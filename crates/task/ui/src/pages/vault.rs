@@ -90,6 +90,15 @@ struct Pane {
 /// Hard cap on side-by-side panes — a single 2-way horizontal split.
 const MAX_PANES: usize = 2;
 
+/// The right sidebar's active tab. Properties (the focused note's
+/// frontmatter, edited live) and Links (backlinks + outgoing links +
+/// local graph).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RightTab {
+    Properties,
+    Links,
+}
+
 /// One node of the virtual-folder tree.
 #[derive(Clone, PartialEq)]
 pub(crate) struct TreeNode {
@@ -138,6 +147,14 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     });
     let mut focused = use_signal(|| 0usize);
     let focus_tick = use_signal(|| 0u64);
+
+    // The focused note's live editor doc, published by its `NoteView`
+    // and consumed by the right-sidebar Properties tab.
+    use_context_provider(|| Signal::new(None::<crate::pages::note_properties::FocusedDoc>));
+    // Which right-sidebar tab is showing. Properties first — it's the
+    // one used most while writing.
+    let mut right_tab = use_signal(|| RightTab::Properties);
+    let nav = use_navigator();
 
     // Focused pane's active-tab path — drives the tree highlight, the
     // backlinks panel, and the "any note open?" layout switches.
@@ -259,6 +276,21 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                 });
             }
         }
+    });
+
+    // Pane → route sync: keep the top tab strip (the ONE tab UI now
+    // that the inner note-tab bar is hidden in single-pane mode)
+    // tracking the focused pane's active note. Shares `last_link` with
+    // the route→pane effect above so the two directions can't ping-pong:
+    // whichever side moves first stamps `last_link`, and the other sees
+    // it already matches and stops.
+    use_effect(move || {
+        let Some(sel) = selected() else { return };
+        if *last_link.peek() == sel {
+            return;
+        }
+        last_link.set(sel.clone());
+        nav.push(crate::routes::Route::VaultRoute { path: sel });
     });
 
     // Autocomplete tags — `#` completes vault tags pulled once per org
@@ -716,7 +748,13 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                             key: "pane-{pi}",
                             class: if pi == 0 { "flex min-h-0 min-w-0 flex-1 flex-col" } else { "hidden min-h-0 min-w-0 flex-1 flex-col border-l border-border md:flex" },
                             onfocusin: move |_| focus_pane.call(pi),
-                            {render_tab_bar(pi, &pane, n_panes, focused_idx, focus_tab, close_tab, split, close_pane)}
+                            // Inner note-tab bar only in SPLIT mode — a single
+                            // router route can't represent two panes, so split
+                            // keeps its own tab strip. In single-pane mode the
+                            // top strip is the one tab UI (pane↔route synced).
+                            if n_panes > 1 {
+                                {render_tab_bar(pi, &pane, n_panes, focused_idx, focus_tab, close_tab, split, close_pane)}
+                            }
                             if let Some(tab) = pane.tabs.get(pane.active).cloned() {
                                 NoteView {
                                     key: "{pi}:{tab.path}",
@@ -741,21 +779,47 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                         }
                     }
                 }
-                // ── Backlinks + verses panel (md+, focused note) ──
+                // ── Right sidebar (md+, focused note): Properties | Links ──
                 if has_file && panel_open {
                     aside { class: "hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/30 md:flex",
-                        div { class: "flex items-center justify-between px-3 py-3",
-                            Heading { level: HeadingLevel::H3, "Backlinks" }
-                            button {
-                                class: "text-xs text-muted-foreground hover:text-foreground",
-                                onclick: move |_| {
-                                    let mut o = shell_right;
-                                    o.set(crate::chrome::RightPanelOpen(false));
-                                },
-                                "Hide"
+                        // Tab header: Properties / Links + a Hide control.
+                        div { class: "flex items-center gap-1 border-b border-border/60 px-2 py-1.5",
+                            for (tab, label) in [(RightTab::Properties, "Properties"), (RightTab::Links, "Links")] {
+                                button {
+                                    key: "{label}",
+                                    class: if right_tab() == tab {
+                                        "rounded px-2 py-1 text-xs font-medium text-foreground bg-accent"
+                                    } else {
+                                        "rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                                    },
+                                    onclick: move |_| right_tab.set(tab),
+                                    "{label}"
+                                }
+                            }
+                            div { class: "ml-auto flex items-center gap-1.5",
+                                if n_panes < MAX_PANES {
+                                    button {
+                                        class: "rounded px-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground",
+                                        title: "Split right",
+                                        onclick: move |_| split.call(()),
+                                        "⇥"
+                                    }
+                                }
+                                button {
+                                    class: "text-xs text-muted-foreground hover:text-foreground",
+                                    onclick: move |_| {
+                                        let mut o = shell_right;
+                                        o.set(crate::chrome::RightPanelOpen(false));
+                                    },
+                                    "Hide"
+                                }
                             }
                         }
-                        {backlinks_body.clone()}
+                        if right_tab() == RightTab::Properties {
+                            crate::pages::note_properties::NoteProperties {}
+                        } else {
+                            {backlinks_body.clone()}
+                        }
                     }
                 }
             }
@@ -804,8 +868,26 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                 let mut o = shell_right;
                 o.set(crate::chrome::RightPanelOpen(false));
             },
-            title: "Backlinks",
-            {backlinks_body}
+            title: if right_tab() == RightTab::Properties { "Properties" } else { "Links" },
+            div { class: "flex items-center gap-1 border-b border-border/60 px-2 py-1.5",
+                for (tab, label) in [(RightTab::Properties, "Properties"), (RightTab::Links, "Links")] {
+                    button {
+                        key: "{label}",
+                        class: if right_tab() == tab {
+                            "rounded px-2 py-1 text-xs font-medium text-foreground bg-accent"
+                        } else {
+                            "rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                        },
+                        onclick: move |_| right_tab.set(tab),
+                        "{label}"
+                    }
+                }
+            }
+            if right_tab() == RightTab::Properties {
+                crate::pages::note_properties::NoteProperties {}
+            } else {
+                {backlinks_body}
+            }
         }
         document::Link { rel: "stylesheet", href: editor::EDITOR_STYLE }
         document::Style { {crate::collab::COLLAB_STYLE} }
@@ -1281,7 +1363,7 @@ fn front_block_maps(text: &str, key: &str) -> Vec<Vec<(String, String)>> {
 }
 
 /// Read a scalar `key: value` from the note's leading `---` frontmatter block.
-fn frontmatter_value(text: &str, key: &str) -> Option<String> {
+pub(crate) fn frontmatter_value(text: &str, key: &str) -> Option<String> {
     let rest = text.strip_prefix("---")?;
     let (front, _) = rest.split_once("\n---")?;
     for line in front.lines() {

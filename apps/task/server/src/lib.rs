@@ -18,6 +18,7 @@
 //! editor layer (future); vault is the sole storage path.
 
 pub mod attachments;
+pub mod media;
 pub mod capability;
 pub mod connections;
 pub mod forge_sync;
@@ -1519,6 +1520,15 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             attachments_proto::attachment_service_service_descriptor(),
             attachments_proto::AttachmentServiceDispatcher::new((*org.attachments).clone()),
+        )
+        // Media — the same blobs streamed over vox (Tx<MediaChunk>),
+        // no HTTP side-channel. Read-side view over the attachment
+        // store for the session player's stems + large media.
+        .with(
+            media_proto::media_service_service_descriptor(),
+            media_proto::MediaServiceDispatcher::new(crate::media::MediaServiceImpl::new(
+                org.attachments.clone(),
+            )),
         )
         // Vault file replication (manifest / get / put / delete / subscribe).
         .with(

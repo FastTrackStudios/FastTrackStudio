@@ -48,7 +48,6 @@ members = [
     "libs/installer-core",
     "libs/engine-launcher",
     "libs/neural-amp-modeler",
-    "libs/moire-trace-capture",
     # ── crates/ — domain cores ────────────────────────────────────────
     "crates/audiocore/audiocore-core",
     "crates/audiocore/audiocore-dsp",
@@ -257,7 +256,7 @@ members = [
     "apps/patchbay",
     "apps/patchbay/web",
     "apps/installer",
-    "apps/fts-cli",
+    "apps/fasttrackstudio/cli",
     "apps/site",
     # ── apps/plugins — CLAP/VST3 plugin shells (nice-plug cdylibs) ─────
     "apps/plugins/level",
@@ -351,7 +350,6 @@ vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
 engine-launcher = { path = "libs/engine-launcher" }
 neural-amp-modeler = { path = "libs/neural-amp-modeler" }
-moire-trace-capture = { path = "libs/moire-trace-capture" }
 audiocore-core = { path = "crates/audiocore/audiocore-core" }
 audiocore-dsp = { path = "crates/audiocore/audiocore-dsp", default-features = false }
 audiocore-gui = { path = "crates/audiocore/audiocore-gui" }
@@ -756,7 +754,6 @@ tracing-appender = "0.2"
 # Sentry error/crash telemetry — rustls (not native-tls) for iOS.
 sentry = { version = "0.44", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 sentry-tracing = "0.44"
-moire = { version = "1.0" }
 
 # ── Proc-macro plumbing ───────────────────────────────────────────────
 syn = { version = "2", features = ["full", "extra-traits"] }
@@ -900,6 +897,7 @@ email-sync = { path = "features/task/email/email-sync" }
 email-link = { path = "features/task/email/email-link" }
 # features/task — vault-superset slices
 attachments-proto = { path = "features/task/attachments/attachments-proto" }
+media-proto = { path = "features/task/media/media-proto" }
 locations = { path = "features/task/locations/locations" }
 locations-proto = { path = "features/task/locations/locations-proto", default-features = false }
 inventory = { path = "features/task/inventory/inventory" }
@@ -954,7 +952,7 @@ git-config = { path = "features/task/git/git-config" }
 
 # Task's externals not already pinned above (root pins win everywhere
 # a key already existed — dioxus, serde, tokio, facet/vox rc.5 fleet,
-# sea-orm crates.io 1.x, loro, moire via [patch]).
+# sea-orm crates.io 1.x, loro).
 keybindings = "0.0.2"
 editor-types = "0.0.2"
 rrule = "0.11"
@@ -997,20 +995,6 @@ actions-proto = { path = "crates/input/actions-proto" }
 [patch."https://codeberg.org/FastTrackStudios/fts-ui.git"]
 fts-ui = { path = "libs/fts-ui/fts-ui" }
 
-# moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
-# All moire crates must point to the same fork rev to avoid duplicate
-# moire-runtime #[ctor] registrations (aligned with daw/session/signal).
-[patch."https://github.com/bearcove/moire"]
-moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-
 [patch.crates-io]
 # Blitz from the FTS fork (0.3.0-beta.1 line, upstream 02523b83 +
 # fts-focus: focus-follows-pointerdown for all focusable content —
@@ -1044,15 +1028,6 @@ phon-jit = { path = "libs/vendor/phon-jit" }
 # Editor's vendored mermaid-rs-renderer fork (web_time::Instant so the
 # layouter works on wasm32) — see libs/editor/vendor/.
 mermaid-rs-renderer = { path = "libs/editor/vendor/mermaid-rs-renderer" }
-moire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://codeberg.org/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 # ── Lints — merged union of the dissolved workspaces' policies ─────────
 [workspace.lints.rust]
@@ -1106,6 +1081,28 @@ filter_next = "allow"
 # app/UI workspace crates stay at light opt for fast rebuilds.
 [profile.dev]
 opt-level = 1
+
+# dx web builds: native debuginfo in the wasm module blew past
+# Chrome's 1 GiB WebAssembly module cap (1.14 GB observed). Wasm dev
+# builds don't need it — strip it and dev bundles come back to a
+# loadable size.
+[profile.wasm-dev]
+inherits = "dev"
+debug = false
+strip = "debuginfo"
+
+# The in-browser setlist player renders daw-standalone's full graph in wasm —
+# mirror the dev-profile audio-path opt overrides here explicitly (package
+# overrides may not carry through `inherits`), so dx dev bundles mix ~20
+# stems in realtime instead of grinding the main thread.
+[profile.wasm-dev.package."*"]
+opt-level = 3
+[profile.wasm-dev.package.audiocore-dsp]
+opt-level = 3
+[profile.wasm-dev.package.daw-audio-graph]
+opt-level = 3
+[profile.wasm-dev.package.daw-standalone]
+opt-level = 3
 
 [profile.dev.package."*"]
 opt-level = 3

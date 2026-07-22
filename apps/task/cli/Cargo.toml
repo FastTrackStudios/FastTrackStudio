@@ -114,6 +114,9 @@ song = { workspace = true }
 # `task song ingest` — stems become content-addressed attachments
 # (initiate/PUT/complete against the org's AttachmentService).
 attachments-proto = { workspace = true, features = ["vox"] }
+# `task media …` — the same blobs streamed over vox (stat/get/
+# verify-song), the binary↔binary audio-streaming E2E.
+media-proto = { workspace = true, features = ["vox"] }
 # `task-cli wiki context --links` — overlay typed-link-store
 # edges onto the context subgraph.
 links.workspace = true

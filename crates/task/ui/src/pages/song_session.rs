@@ -56,7 +56,7 @@ pub(crate) mod imp {
         Song as SessionSong, SongChartHydration, SongId,
     };
     use session_ui::components::{
-        MixerView, ProgressSection, SectionProgressBar, SongProgressBar, SongTitle,
+        MixerView, ProgressSection, SectionProgressBar, SongProgressBar,
         TransportControlBar,
     };
     use session_ui::{
@@ -127,6 +127,10 @@ pub(crate) mod imp {
         el: HtmlAudioElement,
         gain: GainNode,
         node: web_sys::MediaElementAudioSourceNode,
+        /// Post-gain tap for VU metering (reads the level the listener hears).
+        /// A side branch off `gain` — it does not connect onward, so it never
+        /// affects the audio path.
+        analyser: web_sys::AnalyserNode,
     }
 
     /// The shared playback graph. Held in an `Rc<RefCell<…>>` so the resource
@@ -149,6 +153,27 @@ pub(crate) mod imp {
                 .map(|s| s.el.current_time())
                 .unwrap_or(0.0)
                 .clamp(0.0, self.duration)
+        }
+
+        /// Per-stem peak level (0.0..=1.0), in stem order, from the metering
+        /// analysers — the post-gain signal the listener hears (muted stems read
+        /// ~0). Cheap; poll at UI rate (~20 fps), not per audio frame.
+        pub(crate) fn peak_levels(&self) -> Vec<f32> {
+            let mut buf = [0u8; 256];
+            self.stems
+                .iter()
+                .map(|s| {
+                    s.analyser.get_byte_time_domain_data(&mut buf);
+                    // 128 = silence; the frame's max deviation → 0..1.
+                    let peak = buf
+                        .iter()
+                        .map(|&b| (b as i16 - 128).unsigned_abs())
+                        .max()
+                        .unwrap_or(0) as f32
+                        / 128.0;
+                    peak.min(1.0)
+                })
+                .collect()
         }
 
         /// Resume the context, park every element at `offset`, and play them.
@@ -259,26 +284,57 @@ pub(crate) mod imp {
         serde_json::from_str(&txt).map_err(|e| format!("{url}: bad manifest json: {e}"))
     }
 
-    /// Resolve a frontmatter-stems song: each stem's `content_hash` becomes a
-    /// short-lived signed `/blobs/download` URL via the org's
-    /// `AttachmentService`, and the manifest is synthesized from the
-    /// frontmatter scalars + `sections:` block.
+    /// Where one stem's audio comes from.
+    #[derive(Clone, Debug, PartialEq)]
+    pub(crate) enum StemSource {
+        /// Plain URL for an `HTMLAudioElement` (legacy `/media` files,
+        /// signed blob URLs — the browser range-requests over HTTP).
+        Url(String),
+        /// Streamed over the org's vox lane into a MediaSource-backed
+        /// element (`vox_media_source`). webm/opus stems only.
+        Vox { org: String, hash: String },
+    }
+
+    /// Resolve a frontmatter-stems song. webm/opus stems stream over
+    /// vox (MediaSource fed by `MediaService` chunks); anything else
+    /// falls back to a short-lived signed `/blobs/download` URL. The
+    /// manifest is synthesized from the frontmatter scalars +
+    /// `sections:` block.
     pub(crate) async fn resolve_front(
         org: &str,
         title: &str,
         front: &crate::pages::vault::SongFront,
-    ) -> Result<(Manifest, Vec<String>), String> {
+    ) -> Result<(Manifest, Vec<StemSource>), String> {
         use attachments_proto::ContentHashArg;
-        let client = crate::vox_clients::attachments_client(org).await?;
-        let mut urls = Vec::with_capacity(front.stems.len());
+        use crate::pages::vox_media_source::mse_supported;
+
+        let media = crate::vox_clients::media_client(org).await.ok();
+        let mut sources = Vec::with_capacity(front.stems.len());
         for stem in &front.stems {
+            // Vox-MSE path: browser speaks webm/opus MSE AND the blob
+            // was ingested as webm (mime from the media stat).
+            if mse_supported() {
+                if let Some(m) = &media {
+                    if let Ok(info) = m.stat(stem.content_hash.clone()).await {
+                        if info.mime_type.starts_with("audio/webm") {
+                            sources.push(StemSource::Vox {
+                                org: org.to_owned(),
+                                hash: stem.content_hash.clone(),
+                            });
+                            continue;
+                        }
+                    }
+                }
+            }
+            // Fallback: signed HTTP URL (ogg-opus + older ingests).
+            let client = crate::vox_clients::attachments_client(org).await?;
             let signed = client
                 .get_download_url(ContentHashArg {
                     content_hash: stem.content_hash.clone(),
                 })
                 .await
                 .map_err(|e| format!("stem `{}`: {e:?}", stem.name))?;
-            urls.push(signed.url);
+            sources.push(StemSource::Url(signed.url));
         }
         let duration_sec = front
             .duration_sec
@@ -312,22 +368,34 @@ pub(crate) mod imp {
                 })
                 .collect(),
         };
-        Ok((manifest, urls))
+        Ok((manifest, sources))
     }
 
     /// Build the streaming graph: create the context, and for each stem create
-    /// an `HTMLAudioElement` (progressive stream) routed through
-    /// media-element-source → gain → destination. `urls` is parallel to
-    /// `manifest.stems` (signed blob URLs or `/media` paths). Synchronous and
-    /// side-effect free apart from element creation — no fetch/decode, so no
-    /// per-stem progress signal and nothing to re-fire on transport ticks.
-    pub(crate) fn build_engine(manifest: &Manifest, urls: &[String]) -> Result<Engine, String> {
+    /// an `<audio>` element — plain URL (progressive HTTP) or
+    /// MediaSource-fed-from-vox, per its [`StemSource`] — routed through
+    /// media-element-source → gain → destination. `sources` is parallel to
+    /// `manifest.stems`. Synchronous and side-effect free apart from element
+    /// creation (vox feeds run in spawned tasks) — nothing to re-fire on
+    /// transport ticks.
+    pub(crate) fn build_engine(
+        manifest: &Manifest,
+        sources: &[StemSource],
+    ) -> Result<Engine, String> {
         let ctx = AudioContext::new().map_err(|e| format!("AudioContext: {e:?}"))?;
         let dest = ctx.destination();
         let mut stems = Vec::with_capacity(manifest.stems.len());
-        for (spec, url) in manifest.stems.iter().zip(urls) {
-            let el =
-                HtmlAudioElement::new_with_src(url).map_err(|e| format!("audio element: {e:?}"))?;
+        for (spec, source) in manifest.stems.iter().zip(sources) {
+            let el = match source {
+                StemSource::Url(url) => HtmlAudioElement::new_with_src(url)
+                    .map_err(|e| format!("audio element: {e:?}"))?,
+                StemSource::Vox { org, hash } => {
+                    crate::pages::vox_media_source::audio_element_over_vox(
+                        org.clone(),
+                        hash.clone(),
+                    )?
+                }
+            };
             el.set_preload("auto");
             el.set_loop(false);
 
@@ -338,12 +406,25 @@ pub(crate) mod imp {
             // Deref coercion: &MediaElementAudioSourceNode / &GainNode → &AudioNode.
             let _ = node.connect_with_audio_node(&gain);
             let _ = gain.connect_with_audio_node(&dest);
+            // Metering tap: gain → analyser (a side branch that isn't connected
+            // onward, so it only observes and never colors the signal). Small
+            // FFT → cheap time-domain reads for a peak meter.
+            let analyser = ctx
+                .create_analyser()
+                .map_err(|e| format!("create_analyser: {e:?}"))?;
+            analyser.set_fft_size(256);
+            let _ = gain.connect_with_audio_node(&analyser);
             gain.gain()
                 .set_value(if spec.default_muted { 0.0 } else { 1.0 });
             // Kick off buffering.
             el.load();
 
-            stems.push(StemNode { el, gain, node });
+            stems.push(StemNode {
+                el,
+                gain,
+                node,
+                analyser,
+            });
         }
 
         Ok(Rc::new(RefCell::new(EngineInner {
@@ -389,19 +470,59 @@ pub(crate) mod imp {
         }
     }
 
+    /// Sections derived from the KEYFLOW chart, labelled exactly like the
+    /// engraved chart (`VS 1 A`, `CH 2 A`, `PRE-CH`, …) via
+    /// `chart_section_timeline`, with timing from the chart's measures (real
+    /// music starts after the count-in). `None` if there's no parseable chart
+    /// or it has no real sections — the caller then falls back to the manifest's
+    /// audio-region sections.
+    fn chart_sections(chart_text: &str, bpm: f64, ts_num: u32) -> Option<Vec<SessionSection>> {
+        use keyflow::engraver::layout::chart::section_layout::chart_section_timeline;
+        let chart = keyflow::parse(chart_text).ok()?;
+        let spans = chart_section_timeline(&chart);
+        let spm = (60.0 / bpm.max(1.0)) * (ts_num.max(1) as f64);
+        // Real music begins after the count-in; align section 0 to that offset
+        // so the chart-measure timeline sits on the audio's SONGSTART.
+        let content_start = spans
+            .iter()
+            .find(|s| s.is_count_in)
+            .map(|s| s.measure_count as f64 * spm)
+            .unwrap_or(0.0);
+        let sections: Vec<SessionSection> = spans
+            .iter()
+            .filter(|s| !s.is_count_in)
+            .map(|s| SessionSection {
+                section_id: SectionId::new(),
+                id: None,
+                name: s.label.clone(),
+                comment: None,
+                section_type: s.section_type.clone(),
+                start_seconds: content_start + s.start_measure as f64 * spm,
+                end_seconds: content_start + (s.start_measure + s.measure_count) as f64 * spm,
+                number: None,
+                color: None,
+            })
+            .collect();
+        (!sections.is_empty()).then_some(sections)
+    }
+
     /// Build one `session_proto::Song` from a manifest — the per-song core
     /// shared by the single-song player and the setlist player. Each song's
     /// sections are in its own local seconds (0-based), and its `project_guid`
     /// is `web-session:{slug}` so `SONG_CHARTS` and the chart pane can key off
-    /// it.
+    /// it. Sections prefer the KEYFLOW chart's own labelling/timing (so the
+    /// navigator + progress bars read `VS 1 A` / `CH 2 A` like the chart), and
+    /// fall back to the manifest's audio-region sections when there's no chart.
     pub(crate) fn build_song(
         slug: &str,
         manifest: &Manifest,
         chart_text: Option<String>,
     ) -> SessionSong {
         let (ts_num, ts_denom) = parse_time_sig(manifest.time_signature.as_ref());
-        let sections: Vec<SessionSection> =
-            manifest.sections.iter().map(to_session_section).collect();
+        let sections: Vec<SessionSection> = chart_text
+            .as_deref()
+            .and_then(|t| chart_sections(t, manifest.bpm.unwrap_or(120.0), ts_num))
+            .unwrap_or_else(|| manifest.sections.iter().map(to_session_section).collect());
         SessionSong {
             id: SongId::new(),
             name: manifest.title.clone().unwrap_or_default(),
@@ -450,6 +571,26 @@ pub(crate) mod imp {
                     short_name: s.short_display(),
                     comment: None,
                 }
+            })
+            .collect()
+    }
+
+    /// Progress-bar segments from a hydrated `Song`'s sections (which prefer the
+    /// KEYFLOW chart's labelling). Used by the setlist so the bars read the same
+    /// `VS 1 A` / `CH 2 A` as the navigator + the engraved chart.
+    pub(crate) fn progress_sections_from_song(song: &SessionSong) -> Vec<ProgressSection> {
+        let dur = (song.end_seconds - song.start_seconds).max(0.001);
+        song.sections
+            .iter()
+            .map(|sec| ProgressSection {
+                start_percent: ((sec.start_seconds - song.start_seconds) / dur * 100.0)
+                    .clamp(0.0, 100.0),
+                end_percent: ((sec.end_seconds - song.start_seconds) / dur * 100.0)
+                    .clamp(0.0, 100.0),
+                color: sec.bright_color(),
+                name: sec.display_name(),
+                short_name: sec.short_display(),
+                comment: sec.comment.clone(),
             })
             .collect()
     }
@@ -517,6 +658,8 @@ pub(crate) mod imp {
 
     // ── small format helpers ────────────────────────────────────────────────
 
+    #[allow(dead_code)] // kept as a shared helper; the inline scrubber that
+    // used it moved to the progress bars.
     pub(crate) fn fmt_time(s: f64) -> String {
         let s = s.max(0.0);
         let m = (s / 60.0) as u64;
@@ -565,19 +708,19 @@ pub(crate) mod imp {
             let title = title_r.clone();
             let front = front_r.clone();
             async move {
-                let (manifest, urls) = if front.stems.is_empty() {
+                let (manifest, sources) = if front.stems.is_empty() {
                     let manifest =
                         fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
-                    let urls = manifest
+                    let sources = manifest
                         .stems
                         .iter()
-                        .map(|s| format!("/media/songs/{slug}/{}", s.file))
+                        .map(|s| StemSource::Url(format!("/media/songs/{slug}/{}", s.file)))
                         .collect();
-                    (manifest, urls)
+                    (manifest, sources)
                 } else {
                     resolve_front(&org, &title, &front).await?
                 };
-                let eng = build_engine(&manifest, &urls)?;
+                let eng = build_engine(&manifest, &sources)?;
                 Ok::<(Manifest, Engine), String>((manifest, eng))
             }
         }));
@@ -816,7 +959,9 @@ pub(crate) mod imp {
         };
 
         rsx! {
-            div { class: "mx-auto w-full max-w-4xl px-4 py-6 flex flex-col gap-5", {body} }
+            // Full-width: the embedded player fills the note column (no
+            // artificial max-width) so the progress bars get real room.
+            div { class: "w-full px-4 py-6 flex flex-col gap-5", {body} }
         }
     }
 
@@ -923,8 +1068,6 @@ pub(crate) mod imp {
         let is_playing = playing();
         let is_buffering = buffering();
 
-        let title = manifest.title.clone().unwrap_or_default();
-        let artist = manifest.artist.clone().unwrap_or_default();
         let sections = progress_sections(&manifest);
 
         // Song / section progress (0-100) for the session-ui progress bars.
@@ -1031,24 +1174,6 @@ pub(crate) mod imp {
         let active = tab();
 
         rsx! {
-            // Title (real session-ui component) + metadata badges.
-            SongTitle { song_name: title.clone() }
-            div { class: "flex flex-wrap items-center justify-center gap-2 -mt-4",
-                if !artist.is_empty() {
-                    span { class: "text-sm text-muted-foreground mr-2", "{artist}" }
-                }
-                if let Some(k) = manifest.key.as_ref() {
-                    Badge { label: "Key {k}" }
-                }
-                if let Some(b) = manifest.bpm {
-                    Badge { label: "{b} BPM" }
-                }
-                if let Some(ts) = manifest.time_signature.as_ref() {
-                    Badge { label: "{ts}" }
-                }
-                Badge { label: "{manifest.stems.len()} stems" }
-            }
-
             // Song progress (segmented sections; click to seek). Always visible.
             if !manifest.sections.is_empty() {
                 div { class: "pt-2",
@@ -1067,37 +1192,21 @@ pub(crate) mod imp {
                 }
             }
 
-            // Fine scrubber + time readout (kept for precise seeking).
-            div { class: "flex items-center gap-3",
-                span { class: "text-xs font-mono text-muted-foreground tabular-nums min-w-[84px]",
-                    "{fmt_time(pos)} / {fmt_time(duration)}"
-                }
-                input {
-                    r#type: "range",
-                    class: "flex-1 accent-primary",
-                    min: "0",
-                    max: "{duration}",
-                    step: "0.01",
-                    value: "{pos}",
-                    oninput: move |e| {
-                        if let Ok(v) = e.value().parse::<f64>() {
-                            seek.call(v);
-                        }
-                    },
-                }
-                if is_buffering {
-                    span { class: "text-[11px] text-muted-foreground/70", "buffering…" }
-                }
+            // Buffering hint (the scrubbing UI lives in the progress bars above).
+            if is_buffering {
+                div { class: "text-[11px] text-muted-foreground/70", "buffering…" }
             }
 
-            // Transport bar (real session-ui component). Record/arm/loop are
-            // no-ops in the browser player; play/back/forward drive the engine.
+            // Transport bar (real session-ui component) — playback only, so
+            // Arm/Record are hidden. Loop is a no-op in the browser player;
+            // play/back/forward drive the engine.
             div { class: "h-16 rounded-lg overflow-hidden border border-border",
                 TransportControlBar {
                     is_playing,
                     is_looping: false,
                     is_recording: false,
                     is_armed: false,
+                    show_recording: false,
                     on_play_pause,
                     on_loop_toggle: noop,
                     on_record_toggle: noop,
@@ -1163,16 +1272,6 @@ pub(crate) mod imp {
                         on_solo: mixer_solo,
                     }
                 }
-            }
-        }
-    }
-
-    #[component]
-    fn Badge(label: String) -> Element {
-        rsx! {
-            span {
-                class: "text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground border border-border rounded-full px-2 py-0.5",
-                "{label}"
             }
         }
     }

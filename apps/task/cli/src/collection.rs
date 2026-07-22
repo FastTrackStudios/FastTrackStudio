@@ -661,7 +661,7 @@ async fn ingest_song_stems(args: IngestArgs) -> eyre::Result<()> {
             uploads.push((i, s.path.clone()));
             continue;
         }
-        let dst = tmp.path().join(format!("{i:02}.ogg"));
+        let dst = tmp.path().join(format!("{i:02}.webm"));
         transcode_opus(&s.path, &dst, &args.bitrate)?;
         uploads.push((i, dst));
     }
@@ -681,12 +681,12 @@ async fn ingest_song_stems(args: IngestArgs) -> eyre::Result<()> {
     for (i, file) in &uploads {
         let stem = &found[*i];
         let bytes = std::fs::read(file).map_err(|e| eyre::eyre!("read {}: {e}", file.display()))?;
-        let filename = format!("{}.ogg", slug(&stem.name));
+        let filename = format!("{}.webm", slug(&stem.name));
         let ticket = client
             .initiate_upload(InitiateUpload {
                 doc_id: note_rel.clone(),
                 filename,
-                mime_type: "audio/ogg".to_string(),
+                mime_type: "audio/webm".to_string(),
                 size_bytes: bytes.len() as u64,
             })
             .await
@@ -790,21 +790,27 @@ fn discover_stems(dir: &Path) -> eyre::Result<Vec<IngestStem>> {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            // Strip a leading `NN - ` (or `NN.` / `NN_`) track index.
-            let name = base
-                .split_once(" - ")
-                .filter(|(idx, _)| idx.trim().chars().all(|c| c.is_ascii_digit()))
-                .map(|(_, rest)| rest.trim().to_string())
-                .unwrap_or(base);
+            // Strip a leading track index: `NN - `, `NN-`, `NN.`, `NN_`.
+            let stripped = base
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .trim_start_matches([' ', '-', '.', '_'])
+                .trim();
+            let name = if stripped.is_empty() || stripped.len() == base.len() {
+                base.clone()
+            } else {
+                stripped.to_string()
+            };
             let group = stem_group_for(&name);
             let default_muted = {
                 let hay = format!("{} {}", group.unwrap_or(""), name).to_ascii_lowercase();
                 ["click", "guide", "cue", "count"].iter().any(|k| hay.contains(k))
             };
+            // Only webm passes through untranscoded — the browser player's
+            // vox-MSE path speaks audio/webm; ogg/opus fall back to HTTP.
             let passthrough = path
                 .extension()
                 .and_then(|e| e.to_str())
-                .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "ogg" | "opus"));
+                .is_some_and(|e| e.eq_ignore_ascii_case("webm"));
             IngestStem {
                 name,
                 group,

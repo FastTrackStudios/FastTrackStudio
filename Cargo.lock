@@ -967,7 +967,6 @@ dependencies = [
  "gloo-timers",
  "include_dir",
  "iroh",
- "moire",
  "rtrb",
  "sea-orm",
  "thiserror 2.0.18",
@@ -4838,12 +4837,11 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-version = "0.2.9"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501"
+checksum = "83cf0d42651b16c6dfe68685716d18480d18a9c39c62d76e8cf3eb6ed5d8bcbf"
 dependencies = [
- "quote",
- "syn 2.0.118",
+ "dtor",
 ]
 
 [[package]]
@@ -5785,9 +5783,8 @@ dependencies = [
  "dawfile-reaper",
  "eyre",
  "facet 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "libc",
- "moire",
  "reaper-launcher",
  "serde_json",
  "tokio",
@@ -5850,7 +5847,6 @@ dependencies = [
  "dawfile-reaper",
  "eyre",
  "fragile",
- "moire",
  "reaper-high",
  "reaper-low",
  "reaper-macros",
@@ -5871,9 +5867,8 @@ dependencies = [
  "daw-proto",
  "eyre",
  "facet 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "futures",
- "moire",
  "serde",
  "serde_json",
  "tracing",
@@ -5972,7 +5967,7 @@ dependencies = [
  "actions-proto",
  "architect",
  "facet 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "futures",
  "midicore",
  "vox",
@@ -6000,9 +5995,8 @@ dependencies = [
  "display-info",
  "enumflags2",
  "eyre",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "libloading 0.8.9",
- "moire",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
@@ -6106,7 +6100,6 @@ name = "daw-standalone"
 version = "0.1.0"
 dependencies = [
  "architect",
- "async-lock",
  "base64 0.22.1",
  "clack-extensions",
  "clack-host",
@@ -6120,8 +6113,6 @@ dependencies = [
  "js-sys",
  "libloading 0.8.9",
  "memmap2",
- "moire",
- "raw-window-handle 0.6.2",
  "rtrb",
  "symphonia",
  "thiserror 2.0.18",
@@ -7445,7 +7436,7 @@ name = "dock-proto"
 version = "0.1.0"
 dependencies = [
  "facet 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "uuid 1.23.4",
 ]
 
@@ -8826,18 +8817,6 @@ dependencies = [
 
 [[package]]
 name = "facet-json"
-version = "0.46.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6fbb1d8aa586b5e6b189575d1eda196cd3014347aff36be8dd097401024fe6d"
-dependencies = [
- "facet 0.46.5",
- "facet-core 0.46.5",
- "facet-format 0.47.1",
- "facet-reflect 0.46.5",
-]
-
-[[package]]
-name = "facet-json"
 version = "0.50.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82902c758e29af6599f852dd783206697fd33383fa499b07bdcddbd8eb1ef4d0"
@@ -8967,7 +8946,7 @@ dependencies = [
  "facet-format 0.50.0-rc.5",
  "facet-path 0.50.0-rc.5",
  "facet-reflect 0.50.0-rc.5",
- "facet-value 0.50.0-rc.5",
+ "facet-value",
 ]
 
 [[package]]
@@ -9126,18 +9105,6 @@ dependencies = [
 
 [[package]]
 name = "facet-value"
-version = "0.46.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c61477bcef8cda3ba1082f25ad69569792214f9d430671afb32e9cdedbce6d7"
-dependencies = [
- "facet-core 0.46.5",
- "facet-format 0.47.1",
- "facet-reflect 0.46.5",
- "indexmap 2.14.0",
-]
-
-[[package]]
-name = "facet-value"
 version = "0.50.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfc5a08618f541594700de7dc032054e04368c06029682d61ab43683d18f5232"
@@ -9247,7 +9214,7 @@ dependencies = [
  "dioxus",
  "engine-launcher",
  "eyre",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "futures-util",
  "getrandom 0.3.4",
  "include_dir",
@@ -9346,7 +9313,7 @@ dependencies = [
  "facet-core 0.50.0-rc.5",
  "facet-error",
  "facet-format 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "facet-pretty",
  "facet-reflect 0.50.0-rc.5",
  "figue-attrs",
@@ -13828,7 +13795,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "facet 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "flate2",
  "hound",
  "midly",
@@ -16223,6 +16190,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "media-proto"
+version = "0.1.0"
+dependencies = [
+ "facet 0.50.0-rc.5",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16499,129 +16476,6 @@ dependencies = [
  "chorus-dsp",
  "trem-dsp",
  "wah-dsp",
-]
-
-[[package]]
-name = "modulation-plugin"
-version = "0.1.0"
-dependencies = [
- "audiocore-dsp",
- "modulation",
- "nice-plug",
-]
-
-[[package]]
-name = "moire"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "moire-macros",
- "moire-macros-noop",
- "moire-tokio",
- "moire-wasm",
-]
-
-[[package]]
-name = "moire-macros"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "proc-macro2",
- "quote",
- "unsynn",
-]
-
-[[package]]
-name = "moire-macros-noop"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-
-[[package]]
-name = "moire-runtime"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "ctor",
- "facet 0.46.5",
- "facet-json 0.46.1",
- "facet-value 0.46.0",
- "moire-trace-capture 1.0.0 (git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc)",
- "moire-trace-types",
- "moire-types",
- "moire-wire",
- "tokio",
-]
-
-[[package]]
-name = "moire-tokio"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "moire-runtime",
- "moire-types",
- "parking_lot",
- "tokio",
-]
-
-[[package]]
-name = "moire-trace-capture"
-version = "1.0.0"
-dependencies = [
- "libc",
- "moire-trace-types",
-]
-
-[[package]]
-name = "moire-trace-capture"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "libc",
- "moire-trace-types",
-]
-
-[[package]]
-name = "moire-trace-types"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "facet 0.46.5",
-]
-
-[[package]]
-name = "moire-types"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "facet 0.46.5",
- "facet-value 0.46.0",
- "moire-trace-types",
-]
-
-[[package]]
-name = "moire-wasm"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "async-channel 2.5.0",
- "async-lock",
- "event-listener 5.4.1",
- "futures-channel",
- "futures-util",
- "gloo-timers",
- "moire-types",
- "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "moire-wire"
-version = "1.0.0"
-source = "git+https://codeberg.org/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-dependencies = [
- "facet 0.46.5",
- "facet-json 0.46.1",
- "moire-trace-types",
- "moire-types",
 ]
 
 [[package]]
@@ -19394,7 +19248,7 @@ name = "phon"
 version = "0.2.0-rc.5"
 dependencies = [
  "facet 0.50.0-rc.5",
- "facet-value 0.50.0-rc.5",
+ "facet-value",
  "phon-engine",
  "phon-ir",
  "phon-jit",
@@ -19418,7 +19272,7 @@ version = "0.2.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91a69d860e426637af9966bf0e86bf1ea5512fd98aa9fa28154c8832f3aa227e"
 dependencies = [
- "facet-value 0.50.0-rc.5",
+ "facet-value",
  "phon-ir",
  "phon-schema",
  "weavy",
@@ -19451,7 +19305,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d14899019fdf1a665207c3c2e1fcf5cbe87cf9c48ec3e745c5eaa55504eb39e"
 dependencies = [
  "blake3",
- "facet-value 0.50.0-rc.5",
+ "facet-value",
 ]
 
 [[package]]
@@ -21079,7 +20933,7 @@ dependencies = [
  "dioxus-native",
  "enumflags2",
  "facet 0.50.0-rc.5",
- "facet-json 0.50.0-rc.5",
+ "facet-json",
  "facet-styx 5.0.0-rc.5",
  "figue",
  "fts-ui",
@@ -23009,9 +22863,9 @@ dependencies = [
  "daw-synchronization",
  "dynamic-template",
  "eyre",
+ "futures",
  "keyflow",
  "keyflow-daw-analysis",
- "moire",
  "music-catalog",
  "reaper-high",
  "reaper-low",
@@ -23085,9 +22939,11 @@ dependencies = [
  "dioxus",
  "dock-dioxus",
  "dock-proto",
+ "dynamic-template",
  "eyre",
  "fts-ui",
- "lucide-dioxus",
+ "keyflow",
+ "lucide-dioxus 2.577.0",
  "session-proto",
  "tracing",
  "web-sys",
@@ -23167,7 +23023,6 @@ dependencies = [
  "daw",
  "eyre",
  "futures",
- "moire",
  "serde_json",
  "signal-controller",
  "signal-daw-bridge",
@@ -23485,7 +23340,6 @@ dependencies = [
  "daw",
  "eyre",
  "futures",
- "moire",
  "serde",
  "serde_json",
  "signal-macromod",
@@ -25743,6 +25597,7 @@ dependencies = [
  "links",
  "locations",
  "mealplan",
+ "media-proto",
  "milestone",
  "mount",
  "org-proto",
@@ -25836,6 +25691,7 @@ dependencies = [
  "links",
  "locations",
  "mealplan",
+ "media-proto",
  "milestone",
  "org-proto",
  "org-snapshot",
@@ -25879,6 +25735,7 @@ dependencies = [
  "vault-collab",
  "vault-proto",
  "vox",
+ "vox-core",
  "walkdir",
  "wiki-live",
  "wiki-proto",
@@ -26326,6 +26183,19 @@ dependencies = [
  "arrayref",
  "bytemuck",
  "strict-num",
+]
+
+[[package]]
+name = "tiny-xlib"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a90a0ca3ee6a69f2ad28fd11621a4c3f03b371f366be500b64df260c4ffbafb4"
+dependencies = [
+ "as-raw-xcb-connection",
+ "ctor",
+ "libloading 0.8.9",
+ "pkg-config",
+ "tracing",
 ]
 
 [[package]]
@@ -27686,14 +27556,18 @@ dependencies = [
  "cookbook-proto",
  "crdt",
  "cycle",
+ "daw",
  "daw-proto",
+ "daw-standalone",
  "dioxus",
  "dioxus-icons",
  "dioxus-router",
  "editor",
  "editor-crdt",
  "editor-keyflow",
+ "editor-keyflow-lang",
  "email-proto",
+ "eyre",
  "fake",
  "finance-proto",
  "fitness-proto",
@@ -27712,6 +27586,7 @@ dependencies = [
  "links-proto",
  "locations-proto",
  "mealplan-proto",
+ "media-proto",
  "milestone-proto",
  "nucleo-matcher",
  "pantry-proto",
@@ -27726,6 +27601,7 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "session",
  "session-proto",
  "session-ui",
  "spaced-repetition",
@@ -28869,7 +28745,7 @@ dependencies = [
  "facet 0.50.0-rc.5",
  "facet-core 0.50.0-rc.5",
  "facet-reflect 0.50.0-rc.5",
- "facet-value 0.50.0-rc.5",
+ "facet-value",
  "heck 0.5.0",
  "indexmap 2.14.0",
  "structstruck",

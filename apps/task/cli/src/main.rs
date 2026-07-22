@@ -22,6 +22,7 @@ mod collection;
 mod errors;
 mod json_out;
 mod mealprep;
+mod media;
 mod org_ctx;
 mod plan;
 mod recipe_import;
@@ -181,6 +182,10 @@ enum Commands {
     /// and add it to a target collection as a `song:` node.
     #[command(subcommand)]
     Song(collection::SongCmd),
+    /// Media — content-addressed blobs streamed over vox (stat /
+    /// get / verify-song). The no-browser audio-streaming E2E.
+    #[command(subcommand)]
+    Media(media::MediaCmd),
     /// Physical places — studios, rooms, venues, storage.
     /// Pantry + inventory reference these by id.
     #[command(subcommand)]
@@ -4777,6 +4782,9 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         }
         Commands::Song(cmd) => {
             return Box::pin(collection::run_song(cmd)).await;
+        }
+        Commands::Media(cmd) => {
+            return Box::pin(media::run_media(cmd)).await;
         }
         Commands::Location(cmd) => {
             return Box::pin(run_location(cmd)).await;

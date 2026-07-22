@@ -82,7 +82,14 @@ pub(crate) fn NoteView(
 
     // ── Editor extensions ─────────────────────────────────────
     let keymap = use_signal(editor::standard_markdown_keymap);
-    let props_open = use_signal(|| true);
+    // Frontmatter properties now live in the right sidebar (Properties
+    // tab), so the editor's inline `.md-properties` widget stays
+    // collapsed — the class below is always `props-collapsed`.
+    let props_open = use_signal(|| false);
+    // Setlist notes open straight into the full-screen Experience; `Esc`
+    // (or the close control) drops back to the embedded view.
+    let mut setlist_fullscreen =
+        use_signal(|| crate::pages::experience::ExperienceKind::Setlist.auto_fullscreen());
     let vim = use_signal(VimState::new);
     // Vim is a physical-keyboard idiom — decide once at mount.
     let vim = (!use_hook(editor::editor_view::coarse_pointer)).then_some(vim);
@@ -204,6 +211,33 @@ pub(crate) fn NoteView(
         crate::collab::on_editor_transaction(&c, &session, &event, &who);
     });
 
+    // Publish this doc to the sidebar Properties panel while focused, so
+    // it edits the SAME live buffer through this note's transaction sink.
+    // The `claim` id makes clears identity-safe: a pane only relinquishes
+    // the context while it is still the holder, so a split-view focus swap
+    // (or a keyed remount) never drops the newly-focused doc.
+    let claim = use_hook(crate::pages::note_properties::next_claim);
+    if let Some(mut focused_doc) =
+        try_use_context::<Signal<Option<crate::pages::note_properties::FocusedDoc>>>()
+    {
+        use_effect(move || {
+            if is_focused() {
+                focused_doc.set(Some(crate::pages::note_properties::FocusedDoc {
+                    claim,
+                    state: session.state,
+                    on_transaction,
+                }));
+            } else if (*focused_doc.peek()).map(|d| d.claim) == Some(claim) {
+                focused_doc.set(None);
+            }
+        });
+        use_drop(move || {
+            if (*focused_doc.peek()).map(|d| d.claim) == Some(claim) {
+                focused_doc.set(None);
+            }
+        });
+    }
+
     // Editor sources — created once, capturing the signals above.
     let decorations = use_hook(|| crate::collab::collab_decoration_source(lookup, collab));
     let completion = use_hook(|| vault_lookup::vault_completion_source(link_candidates, tag_rows));
@@ -219,7 +253,16 @@ pub(crate) fn NoteView(
     });
     let is_video = current_type.read().as_deref() == Some("video");
     let is_song = current_type.read().as_deref() == Some("song");
-    let is_setlist = current_type.read().as_deref() == Some("setlist");
+    // Immersive Experience from `type:` + an optional `experience:`
+    // frontmatter key (`type: setlist` implies the setlist experience;
+    // `experience: <name>` selects one for any note).
+    let note_experience = {
+        let doc = session.state.peek().doc.to_string();
+        let exp = crate::pages::vault::frontmatter_value(&doc, "experience")
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned());
+        crate::pages::experience::experience_of(current_type.read().as_deref(), exp.as_deref())
+    };
+    let is_setlist = note_experience == Some(crate::pages::experience::ExperienceKind::Setlist);
     let is_base = path
         .rsplit_once('.')
         .is_some_and(|(_, e)| e.eq_ignore_ascii_case("base"));
@@ -373,25 +416,55 @@ pub(crate) fn NoteView(
                         }
                     }
                     if is_setlist {
-                        crate::pages::setlist_session::SetlistPlayer { songs: setlist_songs_value.clone() }
-                    }
-                    crate::pages::note_header::NoteHeader {
-                        home,
-                        props_open,
-                        on_renamed: move |_| on_renamed.call(()),
-                    }
-                    div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
-                        div { class: "editor-frame editor-frame--flush",
-                            Editor {
-                                state: session.state,
-                                keymap: keymap.read().clone(),
-                                decorations: decorations.clone(),
-                                vim,
-                                slash: Some(slash),
-                                completion: completion.clone(),
-                                on_transaction,
+                        // Setlist Experience: auto full-screen (an overlay
+                        // that escapes the pane + sidebars), Esc to exit.
+                        // Embedded fallback keeps a re-enter control.
+                        if setlist_fullscreen() {
+                            crate::pages::experience::FullscreenExperience {
+                                title: basename_of(&path).to_string(),
+                                on_exit: move |_| setlist_fullscreen.set(false),
+                                crate::pages::setlist_session::SetlistPlayer {
+                                    songs: setlist_songs_value.clone(),
+                                    fullscreen: true,
+                                }
                             }
-                            SlashMenu { state: session.state, slash }
+                        } else {
+                            crate::pages::experience::EnterExperienceButton {
+                                label: "Setlist",
+                                on_enter: move |_| setlist_fullscreen.set(true),
+                            }
+                            crate::pages::setlist_session::SetlistPlayer {
+                                songs: setlist_songs_value.clone(),
+                            }
+                        }
+                    }
+                    // The note body (frontmatter + Markdown editor) is bound to
+                    // `session.state`, which autosaves to the note file. A
+                    // fullscreen experience (e.g. the setlist) draws its OWN
+                    // editors on top; if we also kept this one mounted beneath the
+                    // overlay it would still catch stray keystrokes/edits and
+                    // autosave them into the note — which corrupted the setlist's
+                    // frontmatter when the keyflow-source editor was used. So skip
+                    // it entirely while a fullscreen experience owns the screen.
+                    if note_body_visible(is_setlist, setlist_fullscreen()) {
+                        crate::pages::note_header::NoteHeader {
+                            home,
+                            props_open,
+                            on_renamed: move |_| on_renamed.call(()),
+                        }
+                        div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
+                            div { class: "editor-frame editor-frame--flush",
+                                Editor {
+                                    state: session.state,
+                                    keymap: keymap.read().clone(),
+                                    decorations: decorations.clone(),
+                                    vim,
+                                    slash: Some(slash),
+                                    completion: completion.clone(),
+                                    on_transaction,
+                                }
+                                SlashMenu { state: session.state, slash }
+                            }
                         }
                     }
                 }
@@ -401,5 +474,46 @@ pub(crate) fn NoteView(
                 crate::collab::CollabSession { key: "{doc_id}", doc_id, handles }
             }
         }
+    }
+}
+
+/// Whether the note body (frontmatter + Markdown editor, bound to the
+/// autosaving `session.state`) should be mounted.
+///
+/// It is hidden while a fullscreen experience owns the screen: that experience
+/// renders its own editors (e.g. the setlist's keyflow-source editor), and
+/// keeping the note's editor mounted underneath let stray keystrokes/edits fall
+/// into it and autosave into the note — which corrupted the setlist note's
+/// frontmatter (chart text written to the top of the file, breaking the `---`
+/// fence so `type: setlist` no longer parsed and the experience stopped
+/// opening). Not mounting it removes that sink entirely.
+fn note_body_visible(is_setlist: bool, setlist_fullscreen: bool) -> bool {
+    !(is_setlist && setlist_fullscreen)
+}
+
+#[cfg(test)]
+mod note_body_tests {
+    use super::note_body_visible;
+
+    #[test]
+    fn note_body_hidden_only_under_fullscreen_setlist() {
+        // The one case that caused the corruption: a setlist note shown
+        // fullscreen. The note-body editor (the autosave sink) must NOT mount,
+        // so the keyflow-source editor's input can never land in the note.
+        assert!(
+            !note_body_visible(true, true),
+            "note body must be hidden while the fullscreen setlist experience is open"
+        );
+
+        // Every other combination keeps the normal note editor.
+        assert!(
+            note_body_visible(true, false),
+            "a setlist note shown embedded still edits normally"
+        );
+        assert!(
+            note_body_visible(false, true),
+            "a non-setlist note is never suppressed by the setlist flag"
+        );
+        assert!(note_body_visible(false, false), "a plain note edits normally");
     }
 }

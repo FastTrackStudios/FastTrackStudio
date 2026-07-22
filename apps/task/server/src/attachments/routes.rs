@@ -34,6 +34,10 @@ pub fn attachment_router() -> Router<AttachmentRouteState> {
     Router::new()
         .route("/blobs/upload", put(handle_upload))
         .route("/blobs/download/{content_hash}", get(handle_download))
+        // Stems and other media blow straight past axum's 2 MB default
+        // body cap; uploads are pre-authorized by signed ticket, so a
+        // generous cap is safe (multitrack WAVs run hundreds of MB).
+        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
 }
 
 /// Sliver of `AppState` the routes need. Avoids depending on the

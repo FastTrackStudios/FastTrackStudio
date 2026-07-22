@@ -85,13 +85,24 @@ pub fn InboxView() -> Element {
         };
     }
 
+    // The inbox triage IS an Experience — a full-screen, focused deck.
+    // The shared chrome gives it the consistent overlay + top-bar exit;
+    // `handle_esc: false` because ProcessReview binds Esc (and the triage
+    // keys) itself.
     rsx! {
-        ProcessReview {
-            items: queue(),
-            slug,
+        crate::pages::experience::FullscreenExperience {
+            title: "Inbox",
+            handle_esc: false,
             on_exit: move |()| {
                 nav.push(crate::routes::Route::DashboardRoute {});
             },
+            ProcessReview {
+                items: queue(),
+                slug,
+                on_exit: move |()| {
+                    nav.push(crate::routes::Route::DashboardRoute {});
+                },
+            }
         }
     }
 }
