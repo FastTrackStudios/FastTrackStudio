@@ -121,6 +121,18 @@ thread_local! {
     /// cleared on completion/failure. Fixes the boot race where two calls both
     /// pass the async-lagging `is_running()` check before either build lands.
     static BUILDING: Cell<bool> = const { Cell::new(false) };
+    /// Whether the PARKED engine has had its one-time "open on song 0 /
+    /// section 0" cursor seed. Reset on every park. A re-mounted
+    /// `SessionEventBridge` must NOT re-open: the indices hub replays the
+    /// latest cursor to new subscribers, and re-seeking song 0 yanks a live
+    /// session back to the top of the set.
+    static OPENED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// One-shot per parked engine: `true` exactly once after each [`park`],
+/// telling the bridge to seed the initial cursor (song 0 / section 0).
+pub fn needs_initial_open() -> bool {
+    OPENED.with(|o| !o.replace(true))
 }
 
 /// Whether the engine has finished building and is parked.
@@ -180,6 +192,7 @@ fn park(engine: SessionEngine, wire_session: bool) {
     // `_daw` release the in-memory links.
     ENGINE.with(|c| *c.borrow_mut() = Some(engine));
     BUILDING.with(|b| b.set(false));
+    OPENED.with(|o| o.set(false));
     tracing::info!("session engine: ready (parked in-browser setlist player)");
 }
 
@@ -229,9 +242,20 @@ pub fn build_for_setlist(slugs: Vec<String>) {
         return;
     }
     let key = setlist_key(&slugs);
+    // Diagnose WHY a rebuild is claimed — a re-mount of the same setlist must
+    // NOT rebuild (it resets the cursor to song 0 and orphans in-flight RPCs,
+    // which replay against the fresh engine as wild cross-song seeks).
+    let prev = current_key();
+    let was_running = is_running();
+    let was_building = is_building();
     if !claim_build(&key) {
         return;
     }
+    tracing::info!(
+        "session engine: build claimed (same_key={}, was_running={was_running}, \
+         was_building={was_building})",
+        prev.as_deref() == Some(key.as_str()),
+    );
     wasm_bindgen_futures::spawn_local(async move {
         // Drop the previously parked engine BEFORE building the new one so its
         // `_scope` / `_daw` links (and the global daw facade) are released
@@ -613,14 +637,19 @@ pub fn SessionEventBridge() -> Element {
             }
         });
 
-        // Open on song 0 / section 0 (fired concurrently so `rx` is already
-        // polling when the cursor publish arrives).
-        spawn(async move {
-            match client.seek_to_section(0, 0).await {
-                Ok(_) => tracing::info!("opened setlist on song 0 / section 0"),
-                Err(e) => tracing::warn!("initial seek to song 0 failed: {e:?}"),
-            }
-        });
+        // Open on song 0 / section 0 — ONCE per parked engine (fired
+        // concurrently so `rx` is already polling when the cursor publish
+        // arrives). A re-mounted bridge skips this: the indices hub replays
+        // the latest cursor (`with_replay(1)`), and re-opening would yank a
+        // live session back to the top of the set.
+        if needs_initial_open() {
+            spawn(async move {
+                match client.seek_to_section(0, 0).await {
+                    Ok(_) => tracing::info!("opened setlist on song 0 / section 0"),
+                    Err(e) => tracing::warn!("initial seek to song 0 failed: {e:?}"),
+                }
+            });
+        }
 
         while let Ok(Some(ai)) = rx.recv().await {
             session_ui::apply_active_indices(ai.get());
