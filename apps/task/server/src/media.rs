@@ -45,12 +45,23 @@ impl MediaService for MediaServiceImpl {
             .await
             .map_err(store_err)?;
         let meta = self.attachments.catalog.get(&content_hash);
+        let mime_type = match meta.as_ref() {
+            Some(m) => m.mime_type.clone(),
+            // Catalog is in-memory only — sniff restarts' orphaned blobs.
+            None => {
+                let head = self
+                    .attachments
+                    .store
+                    .get_blob(&content_hash)
+                    .await
+                    .map_err(store_err)?;
+                crate::attachments::sniff_mime(head.get(..16).unwrap_or(&head)).to_string()
+            }
+        };
         Ok(MediaInfo {
             content_hash,
             size_bytes,
-            mime_type: meta
-                .as_ref()
-                .map_or_else(|| "application/octet-stream".into(), |m| m.mime_type.clone()),
+            mime_type,
             filename: meta.map(|m| m.filename).unwrap_or_default(),
         })
     }

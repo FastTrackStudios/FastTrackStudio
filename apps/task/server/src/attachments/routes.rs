@@ -146,10 +146,15 @@ async fn handle_download(
         }
     };
     let meta = state.service.catalog.get(&content_hash);
-    let mime = meta.as_ref().map_or_else(
-        || "application/octet-stream".into(),
-        |m| m.mime_type.clone(),
-    );
+    let mime = match meta.as_ref() {
+        Some(m) => m.mime_type.clone(),
+        // Catalog is in-memory only — sniff restarts' orphaned blobs from
+        // their magic bytes so <audio> gets a playable content type.
+        None => match state.service.store.get_blob(&content_hash).await {
+            Ok(head) => super::sniff_mime(head.get(..16).unwrap_or(&head)).to_string(),
+            Err(_) => "application/octet-stream".to_string(),
+        },
+    };
     let base_headers = |body_len: u64| {
         [
             (header::CONTENT_TYPE, mime.clone()),
