@@ -458,18 +458,28 @@ pub(crate) fn NoteView(
                             props_open,
                             on_renamed: move |_| on_renamed.call(()),
                         }
-                        div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
-                            div { class: "editor-frame editor-frame--flush",
-                                Editor {
-                                    state: session.state,
-                                    keymap: keymap.read().clone(),
-                                    decorations: decorations.clone(),
-                                    vim,
-                                    slash: Some(slash),
-                                    completion: completion.clone(),
-                                    on_transaction,
+                        // Raw view (status-bar toggle): the literal file text
+                        // MINUS the YAML frontmatter — properties stay in the
+                        // right-sidebar Properties tab. Read currently renders
+                        // the editor (the reading-view design comes later).
+                        if use_context::<crate::chrome::NoteViewMode>().0() == crate::chrome::ViewMode::Raw {
+                            pre { class: "whitespace-pre-wrap px-6 py-4 font-mono text-sm leading-6 text-foreground",
+                                {raw_body_text(&session.state.read().doc.to_string())}
+                            }
+                        } else {
+                            div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
+                                div { class: "editor-frame editor-frame--flush",
+                                    Editor {
+                                        state: session.state,
+                                        keymap: keymap.read().clone(),
+                                        decorations: decorations.clone(),
+                                        vim,
+                                        slash: Some(slash),
+                                        completion: completion.clone(),
+                                        on_transaction,
+                                    }
+                                    SlashMenu { state: session.state, slash }
                                 }
-                                SlashMenu { state: session.state, slash }
                             }
                         }
                     }
@@ -481,6 +491,15 @@ pub(crate) fn NoteView(
             }
         }
     }
+}
+
+/// The Raw view's text: the file minus its YAML frontmatter fence (the
+/// properties live in the right-sidebar Properties tab).
+fn raw_body_text(text: &str) -> String {
+    text.strip_prefix("---")
+        .and_then(|rest| rest.split_once("\n---"))
+        .map(|(_, body)| body.trim_start_matches(['\r', '\n']).to_owned())
+        .unwrap_or_else(|| text.to_owned())
 }
 
 /// Whether the note body (frontmatter + Markdown editor, bound to the
