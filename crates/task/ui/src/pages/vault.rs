@@ -1221,6 +1221,36 @@ pub(crate) fn setlist_songs_from_body(text: &str) -> Vec<String> {
     out
 }
 
+/// The RAW wikilink target names of a setlist body, in document order
+/// (the un-slugified companion of [`setlist_songs_from_body`]).
+pub(crate) fn setlist_song_links_from_body(text: &str) -> Vec<String> {
+    let body = text
+        .strip_prefix("---")
+        .and_then(|rest| rest.split_once("\n---").map(|(_, b)| b))
+        .unwrap_or(text);
+    let mut out = Vec::new();
+    for line in body.lines() {
+        let t = line.trim();
+        let t = t
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .trim_start_matches(['-', '*', '.', ')'])
+            .trim_start();
+        let Some(inner) = t.strip_prefix("[[").and_then(|r| r.strip_suffix("]]")) else {
+            continue;
+        };
+        let target = inner
+            .split(['|', '#'])
+            .next()
+            .unwrap_or(inner)
+            .trim()
+            .trim_start_matches("Songs/");
+        if !target.is_empty() && !out.iter().any(|s: &String| s == target) {
+            out.push(target.to_owned());
+        }
+    }
+    out
+}
+
 pub(crate) fn setlist_songs_from(text: &str) -> Vec<String> {
     // The composable form wins: standalone [[SongTitle]] wikilinks in the
     // body, in document order. The frontmatter `songs:` list remains as

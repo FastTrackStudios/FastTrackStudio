@@ -139,7 +139,7 @@ impl ClientVaultIndex {
     /// `spawn_forever` + wrote `state` from the root scope — a
     /// signal-ownership violation the multiplayer suite's console
     /// gate flags as fatal.)
-    fn content(&self, path: &str) -> Option<String> {
+    pub fn content(&self, path: &str) -> Option<String> {
         let mut cache = self.cache.borrow_mut();
         if let Some(text) = cache.map.get(path).cloned() {
             cache.touch(path);
@@ -276,11 +276,25 @@ impl VaultLookup for ClientVaultIndex {
         if !is_setlist {
             return None;
         }
-        let songs = crate::pages::vault::setlist_songs_from(&raw);
+        let links = crate::pages::vault::setlist_song_links_from_body(&raw);
+        let songs: Vec<editor::markdown::VaultSetlistSongRow> = links
+            .iter()
+            .map(|link| {
+                let hit = self.lookup_song(link);
+                editor::markdown::VaultSetlistSongRow {
+                    link: link.clone(),
+                    artist: hit.as_ref().and_then(|h| h.artist.clone()),
+                    duration_sec: hit.as_ref().map(|h| h.duration_sec).unwrap_or(0.0),
+                    stem_count: hit.as_ref().map(|h| h.stem_count).unwrap_or(0),
+                }
+            })
+            .collect();
+        let total_seconds = songs.iter().map(|s| s.duration_sec).sum();
         Some(editor::markdown::VaultSetlistHit {
             title: meta.basename.clone(),
             song_count: songs.len(),
-            total_seconds: 0.0, // durations live in each song note; summed later
+            total_seconds,
+            songs,
         })
     }
 

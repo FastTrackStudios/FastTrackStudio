@@ -280,6 +280,28 @@ pub(crate) fn NoteView(
     } else {
         Vec::new()
     };
+    // A non-setlist note (e.g. an event) that EMBEDS a setlist via a
+    // standalone wikilink still gets a headless player so the embed's ▶
+    // buttons work: resolve the first embedded setlist through the vault
+    // index and queue its songs.
+    let embedded_setlist_songs: Vec<String> = if !is_setlist {
+        let doc = session.state.peek().doc.to_string();
+        crate::pages::vault::setlist_song_links_from_body(&doc)
+            .iter()
+            .find_map(|target| {
+                let guard = lookup.peek();
+                let ix = guard.as_ref()?;
+                let meta = ix.meta(target)?;
+                let raw = ix.content(&meta.path)?;
+                let is_sl = crate::pages::vault::frontmatter_value(&raw, "type")
+                    .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "setlist")
+                    .unwrap_or(false);
+                is_sl.then(|| crate::pages::vault::setlist_songs_from(&raw))
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     // Editor link clicks: `song-play:<name>` drives the mounted stream
     // player (inline song-strip play buttons); wikilink targets navigate
@@ -296,6 +318,10 @@ pub(crate) fn NoteView(
         if href.starts_with("setlist-play:") {
             let generation = play_req.peek().0 + 1;
             play_req.set((generation, String::new())); // empty = toggle
+            return;
+        }
+        if let Some(tab) = href.strip_prefix("event-tab:") {
+            *crate::event_tabs::EVENT_ACTIVE_TAB.write() = tab.to_string();
             return;
         }
         if href.starts_with("http://") || href.starts_with("https://") {
@@ -442,6 +468,16 @@ pub(crate) fn NoteView(
                             org: home.read().clone(),
                             title: basename_of(&path).to_string(),
                             front: song_front_value.clone(),
+                        }
+                    }
+                    if !is_setlist && !embedded_setlist_songs.is_empty() {
+                        // Headless queue for embedded-setlist playback.
+                        crate::pages::setlist_stream::SetlistStreamPlayer {
+                            org: home.read().clone(),
+                            title: basename_of(&path).to_string(),
+                            songs: embedded_setlist_songs.clone(),
+                            show_rows: false,
+                            headless: true,
                         }
                     }
                     if is_setlist {
