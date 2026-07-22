@@ -23023,6 +23023,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "share-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "thiserror 2.0.18",
+ "vox",
+]
+
+[[package]]
 name = "shell-words"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -25742,6 +25752,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.10.9",
+ "share-proto",
  "store-proto",
  "tag",
  "tag-proto",
@@ -27618,6 +27629,7 @@ dependencies = [
  "session",
  "session-proto",
  "session-ui",
+ "share-proto",
  "spaced-repetition",
  "tag-proto",
  "task",

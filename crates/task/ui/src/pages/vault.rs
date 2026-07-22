@@ -97,6 +97,7 @@ const MAX_PANES: usize = 2;
 enum RightTab {
     Properties,
     Links,
+    Share,
 }
 
 /// One node of the virtual-folder tree.
@@ -784,7 +785,11 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                     aside { class: "hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-border bg-muted/30 md:flex",
                         // Tab header: Properties / Links + a Hide control.
                         div { class: "flex items-center gap-1 border-b border-border/60 px-2 py-1.5",
-                            for (tab, label) in [(RightTab::Properties, "Properties"), (RightTab::Links, "Links")] {
+                            for (tab, label) in [
+                                (RightTab::Properties, "Properties"),
+                                (RightTab::Links, "Links"),
+                                (RightTab::Share, "Share"),
+                            ] {
                                 button {
                                     key: "{label}",
                                     class: if right_tab() == tab {
@@ -817,6 +822,8 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                         }
                         if right_tab() == RightTab::Properties {
                             crate::pages::note_properties::NoteProperties {}
+                        } else if right_tab() == RightTab::Share {
+                            crate::pages::share_panel::SharePanel { slug: home(), path: selected() }
                         } else {
                             {backlinks_body.clone()}
                         }
@@ -868,9 +875,17 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                 let mut o = shell_right;
                 o.set(crate::chrome::RightPanelOpen(false));
             },
-            title: if right_tab() == RightTab::Properties { "Properties" } else { "Links" },
+            title: match right_tab() {
+                RightTab::Properties => "Properties",
+                RightTab::Links => "Links",
+                RightTab::Share => "Share",
+            },
             div { class: "flex items-center gap-1 border-b border-border/60 px-2 py-1.5",
-                for (tab, label) in [(RightTab::Properties, "Properties"), (RightTab::Links, "Links")] {
+                for (tab, label) in [
+                                (RightTab::Properties, "Properties"),
+                                (RightTab::Links, "Links"),
+                                (RightTab::Share, "Share"),
+                            ] {
                     button {
                         key: "{label}",
                         class: if right_tab() == tab {
@@ -885,6 +900,8 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             }
             if right_tab() == RightTab::Properties {
                 crate::pages::note_properties::NoteProperties {}
+            } else if right_tab() == RightTab::Share {
+                crate::pages::share_panel::SharePanel { slug: home(), path: selected() }
             } else {
                 {backlinks_body}
             }

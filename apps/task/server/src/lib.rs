@@ -26,6 +26,7 @@ pub mod identity_mgmt;
 pub mod link_sync;
 pub mod presence;
 pub mod server_mgmt;
+pub mod share;
 pub mod snapshot;
 pub mod watch_bridge;
 pub mod webhooks;
@@ -96,6 +97,9 @@ pub struct OrgAppState {
     /// (audits would-be denies, enforces nothing) until
     /// `TASK_ENFORCE_PERMISSIONS=1` — see `plans/architect-permissions.md`.
     pub permissions: Arc<architect::permissions_gate::PermissionsGate>,
+    /// Share links (`<org>/shares.json`) — link CRUD on the org lane +
+    /// the token-checked `/org/{slug}/share/{token}` landing route.
+    pub shares: Arc<share::ShareStore>,
     pub attachments: Arc<attachments::AttachmentServiceImpl>,
     /// File-replication backend rooted at this org's
     /// `vault/` dir.
@@ -1026,11 +1030,13 @@ pub(crate) async fn build_org_state(
         }
 
         let permissions = Arc::new(build_org_permissions_gate(&auth));
+        let shares = Arc::new(share::ShareStore::open(org_root.path()));
 
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
             auth,
             permissions,
+            shares,
             attachments: attachment_service,
             vault_sync: vault_sync_state,
             vault_collab,
@@ -1220,6 +1226,7 @@ pub fn router(state: AppState) -> Router {
             "/org/{slug}/webhooks/forge",
             axum::routing::post(webhooks::forge_webhook_handler),
         )
+        .route("/org/{slug}/share/{token}", get(share_landing_handler))
         .with_state(state.clone());
 
     // Server-management vox: `OrgManagementService` +
@@ -1500,6 +1507,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         attachments_proto::attachment_service_service_descriptor(),
         vault_proto::descriptor(),
         architect_permissions_proto::permissions_service_service_descriptor(),
+        share_proto::share_service_service_descriptor(),
         agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
         agent_proto::service::sessions::sessions_rpc_service_descriptor(),
         agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
@@ -1604,6 +1612,15 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                     org.permissions.identity_resolver(),
                 ),
             ),
+        )
+        // Share links — CRUD for the note Share panel + Links registry.
+        .with(
+            share_proto::share_service_service_descriptor(),
+            share_proto::ShareServiceDispatcher::new(share::ShareServiceImpl::new(
+                org.shares.clone(),
+                org.slug.clone(),
+                share_public_base(),
+            )),
         )
         // Agent-task queue — slim domain trait (claim / complete / set-status).
         .with(
@@ -1921,6 +1938,43 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             vault_proto::vault_graph_rpc_service_descriptor(),
             vault_proto::vault_graph_serve(org.vault_graph.clone()),
         )
+}
+
+/// Public base URL share links are composed against.
+fn share_public_base() -> String {
+    std::env::var("TASK_SHARE_PUBLIC_BASE")
+        .or_else(|_| std::env::var("TASK_SERVER_PUBLIC_URL"))
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            let bind = std::env::var("TASK_SERVER_BIND").unwrap_or_else(|_| "127.0.0.1:3456".into());
+            format!("http://{bind}")
+        })
+}
+
+/// `GET /org/{slug}/share/{token}` — the share landing page. The token is
+/// checked on EVERY hit so disabling a link is retroactive: unknown → 404,
+/// disabled → 410, live → the landing page (which opens the note in the
+/// app at `TASK_SHARE_APP_ORIGIN`, default same-origin).
+async fn share_landing_handler(
+    State(state): State<AppState>,
+    axum::extract::Path((slug, token)): axum::extract::Path<(String, String)>,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::{Html, IntoResponse};
+    let Some(org) = state.org(&slug) else {
+        return (StatusCode::NOT_FOUND, "no such org").into_response();
+    };
+    match org.shares.resolve(&token) {
+        None => (StatusCode::NOT_FOUND, "no such share link").into_response(),
+        Some(link) if link.disabled => {
+            (StatusCode::GONE, Html(share::disabled_html())).into_response()
+        }
+        Some(link) => {
+            let app_origin = std::env::var("TASK_SHARE_APP_ORIGIN").unwrap_or_default();
+            Html(share::landing_html(&link, &app_origin)).into_response()
+        }
+    }
 }
 
 fn serve_org_vox(
