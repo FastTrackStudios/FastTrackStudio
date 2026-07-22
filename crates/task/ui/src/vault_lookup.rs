@@ -260,6 +260,30 @@ impl VaultLookup for ClientVaultIndex {
         })
     }
 
+    fn lookup_note_kind(&self, name: &str) -> Option<String> {
+        let meta = self.meta(name)?;
+        let raw = self.content(&meta.path)?;
+        crate::pages::vault::frontmatter_value(&raw, "type")
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
+    }
+
+    fn lookup_setlist(&self, name: &str) -> Option<editor::markdown::VaultSetlistHit> {
+        let meta = self.meta(name)?;
+        let raw = self.content(&meta.path)?;
+        let is_setlist = crate::pages::vault::frontmatter_value(&raw, "type")
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "setlist")
+            .unwrap_or(false);
+        if !is_setlist {
+            return None;
+        }
+        let songs = crate::pages::vault::setlist_songs_from(&raw);
+        Some(editor::markdown::VaultSetlistHit {
+            title: meta.basename.clone(),
+            song_count: songs.len(),
+            total_seconds: 0.0, // durations live in each song note; summed later
+        })
+    }
+
     fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String> {
         let meta = self.meta(page)?;
         let raw = match self.content(&meta.path) {
