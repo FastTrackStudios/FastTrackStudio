@@ -26,25 +26,42 @@ content contains (stems → practice player; orchestral-parts → parts desk).
 New per-org table (home: `auth.sqlite`, beside the auth entities it joins):
 
 ```
-Share {
+Share {                         // ONE scope, many audiences/links
   id:            ShareId (uuid)
-  token:         String        // unguessable URL id (also the public-link secret)
   title:         String        // "Sunday Worship — band rehearsal"
   scope:         ShareScope    // see below
-  capability:    View | Comment | Edit
-  experience:    Auto | Practice | PartsDesk | Notes   // landing-page hint
-  public_link:   bool          // anyone with the link (at `capability`, but Edit is invite-only)
   created_by:    user_id
-  expires_at:    Option<ts>
-  revoked_at:    Option<ts>
 }
-ShareGrant {                    // named audience members
+ShareLink {                     // Samply-style: a share can mint MANY links,
+                                // each with its OWN settings, individually
+                                // editable + revocable after creation
+  id, share_id
+  token:         String        // unguessable URL secret
+  label:         String        // "band link", "orchestra front desk", …
+  capability:    View | Comment          // link-based Edit is not offered;
+                                          // Edit is always a named grant
+  experience:    Auto | Practice | PartsDesk | Notes
+  allow_download: bool         // playback/preview WITHOUT download (streams
+                               //  stems / previews PDFs, no file export)
+  password_hash: Option<String> // optional extra gate on the link
+  expires_at:    Option<ts>
+  disabled_at:   Option<ts>    // deactivate (reversible) — delete is separate
+  created_by, created_at
+}
+ShareGrant {                    // named audience members (email / contact)
   share_id, email, invitation_id: Option<AuthInvitationId>,
   user_id: Option<user_id>,     // filled once accepted / signed in
-  capability_override: Option<Capability>,
+  capability: View | Comment | Edit,
   instrument: Option<String>,   // orchestra flow: pre-assign "Violin 1", …
 }
 ```
+
+**Every setting is retroactive by construction**: the share lane resolves
+`token → ShareLink → Share` on every connect/request, so flipping a link
+from Comment to View, toggling `allow_download`, adding a password, or
+deactivating it applies to the next request — including live-connected
+guests (the lane re-checks on reconnect; active WebSocket lanes are dropped
+on disable/permission change).
 
 ### Scope: a note group, expanded
 
@@ -192,10 +209,12 @@ right-hand panel), following the atom-store pattern:
 │  strings@symphony.org View · Vln 1  │
 │  [+ invite by email]                │
 │                                     │
-│ Public link                Comment ▾│
-│  ○ off  ● on                        │
-│  https://task…/s/8Xk2…   [copy]     │
-│  Expires: [never ▾]   [revoke]      │
+│ Links                    [+ new]    │
+│  band link      Comment · no dl     │
+│   https://task…/s/8Xk2…  [copy] ⋯   │
+│  orchestra desk View · dl · 🔒      │
+│   https://task…/s/P9q4…  [copy] ⋯   │
+│   (⋯ = edit · deactivate · delete)  │
 │                                     │
 │ Landing: [Auto ▾]  (Practice)       │
 │ Activity: 3 visitors this week      │
@@ -204,21 +223,45 @@ right-hand panel), following the atom-store pattern:
 
 - Capability per grant (dropdown), instrument field appears when the scope
   contains orchestral parts.
+- "+ new link" mints another `ShareLink` with its own label/settings —
+  a share can carry several at once (band link with downloads off,
+  orchestra link with downloads on, a view-only promoter link…).
+- Per-link controls (Samply-style): capability, downloads on/off, password,
+  expiry, **deactivate** (reversible) vs delete, copy URL.
 - Invite-by-email goes through the newly-exposed vox
   `create_invitation` + `ShareGrant`; Members page (`pages/members.rs`)
   grows the same invite affordance for org-level membership.
 - Share management RPC: new `ShareService` (create/update/revoke/list,
-  list_grants, activity) mounted on the ORG lane (members only).
+  links CRUD, list_grants, activity) mounted on the ORG lane (members only).
+
+### The Links registry (org-level)
+
+A dedicated **Links** page (sidebar, beside Members): every link ever
+created across the org, in one table —
+
+```
+Label            Scope              Cap      Dl  Status    Last visit  Visits
+band link        Sunday Worship     Comment  ✕   active    2h ago      14
+orchestra desk   Columbus Symphony  View     ✓   active    yesterday   31
+promoter copy    Columbus Symphony  View     ✕   disabled  Jun 30      2
+```
+
+Row actions: edit settings inline, copy, deactivate/re-enable, delete,
+jump to the owning note's Share panel. This is the "keep track of every
+link that's been created and change permissions after the fact" surface —
+nothing is fire-and-forget.
 
 ## 7. Staged plan
 
 1. **S1 — enforcement middleware** (`billing-access-control.md` S1): token →
    identity on every org-lane dispatcher; org members pass. Ships alone.
-2. **S2 — Share model + share lane (View)**: `Share`/`ShareGrant` tables,
-   `ShareService`, `/org/{slug}/share/{token}/vox` with scoped
-   VaultSync + MediaService, scope expansion for setlist notes, public-link
-   read-only. Landing = Practice/Notes (view). *Band-rehearsal link works
-   end-to-end here.*
+2. **S2 — Share model + share lane (View)**: `Share`/`ShareLink`/
+   `ShareGrant` tables, `ShareService` (links CRUD — settings mutable and
+   retroactive from day one), `/org/{slug}/share/{token}/vox` with scoped
+   VaultSync + MediaService, scope expansion for setlist notes, the Links
+   registry page. Landing = Practice/Notes (view). `allow_download` off ⇒
+   stems stream / PDFs preview but no file export; the zip route and raw
+   downloads check it. *Band-rehearsal link works end-to-end here.*
 3. **S3 — PartsDesk + zip route**: instrument picker, per-song part listing,
    zip streaming endpoint. *Orchestra flow done.*
 4. **S4 — Comment**: scoped ThreadsService on the share lane, guest
