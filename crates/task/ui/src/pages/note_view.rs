@@ -286,19 +286,39 @@ pub(crate) fn NoteView(
     // index and queue its songs.
     let embedded_setlist_songs: Vec<String> = if !is_setlist {
         let doc = session.state.peek().doc.to_string();
-        crate::pages::vault::setlist_song_links_from_body(&doc)
+        let links = crate::pages::vault::setlist_song_links_from_body(&doc);
+        let guard = lookup.peek();
+        let kind_of = |target: &str| -> Option<String> {
+            let ix = guard.as_ref()?;
+            let meta = ix.meta(target)?;
+            let raw = ix.content(&meta.path)?;
+            crate::pages::vault::frontmatter_value(&raw, "type")
+                .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
+        };
+        // IMPLICIT setlist: song wikilinks directly in the note (an event
+        // IS its setlist — no separate setlist doc required) …
+        let direct: Vec<String> = links
             .iter()
-            .find_map(|target| {
-                let guard = lookup.peek();
-                let ix = guard.as_ref()?;
-                let meta = ix.meta(target)?;
-                let raw = ix.content(&meta.path)?;
-                let is_sl = crate::pages::vault::frontmatter_value(&raw, "type")
-                    .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "setlist")
-                    .unwrap_or(false);
-                is_sl.then(|| crate::pages::vault::setlist_songs_from(&raw))
-            })
-            .unwrap_or_default()
+            .filter(|t| kind_of(t).as_deref() == Some("song"))
+            .map(|t| crate::pages::vault::slugify(t))
+            .collect();
+        if !direct.is_empty() {
+            direct
+        } else {
+            // … falling back to the first EMBEDDED setlist note.
+            links
+                .iter()
+                .find_map(|target| {
+                    let ix = guard.as_ref()?;
+                    let meta = ix.meta(target)?;
+                    let raw = ix.content(&meta.path)?;
+                    (crate::pages::vault::frontmatter_value(&raw, "type")
+                        .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "setlist")
+                        .unwrap_or(false))
+                    .then(|| crate::pages::vault::setlist_songs_from(&raw))
+                })
+                .unwrap_or_default()
+        }
     } else {
         Vec::new()
     };
@@ -524,9 +544,9 @@ pub(crate) fn NoteView(
                     // frontmatter when the keyflow-source editor was used. So skip
                     // it entirely while a fullscreen experience owns the screen.
                     if note_body_visible(is_setlist, setlist_fullscreen()) {
-                        // Setlists: the streaming header above IS the title —
-                        // skip the duplicate note header.
-                        if !is_setlist {
+                        // Setlists + events: the typed title widget in the
+                        // editor IS the title — skip the duplicate header.
+                        if !is_setlist && current_type.read().as_deref() != Some("event") {
                             crate::pages::note_header::NoteHeader {
                                 home,
                                 props_open,
