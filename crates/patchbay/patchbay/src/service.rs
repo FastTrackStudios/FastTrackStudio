@@ -428,7 +428,13 @@ fn apply_named_routes(
             let by_channel = |node: u32, dir: PortDirection| {
                 let mut m = std::collections::BTreeMap::new();
                 for p in store_r.ports.values() {
-                    if p.node_id == node && p.direction == dir {
+                    // Skip MIDI ports: REAPER exposes both `in18` and
+                    // `MIDI Input 18`, which collide on channel 18 —
+                    // pairing must land on the AUDIO port.
+                    if p.node_id == node
+                        && p.direction == dir
+                        && p.media_kind != patchbay_proto::MediaKind::Midi
+                    {
                         if let Some(ch) = crate::chanmap::channel_of_port(&p.name) {
                             m.entry(ch).or_insert(p.id);
                         }
@@ -640,7 +646,12 @@ impl PatchbayService for PatchbayBackend {
             let by_channel = |node: u32, dir: patchbay_proto::PortDirection| {
                 let mut m = std::collections::BTreeMap::new();
                 for p in store.ports.values() {
-                    if p.node_id == node && p.direction == dir {
+                    // Skip MIDI ports (see apply_named_routes): `in18`
+                    // and `MIDI Input 18` collide on channel 18.
+                    if p.node_id == node
+                        && p.direction == dir
+                        && p.media_kind != patchbay_proto::MediaKind::Midi
+                    {
                         if let Some(ch) = crate::chanmap::channel_of_port(&p.name) {
                             m.entry(ch).or_insert(p.id);
                         }
