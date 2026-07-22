@@ -359,10 +359,48 @@ fn resolve_route_endpoint(
     None
 }
 
+/// The port sentinel that turns a route into a whole-node BANK route:
+/// pair the two nodes' ports 1:1 by numeric suffix (like
+/// `connect_one_to_one`) instead of matching a single named port.
+const BANK_PORT: &str = "*";
+
+/// Resolve a node by `node.name` / label / alias (case-insensitive).
+fn resolve_node<'a>(
+    store: &'a GraphStore,
+    aliases: &HashMap<String, String>,
+    query: &str,
+) -> Option<&'a patchbay_proto::PwNode> {
+    let q = query.trim().to_lowercase();
+    store.nodes.values().find(|n| {
+        n.name.to_lowercase() == q
+            || n.label.to_lowercase() == q
+            || aliases.get(&n.name).map(|s| s.to_lowercase()).as_deref() == Some(q.as_str())
+    })
+}
+
+/// Issue a CreateLink for `out → inp` unless it already exists. Returns
+/// whether a command was sent.
+fn ensure_link(store: &GraphStore, engine: &EngineHandle, out: u32, inp: u32) -> bool {
+    if store.link_between(out, inp).is_some() {
+        return false;
+    }
+    let (Some(on), Some(inn)) = (store.node_of_port(out), store.node_of_port(inp)) else {
+        return false;
+    };
+    engine
+        .send(Command::CreateLink {
+            output_node: on.id,
+            output_port: out,
+            input_node: inn.id,
+            input_port: inp,
+        })
+        .is_ok()
+}
+
 /// Apply every enabled named route against the live graph: create the
-/// missing link for each route whose endpoints both resolve. Idempotent
-/// — never destroys anything, never duplicates an existing link.
-/// Returns the number of links created. Runs on graph-settle and on the
+/// missing link(s) for each route whose endpoints resolve. Idempotent —
+/// never destroys anything, never duplicates an existing link. Returns
+/// the number of links created. Runs on graph-settle and on the
 /// `apply_routes` RPC.
 fn apply_named_routes(
     store: &Arc<RwLock<GraphStore>>,
@@ -378,27 +416,44 @@ fn apply_named_routes(
     let store_r = store.read();
     let mut created = 0;
     for route in routes.iter().filter(|r| r.enabled) {
+        // Bank route: pair the whole output node to the whole input node
+        // 1:1 by numeric suffix (out<N>/capture_N → in<N>/playback_N).
+        if route.from.port.trim() == BANK_PORT || route.to.port.trim() == BANK_PORT {
+            let (Some(on), Some(inn)) = (
+                resolve_node(&store_r, &aliases, &route.from.node),
+                resolve_node(&store_r, &aliases, &route.to.node),
+            ) else {
+                continue;
+            };
+            let by_channel = |node: u32, dir: PortDirection| {
+                let mut m = std::collections::BTreeMap::new();
+                for p in store_r.ports.values() {
+                    if p.node_id == node && p.direction == dir {
+                        if let Some(ch) = crate::chanmap::channel_of_port(&p.name) {
+                            m.entry(ch).or_insert(p.id);
+                        }
+                    }
+                }
+                m
+            };
+            let outs = by_channel(on.id, PortDirection::Output);
+            let ins = by_channel(inn.id, PortDirection::Input);
+            for (ch, out) in outs {
+                if let Some(&inp) = ins.get(&ch) {
+                    if ensure_link(&store_r, engine, out, inp) {
+                        created += 1;
+                    }
+                }
+            }
+            continue;
+        }
         let (Some(out), Some(inp)) = (
             resolve_route_endpoint(&store_r, &aliases, &route.from, PortDirection::Output),
             resolve_route_endpoint(&store_r, &aliases, &route.to, PortDirection::Input),
         ) else {
             continue;
         };
-        if store_r.link_between(out, inp).is_some() {
-            continue;
-        }
-        let (Some(on), Some(inn)) = (store_r.node_of_port(out), store_r.node_of_port(inp)) else {
-            continue;
-        };
-        if engine
-            .send(Command::CreateLink {
-                output_node: on.id,
-                output_port: out,
-                input_node: inn.id,
-                input_port: inp,
-            })
-            .is_ok()
-        {
+        if ensure_link(&store_r, engine, out, inp) {
             tracing::info!(route = %route.name, out, inp, "named route applied");
             created += 1;
         }

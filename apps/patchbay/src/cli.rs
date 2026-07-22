@@ -148,6 +148,15 @@ enum RouteCmd {
         #[arg(long)]
         disabled: bool,
     },
+    /// Bank route: wire a whole output node to a whole input node 1:1
+    /// by channel number (out<N>/capture_N → in<N>/playback_N), and keep
+    /// it wired. `<name> <output-node> <input-node>` (node name or alias).
+    /// E.g. `route bank inferno-to-reaper "Inferno source" REAPER`.
+    Bank {
+        name: String,
+        output_node: String,
+        input_node: String,
+    },
     Remove { name: String },
     /// Apply all enabled routes now; prints links created.
     Apply,
@@ -534,6 +543,16 @@ async fn main() -> eyre::Result<()> {
                 };
                 ok_or_msg(c.set_route(route).await)?;
                 println!("route '{name}' set");
+            }
+            RouteCmd::Bank { name, output_node, input_node } => {
+                let route = NamedRoute {
+                    name: name.clone(),
+                    from: RouteEndpoint { node: output_node, port: "*".into() },
+                    to: RouteEndpoint { node: input_node, port: "*".into() },
+                    enabled: true,
+                };
+                ok_or_msg(c.set_route(route).await)?;
+                println!("bank route '{name}' set (whole-node 1:1)");
             }
             RouteCmd::Remove { name } => {
                 ok_or_msg(c.delete_route(name.clone()).await)?;
