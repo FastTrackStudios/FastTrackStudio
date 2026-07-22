@@ -139,7 +139,7 @@ impl ClientVaultIndex {
     /// `spawn_forever` + wrote `state` from the root scope — a
     /// signal-ownership violation the multiplayer suite's console
     /// gate flags as fatal.)
-    fn content(&self, path: &str) -> Option<String> {
+    pub fn content(&self, path: &str) -> Option<String> {
         let mut cache = self.cache.borrow_mut();
         if let Some(text) = cache.map.get(path).cloned() {
             cache.touch(path);
@@ -166,7 +166,7 @@ impl ClientVaultIndex {
         }
     }
 
-    fn meta(&self, name: &str) -> Option<&PageMeta> {
+    pub fn meta(&self, name: &str) -> Option<&PageMeta> {
         self.by_basename.get(&name.to_lowercase())
     }
 }
@@ -235,6 +235,67 @@ impl VaultLookup for ClientVaultIndex {
             Some(raw) => section_body(&raw, heading),
             None => Some(LOADING.to_owned()),
         }
+    }
+
+    fn lookup_song(&self, name: &str) -> Option<editor::markdown::VaultSongHit> {
+        let meta = self.meta(name)?;
+        // A miss queues the fetch; the strip appears when content lands.
+        let raw = self.content(&meta.path)?;
+        // Only `type: song` notes get the strip.
+        let is_song = crate::pages::vault::frontmatter_value(&raw, "type")
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "song")
+            .unwrap_or(false);
+        if !is_song {
+            return None;
+        }
+        let front = crate::pages::vault::song_front_from(&raw);
+        Some(editor::markdown::VaultSongHit {
+            title: meta.basename.clone(),
+            artist: front.artist.clone(),
+            duration_sec: front
+                .duration_sec
+                .or_else(|| front.sections.last().map(|s| s.end_sec))
+                .unwrap_or(0.0),
+            stem_count: front.stems.len(),
+        })
+    }
+
+    fn lookup_note_kind(&self, name: &str) -> Option<String> {
+        let meta = self.meta(name)?;
+        let raw = self.content(&meta.path)?;
+        crate::pages::vault::frontmatter_value(&raw, "type")
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
+    }
+
+    fn lookup_setlist(&self, name: &str) -> Option<editor::markdown::VaultSetlistHit> {
+        let meta = self.meta(name)?;
+        let raw = self.content(&meta.path)?;
+        let is_setlist = crate::pages::vault::frontmatter_value(&raw, "type")
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "setlist")
+            .unwrap_or(false);
+        if !is_setlist {
+            return None;
+        }
+        let links = crate::pages::vault::setlist_song_links_from_body(&raw);
+        let songs: Vec<editor::markdown::VaultSetlistSongRow> = links
+            .iter()
+            .map(|link| {
+                let hit = self.lookup_song(link);
+                editor::markdown::VaultSetlistSongRow {
+                    link: link.clone(),
+                    artist: hit.as_ref().and_then(|h| h.artist.clone()),
+                    duration_sec: hit.as_ref().map(|h| h.duration_sec).unwrap_or(0.0),
+                    stem_count: hit.as_ref().map(|h| h.stem_count).unwrap_or(0),
+                }
+            })
+            .collect();
+        let total_seconds = songs.iter().map(|s| s.duration_sec).sum();
+        Some(editor::markdown::VaultSetlistHit {
+            title: meta.basename.clone(),
+            song_count: songs.len(),
+            total_seconds,
+            songs,
+        })
     }
 
     fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String> {

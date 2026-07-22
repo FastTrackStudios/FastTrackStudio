@@ -24,6 +24,8 @@ members = [
     "libs/architect/auth/auth-db",
     "libs/architect/auth/auth-client",
     "libs/architect/auth/tests/native",
+    "libs/architect/permissions",
+    "libs/architect/permissions/proto",
     "libs/architect/crdt/crdt",
     "libs/architect/crdt/crdt-derive",
     "libs/architect/crdt/crdt-seaorm",
@@ -603,6 +605,8 @@ inferno-net = { git = "https://codeberg.org/FastTrackStudios/inferno-control", r
 # ── Architect framework — in-tree at libs/architect (subtree import) ──
 architect = { path = "libs/architect/architect" }
 architect-derive = { path = "libs/architect/macros/architect-derive" }
+architect-permissions = { path = "libs/architect/permissions" }
+architect-permissions-proto = { path = "libs/architect/permissions/proto" }
 architect-rpc-derive = { path = "libs/architect/macros/architect-rpc-derive" }
 architect-action-derive = { path = "libs/architect/macros/architect-action-derive" }
 architect-atom = { path = "libs/architect/atom" }
@@ -898,6 +902,7 @@ email-link = { path = "features/task/email/email-link" }
 # features/task — vault-superset slices
 attachments-proto = { path = "features/task/attachments/attachments-proto" }
 media-proto = { path = "features/task/media/media-proto" }
+share-proto = { path = "features/task/share/share-proto" }
 locations = { path = "features/task/locations/locations" }
 locations-proto = { path = "features/task/locations/locations-proto", default-features = false }
 inventory = { path = "features/task/inventory/inventory" }

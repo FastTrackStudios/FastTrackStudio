@@ -43,6 +43,7 @@ task-ui.workspace = true
 session-ui = { workspace = true, features = ["web"] }
 session-proto = { workspace = true }
 daw-proto = { workspace = true }
+share-proto = { workspace = true }
 keyflow = { workspace = true, features = ["engraver", "text"] }
 editor-keyflow = { workspace = true }
 # Keyflow syntax highlighting for the setlist experience's chart editor.
@@ -196,6 +197,7 @@ web-sys = { workspace = true, features = [
     "Element",
     "HtmlElement",
     "Storage",
+    "Clipboard",
     "console",
     "Response",
     # `type: song` session player — Web Audio multitrack. Each stem is streamed

@@ -29,7 +29,10 @@ impl ExperienceKind {
     /// Whether this experience auto-opens full-screen on note open.
     pub fn auto_fullscreen(self) -> bool {
         match self {
-            ExperienceKind::Setlist => true,
+            // Setlist notes open on the NOTE (the embedded streaming
+            // player); the fullscreen rehearsal Experience is entered
+            // deliberately via the Setlist button.
+            ExperienceKind::Setlist => false,
             // Inbox is entered deliberately (a "Process" button), not on
             // every note open.
             ExperienceKind::Inbox => false,

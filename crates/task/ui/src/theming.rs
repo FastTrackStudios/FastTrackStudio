@@ -90,7 +90,12 @@ const OBSIDIAN_DARK: &[(&str, &str)] = &[
 ];
 
 pub fn state_from_preset_name(name: &str, mode: ThemeMode) -> ThemeState {
-    let preset = theme_preset(name).unwrap_or_else(default_theme_preset);
+    // Unset/unknown preset ⇒ the FastTrackStudio brand theme (the product
+    // default); the fts-ui "default" preset only appears when explicitly
+    // chosen (and keeps its Obsidian token overlay below).
+    let preset = theme_preset(name)
+        .or_else(|| theme_preset("fasttrackstudio"))
+        .unwrap_or_else(default_theme_preset);
     // Org/project presets keep their own colors; only the default
     // preset gets the Obsidian skin.
     let is_default = preset.name == "default";

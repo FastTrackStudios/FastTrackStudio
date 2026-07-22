@@ -385,6 +385,7 @@ pub fn collab_decoration_source(
         if let Some(c) = &*collab.read() {
             out.extend(remote_cursor_decorations(state, c));
         }
+        out.extend(crate::event_tabs::event_tab_decorations(state));
         out
     })
 }

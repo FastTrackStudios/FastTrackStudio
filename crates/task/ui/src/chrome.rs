@@ -44,11 +44,55 @@ pub struct FleetingOpen(pub Signal<bool>);
 #[derive(Clone, Copy)]
 pub struct ZenMode(pub Signal<bool>);
 
+/// Note view mode — Obsidian-shaped: Edit (live editor), Read (reading
+/// view; currently renders the same editor — the read design comes with
+/// the viewing-experience pass), Raw (the literal text file, MINUS the
+/// YAML frontmatter block, which stays in the Properties tab). Toggled
+/// from the bottom status bar; app-wide like Obsidian's per-pane default.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ViewMode {
+    Edit,
+    Read,
+    Raw,
+}
+
+#[derive(Clone, Copy)]
+pub struct NoteViewMode(pub Signal<ViewMode>);
+
+/// A song-strip play click (`data-href="song-play:<Note Name>"` from the
+/// editor's inline song widgets). `(generation, note name)` — the counter
+/// makes replaying the same song observable. Consumed by whichever player
+/// is mounted (the setlist stream header today).
+#[derive(Clone, Copy)]
+pub struct SongPlayRequest(pub Signal<(u64, String)>);
+
+/// Anonymous share-link mode (`?share=1` in the URL — appended by the
+/// share landing page's Open button): render NO app chrome at all — no
+/// top bar, rail, explorer, tabs, or capture FAB. The visitor gets just
+/// the shared view. Read once at boot; guests don't toggle chrome.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ShareMode(pub bool);
+
+fn detect_share_mode() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.location().search().ok())
+            .map(|q| q.contains("share=1"))
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    false
+}
+
 /// Install the chrome contexts. Call once in the app shell.
 pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
     use_context_provider(|| StatusBarInfo(Signal::new(None)));
     use_context_provider(|| ZenMode(Signal::new(false)));
+    use_context_provider(|| ShareMode(detect_share_mode()));
+    use_context_provider(|| NoteViewMode(Signal::new(ViewMode::Edit)));
+    use_context_provider(|| SongPlayRequest(Signal::new((0, String::new()))));
     use_context_provider(|| TimerResumeHint(Signal::new(None)));
 }
 
@@ -217,7 +261,35 @@ pub fn StatusBar() -> Element {
                 }
             }
             div { class: "ml-auto flex items-center gap-3",
+                ViewModeToggle {}
                 crate::presence::ConnectionBadge {}
+            }
+        }
+    }
+}
+
+/// The Edit | Read | Raw segment control in the status bar.
+#[component]
+fn ViewModeToggle() -> Element {
+    let mut mode = use_context::<NoteViewMode>().0;
+    let current = mode();
+    rsx! {
+        div { class: "flex items-center overflow-hidden rounded border border-border",
+            for (m, label) in [
+                (ViewMode::Edit, "Edit"),
+                (ViewMode::Read, "Read"),
+                (ViewMode::Raw, "Raw"),
+            ] {
+                button {
+                    r#type: "button",
+                    class: if current == m {
+                        "bg-accent px-1.5 py-0.5 font-semibold text-foreground"
+                    } else {
+                        "px-1.5 py-0.5 text-muted-foreground hover:text-foreground"
+                    },
+                    onclick: move |_| mode.set(m),
+                    "{label}"
+                }
             }
         }
     }

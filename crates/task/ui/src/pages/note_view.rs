@@ -280,6 +280,81 @@ pub(crate) fn NoteView(
     } else {
         Vec::new()
     };
+    // A non-setlist note (e.g. an event) that EMBEDS a setlist via a
+    // standalone wikilink still gets a headless player so the embed's ▶
+    // buttons work: resolve the first embedded setlist through the vault
+    // index and queue its songs.
+    let embedded_setlist_songs: Vec<String> = if !is_setlist {
+        let doc = session.state.peek().doc.to_string();
+        let links = crate::pages::vault::setlist_song_links_from_body(&doc);
+        let guard = lookup.peek();
+        let kind_of = |target: &str| -> Option<String> {
+            let ix = guard.as_ref()?;
+            let meta = ix.meta(target)?;
+            let raw = ix.content(&meta.path)?;
+            crate::pages::vault::frontmatter_value(&raw, "type")
+                .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
+        };
+        // IMPLICIT setlist: song wikilinks directly in the note (an event
+        // IS its setlist — no separate setlist doc required) …
+        let direct: Vec<String> = links
+            .iter()
+            .filter(|t| kind_of(t).as_deref() == Some("song"))
+            .map(|t| crate::pages::vault::slugify(t))
+            .collect();
+        if !direct.is_empty() {
+            direct
+        } else {
+            // … falling back to the first EMBEDDED setlist note.
+            links
+                .iter()
+                .find_map(|target| {
+                    let ix = guard.as_ref()?;
+                    let meta = ix.meta(target)?;
+                    let raw = ix.content(&meta.path)?;
+                    (crate::pages::vault::frontmatter_value(&raw, "type")
+                        .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "setlist")
+                        .unwrap_or(false))
+                    .then(|| crate::pages::vault::setlist_songs_from(&raw))
+                })
+                .unwrap_or_default()
+        }
+    } else {
+        Vec::new()
+    };
+
+    // Editor link clicks: `song-play:<name>` drives the mounted stream
+    // player (inline song-strip play buttons); wikilink targets navigate
+    // to the note (resolved through the vault index when possible).
+    let nav_links = use_navigator();
+    let lookup_for_links = lookup;
+    let mut play_req = use_context::<crate::chrome::SongPlayRequest>().0;
+    let on_link_click = use_callback(move |href: String| {
+        if let Some(name) = href.strip_prefix("song-play:") {
+            let generation = play_req.peek().0 + 1;
+            play_req.set((generation, name.to_string()));
+            return;
+        }
+        if href.starts_with("setlist-play:") {
+            let generation = play_req.peek().0 + 1;
+            play_req.set((generation, String::new())); // empty = toggle
+            return;
+        }
+        if let Some(tab) = href.strip_prefix("event-tab:") {
+            *crate::event_tabs::EVENT_ACTIVE_TAB.write() = tab.to_string();
+            return;
+        }
+        if href.starts_with("http://") || href.starts_with("https://") {
+            return; // the editor already window.open()s external links
+        }
+        let page = href.split(['#', '|']).next().unwrap_or(&href).trim();
+        let path = lookup_for_links
+            .peek()
+            .as_ref()
+            .and_then(|ix| ix.meta(page).map(|m| m.path.clone()))
+            .unwrap_or_else(|| format!("{page}.md"));
+        nav_links.push(crate::routes::Route::VaultRoute { path });
+    });
 
     // ── Save / conflict state ─────────────────────────────────
     let is_dirty = session.dirty();
@@ -415,6 +490,16 @@ pub(crate) fn NoteView(
                             front: song_front_value.clone(),
                         }
                     }
+                    if !is_setlist && !embedded_setlist_songs.is_empty() {
+                        // Headless queue for embedded-setlist playback.
+                        crate::pages::setlist_stream::SetlistStreamPlayer {
+                            org: home.read().clone(),
+                            title: basename_of(&path).to_string(),
+                            songs: embedded_setlist_songs.clone(),
+                            show_rows: false,
+                            headless: true,
+                        }
+                    }
                     if is_setlist {
                         // Setlist Experience: auto full-screen (an overlay
                         // that escapes the pane + sidebars), Esc to exit.
@@ -433,8 +518,20 @@ pub(crate) fn NoteView(
                                 label: "Setlist",
                                 on_enter: move |_| setlist_fullscreen.set(true),
                             }
-                            crate::pages::setlist_session::SetlistPlayer {
+                            // Streaming header (icon · title · play) — the
+                            // setlist's H1 replacement. Rows render INLINE in
+                            // the editor as song strips; this header owns
+                            // playback (one reference track at a time over
+                            // vox MediaService) and answers strip play clicks.
+                            // HEADLESS: the editor's setlist-header widget
+                            // (the note's own H1) is the visible header; this
+                            // just owns playback + answers play requests.
+                            crate::pages::setlist_stream::SetlistStreamPlayer {
+                                org: home.read().clone(),
+                                title: basename_of(&path).to_string(),
                                 songs: setlist_songs_value.clone(),
+                                show_rows: false,
+                                headless: true,
                             }
                         }
                     }
@@ -447,24 +544,41 @@ pub(crate) fn NoteView(
                     // frontmatter when the keyflow-source editor was used. So skip
                     // it entirely while a fullscreen experience owns the screen.
                     if note_body_visible(is_setlist, setlist_fullscreen()) {
-                        crate::pages::note_header::NoteHeader {
-                            home,
-                            props_open,
-                            on_renamed: move |_| on_renamed.call(()),
-                        }
-                        div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
-                            div { class: "editor-frame editor-frame--flush",
-                                Editor {
-                                    state: session.state,
-                                    keymap: keymap.read().clone(),
-                                    decorations: decorations.clone(),
-                                    vim,
-                                    slash: Some(slash),
-                                    completion: completion.clone(),
-                                    on_transaction,
-                                }
-                                SlashMenu { state: session.state, slash }
+                        // Setlists + events: the typed title widget in the
+                        // editor IS the title — skip the duplicate header.
+                        if !is_setlist && current_type.read().as_deref() != Some("event") {
+                            crate::pages::note_header::NoteHeader {
+                                home,
+                                props_open,
+                                on_renamed: move |_| on_renamed.call(()),
                             }
+                        }
+                        // Raw view (status-bar toggle): the literal file text
+                        // MINUS the YAML frontmatter — properties stay in the
+                        // right-sidebar Properties tab. Read currently renders
+                        // the editor (the reading-view design comes later).
+                        div { class: "mx-auto w-full max-w-3xl",
+                        if use_context::<crate::chrome::NoteViewMode>().0() == crate::chrome::ViewMode::Raw {
+                            pre { class: "whitespace-pre-wrap px-6 py-4 font-mono text-sm leading-6 text-foreground",
+                                {raw_body_text(&session.state.read().doc.to_string())}
+                            }
+                        } else {
+                            div { class: if props_open() { "editor-app" } else { "editor-app props-collapsed" },
+                                div { class: "editor-frame editor-frame--flush",
+                                    Editor {
+                                        state: session.state,
+                                        keymap: keymap.read().clone(),
+                                        decorations: decorations.clone(),
+                                        vim,
+                                        slash: Some(slash),
+                                        completion: completion.clone(),
+                                        on_transaction,
+                                        on_link_click,
+                                    }
+                                    SlashMenu { state: session.state, slash }
+                                }
+                            }
+                        }
                         }
                     }
                 }
@@ -475,6 +589,15 @@ pub(crate) fn NoteView(
             }
         }
     }
+}
+
+/// The Raw view's text: the file minus its YAML frontmatter fence (the
+/// properties live in the right-sidebar Properties tab).
+fn raw_body_text(text: &str) -> String {
+    text.strip_prefix("---")
+        .and_then(|rest| rest.split_once("\n---"))
+        .map(|(_, body)| body.trim_start_matches(['\r', '\n']).to_owned())
+        .unwrap_or_else(|| text.to_owned())
 }
 
 /// Whether the note body (frontmatter + Markdown editor, bound to the

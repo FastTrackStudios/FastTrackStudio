@@ -356,6 +356,12 @@ pub async fn media_client(slug: &str) -> Result<media_proto::MediaServiceClient,
     establish_for::<media_proto::MediaServiceClient>(slug).await
 }
 
+/// An org's `ShareServiceClient` — share-link CRUD for the note Share
+/// panel + the Links registry.
+pub async fn share_client(slug: &str) -> Result<share_proto::ShareServiceClient, String> {
+    establish_for::<share_proto::ShareServiceClient>(slug).await
+}
+
 /// An org's `VaultGraphClient` — link-graph reads (backlinks /
 /// links / orphans / unresolved / deadends / tags) for the vault
 /// page's backlinks panel and the editor's tag candidates.
