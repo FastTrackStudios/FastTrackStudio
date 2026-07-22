@@ -1447,7 +1447,7 @@ pub(crate) fn frontmatter_value(text: &str, key: &str) -> Option<String> {
 }
 
 /// Lowercase, spaces/underscores → hyphens, drop other punctuation.
-fn slugify(s: &str) -> String {
+pub(crate) fn slugify(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev_dash = false;
     for c in s.chars() {

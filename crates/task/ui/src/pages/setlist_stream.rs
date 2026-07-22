@@ -53,7 +53,9 @@ mod imp {
             else {
                 continue;
             };
-            let slug = crate::feeds::slugify(base);
+            // SAME slugify as the wikilink parser (drops apostrophes) —
+            // two impls diverging here cost us matching once already.
+            let slug = crate::pages::vault::slugify(base);
             if !slugs.contains(&slug) {
                 continue;
             }
