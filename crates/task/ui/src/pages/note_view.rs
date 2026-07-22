@@ -293,6 +293,11 @@ pub(crate) fn NoteView(
             play_req.set((generation, name.to_string()));
             return;
         }
+        if href.starts_with("setlist-play:") {
+            let generation = play_req.peek().0 + 1;
+            play_req.set((generation, String::new())); // empty = toggle
+            return;
+        }
         if href.starts_with("http://") || href.starts_with("https://") {
             return; // the editor already window.open()s external links
         }
@@ -462,11 +467,15 @@ pub(crate) fn NoteView(
                             // the editor as song strips; this header owns
                             // playback (one reference track at a time over
                             // vox MediaService) and answers strip play clicks.
+                            // HEADLESS: the editor's setlist-header widget
+                            // (the note's own H1) is the visible header; this
+                            // just owns playback + answers play requests.
                             crate::pages::setlist_stream::SetlistStreamPlayer {
                                 org: home.read().clone(),
                                 title: basename_of(&path).to_string(),
                                 songs: setlist_songs_value.clone(),
                                 show_rows: false,
+                                headless: true,
                             }
                         }
                     }

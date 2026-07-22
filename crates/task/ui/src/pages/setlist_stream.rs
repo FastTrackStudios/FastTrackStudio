@@ -145,6 +145,10 @@ mod imp {
         /// (inline editor song strips) — the header still owns playback.
         #[props(default = true)]
         show_rows: bool,
+        /// Render NOTHING (the editor's setlist-header widget is the UI)
+        /// — the component still owns playback + answers play requests.
+        #[props(default = false)]
+        headless: bool,
     ) -> Element {
         // The live element (one at a time). Rc'd so callbacks share it.
         let element: Rc<RefCell<Option<HtmlAudioElement>>> = use_hook(|| Rc::new(RefCell::new(None)));
@@ -230,6 +234,12 @@ mod imp {
                     return;
                 }
                 last_gen.set(generation);
+                if name.is_empty() {
+                    // The setlist header's big play: toggle, or start at
+                    // the top when nothing has played yet.
+                    toggle.call(());
+                    return;
+                }
                 let slug = crate::pages::vault::slugify(&name);
                 let Some(Ok(list)) = &*tracks.read_unchecked() else {
                     return;
@@ -266,6 +276,10 @@ mod imp {
 
         let cur = current();
         let pos = position();
+
+        if headless {
+            return rsx! {};
+        }
 
         rsx! {
             div { class: "mx-auto w-full max-w-3xl px-2 py-4",
@@ -373,6 +387,10 @@ mod stub {
         /// (inline editor song strips) — the header still owns playback.
         #[props(default = true)]
         show_rows: bool,
+        /// Render NOTHING (the editor's setlist-header widget is the UI)
+        /// — the component still owns playback + answers play requests.
+        #[props(default = false)]
+        headless: bool,
     ) -> Element {
         let _ = (&org, &title, &songs);
         rsx! {
