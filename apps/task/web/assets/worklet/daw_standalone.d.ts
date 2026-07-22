@@ -61,6 +61,12 @@ export class WebRenderer {
      */
     render(out_left: Float32Array, out_right: Float32Array): void;
     seekSeconds(seconds: number): void;
+    setTrackMute(index: number, muted: boolean): void;
+    setTrackSolo(index: number, soloed: boolean): void;
+    /**
+     * Fader gain, linear (1.0 = unity).
+     */
+    setTrackVolume(index: number, volume: number): void;
     stop(): void;
     /**
      * All `(take_guid, source_path)` pairs in the loaded project,
@@ -96,6 +102,9 @@ export interface InitOutput {
     readonly webrenderer_projectGuid: (a: number) => [number, number];
     readonly webrenderer_render: (a: number, b: number, c: number, d: any, e: number, f: number, g: any) => void;
     readonly webrenderer_seekSeconds: (a: number, b: number) => void;
+    readonly webrenderer_setTrackMute: (a: number, b: number, c: number) => void;
+    readonly webrenderer_setTrackSolo: (a: number, b: number, c: number) => void;
+    readonly webrenderer_setTrackVolume: (a: number, b: number, c: number) => void;
     readonly webrenderer_stop: (a: number) => void;
     readonly webrenderer_takeSources: (a: number) => [number, number];
     readonly webrenderer_trackCount: (a: number) => number;

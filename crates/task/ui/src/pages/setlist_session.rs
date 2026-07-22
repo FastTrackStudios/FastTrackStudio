@@ -246,9 +246,10 @@ mod imp {
         // stems into PCM asynchronously; the graph renders silence until they
         // land, so there's no explicit buffering gate).
         let buffering = use_signal(|| false);
-        // Per-stem mixer state for the CURRENT song (DISPLAY ONLY now — the
-        // mixer strips render from this; audio wiring returns in 4b-2). Reset
-        // from the current song's manifest on song switch.
+        // Per-stem mixer state for the CURRENT song. The mixer strips render
+        // from this AND it is pushed into the worklet renderer (the effect
+        // below `set_mutes`), so mute/solo/fader are audible. Reset from the
+        // current song's manifest on song switch.
         let stem_ui = use_signal(Vec::<media::StemUi>::new);
 
         // Fetch EVERY song's manifest + chart.kf once. Keyed on the slug list
@@ -494,7 +495,10 @@ mod imp {
             }
         });
 
-        // ── mixer mutators (by stem index) — DISPLAY-ONLY state until 4b-2 ──────
+        // ── mixer mutators (by stem index) ───────────────────────────────────
+        // They only write `stem_ui`; the effect below pushes the whole mixer
+        // state into the worklet renderer, so every path (strip buttons, guide
+        // toggle, faders) is audible through one door.
         let toggle_mute: Callback<usize> = use_callback({
             let mut stem_ui = stem_ui;
             move |i: usize| {
@@ -537,6 +541,26 @@ mod imp {
                 stem_ui.set(ui);
             }
         });
+
+        // Push the FULL mixer state into the worklet renderer whenever it
+        // changes or a new song's graph comes up (both reads are reactive).
+        // `apply_mix` queues while the pump is still attaching, so the
+        // manifest's default-muted stems (click / guide) never sound.
+        {
+            let audio = audio;
+            let stem_ui = stem_ui;
+            use_effect(move || {
+                let ui = stem_ui();
+                let Some(a) = audio.read().clone() else {
+                    return;
+                };
+                a.apply_mix(
+                    ui.iter().map(|s| s.muted).collect(),
+                    ui.iter().map(|s| s.soloed).collect(),
+                    ui.iter().map(|s| s.volume).collect(),
+                );
+            });
+        }
 
         // ── set navigation: pick / prev / next a whole song → engine RPC ───────
         let goto_song: Callback<usize> = use_callback({
@@ -679,7 +703,19 @@ mod imp {
 
         let count = songs_meta.len();
         let idx = current_song();
-        let duration = manifest.duration_sec.max(0.001);
+        // ONE timebase for the bars: the ENGINE song — the same source the
+        // navigator and the `position` mirror (ACTIVE_INDICES × engine
+        // duration) use. Falling back to the manifest duration while the
+        // engine hydrates. Mixing the two skews every percent the bars draw.
+        let duration = {
+            let sl = SETLIST_STRUCTURE.read();
+            sl.songs
+                .get(idx)
+                .map(|s| s.duration())
+                .filter(|d| *d > 0.0)
+                .unwrap_or(manifest.duration_sec)
+                .max(0.001)
+        };
         let pos = position();
         let is_playing = playing();
         let is_buffering = buffering();
@@ -746,9 +782,16 @@ mod imp {
 
         // ── transport bar adapters (section nav; crosses into the set at
         //     song boundaries) ──────────────────────────────────────────────
+        // Section-nav targets come from the SAME `sections` the bars render
+        // (engine timebase) — indexing a different list (the manifest's
+        // audio-region sections) highlighted one thing and seeked another.
+        let section_starts: Vec<f64> = sections
+            .iter()
+            .map(|s| s.start_percent / 100.0 * duration)
+            .collect();
         let on_play_pause: Callback<()> = use_callback(move |()| play_pause.call(()));
         let noop: Callback<()> = use_callback(move |()| {});
-        let sections_for_back = manifest.sections.clone();
+        let starts_for_back = section_starts.clone();
         let on_back: Callback<()> = use_callback(move |()| {
             let p = position();
             // At the head of the song, Back steps to the previous SONG.
@@ -756,21 +799,17 @@ mod imp {
                 goto_song.call(*current_song.peek() - 1);
                 return;
             }
-            let target = sections_for_back
+            let target = starts_for_back
                 .iter()
-                .map(|s| s.start_sec)
+                .copied()
                 .filter(|&s| s < p - 1.0)
                 .fold(0.0_f64, f64::max);
             seek.call(target);
         });
-        let sections_for_fwd = manifest.sections.clone();
+        let starts_for_fwd = section_starts.clone();
         let on_forward: Callback<()> = use_callback(move |()| {
             let p = position();
-            if let Some(next) = sections_for_fwd
-                .iter()
-                .map(|s| s.start_sec)
-                .find(|&s| s > p + 0.5)
-            {
+            if let Some(next) = starts_for_fwd.iter().copied().find(|&s| s > p + 0.5) {
                 seek.call(next);
             } else if *current_song.peek() + 1 < count {
                 // Past the last section, Advance steps to the next SONG.
@@ -784,11 +823,12 @@ mod imp {
             set_mutes.call((guide_idxs_for_toggle.clone(), guide_on));
         });
 
-        // Section-click seeks to the section start.
-        let sections_for_click = manifest.sections.clone();
+        // Section-click seeks to the section start — indexed into the SAME
+        // list the bar renders.
+        let starts_for_click = section_starts.clone();
         let on_section_click: Callback<usize> = use_callback(move |i: usize| {
-            if let Some(s) = sections_for_click.get(i) {
-                seek.call(s.start_sec);
+            if let Some(&s) = starts_for_click.get(i) {
+                seek.call(s);
             }
         });
 

@@ -193,6 +193,31 @@ mod imp {
         Ok(())
     }
 
+    /// Whether the media-element output pipeline is FORCED (see the connect
+    /// site in [`attach`]): `?audio=media` in the URL, or the persistent
+    /// `localStorage["fts-audio-sink"] = "media"` rig flag.
+    fn media_sink_forced() -> bool {
+        let Some(win) = web_sys::window() else {
+            return false;
+        };
+        if win
+            .location()
+            .search()
+            .map(|s| s.contains("audio=media"))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        matches!(
+            win.local_storage()
+                .ok()
+                .flatten()
+                .and_then(|s| s.get_item("fts-audio-sink").ok().flatten())
+                .as_deref(),
+            Some("media")
+        )
+    }
+
     /// Build a `{kind: ...}` message object.
     fn msg(kind: &str) -> js_sys::Object {
         let o = js_sys::Object::new();
@@ -207,11 +232,15 @@ mod imp {
     struct Pump {
         node: AudioWorkletNode,
         port: MessagePort,
-        /// The `<audio>` element playing the rendered MediaStream (the
-        /// media-path output sink — see the connect site).
-        sink: web_sys::HtmlAudioElement,
+        /// The `<audio>` element playing the rendered MediaStream — only when
+        /// the media-path output sink is FORCED (see the connect site); the
+        /// default path connects straight to `ctx.destination()`.
+        sink: Option<web_sys::HtmlAudioElement>,
         _onmsg: Closure<dyn FnMut(MessageEvent)>,
     }
+
+    /// Full mixer state, track order == stem order: (muted, soloed, volumes).
+    type MixState = (Vec<bool>, Vec<bool>, Vec<f32>);
 
     /// One active song's audio. Dropping it stops the worklet transport and
     /// disconnects the node (the shared context stays alive for the next song).
@@ -222,6 +251,9 @@ mod imp {
         /// module setup takes ~a frame; a Play click can beat it).
         want_play: Rc<Cell<bool>>,
         pending_seek: Rc<Cell<Option<f64>>>,
+        /// Latest mixer state queued while attaching — flushed on attach so
+        /// default-muted stems (click / guide) are silent from the first block.
+        pending_mix: Rc<RefCell<Option<MixState>>>,
         // ── mirrors of the worklet's ~21 ms state tick ──
         pos: Rc<Cell<f64>>,
         playing: Rc<Cell<bool>>,
@@ -239,6 +271,7 @@ mod imp {
                 pump: Rc::new(RefCell::new(None)),
                 want_play: Rc::new(Cell::new(false)),
                 pending_seek: Rc::new(Cell::new(None)),
+                pending_mix: Rc::new(RefCell::new(None)),
                 pos: Rc::new(Cell::new(0.0)),
                 playing: Rc::new(Cell::new(false)),
                 peaks: Rc::new(RefCell::new(Vec::new())),
@@ -262,6 +295,7 @@ mod imp {
                 let pump = audio.pump.clone();
                 let want_play = audio.want_play.clone();
                 let pending_seek = audio.pending_seek.clone();
+                let pending_mix = audio.pending_mix.clone();
                 let pos = audio.pos.clone();
                 let playing = audio.playing.clone();
                 let peaks = audio.peaks.clone();
@@ -272,6 +306,7 @@ mod imp {
                         &pump,
                         &want_play,
                         &pending_seek,
+                        &pending_mix,
                         pos,
                         playing,
                         peaks,
@@ -309,8 +344,10 @@ mod imp {
             if let Some(p) = self.pump.borrow().as_ref() {
                 let _ = p.port.post_message(&msg("play"));
                 // The Play click is the autoplay gesture for the media-path
-                // sink element too.
-                let _ = p.sink.play();
+                // sink element too (only present when that path is forced).
+                if let Some(sink) = &p.sink {
+                    let _ = sink.play();
+                }
             }
         }
 
@@ -350,6 +387,35 @@ mod imp {
         pub(crate) fn peaks(&self) -> Vec<f32> {
             self.peaks.borrow().clone()
         }
+
+        /// Push the FULL mixer state (track order == stem order) into the
+        /// worklet renderer — mute / solo / fader are audible, not display
+        /// state. Idempotent; queued while the pump is still attaching (the
+        /// attach flushes the LATEST state), so default-muted stems (click /
+        /// guide) are silent from the first rendered block.
+        pub(crate) fn apply_mix(&self, muted: Vec<bool>, soloed: Vec<bool>, volumes: Vec<f32>) {
+            match self.pump.borrow().as_ref() {
+                Some(p) => post_mix(&p.port, &muted, &soloed, &volumes),
+                None => *self.pending_mix.borrow_mut() = Some((muted, soloed, volumes)),
+            }
+        }
+    }
+
+    /// Post one `mix` message carrying the full mixer state.
+    fn post_mix(port: &MessagePort, muted: &[bool], soloed: &[bool], volumes: &[f32]) {
+        let m = msg("mix");
+        let jm = js_sys::Array::new();
+        for &b in muted {
+            jm.push(&JsValue::from_bool(b));
+        }
+        let js = js_sys::Array::new();
+        for &b in soloed {
+            js.push(&JsValue::from_bool(b));
+        }
+        set(&m, "muted", &jm);
+        set(&m, "soloed", &js);
+        set(&m, "volumes", &js_sys::Float32Array::from(volumes));
+        let _ = port.post_message(&m);
     }
 
     impl Drop for SetlistAudio {
@@ -360,8 +426,10 @@ mod imp {
                 let _ = p.port.post_message(&msg("stop"));
                 p.port.set_onmessage(None);
                 p.node.disconnect();
-                let _ = p.sink.pause();
-                p.sink.set_src_object(None);
+                if let Some(sink) = &p.sink {
+                    let _ = sink.pause();
+                    sink.set_src_object(None);
+                }
             }
         }
     }
@@ -377,6 +445,7 @@ mod imp {
         pump: &Rc<RefCell<Option<Pump>>>,
         want_play: &Rc<Cell<bool>>,
         pending_seek: &Rc<Cell<Option<f64>>>,
+        pending_mix: &Rc<RefCell<Option<MixState>>>,
         pos: Rc<Cell<f64>>,
         playing: Rc<Cell<bool>>,
         peaks: Rc<RefCell<Vec<f32>>>,
@@ -457,30 +526,43 @@ mod imp {
             let _ = port.post_message(&m);
         }
 
-        // Output via the MEDIA path, not `ctx.destination()`: on this rig
-        // (pipewire-pulse cycling + Brave), Chrome's WebAudio destination
-        // stream opens land on a silent FAKE device stream (graph runs,
-        // meters move, zero sound, no PipeWire node — and even a successful
-        // `setSinkId` cycle hands back another dead one), while media-element
-        // playback provably works (YouTube). So render into a
-        // MediaStreamAudioDestinationNode and play that stream through an
-        // `<audio>` element — the same output pipeline media uses.
-        let msd = ctx
-            .create_media_stream_destination()
-            .map_err(|e| format!("create_media_stream_destination: {e:?}"))?;
-        node.connect_with_audio_node(&msd)
-            .map_err(|e| format!("connect worklet node: {e:?}"))?;
-        let sink = web_sys::HtmlAudioElement::new()
-            .map_err(|e| format!("HtmlAudioElement: {e:?}"))?;
-        sink.set_src_object(Some(&msd.stream()));
-        sink.set_autoplay(true);
-        let _ = sink.play();
+        // Output path. DEFAULT: straight into `ctx.destination()` — the spec
+        // path, and the only one immune to media-element live-stream clock
+        // sync (an `<audio srcObject>` sink plays FAST to catch up latency
+        // accumulated while the main thread is saturated — the "warped /
+        // sped-up ~10 s on page load" bug). On rigs where WebAudio device
+        // streams land on a silent FAKE sink (THEBATTLESHIP's pipewire-pulse
+        // cycling strands the browser's audio service; see `cycle_sink`),
+        // FORCE the media-element pipeline — the one that provably plays
+        // there — with `localStorage.setItem("fts-audio-sink", "media")` or
+        // `?audio=media`.
+        let sink = if media_sink_forced() {
+            let msd = ctx
+                .create_media_stream_destination()
+                .map_err(|e| format!("create_media_stream_destination: {e:?}"))?;
+            node.connect_with_audio_node(&msd)
+                .map_err(|e| format!("connect worklet node: {e:?}"))?;
+            let sink = web_sys::HtmlAudioElement::new()
+                .map_err(|e| format!("HtmlAudioElement: {e:?}"))?;
+            sink.set_src_object(Some(&msd.stream()));
+            sink.set_autoplay(true);
+            let _ = sink.play();
+            tracing::info!("setlist audio: media-element output sink FORCED");
+            Some(sink)
+        } else {
+            node.connect_with_audio_node(&ctx.destination())
+                .map_err(|e| format!("connect worklet node: {e:?}"))?;
+            None
+        };
 
-        // Flush transport intent queued while attaching.
+        // Flush transport + mixer intent queued while attaching.
         if let Some(s) = pending_seek.take() {
             let m = msg("seek");
             set(&m, "seconds", &JsValue::from_f64(s));
             let _ = port.post_message(&m);
+        }
+        if let Some((muted, soloed, volumes)) = pending_mix.borrow_mut().take() {
+            post_mix(&port, &muted, &soloed, &volumes);
         }
         if want_play.get() {
             let _ = port.post_message(&msg("play"));

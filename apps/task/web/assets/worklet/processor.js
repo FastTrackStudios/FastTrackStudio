@@ -175,6 +175,18 @@ class FtsDawProcessor extends AudioWorkletProcessor {
         case 'seek':
           this.renderer?.seekSeconds(msg.seconds);
           break;
+        case 'mix': {
+          // Full mixer state, idempotent (track order == stem order). Goes
+          // through the graph's own Tracks ops, so solo routing + fader gain
+          // apply on the next render block.
+          const n = msg.muted?.length ?? 0;
+          for (let i = 0; i < n; i++) {
+            this.renderer?.setTrackMute(i, !!msg.muted[i]);
+            this.renderer?.setTrackSolo(i, !!msg.soloed[i]);
+            this.renderer?.setTrackVolume(i, msg.volumes[i]);
+          }
+          break;
+        }
       }
     } catch (err) {
       this.port.postMessage({ kind: 'error', message: String(err) });

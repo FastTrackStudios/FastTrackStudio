@@ -155,6 +155,28 @@ export class WebRenderer {
     seekSeconds(seconds) {
         wasm.webrenderer_seekSeconds(this.__wbg_ptr, seconds);
     }
+    /**
+     * @param {number} index
+     * @param {boolean} muted
+     */
+    setTrackMute(index, muted) {
+        wasm.webrenderer_setTrackMute(this.__wbg_ptr, index, muted);
+    }
+    /**
+     * @param {number} index
+     * @param {boolean} soloed
+     */
+    setTrackSolo(index, soloed) {
+        wasm.webrenderer_setTrackSolo(this.__wbg_ptr, index, soloed);
+    }
+    /**
+     * Fader gain, linear (1.0 = unity).
+     * @param {number} index
+     * @param {number} volume
+     */
+    setTrackVolume(index, volume) {
+        wasm.webrenderer_setTrackVolume(this.__wbg_ptr, index, volume);
+    }
     stop() {
         wasm.webrenderer_stop(this.__wbg_ptr);
     }
