@@ -61,6 +61,13 @@ export class WebRenderer {
      */
     render(out_left: Float32Array, out_right: Float32Array): void;
     seekSeconds(seconds: number): void;
+    /**
+     * Queue a QUANTIZED seek: when the transport reaches `at` seconds the
+     * render callback jumps to `target` seconds (see [`render`]). A later
+     * call replaces the queued jump; an immediate [`seek_seconds`] cancels
+     * it.
+     */
+    seekSecondsAt(target: number, at: number): void;
     setTrackMute(index: number, muted: boolean): void;
     setTrackSolo(index: number, soloed: boolean): void;
     /**
@@ -102,6 +109,7 @@ export interface InitOutput {
     readonly webrenderer_projectGuid: (a: number) => [number, number];
     readonly webrenderer_render: (a: number, b: number, c: number, d: any, e: number, f: number, g: any) => void;
     readonly webrenderer_seekSeconds: (a: number, b: number) => void;
+    readonly webrenderer_seekSecondsAt: (a: number, b: number, c: number) => void;
     readonly webrenderer_setTrackMute: (a: number, b: number, c: number) => void;
     readonly webrenderer_setTrackSolo: (a: number, b: number, c: number) => void;
     readonly webrenderer_setTrackVolume: (a: number, b: number, c: number) => void;

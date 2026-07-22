@@ -175,6 +175,11 @@ class FtsDawProcessor extends AudioWorkletProcessor {
         case 'seek':
           this.renderer?.seekSeconds(msg.seconds);
           break;
+        case 'seek_q':
+          // Quantized seek: jump to `seconds` when the transport reaches
+          // `at` (executed inside render(), on the boundary block).
+          this.renderer?.seekSecondsAt(msg.seconds, msg.at);
+          break;
         case 'mix': {
           // Full mixer state, idempotent (track order == stem order). Goes
           // through the graph's own Tracks ops, so solo routing + fader gain

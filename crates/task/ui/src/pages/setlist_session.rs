@@ -322,17 +322,14 @@ mod imp {
                 if (secs - prev).abs() > 0.01 {
                     position.set(secs);
                 }
-                // Stage 4b-2: keep the WebRenderer aligned to the engine cursor
-                // on DISCRETE jumps (navigator section select, big resync) —
-                // the ~30 Hz smooth per-tick advances during play (tiny deltas)
-                // are left to free-run so playback doesn't stutter. `audio` is
-                // read via `peek` so this effect doesn't churn on a song
-                // rebuild. 4b-2b: drive the UI playhead from
-                // `renderer.position_seconds()` to kill drift instead.
-                if (secs - prev).abs() > 0.5 {
-                    if let Some(a) = audio.peek().clone() {
-                        a.seek(secs);
-                    }
+                // Keep the WebRenderer aligned to the engine cursor via the
+                // guarded `nudge` (it re-seeks only on genuine divergence and
+                // never while a user/quantized seek is in flight — the old
+                // unconditional ">0.5 s ⇒ seek" cancelled bar-click seeks
+                // with stale engine ticks). `audio` is read via `peek` so
+                // this effect doesn't churn on a song rebuild.
+                if let Some(a) = audio.peek().clone() {
+                    a.nudge(secs);
                 }
             });
         }
@@ -494,6 +491,31 @@ mod imp {
                 }
             }
         });
+        // QUANTIZED seek `(target, boundary)` — both in song seconds. The
+        // worklet jumps ON the boundary (audio-thread accurate); the engine's
+        // `seek_to` is scheduled to land at the same moment so the UI cursor
+        // follows without fighting the audio (see `SetlistAudio::nudge`).
+        let seek_quantized: Callback<(f64, f64)> = use_callback({
+            let audio = audio;
+            let position = position;
+            move |(target, boundary): (f64, f64)| {
+                let delay = (boundary - *position.peek()).max(0.0);
+                if let Some(a) = audio.peek().clone() {
+                    a.seek_quantized(target, boundary, delay);
+                }
+                if let Some(client) = crate::session_engine::client() {
+                    spawn(async move {
+                        architect::platform::sleep(std::time::Duration::from_secs_f64(delay))
+                            .await;
+                        if let Err(e) = client.seek_to(target).await {
+                            tracing::warn!(
+                                "setlist: quantized seek_to({target:.2}) failed: {e:?}"
+                            );
+                        }
+                    });
+                }
+            }
+        });
 
         // ── mixer mutators (by stem index) ───────────────────────────────────
         // They only write `stem_ui`; the effect below pushes the whole mixer
@@ -637,6 +659,7 @@ mod imp {
                         stem_ui,
                         play_pause,
                         seek,
+                        seek_quantized,
                         toggle_mute,
                         toggle_solo,
                         set_volume,
@@ -681,6 +704,7 @@ mod imp {
         stem_ui: Signal<Vec<media::StemUi>>,
         play_pause: Callback<()>,
         seek: Callback<f64>,
+        seek_quantized: Callback<(f64, f64)>,
         toggle_mute: Callback<usize>,
         toggle_solo: Callback<usize>,
         set_volume: Callback<(usize, f32)>,
@@ -700,6 +724,9 @@ mod imp {
         let mut chart_left = use_signal(|| ChartLeft::MasterRhythm);
         // Navigator sidebar open/closed (full-screen experience only).
         let mut nav_open = use_signal(|| true);
+        // Target (song seconds) of a QUANTIZED seek waiting for its measure
+        // boundary — drives the progress bar's queued-section pulse.
+        let pending_jump = use_signal(|| None::<f64>);
 
         let count = songs_meta.len();
         let idx = current_song();
@@ -789,6 +816,54 @@ mod imp {
             .iter()
             .map(|s| s.start_percent / 100.0 * duration)
             .collect();
+        // Tempo / meter (engine song) — measure grid anchored at song start.
+        // Needed here for BOTH the quantized seek boundary and the section
+        // bar's measure indicators further down.
+        let (bpm, beats_per_measure, ts_denom) = {
+            let sl = SETLIST_STRUCTURE.read();
+            sl.songs
+                .get(idx)
+                .map(|s| {
+                    let ts = s.time_signature.unwrap_or(TimeSignature::COMMON_TIME);
+                    (s.tempo.unwrap_or(120.0), ts.numerator() as f64, ts.denominator() as u8)
+                })
+                .unwrap_or((120.0, 4.0, 4))
+        };
+        let seconds_per_measure = (60.0 / bpm.max(1.0)) * beats_per_measure.max(1.0);
+        // Section-nav seek door: while PLAYING, section jumps are QUANTIZED —
+        // queued to the next measure boundary so the audio splices on the
+        // grid ("wait for the bar line, then jump"). Paused (or degenerate
+        // grid / end of song) seeks land immediately.
+        let do_seek: Callback<f64> = use_callback({
+            let position = position;
+            let playing = playing;
+            let mut pending_jump = pending_jump;
+            move |target: f64| {
+                let p = *position.peek();
+                let spm = seconds_per_measure;
+                if *playing.peek() && spm > 0.05 {
+                    let boundary = ((p + 0.02) / spm).ceil() * spm;
+                    if boundary + 0.05 < duration {
+                        seek_quantized.call((target, boundary));
+                        // Pulse the queued section until the jump lands.
+                        pending_jump.set(Some(target));
+                        let delay = (boundary - p).max(0.0) + 0.3;
+                        spawn(async move {
+                            architect::platform::sleep(
+                                std::time::Duration::from_secs_f64(delay),
+                            )
+                            .await;
+                            if *pending_jump.peek() == Some(target) {
+                                pending_jump.set(None);
+                            }
+                        });
+                        return;
+                    }
+                }
+                pending_jump.set(None);
+                seek.call(target);
+            }
+        });
         let on_play_pause: Callback<()> = use_callback(move |()| play_pause.call(()));
         let noop: Callback<()> = use_callback(move |()| {});
         let starts_for_back = section_starts.clone();
@@ -804,13 +879,13 @@ mod imp {
                 .copied()
                 .filter(|&s| s < p - 1.0)
                 .fold(0.0_f64, f64::max);
-            seek.call(target);
+            do_seek.call(target);
         });
         let starts_for_fwd = section_starts.clone();
         let on_forward: Callback<()> = use_callback(move |()| {
             let p = position();
             if let Some(next) = starts_for_fwd.iter().copied().find(|&s| s > p + 0.5) {
-                seek.call(next);
+                do_seek.call(next);
             } else if *current_song.peek() + 1 < count {
                 // Past the last section, Advance steps to the next SONG.
                 goto_song.call(*current_song.peek() + 1);
@@ -824,20 +899,29 @@ mod imp {
         });
 
         // Section-click seeks to the section start — indexed into the SAME
-        // list the bar renders.
+        // list the bar renders; quantized to the measure grid while playing.
         let starts_for_click = section_starts.clone();
         let on_section_click: Callback<usize> = use_callback(move |i: usize| {
             if let Some(&s) = starts_for_click.get(i) {
-                seek.call(s);
+                do_seek.call(s);
             }
         });
 
-        // Navigator section click `(song_idx, section_idx)` → engine
-        // `seek_to_section` (crosses song boundaries natively). The bridge
+        // Navigator section click `(song_idx, section_idx)`. Same-song
+        // selects go through the quantized seek door (same targets the bar
+        // uses — engine sections); cross-song selects stay on the engine's
+        // `seek_to_section` (it switches projects natively). The bridge
         // echoes the new cursor back into ACTIVE_INDICES.
+        let starts_for_nav = section_starts.clone();
         let on_section_select: Callback<(usize, usize)> = use_callback({
             let mut current_song = current_song;
             move |(sidx, secidx): (usize, usize)| {
+                if sidx == *current_song.peek() {
+                    if let Some(&s) = starts_for_nav.get(secidx) {
+                        do_seek.call(s);
+                        return;
+                    }
+                }
                 if sidx != *current_song.peek() {
                     current_song.set(sidx); // optimistic
                 }
@@ -873,6 +957,19 @@ mod imp {
             .and_then(|i| songs_meta.get(i))
             .map(|s| s.title.clone());
         let next_title = songs_meta.get(idx + 1).map(|s| s.title.clone());
+        // A quantized seek waiting for its boundary → the bar pulses the
+        // queued section (matched by start seconds against the SAME list the
+        // bar renders).
+        let queued_target = pending_jump().and_then(|t| {
+            let sec_idx = section_starts.iter().position(|&s| (s - t).abs() < 0.05)?;
+            let song_id = SETLIST_STRUCTURE.read().songs.get(idx)?.id.clone();
+            Some(session_proto::QueuedTarget::Section {
+                song_id,
+                song_index: idx,
+                section_index: sec_idx,
+            })
+        });
+
         // The section the playhead is in — the "where am I" caption.
         let cur_section_name = sections
             .iter()
@@ -895,17 +992,7 @@ mod imp {
         // Divide the current section into measures for the section bar — each is
         // clickable to seek. `musical_position.measure` carries the measure's
         // index within the section; the click seeks to its absolute time.
-        let (bpm, beats_per_measure, ts_denom) = {
-            let sl = SETLIST_STRUCTURE.read();
-            sl.songs
-                .get(idx)
-                .map(|s| {
-                    let ts = s.time_signature.unwrap_or(TimeSignature::COMMON_TIME);
-                    (s.tempo.unwrap_or(120.0), ts.numerator() as f64, ts.denominator() as u8)
-                })
-                .unwrap_or((120.0, 4.0, 4))
-        };
-        let seconds_per_measure = (60.0 / bpm.max(1.0)) * beats_per_measure.max(1.0);
+        // (Tempo / seconds_per_measure computed above, beside the seek door.)
         let cur_section = sections
             .iter()
             .find(|s| song_progress >= s.start_percent && song_progress < s.end_percent)
@@ -975,6 +1062,7 @@ mod imp {
                                     progress: song_progress,
                                     sections: sections.clone(),
                                     song_key: manifest.key.clone(),
+                                    queued_target: queued_target.clone(),
                                     on_section_click,
                                 }
                                 SectionProgressBar {
@@ -1330,6 +1418,7 @@ mod imp {
                                 progress: song_progress,
                                 sections: sections.clone(),
                                 song_key: manifest.key.clone(),
+                                queued_target: queued_target.clone(),
                                 on_section_click,
                             }
                         }

@@ -254,6 +254,11 @@ mod imp {
         /// Latest mixer state queued while attaching — flushed on attach so
         /// default-muted stems (click / guide) are silent from the first block.
         pending_mix: Rc<RefCell<Option<MixState>>>,
+        /// AudioContext time until which engine-driven [`nudge`]s are
+        /// suppressed. Every explicit seek arms it — otherwise the bridge's
+        /// next (still-stale) engine tick would seek the worklet straight
+        /// BACK to the old position and cancel the user's jump.
+        nudge_guard: Rc<Cell<f64>>,
         // ── mirrors of the worklet's ~21 ms state tick ──
         pos: Rc<Cell<f64>>,
         playing: Rc<Cell<bool>>,
@@ -272,6 +277,7 @@ mod imp {
                 want_play: Rc::new(Cell::new(false)),
                 pending_seek: Rc::new(Cell::new(None)),
                 pending_mix: Rc::new(RefCell::new(None)),
+                nudge_guard: Rc::new(Cell::new(0.0)),
                 pos: Rc::new(Cell::new(0.0)),
                 playing: Rc::new(Cell::new(false)),
                 peaks: Rc::new(RefCell::new(Vec::new())),
@@ -318,7 +324,7 @@ mod imp {
                 });
             }
 
-            tracing::info!("setlist audio: built (worklet-hosted renderer, v4b2c)");
+            tracing::info!("setlist audio: built (worklet-hosted renderer, v4b3-mix)");
             Ok(audio)
         }
 
@@ -361,6 +367,7 @@ mod imp {
 
         /// Seek the worklet transport to `seconds` (playing or paused).
         pub(crate) fn seek(&self, seconds: f64) {
+            self.nudge_guard.set(self.ctx.current_time() + 1.5);
             if let Some(p) = self.pump.borrow().as_ref() {
                 let m = msg("seek");
                 set(&m, "seconds", &JsValue::from_f64(seconds));
@@ -368,6 +375,40 @@ mod imp {
             } else {
                 self.pending_seek.set(Some(seconds));
             }
+        }
+
+        /// QUANTIZED seek: the worklet jumps to `target` (song seconds) when
+        /// its transport reaches `at` (song seconds) — executed on the audio
+        /// thread, on the boundary block. `delay` is the wall-clock estimate
+        /// until the boundary (arms the nudge guard past the jump so the
+        /// engine's catch-up ticks can't cancel it).
+        pub(crate) fn seek_quantized(&self, target: f64, at: f64, delay: f64) {
+            self.nudge_guard
+                .set(self.ctx.current_time() + delay.max(0.0) + 1.5);
+            if let Some(p) = self.pump.borrow().as_ref() {
+                let m = msg("seek_q");
+                set(&m, "seconds", &JsValue::from_f64(target));
+                set(&m, "at", &JsValue::from_f64(at));
+                let _ = p.port.post_message(&m);
+            } else {
+                self.pending_seek.set(Some(target));
+            }
+        }
+
+        /// Engine-driven drift-kill. Re-seeks the worklet to the engine's
+        /// position ONLY when it has genuinely diverged (> 1 s vs the
+        /// worklet's own mirrored position) and no explicit / quantized seek
+        /// is in flight — the previous unconditional ">0.5 s ⇒ seek" fought
+        /// user seeks with stale engine ticks (a bar click seeked, the next
+        /// old-position tick seeked it straight back).
+        pub(crate) fn nudge(&self, secs: f64) {
+            if self.ctx.current_time() < self.nudge_guard.get() {
+                return;
+            }
+            if (secs - self.pos.get()).abs() <= 1.0 {
+                return;
+            }
+            self.seek(secs);
         }
 
         /// The render transport's position (audio truth, mirrored from the
@@ -394,6 +435,10 @@ mod imp {
         /// attach flushes the LATEST state), so default-muted stems (click /
         /// guide) are silent from the first rendered block.
         pub(crate) fn apply_mix(&self, muted: Vec<bool>, soloed: Vec<bool>, volumes: Vec<f32>) {
+            tracing::debug!(
+                "setlist audio: mix push ({} stems, muted={muted:?}, soloed={soloed:?})",
+                muted.len()
+            );
             match self.pump.borrow().as_ref() {
                 Some(p) => post_mix(&p.port, &muted, &soloed, &volumes),
                 None => *self.pending_mix.borrow_mut() = Some((muted, soloed, volumes)),

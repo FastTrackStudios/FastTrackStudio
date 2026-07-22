@@ -156,6 +156,17 @@ export class WebRenderer {
         wasm.webrenderer_seekSeconds(this.__wbg_ptr, seconds);
     }
     /**
+     * Queue a QUANTIZED seek: when the transport reaches `at` seconds the
+     * render callback jumps to `target` seconds (see [`render`]). A later
+     * call replaces the queued jump; an immediate [`seek_seconds`] cancels
+     * it.
+     * @param {number} target
+     * @param {number} at
+     */
+    seekSecondsAt(target, at) {
+        wasm.webrenderer_seekSecondsAt(this.__wbg_ptr, target, at);
+    }
+    /**
      * @param {number} index
      * @param {boolean} muted
      */
