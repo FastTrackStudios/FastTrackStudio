@@ -3,6 +3,7 @@
 pub mod app_shell;
 pub mod explorer;
 pub mod mobile;
+pub mod now_playing;
 pub mod org_switcher;
 pub mod rail;
 pub mod sidebar;

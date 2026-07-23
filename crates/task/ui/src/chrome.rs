@@ -66,6 +66,30 @@ pub struct NoteViewMode(pub Signal<ViewMode>);
 #[derive(Clone, Copy)]
 pub struct SongPlayRequest(pub Signal<(u64, String)>);
 
+/// A request to the GLOBAL Now Playing player (mounted in the app shell,
+/// so playback survives navigation). Carries the whole queue captured at
+/// play time — the player owns its copy, independent of whichever note
+/// fired it, so leaving the note doesn't stop the music or break
+/// skip-next. `generation` makes replays of the same request observable.
+#[derive(Clone, PartialEq, Default)]
+pub struct NowPlayingRequest {
+    pub generation: u64,
+    /// Org whose colocated `/org/{org}/media/songs/{slug}/…` serves the audio.
+    pub org: String,
+    /// Queue title (setlist name, or the song's own title for a 1-song queue).
+    pub title: String,
+    /// Ordered song slugs (`/media` slugs).
+    pub songs: Vec<String>,
+    /// Index in `songs` to start / jump to.
+    pub start: usize,
+    /// Header ▶: toggle play/pause when this queue is already loaded,
+    /// rather than restarting it. Song-strip clicks set this `false`.
+    pub toggle: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct NowPlaying(pub Signal<NowPlayingRequest>);
+
 /// Anonymous share-link mode (`?share=1` in the URL — appended by the
 /// share landing page's Open button): render NO app chrome at all — no
 /// top bar, rail, explorer, tabs, or capture FAB. The visitor gets just
@@ -93,6 +117,7 @@ pub fn provide_chrome_contexts() {
     use_context_provider(|| ShareMode(detect_share_mode()));
     use_context_provider(|| NoteViewMode(Signal::new(ViewMode::Edit)));
     use_context_provider(|| SongPlayRequest(Signal::new((0, String::new()))));
+    use_context_provider(|| NowPlaying(Signal::new(NowPlayingRequest::default())));
     use_context_provider(|| TimerResumeHint(Signal::new(None)));
 }
 

@@ -101,6 +101,10 @@ pub fn AppShell() -> Element {
         if zen() {
             crate::chrome::ZenExitOverlay {}
         }
+        // Global Now Playing mini-player — mounted here (outside the route
+        // Outlet) so playback survives navigation. Renders nothing until a
+        // song/setlist is played; then a persistent transport bar.
+        crate::shell::now_playing::GlobalNowPlayer {}
         // Single global capture modal, toggled from any fleeting button.
         FleetingModal {}
         // Ctrl+P command palette — pages + vault notes, fuzzy-ranked.

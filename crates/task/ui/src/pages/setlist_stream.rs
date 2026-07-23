@@ -37,8 +37,8 @@ mod imp {
 
     /// Load the setlist's tracks: enumerate `Songs/*.md` over VaultSync,
     /// parse each note's frontmatter, and match notes to setlist slugs by
-    /// slugified basename.
-    async fn load_tracks(org: &str, slugs: &[String]) -> Result<Vec<Track>, String> {
+    /// slugified basename. Shared with the global Now Playing player.
+    pub(crate) async fn load_tracks(org: &str, slugs: &[String]) -> Result<Vec<Track>, String> {
         // Filesystem-first: read each song's manifest straight from the org's
         // colocated media (`/org/{org}/media/songs/{slug}/manifest.json`).
         // No vault round-trip, no content-addressed blobs — the reference is
@@ -85,14 +85,18 @@ mod imp {
     /// `/org/{org}/media/songs/{slug}/{file}`. Plain same-origin URL — the
     /// browser streams it (Range-capable via the static handler); no vox, no
     /// content-hash, no ingest.
-    fn element_for(org: &str, slug: &str, file: &str) -> Result<HtmlAudioElement, String> {
+    pub(crate) fn element_for(
+        org: &str,
+        slug: &str,
+        file: &str,
+    ) -> Result<HtmlAudioElement, String> {
         let el = HtmlAudioElement::new().map_err(|e| format!("audio element: {e:?}"))?;
         el.set_preload("auto");
         el.set_src(&format!("/org/{org}/media/songs/{slug}/{file}"));
         Ok(el)
     }
 
-    fn fmt_time(sec: f64) -> String {
+    pub(crate) fn fmt_time(sec: f64) -> String {
         let s = sec.max(0.0) as u64;
         format!("{}:{:02}", s / 60, s % 60)
     }

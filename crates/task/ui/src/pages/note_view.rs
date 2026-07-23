@@ -323,21 +323,54 @@ pub(crate) fn NoteView(
         Vec::new()
     };
 
-    // Editor link clicks: `song-play:<name>` drives the mounted stream
-    // player (inline song-strip play buttons); wikilink targets navigate
-    // to the note (resolved through the vault index when possible).
+    // Editor link clicks: `song-play:<name>` / `setlist-play:` drive the
+    // GLOBAL Now Playing player (mounted in the app shell, so playback
+    // survives navigation); wikilink targets navigate to the note
+    // (resolved through the vault index when possible).
     let nav_links = use_navigator();
     let lookup_for_links = lookup;
-    let mut play_req = use_context::<crate::chrome::SongPlayRequest>().0;
+    let mut now_playing = use_context::<crate::chrome::NowPlaying>().0;
+    // The queue these strips belong to: the setlist's own songs, or (for a
+    // note that merely embeds a setlist) the embedded queue.
+    let queue_songs = if is_setlist {
+        setlist_songs_value.clone()
+    } else {
+        embedded_setlist_songs.clone()
+    };
+    let queue_title = basename_of(&path).to_string();
     let on_link_click = use_callback(move |href: String| {
         if let Some(name) = href.strip_prefix("song-play:") {
-            let generation = play_req.peek().0 + 1;
-            play_req.set((generation, name.to_string()));
+            let slug = crate::pages::vault::slugify(name);
+            // Play within the note's queue; a lone strip becomes a 1-song queue.
+            let songs = if queue_songs.is_empty() {
+                vec![slug.clone()]
+            } else {
+                queue_songs.clone()
+            };
+            let start = songs.iter().position(|s| *s == slug).unwrap_or(0);
+            let generation = now_playing.peek().generation + 1;
+            now_playing.set(crate::chrome::NowPlayingRequest {
+                generation,
+                org: home.read().clone(),
+                title: queue_title.clone(),
+                songs,
+                start,
+                toggle: false,
+            });
             return;
         }
         if href.starts_with("setlist-play:") {
-            let generation = play_req.peek().0 + 1;
-            play_req.set((generation, String::new())); // empty = toggle
+            // Header ▶: start the whole setlist, or toggle if it's already
+            // the loaded queue.
+            let generation = now_playing.peek().generation + 1;
+            now_playing.set(crate::chrome::NowPlayingRequest {
+                generation,
+                org: home.read().clone(),
+                title: queue_title.clone(),
+                songs: queue_songs.clone(),
+                start: 0,
+                toggle: true,
+            });
             return;
         }
         if crate::event_tabs::handle_tab_href(&href) {
@@ -489,16 +522,10 @@ pub(crate) fn NoteView(
                             front: song_front_value.clone(),
                         }
                     }
-                    if !is_setlist && !embedded_setlist_songs.is_empty() {
-                        // Headless queue for embedded-setlist playback.
-                        crate::pages::setlist_stream::SetlistStreamPlayer {
-                            org: home.read().clone(),
-                            title: basename_of(&path).to_string(),
-                            songs: embedded_setlist_songs.clone(),
-                            show_rows: false,
-                            headless: true,
-                        }
-                    }
+                    // Embedded-setlist + setlist playback now flows through the
+                    // GLOBAL Now Playing player (mounted in the app shell) so it
+                    // survives navigation — the strip/header clicks fire a
+                    // `NowPlayingRequest` via `on_link_click`. No per-note player.
                     if is_setlist {
                         // Setlist Experience: auto full-screen (an overlay
                         // that escapes the pane + sidebars), Esc to exit.
@@ -518,21 +545,10 @@ pub(crate) fn NoteView(
                                 label: "Setlist",
                                 on_enter: move |_| setlist_fullscreen.set(true),
                             }
-                            // Streaming header (icon · title · play) — the
-                            // setlist's H1 replacement. Rows render INLINE in
-                            // the editor as song strips; this header owns
-                            // playback (one reference track at a time over
-                            // vox MediaService) and answers strip play clicks.
-                            // HEADLESS: the editor's setlist-header widget
-                            // (the note's own H1) is the visible header; this
-                            // just owns playback + answers play requests.
-                            crate::pages::setlist_stream::SetlistStreamPlayer {
-                                org: home.read().clone(),
-                                title: basename_of(&path).to_string(),
-                                songs: setlist_songs_value.clone(),
-                                show_rows: false,
-                                headless: true,
-                            }
+                            // The visible setlist header + song strips are the
+                            // editor's own widgets (the note's H1); their ▶
+                            // clicks route to the global Now Playing player via
+                            // `on_link_click`. Nothing to mount here.
                         }
                     }
                     // The note body (frontmatter + Markdown editor) is bound to
