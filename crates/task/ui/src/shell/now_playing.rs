@@ -15,6 +15,12 @@
 //! rehearsal rig (fullscreen `SetlistPlayer`) and the per-song page
 //! (`SongView`) remain separate, richer experiences.
 //!
+//! The queue loads through `use_resource` (which owns its async task's
+//! lifecycle) rather than a `spawn` inside an effect — an effect re-run
+//! would cancel an in-flight `spawn`, so rapid play clicks used to drop
+//! the load and never render the bar. A pending start index waits for the
+//! resource to resolve and then plays.
+//!
 //! Future: a `video:` queue would swap the `<audio>` for a `<video>` and
 //! surface the frame here — the transport + queue plumbing is unchanged.
 
@@ -36,15 +42,28 @@ mod imp {
         // persists across route changes.
         let element: Rc<RefCell<Option<HtmlAudioElement>>> =
             use_hook(|| Rc::new(RefCell::new(None)));
-        let mut tracks = use_signal(Vec::<Track>::new);
-        // (org, songs) of the loaded queue — a matching request just jumps
-        // within it instead of reloading (and interrupting) playback.
+        // (org, songs) of the queue to load; drives the tracks resource.
         let mut queue_key = use_signal(|| (String::new(), Vec::<String>::new()));
         let mut title = use_signal(String::new);
         let mut current = use_signal(|| None::<usize>);
         let mut playing = use_signal(|| false);
         let mut position = use_signal(|| 0.0f64);
         let mut duration = use_signal(|| 0.0f64);
+        // A start index waiting for the queue's tracks to finish loading.
+        let mut pending_start = use_signal(|| None::<usize>);
+
+        // Load the queue's tracks whenever the queue changes. use_resource
+        // owns the task, so an effect re-run can't cancel it mid-flight.
+        let tracks = use_resource(move || {
+            let (org, songs) = queue_key();
+            async move {
+                if songs.is_empty() {
+                    Vec::<Track>::new()
+                } else {
+                    load_tracks(&org, &songs).await.unwrap_or_default()
+                }
+            }
+        });
 
         // Select + play track `i` from the loaded queue. Replaces the live
         // element (the old one pauses as it drops out of the slot).
@@ -53,7 +72,7 @@ mod imp {
             move |i: usize| {
                 let track = {
                     let list = tracks.peek();
-                    match list.get(i).cloned() {
+                    match list.as_ref().and_then(|l| l.get(i).cloned()) {
                         Some(t) => t,
                         None => return,
                     }
@@ -114,6 +133,18 @@ mod imp {
             }
         });
 
+        // When the queue's tracks finish loading and a start is pending, play it.
+        use_effect(move || {
+            let ready = tracks.read().as_ref().map(|l| !l.is_empty()).unwrap_or(false);
+            let pending = *pending_start.peek();
+            if ready {
+                if let Some(s) = pending {
+                    pending_start.set(None);
+                    select.call(s);
+                }
+            }
+        });
+
         // Answer global play requests. The player captures the queue here,
         // so it's independent of whichever note fired the request.
         {
@@ -129,32 +160,26 @@ mod imp {
                     let k = queue_key.peek();
                     k.0 == r.org && k.1 == r.songs
                 };
-                if same && !tracks.peek().is_empty() {
-                    // Same queue already loaded: header ▶ toggles, a strip
-                    // click jumps to that song.
-                    if r.toggle {
-                        toggle.call(());
-                    } else {
-                        select.call(r.start);
-                    }
-                    return;
-                }
-                // New queue: load its manifests off /media, then start.
-                queue_key.set((r.org.clone(), r.songs.clone()));
-                title.set(r.title.clone());
-                current.set(None);
-                let org = r.org.clone();
-                let songs = r.songs.clone();
-                let start = r.start;
-                spawn(async move {
-                    match load_tracks(&org, &songs).await {
-                        Ok(list) => {
-                            tracks.set(list);
-                            select.call(start);
+                if same {
+                    let ready = tracks.peek().as_ref().map(|l| !l.is_empty()).unwrap_or(false);
+                    if ready {
+                        // Loaded: header ▶ toggles, a strip click jumps.
+                        if r.toggle {
+                            toggle.call(());
+                        } else {
+                            select.call(r.start);
                         }
-                        Err(e) => tracing::warn!("now-playing: load queue: {e}"),
+                    } else {
+                        // Still loading the same queue: play once it lands.
+                        pending_start.set(Some(r.start));
                     }
-                });
+                } else {
+                    // New queue: swap it in and play `start` once loaded.
+                    title.set(r.title.clone());
+                    current.set(None);
+                    pending_start.set(Some(r.start));
+                    queue_key.set((r.org.clone(), r.songs.clone()));
+                }
             });
         }
 
@@ -178,8 +203,9 @@ mod imp {
                             duration.set(dur);
                         }
                         if ended {
+                            let len = tracks.peek().as_ref().map(|l| l.len()).unwrap_or(0);
                             let next = (*current.peek()).map(|i| i + 1).unwrap_or(0);
-                            if next < tracks.peek().len() {
+                            if next < len {
                                 select.call(next);
                             } else {
                                 playing.set(false);
@@ -196,7 +222,7 @@ mod imp {
         };
         let track = {
             let list = tracks.read();
-            match list.get(idx).cloned() {
+            match list.as_ref().and_then(|l| l.get(idx).cloned()) {
                 Some(t) => t,
                 None => return rsx! {},
             }
@@ -210,7 +236,7 @@ mod imp {
 
         rsx! {
             div {
-                class: "fixed inset-x-0 z-40 border-t border-border bg-card/95 backdrop-blur bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:bottom-6",
+                class: "fixed inset-x-0 bottom-14 z-40 border-t border-border bg-card/95 backdrop-blur md:bottom-6",
                 div { class: "mx-auto flex w-full max-w-3xl items-center gap-3 px-3 py-2",
                     // artwork
                     div { class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/70 to-primary/20 text-lg",

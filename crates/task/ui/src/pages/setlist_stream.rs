@@ -13,7 +13,7 @@
 //! the same org lane everything else rides.
 
 #[cfg(target_arch = "wasm32")]
-mod imp {
+pub(crate) mod imp {
     use std::cell::RefCell;
     use std::rc::Rc;
 
