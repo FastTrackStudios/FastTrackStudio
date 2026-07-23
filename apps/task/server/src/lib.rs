@@ -1226,6 +1226,42 @@ fn parse_byte_range(value: &str, total: u64) -> Option<(u64, u64)> {
     Some((start, end))
 }
 
+/// JSON listing of a media directory's immediate entries, sorted by name.
+/// Each entry is `{ "name": String, "dir": bool, "size": u64 }` (`size` is 0
+/// for directories). Lets a manifest-less song enumerate its stem files over
+/// HTTP (e.g. `GET /org/{slug}/media/songs/{slug}/stems/`).
+async fn media_dir_listing(dir: &std::path::Path) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    let mut rd = match tokio::fs::read_dir(dir).await {
+        Ok(rd) => rd,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    while let Ok(Some(e)) = rd.next_entry().await {
+        let name = e.file_name().to_string_lossy().into_owned();
+        // Skip hidden/dotfiles.
+        if name.starts_with('.') {
+            continue;
+        }
+        let (dir, size) = match e.metadata().await {
+            Ok(m) => (m.is_dir(), if m.is_dir() { 0 } else { m.len() }),
+            Err(_) => continue,
+        };
+        entries.push(serde_json::json!({ "name": name, "dir": dir, "size": size }));
+    }
+    entries.sort_by(|a, b| {
+        a["name"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(b["name"].as_str().unwrap_or_default())
+    });
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::to_string(&entries).unwrap_or_else(|_| "[]".into()),
+    )
+        .into_response()
+}
+
 /// Filesystem-first song media: `GET /org/{slug}/media/<path>` serves
 /// `<data_root>/orgs/{slug}/resources/<path>` straight off disk — no
 /// ingest, no content-addressing, drop-a-file-and-it-serves (fits network
@@ -1255,9 +1291,19 @@ async fn per_org_media_handler(
         .join("resources")
         .join(&rel);
     let meta = match tokio::fs::metadata(&file).await {
-        Ok(m) if m.is_file() => m,
-        _ => return StatusCode::NOT_FOUND.into_response(),
+        Ok(m) => m,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
+    // A directory → JSON listing of its immediate entries. This is how a
+    // manifest-less colocated song enumerates its stems (`…/stems/`,
+    // `…/media/proxy/`) — the client lists the dir and derives the stem set,
+    // deriving structure separately from `arrangements/original.kf`.
+    if meta.is_dir() {
+        return media_dir_listing(&file).await;
+    }
+    if !meta.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let total = meta.len();
     let ct = match file.extension().and_then(|x| x.to_str()) {
         Some("json") => "application/json",

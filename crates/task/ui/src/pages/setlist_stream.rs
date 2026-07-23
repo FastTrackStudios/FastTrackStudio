@@ -47,7 +47,13 @@ pub(crate) mod imp {
         let mut out = Vec::with_capacity(slugs.len());
         for slug in slugs {
             let url = format!("/org/{org}/media/songs/{slug}/manifest.json");
-            match crate::pages::song_session::imp::fetch_manifest(&url).await {
+            // manifest.json is authoritative; a manifest-less colocated song
+            // derives its model from the chart + stem listing (#59).
+            let resolved = match crate::pages::song_session::imp::fetch_manifest(&url).await {
+                Ok(m) => Ok(m),
+                Err(_) => crate::pages::song_session::imp::fetch_kf_manifest(org, slug).await,
+            };
+            match resolved {
                 Ok(m) => {
                     let reference = m
                         .stems

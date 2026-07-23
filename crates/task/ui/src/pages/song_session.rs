@@ -284,6 +284,171 @@ pub(crate) mod imp {
         serde_json::from_str(&txt).map_err(|e| format!("{url}: bad manifest json: {e}"))
     }
 
+    // ── manifest-optional: derive a song model from the chart + a stem
+    // directory listing (the colocated "drop a folder and it plays" path) ────
+
+    /// One entry from the server's `/media` directory listing.
+    #[derive(Deserialize)]
+    pub(crate) struct DirEntry {
+        pub(crate) name: String,
+        #[serde(default)]
+        pub(crate) dir: bool,
+    }
+
+    /// Human-facing section name for a laid-out chart section: a quoted label
+    /// wins (`Interlude "Breakdown"` → "Breakdown"), else the kind plus its
+    /// occurrence number ("Verse 1", "Intro").
+    fn laid_section_name(s: &session::chart_import::LaidSection) -> String {
+        use session::keyflow_actions::SectionKind::*;
+        if let Some(label) = &s.label {
+            if !label.trim().is_empty() {
+                return label.clone();
+            }
+        }
+        let base = match s.kind {
+            Intro => "Intro",
+            Verse => "Verse",
+            PreChorus => "Pre-Chorus",
+            Chorus => "Chorus",
+            Bridge => "Bridge",
+            Outro => "Outro",
+            Instrumental => "Instrumental",
+            Solo => "Solo",
+            Hits => "Hits",
+            Interlude => "Interlude",
+            Breakdown => "Breakdown",
+            Vamp => "Vamp",
+            Refrain => "Refrain",
+            Turnaround => "Turnaround",
+            CountIn => "Count-In",
+            End => "End",
+        };
+        match s.number {
+            Some(n) => format!("{base} {n}"),
+            None => base.to_string(),
+        }
+    }
+
+    fn is_audio_file(name: &str) -> bool {
+        let l = name.to_lowercase();
+        [".ogg", ".mp3", ".wav", ".webm", ".m4a", ".opus"]
+            .iter()
+            .any(|e| l.ends_with(e))
+    }
+
+    /// Infer a stem's display name, mixer group, and default-mute from its
+    /// filename (`NN-slug.ogg` → "Slug"). Guide stems (click/cue/count)
+    /// default muted; the original/reference track is the audible baseline.
+    pub(crate) fn stem_spec_from_file(dir: &str, filename: &str) -> StemSpec {
+        let stem = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(filename);
+        // Drop a leading `NN-` ordering prefix.
+        let core = stem
+            .split_once('-')
+            .filter(|(p, _)| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+            .map(|(_, rest)| rest)
+            .unwrap_or(stem);
+        let name = core
+            .split(['-', '_'])
+            .filter(|w| !w.is_empty())
+            .map(|w| {
+                let mut cs = w.chars();
+                match cs.next() {
+                    Some(f) => f.to_uppercase().collect::<String>() + cs.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let lower = core.to_lowercase();
+        let is_guide = ["click", "cue", "count", "guide"]
+            .iter()
+            .any(|k| lower.contains(k));
+        let is_ref = ["original", "reference"].iter().any(|k| lower.contains(k));
+        let group = if is_guide {
+            "Guide"
+        } else if is_ref {
+            "Reference"
+        } else {
+            "Stems"
+        };
+        StemSpec {
+            name: if name.is_empty() { core.to_string() } else { name },
+            group: Some(group.to_string()),
+            file: format!("{dir}/{filename}"),
+            default_muted: is_guide,
+        }
+    }
+
+    /// List a `/media` directory — the server returns a JSON array of
+    /// `{name, dir, size}`. Empty on any failure (missing dir, bad json).
+    async fn list_media_dir(url: &str) -> Vec<DirEntry> {
+        match fetch_text(url).await {
+            Ok(txt) => serde_json::from_str::<Vec<DirEntry>>(&txt).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Build a [`Manifest`] with NO `manifest.json`: derive structure/tempo/key
+    /// from the keyflow chart (`arrangements/original.kf`, or legacy
+    /// `chart.kf`) via [`session::chart_import::chart_to_layout`], and
+    /// enumerate stems by listing the song's `media/proxy/` (or legacy
+    /// `stems/`) directory. The "drop a song folder and it plays" path — no
+    /// hand-authored manifest required (issue #59 / the colocated layout).
+    pub(crate) async fn fetch_kf_manifest(org: &str, slug: &str) -> Result<Manifest, String> {
+        let base = format!("/org/{org}/media/songs/{slug}");
+        // Chart: prefer the colocated arrangements path, fall back to legacy.
+        let chart_text = match fetch_text(&format!("{base}/arrangements/original.kf")).await {
+            Ok(t) => t,
+            Err(_) => fetch_text(&format!("{base}/chart.kf"))
+                .await
+                .map_err(|e| format!("no chart for `{slug}`: {e}"))?,
+        };
+        let layout = session::chart_import::chart_to_layout(&chart_text)
+            .map_err(|e| format!("chart `{slug}`: {e}"))?;
+        let sections: Vec<Section> = layout
+            .sections
+            .iter()
+            .filter(|s| s.kind != session::keyflow_actions::SectionKind::CountIn)
+            .map(|s| Section {
+                name: laid_section_name(s),
+                start_sec: s.start_seconds,
+                end_sec: s.end_seconds,
+            })
+            .collect();
+        // Stems: prefer the colocated proxy dir, fall back to legacy `stems/`.
+        let (stem_dir, entries) = {
+            let proxy = list_media_dir(&format!("{base}/media/proxy")).await;
+            if proxy.iter().any(|e| !e.dir && is_audio_file(&e.name)) {
+                ("media/proxy", proxy)
+            } else {
+                ("stems", list_media_dir(&format!("{base}/stems")).await)
+            }
+        };
+        let mut stems: Vec<StemSpec> = entries
+            .iter()
+            .filter(|e| !e.dir && is_audio_file(&e.name))
+            .map(|e| stem_spec_from_file(stem_dir, &e.name))
+            .collect();
+        stems.sort_by(|a, b| a.file.cmp(&b.file));
+        if stems.is_empty() {
+            return Err(format!("no stems for `{slug}`"));
+        }
+        let duration_sec = layout
+            .song_end_seconds
+            .max(sections.last().map(|s| s.end_sec).unwrap_or(0.0));
+        Ok(Manifest {
+            slug: Some(slug.to_owned()),
+            title: layout.title,
+            artist: layout.artist,
+            key: layout.key,
+            bpm: Some(layout.tempo_bpm),
+            time_signature: Some(format!("{}/{}", layout.time_sig_num, layout.time_sig_den)),
+            duration_sec,
+            sections,
+            stems,
+        })
+    }
+
     /// Where one stem's audio comes from.
     #[derive(Clone, Debug, PartialEq)]
     pub(crate) enum StemSource {
@@ -717,21 +882,33 @@ pub(crate) mod imp {
                 // (blob) resolver when there's no manifest on disk (404). Matches
                 // the setlist players (#55, commit 53d980ae1). Refs #56.
                 let manifest_url = format!("/org/{org}/media/songs/{slug}/manifest.json");
+                let url_sources = |m: &Manifest| -> Vec<StemSource> {
+                    m.stems
+                        .iter()
+                        .map(|s| {
+                            StemSource::Url(format!("/org/{org}/media/songs/{slug}/{}", s.file))
+                        })
+                        .collect()
+                };
                 let (manifest, sources) = match fetch_manifest(&manifest_url).await {
                     Ok(manifest) => {
-                        let sources = manifest
-                            .stems
-                            .iter()
-                            .map(|s| {
-                                StemSource::Url(format!("/org/{org}/media/songs/{slug}/{}", s.file))
-                            })
-                            .collect();
+                        let sources = url_sources(&manifest);
                         (manifest, sources)
                     }
-                    Err(_) if !front.stems.is_empty() => {
-                        resolve_front(&org, &title, &front).await?
-                    }
-                    Err(e) => return Err(e),
+                    // No manifest.json → derive the song model from the keyflow
+                    // chart + a stem directory listing (the colocated
+                    // "drop a folder and it plays" path, #59). Only if that also
+                    // fails do we fall back to the frontmatter blob resolver.
+                    Err(_) => match fetch_kf_manifest(&org, &slug).await {
+                        Ok(manifest) => {
+                            let sources = url_sources(&manifest);
+                            (manifest, sources)
+                        }
+                        Err(_) if !front.stems.is_empty() => {
+                            resolve_front(&org, &title, &front).await?
+                        }
+                        Err(kf_err) => return Err(kf_err),
+                    },
                 };
                 let eng = build_engine(&manifest, &sources)?;
                 Ok::<(Manifest, Engine), String>((manifest, eng))
