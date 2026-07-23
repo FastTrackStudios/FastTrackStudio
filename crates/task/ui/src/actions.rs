@@ -94,6 +94,7 @@ pub fn intent_for(action_id: &str) -> Option<Intent> {
         NAV_INVOICES => Intent::Nav(Route::InvoicesRoute {}),
         NAV_VAULT => Intent::Nav(Route::VaultRoute {
             path: String::new(),
+            org: String::new(),
         }),
         NAV_SETTINGS => Intent::Nav(Route::SettingsRoute {}),
         _ => return None,

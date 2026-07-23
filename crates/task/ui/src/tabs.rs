@@ -202,7 +202,7 @@ impl TabsState {
 /// notes, which show the note's basename (parsed from the path query —
 /// no vault internals involved).
 pub fn tab_title(route: &Route) -> String {
-    if let Route::VaultRoute { path } = route {
+    if let Route::VaultRoute { path, .. } = route {
         if !path.is_empty() {
             let name = path.rsplit('/').next().unwrap_or(path.as_str());
             let base = name

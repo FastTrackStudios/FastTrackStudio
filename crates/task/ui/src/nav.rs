@@ -156,6 +156,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
             icon: icon_tasks,
             route: Route::VaultRoute {
                 path: "Views/Tasks.base".into(),
+                org: String::new(),
             },
         },
         NavTab {
@@ -163,6 +164,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
             icon: icon_vault,
             route: Route::VaultRoute {
                 path: String::new(),
+                org: String::new(),
             },
         },
         NavTab {
@@ -303,7 +305,7 @@ pub fn primary_mobile_tabs() -> Vec<NavTab> {
 pub fn tabs_match(current: &Route, tab: &NavTab) -> bool {
     // Vault shortcuts must match by PATH — two tabs can both be
     // VaultRoutes (the Tasks view entry vs the vault tree itself).
-    if let (Route::VaultRoute { path: cur }, Route::VaultRoute { path: tab_path }) =
+    if let (Route::VaultRoute { path: cur, .. }, Route::VaultRoute { path: tab_path, .. }) =
         (current, &tab.route)
     {
         return if tab_path.is_empty() {

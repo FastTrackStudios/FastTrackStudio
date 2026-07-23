@@ -66,6 +66,7 @@ pub fn NoteHeader(
                 Ok(_) => {
                     nav.push(crate::routes::Route::VaultRoute {
                         path: new_path.clone(),
+                        org: String::new(),
                     });
                     // The new file is committed and we've navigated; drop
                     // the old one. A delete failure only leaves a stale

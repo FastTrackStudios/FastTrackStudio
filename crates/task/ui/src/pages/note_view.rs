@@ -340,8 +340,7 @@ pub(crate) fn NoteView(
             play_req.set((generation, String::new())); // empty = toggle
             return;
         }
-        if let Some(tab) = href.strip_prefix("event-tab:") {
-            *crate::event_tabs::EVENT_ACTIVE_TAB.write() = tab.to_string();
+        if crate::event_tabs::handle_tab_href(&href) {
             return;
         }
         if href.starts_with("http://") || href.starts_with("https://") {
@@ -353,7 +352,7 @@ pub(crate) fn NoteView(
             .as_ref()
             .and_then(|ix| ix.meta(page).map(|m| m.path.clone()))
             .unwrap_or_else(|| format!("{page}.md"));
-        nav_links.push(crate::routes::Route::VaultRoute { path });
+        nav_links.push(crate::routes::Route::VaultRoute { path, org: home() });
     });
 
     // ── Save / conflict state ─────────────────────────────────

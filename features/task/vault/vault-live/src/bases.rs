@@ -26,6 +26,11 @@ pub struct ParsedBase {
     /// Ordered — controls default column layout.
     pub properties: Vec<PropertyConfig>,
     pub views: Vec<ViewSpec>,
+    /// Top-level `folder:` wikilink → parent note basename, so the base
+    /// shows up under its folder in the vault tree. Empty = root.
+    pub folder: String,
+    /// Top-level `tags:` — puts the base in the tags sidebar.
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -241,6 +246,8 @@ pub fn parse(yaml: &str) -> Result<ParsedBase, BaseParseError> {
                 formulas: Vec::new(),
                 properties: Vec::new(),
                 views: Vec::new(),
+                folder: String::new(),
+                tags: Vec::new(),
             });
         }
         _ => return Err(BaseParseError::Yaml("root must be a mapping".into())),
@@ -312,12 +319,63 @@ pub fn parse(yaml: &str) -> Result<ParsedBase, BaseParseError> {
         None => Vec::new(),
     };
 
+    // Top-level `folder:` (wikilink → parent note) and `tags:` — let
+    // `.base` files sit in the folder tree + tags sidebar exactly like
+    // markdown pages. `folder` gets the same wikilink stripping the page
+    // frontmatter path uses in sync.rs; `tags` accepts a sequence of
+    // strings or a single scalar.
+    let folder = map
+        .get(serde_yaml::Value::String("folder".into()))
+        .and_then(yaml_str)
+        .map(strip_wikilink)
+        .unwrap_or_default();
+
+    let tags = match map.get(serde_yaml::Value::String("tags".into())) {
+        Some(serde_yaml::Value::Sequence(s)) => s
+            .iter()
+            .filter_map(yaml_str)
+            .map(normalize_tag)
+            .filter(|t| !t.is_empty())
+            .collect(),
+        Some(serde_yaml::Value::String(s)) => {
+            let t = normalize_tag(s);
+            if t.is_empty() { Vec::new() } else { vec![t] }
+        }
+        _ => Vec::new(),
+    };
+
     Ok(ParsedBase {
         global_filter,
         formulas,
         properties,
         views,
+        folder,
+        tags,
     })
+}
+
+/// Reduce a `folder` value to a bare parent basename — mirrors
+/// `sync::strip_wikilink` so a base's `folder:` resolves in the tree
+/// identically to a page's frontmatter `folder`. Handles the Obsidian
+/// wikilink form `[[Name|alias]]#heading` as well as a plain string.
+fn strip_wikilink(value: &str) -> String {
+    let t = value.trim();
+    let inner = t
+        .strip_prefix("[[")
+        .and_then(|x| x.strip_suffix("]]"))
+        .unwrap_or(t);
+    inner
+        .split(['|', '#'])
+        .next()
+        .unwrap_or(inner)
+        .trim()
+        .to_string()
+}
+
+/// Normalize a single tag — trim whitespace and a leading `#`, mirroring
+/// `sync::fm_tags`.
+fn normalize_tag(raw: &str) -> String {
+    raw.trim().trim_start_matches('#').to_string()
 }
 
 /// Serialize back to YAML — used when the user edits a Base in our UI.
@@ -2385,6 +2443,8 @@ mod executor_tests {
 
     fn task_kanban_base() -> ParsedBase {
         ParsedBase {
+            folder: String::new(),
+            tags: vec![],
             global_filter: FilterNode::Cmp {
                 left: Expr::NoteProp {
                     name: "kind".into(),
@@ -2473,6 +2533,8 @@ mod executor_tests {
             global_filter: FilterNode::None,
             formulas: vec![],
             properties: vec![],
+            folder: String::new(),
+            tags: vec![],
             views: vec![ViewSpec {
                 kind: ViewKind::List,
                 name: "All".into(),
@@ -2504,6 +2566,8 @@ mod executor_tests {
             global_filter: FilterNode::None,
             formulas: vec![],
             properties: vec![],
+            folder: String::new(),
+            tags: vec![],
             views: vec![ViewSpec {
                 kind: ViewKind::List,
                 name: "All Charts".into(),

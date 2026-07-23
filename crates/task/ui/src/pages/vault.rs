@@ -109,13 +109,25 @@ pub(crate) struct TreeNode {
 }
 
 #[component]
-pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element {
+pub fn VaultView(
+    #[props(default)] initial_path: ReadSignal<String>,
+    #[props(default)] initial_org: ReadSignal<String>,
+) -> Element {
     // The vault follows the org switcher: browse the selected org's
-    // vault (or the home org when viewing All). Re-runs when the
-    // selection or org discovery changes.
+    // vault (or the home org when viewing All). A non-empty `initial_org`
+    // from the route — a cross-org search hit — overrides, so the note
+    // opens in its own org WITHOUT changing the switcher. Re-runs when the
+    // selection, route org, or org discovery changes.
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
-    let active = use_memo(move || crate::orgs::active_slug(&selection.read(), &org_list.read()));
+    let active = use_memo(move || {
+        let route_org = initial_org();
+        if route_org.is_empty() {
+            crate::orgs::active_slug(&selection.read(), &org_list.read())
+        } else {
+            route_org
+        }
+    });
     let mut files = use_resource(move || {
         let slug = active();
         async move { fetch_folder_index(slug).await }
@@ -293,7 +305,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             return;
         }
         last_link.set(sel.clone());
-        nav.push(crate::routes::Route::VaultRoute { path: sel });
+        nav.push(crate::routes::Route::VaultRoute { path: sel, org: active() });
     });
 
     // Autocomplete tags — `#` completes vault tags pulled once per org

@@ -160,7 +160,7 @@ pub fn VaultExplorer() -> Element {
     // Selection = the current route's vault path.
     let route = use_route::<Route>();
     let selected = match &route {
-        Route::VaultRoute { path } => path.clone(),
+        Route::VaultRoute { path, .. } => path.clone(),
         _ => String::new(),
     };
 
@@ -269,6 +269,7 @@ fn explorer_node(
         "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[13px] text-muted-foreground hover:bg-accent/40 hover:text-foreground"
     };
     let toggle_key = key.clone();
+    let row_key = key.clone();
     let path = node.meta.path.clone();
     let title = node.meta.title.clone();
     let chevron = if is_collapsed { "" } else { "rotate-90" };
@@ -280,17 +281,25 @@ fn explorer_node(
                 class: "{row_cls}",
                 style: "padding-left: {indent + 6}px",
                 onclick: move |_| {
+                    // Clicking the row OPENS the note. For a folder it also
+                    // ensures the folder is expanded (never collapses — the
+                    // chevron owns collapse), so a click both opens the
+                    // folder-note and reveals its children.
                     if is_folder {
-                        let mut set = expanded.write();
-                        if !set.remove(&toggle_key) {
-                            set.insert(toggle_key.clone());
-                        }
-                    } else {
-                        nav.push(Route::VaultRoute { path: path.clone() });
+                        expanded.write().insert(row_key.clone());
                     }
+                    nav.push(Route::VaultRoute { path: path.clone(), org: String::new() });
                 },
                 if is_folder {
-                    span { class: "flex h-3 w-3 shrink-0 items-center justify-center transition-transform {chevron}",
+                    span {
+                        class: "flex h-3 w-3 shrink-0 items-center justify-center transition-transform {chevron}",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            let mut set = expanded.write();
+                            if !set.remove(&toggle_key) {
+                                set.insert(toggle_key.clone());
+                            }
+                        },
                         ChevronRight { size: 11 }
                     }
                     span { class: "flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground/80",
@@ -403,7 +412,7 @@ fn page_row(page: &vault_proto::PageMeta, depth: usize, selected: String) -> Ele
             class: "{row_cls}",
             style: "padding-left: {indent + 6}px",
             onclick: move |_| {
-                nav.push(Route::VaultRoute { path: path.clone() });
+                nav.push(Route::VaultRoute { path: path.clone(), org: String::new() });
             },
             if is_base {
                 span { class: "flex h-3.5 w-3.5 shrink-0 items-center justify-center text-primary",

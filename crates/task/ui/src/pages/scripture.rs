@@ -174,7 +174,7 @@ pub fn ScriptureView() -> Element {
                                         for n in bl.notes.iter() {
                                             Link {
                                                 key: "{n.note_path}",
-                                                to: Route::VaultRoute { path: n.note_path.clone() },
+                                                to: Route::VaultRoute { path: n.note_path.clone(), org: String::new() },
                                                 class: "text-xs text-muted-foreground hover:text-foreground",
                                                 title: "{n.excerpt}",
                                                 "↳ {n.note_title}"
