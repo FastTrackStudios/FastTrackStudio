@@ -107,44 +107,9 @@ pub fn NowPlayingTab() -> Element {
         // spaced-out SVG transport with a proper play button. ~2× the
         // status-bar height, rounded top, poking up out of the status line.
         div {
-            class: "flex h-12 w-[30rem] items-center gap-3 rounded-t-lg border border-b-0 border-border bg-card/95 px-3 shadow-md backdrop-blur",
+            class: "flex h-12 w-[40rem] items-center gap-3 rounded-t-lg border border-b-0 border-border bg-card/95 px-3 shadow-md backdrop-blur",
             title: "{label}",
-            // album-art tile (gradient placeholder w/ the title initial)
-            div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/80 to-primary/30 text-sm font-bold text-primary-foreground shadow-sm",
-                "{title.chars().next().unwrap_or('♪')}"
-            }
-            // title + subtitle
-            div { class: "w-36 shrink-0 leading-tight",
-                div { class: "truncate text-xs font-semibold text-foreground", "{title}" }
-                div { class: "truncate text-[10px] text-muted-foreground", "{label}" }
-            }
-            // stretchy custom seek bar (fills the extra width)
-            div { class: "group/seek relative flex h-2.5 min-w-0 flex-1 items-center",
-                div { class: "h-1 w-full overflow-hidden rounded-full bg-muted",
-                    div { class: "h-full rounded-full bg-primary", style: "width: {frac * 100.0}%" }
-                }
-                div {
-                    class: "pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow transition-opacity group-hover/seek:opacity-100",
-                    style: "left: {frac * 100.0}%",
-                }
-                input {
-                    r#type: "range",
-                    min: "0",
-                    max: "1000",
-                    value: "{(frac * 1000.0) as i64}",
-                    class: "absolute inset-0 h-full w-full cursor-pointer opacity-0",
-                    oninput: move |e| {
-                        if let Ok(v) = e.value().parse::<f64>() {
-                            send(NpCmd::Seek(v / 1000.0));
-                        }
-                    },
-                }
-            }
-            // time
-            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground",
-                "{fmt_mmss(pos)} / {fmt_mmss(dur)}"
-            }
-            // transport — spaced out; SVG icons; a proper round play button
+            // ── playback controls (left) — spaced-out SVG transport ──
             div { class: "flex shrink-0 items-center gap-3",
                 button {
                     r#type: "button",
@@ -177,6 +142,42 @@ pub fn NowPlayingTab() -> Element {
                     svg { view_box: "0 0 24 24", fill: "currentColor", class: "h-3.5 w-3.5",
                         path { d: "M15 6h2v12h-2zM5 6l9 6-9 6z" }
                     }
+                }
+            }
+            // ── elapsed time ──
+            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{fmt_mmss(pos)}" }
+            // ── stretchy custom seek bar (middle) ──
+            div { class: "group/seek relative flex h-2.5 min-w-0 flex-1 items-center",
+                div { class: "h-1 w-full overflow-hidden rounded-full bg-muted",
+                    div { class: "h-full rounded-full bg-primary", style: "width: {frac * 100.0}%" }
+                }
+                div {
+                    class: "pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow transition-opacity group-hover/seek:opacity-100",
+                    style: "left: {frac * 100.0}%",
+                }
+                input {
+                    r#type: "range",
+                    min: "0",
+                    max: "1000",
+                    value: "{(frac * 1000.0) as i64}",
+                    class: "absolute inset-0 h-full w-full cursor-pointer opacity-0",
+                    oninput: move |e| {
+                        if let Ok(v) = e.value().parse::<f64>() {
+                            send(NpCmd::Seek(v / 1000.0));
+                        }
+                    },
+                }
+            }
+            // ── total time ──
+            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{fmt_mmss(dur)}" }
+            // ── song details (right): album art + title/subtitle ──
+            div { class: "flex shrink-0 items-center gap-2",
+                div { class: "min-w-0 text-right leading-tight",
+                    div { class: "max-w-[10rem] truncate text-xs font-semibold text-foreground", "{title}" }
+                    div { class: "max-w-[10rem] truncate text-[10px] text-muted-foreground", "{label}" }
+                }
+                div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/80 to-primary/30 text-sm font-bold text-primary-foreground shadow-sm",
+                    "{title.chars().next().unwrap_or('♪')}"
                 }
             }
         }
