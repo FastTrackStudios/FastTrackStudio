@@ -102,55 +102,73 @@ pub fn NowPlayingTab() -> Element {
     };
 
     rsx! {
-        // A proper mini-player tab: ~twice the status-bar height (h-12 vs
-        // h-6) so it pokes well up out of the status line, wide, with a
-        // full-width seekable progress bar and transport always visible.
-        // Rounded top, open bottom → reads as a tab embedded in the bar.
+        // Compact mini-player tab (Spotify-style): album-art tile, title +
+        // queue subtitle, round transport, and a custom seek bar (thin track
+        // + filled fill + hover thumb, with an invisible range overlay doing
+        // the actual seeking). ~2× the status-bar height, rounded top, poking
+        // up out of the status line.
         div {
-            class: "flex h-12 w-80 flex-col justify-center gap-1 rounded-t-lg border border-b-0 border-border bg-card px-3 py-1.5 shadow-md",
+            class: "flex h-12 w-80 items-center gap-2.5 rounded-t-lg border border-b-0 border-border bg-card/95 px-2.5 shadow-md backdrop-blur",
             title: "{label}",
-            // row 1: transport · title/queue · time
-            div { class: "flex items-center gap-2",
+            // album-art tile (gradient placeholder w/ the title initial)
+            div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/80 to-primary/30 text-xs font-bold text-primary-foreground shadow-sm",
+                "{title.chars().next().unwrap_or('♪')}"
+            }
+            // title + subtitle + seek bar stacked
+            div { class: "flex min-w-0 flex-1 flex-col justify-center gap-1",
+                div { class: "flex items-baseline gap-2",
+                    span { class: "min-w-0 flex-1 truncate text-xs font-semibold leading-none text-foreground", "{title}" }
+                    span { class: "shrink-0 text-[9px] tabular-nums text-muted-foreground", "{fmt_mmss(pos)} / {fmt_mmss(dur)}" }
+                }
+                div { class: "flex items-center gap-2",
+                    span { class: "min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground", "{label}" }
+                }
+                // custom seek bar
+                div { class: "group/seek relative flex h-2.5 w-full items-center",
+                    div { class: "h-1 w-full overflow-hidden rounded-full bg-muted",
+                        div { class: "h-full rounded-full bg-primary", style: "width: {frac * 100.0}%" }
+                    }
+                    div {
+                        class: "pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow transition-opacity group-hover/seek:opacity-100",
+                        style: "left: {frac * 100.0}%",
+                    }
+                    // invisible native range on top → robust click + drag seek
+                    input {
+                        r#type: "range",
+                        min: "0",
+                        max: "1000",
+                        value: "{(frac * 1000.0) as i64}",
+                        class: "absolute inset-0 h-full w-full cursor-pointer opacity-0",
+                        oninput: move |e| {
+                            if let Ok(v) = e.value().parse::<f64>() {
+                                send(NpCmd::Seek(v / 1000.0));
+                            }
+                        },
+                    }
+                }
+            }
+            // transport
+            div { class: "flex shrink-0 items-center gap-1",
                 button {
                     r#type: "button",
-                    class: "shrink-0 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30",
+                    class: "text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30",
                     disabled: !can_prev,
                     onclick: move |_| send(NpCmd::Prev),
                     "⏮"
                 }
                 button {
                     r#type: "button",
-                    class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] text-primary-foreground hover:opacity-90",
+                    class: "flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground shadow-sm hover:opacity-90",
                     onclick: move |_| send(NpCmd::Toggle),
                     if playing { "⏸" } else { "▶" }
                 }
                 button {
                     r#type: "button",
-                    class: "shrink-0 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30",
+                    class: "text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30",
                     disabled: !can_next,
                     onclick: move |_| send(NpCmd::Next),
                     "⏭"
                 }
-                div { class: "min-w-0 flex-1 leading-tight",
-                    div { class: "truncate text-xs font-semibold text-foreground", "{title}" }
-                    div { class: "truncate text-[10px] text-muted-foreground", "{label}" }
-                }
-                span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground",
-                    "{fmt_mmss(pos)} / {fmt_mmss(dur)}"
-                }
-            }
-            // row 2: full-width seekable progress bar
-            input {
-                r#type: "range",
-                min: "0",
-                max: "1000",
-                value: "{(frac * 1000.0) as i64}",
-                class: "h-1 w-full cursor-pointer accent-primary",
-                oninput: move |e| {
-                    if let Ok(v) = e.value().parse::<f64>() {
-                        send(NpCmd::Seek(v / 1000.0));
-                    }
-                },
             }
         }
     }
