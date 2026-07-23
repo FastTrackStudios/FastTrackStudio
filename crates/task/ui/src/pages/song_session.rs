@@ -1097,6 +1097,18 @@ pub(crate) mod imp {
                 let Some(eng) = engine_of() else {
                     continue;
                 };
+                // Self-correct the total from the real audio once it loads —
+                // a chart-derived duration omits any outro past the last
+                // charted section, and the end-detect below must not stop
+                // playback early. (The authoritative length is the audio.)
+                {
+                    let mut e = eng.borrow_mut();
+                    if let Some(real) = e.stems.first().map(|s| s.el.duration()) {
+                        if real.is_finite() && real > e.duration {
+                            e.duration = real;
+                        }
+                    }
+                }
                 let (rc, total, is_playing, pos, dur) = {
                     let e = eng.borrow();
                     (
