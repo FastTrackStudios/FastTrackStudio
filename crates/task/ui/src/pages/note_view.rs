@@ -359,6 +359,13 @@ pub(crate) fn NoteView(
             });
             return;
         }
+        if href.starts_with("setlist-open:") {
+            // Open the full-screen setlist experience (the button lives in the
+            // editor's setlist-title widget, so it travels with an embedded
+            // setlist too).
+            setlist_fullscreen.set(true);
+            return;
+        }
         if href.starts_with("setlist-play:") {
             // Header ▶: start the whole setlist, or toggle if it's already
             // the loaded queue.
@@ -540,16 +547,15 @@ pub(crate) fn NoteView(
                                     fullscreen: true,
                                 }
                             }
-                        } else {
-                            crate::pages::experience::EnterExperienceButton {
-                                label: "Setlist",
-                                on_enter: move |_| setlist_fullscreen.set(true),
-                            }
-                            // The visible setlist header + song strips are the
-                            // editor's own widgets (the note's H1); their ▶
-                            // clicks route to the global Now Playing player via
-                            // `on_link_click`. Nothing to mount here.
                         }
+                        // The visible setlist header + song strips are the
+                        // editor's own widgets (the note's H1). Their ▶ clicks
+                        // route to the global Now Playing player, and the
+                        // header's "Open" button opens the full-screen
+                        // experience — both via `on_link_click`. So the
+                        // embedded (non-fullscreen) view needs nothing mounted
+                        // here, and the Open control travels with an embedded
+                        // setlist.
                     }
                     // The note body (frontmatter + Markdown editor) is bound to
                     // `session.state`, which autosaves to the note file. A
