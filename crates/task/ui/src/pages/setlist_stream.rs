@@ -39,95 +39,56 @@ mod imp {
     /// parse each note's frontmatter, and match notes to setlist slugs by
     /// slugified basename.
     async fn load_tracks(org: &str, slugs: &[String]) -> Result<Vec<Track>, String> {
-        let vault = crate::vox_clients::vault_client(org).await?;
-        let manifest = vault
-            .manifest("default".to_owned())
-            .await
-            .map_err(|e| format!("vault manifest: {e:?}"))?;
-        let mut by_slug: std::collections::HashMap<String, Track> = Default::default();
-        for entry in &manifest.files {
-            let path = &entry.path;
-            let Some(base) = path
-                .strip_prefix("Songs/")
-                .and_then(|p: &str| p.strip_suffix(".md"))
-            else {
-                continue;
-            };
-            // SAME slugify as the wikilink parser (drops apostrophes) —
-            // two impls diverging here cost us matching once already.
-            let slug = crate::pages::vault::slugify(base);
-            if !slugs.contains(&slug) {
-                continue;
-            }
-            let Ok(bytes) = vault.get_file("default".to_owned(), path.clone()).await else {
-                continue;
-            };
-            let text = String::from_utf8_lossy(&bytes.0).to_string();
-            let front = song_front_from(&text);
-            let reference = front
-                .stems
-                .iter()
-                .find(|s| {
-                    let n = s.name.to_lowercase();
-                    n.contains("original") || n.contains("reference")
-                })
-                .or_else(|| front.stems.first())
-                .map(|s| s.content_hash.clone());
-            by_slug.insert(
-                slug.clone(),
-                Track {
-                    slug,
-                    title: base.to_owned(),
-                    duration_sec: front
-                        .duration_sec
-                        .or_else(|| front.sections.last().map(|s| s.end_sec))
-                        .unwrap_or(0.0),
-                    reference,
-                    stem_count: front.stems.len(),
-                },
-            );
-        }
-        // Setlist order; unmatched slugs still get a (silent) row.
-        Ok(slugs
-            .iter()
-            .map(|slug| {
-                by_slug.remove(slug).unwrap_or_else(|| Track {
+        // Filesystem-first: read each song's manifest straight from the org's
+        // colocated media (`/org/{org}/media/songs/{slug}/manifest.json`).
+        // No vault round-trip, no content-addressed blobs — the reference is
+        // just a stem FILE path served off disk. Unresolved slugs still get a
+        // silent row so the setlist renders.
+        let mut out = Vec::with_capacity(slugs.len());
+        for slug in slugs {
+            let url = format!("/org/{org}/media/songs/{slug}/manifest.json");
+            match crate::pages::song_session::imp::fetch_manifest(&url).await {
+                Ok(m) => {
+                    let reference = m
+                        .stems
+                        .iter()
+                        .find(|s| {
+                            let n = s.name.to_lowercase();
+                            let g = s.group.as_deref().unwrap_or_default().to_lowercase();
+                            n.contains("original")
+                                || n.contains("reference")
+                                || g.contains("reference")
+                        })
+                        .or_else(|| m.stems.first())
+                        .map(|s| s.file.clone());
+                    out.push(Track {
+                        slug: slug.clone(),
+                        title: m.title.clone().unwrap_or_else(|| slug.replace('-', " ")),
+                        duration_sec: m.duration_sec,
+                        reference,
+                        stem_count: m.stems.len(),
+                    });
+                }
+                Err(_) => out.push(Track {
                     slug: slug.clone(),
                     title: slug.replace('-', " "),
                     duration_sec: 0.0,
                     reference: None,
                     stem_count: 0,
-                })
-            })
-            .collect())
-    }
-
-    /// Build the `<audio>` element for a reference hash — vox-MSE when the
-    /// blob is webm/opus and the browser speaks it, else the signed URL.
-    async fn element_for(org: &str, hash: &str) -> Result<HtmlAudioElement, String> {
-        use attachments_proto::ContentHashArg;
-        if crate::pages::vox_media_source::mse_supported() {
-            if let Ok(media) = crate::vox_clients::media_client(org).await {
-                if let Ok(info) = media.stat(hash.to_owned()).await {
-                    if info.mime_type.starts_with("audio/webm") {
-                        return crate::pages::vox_media_source::audio_element_over_vox(
-                            org.to_owned(),
-                            hash.to_owned(),
-                        );
-                    }
-                }
+                }),
             }
         }
-        let client = crate::vox_clients::attachments_client(org).await?;
-        let signed = client
-            .get_download_url(ContentHashArg {
-                content_hash: hash.to_owned(),
-            })
-            .await
-            .map_err(|e| format!("signed url: {e:?}"))?;
+        Ok(out)
+    }
+
+    /// Build the `<audio>` element for a reference stem served off disk at
+    /// `/org/{org}/media/songs/{slug}/{file}`. Plain same-origin URL — the
+    /// browser streams it (Range-capable via the static handler); no vox, no
+    /// content-hash, no ingest.
+    fn element_for(org: &str, slug: &str, file: &str) -> Result<HtmlAudioElement, String> {
         let el = HtmlAudioElement::new().map_err(|e| format!("audio element: {e:?}"))?;
         el.set_preload("auto");
-        el.set_src(&signed.url);
+        el.set_src(&format!("/org/{org}/media/songs/{slug}/{file}"));
         Ok(el)
     }
 
@@ -176,7 +137,7 @@ mod imp {
                     return;
                 };
                 let Some(track) = list.get(i).cloned() else { return };
-                let Some(hash) = track.reference.clone() else {
+                let Some(file) = track.reference.clone() else {
                     tracing::warn!("stream: `{}` has no reference stem", track.slug);
                     return;
                 };
@@ -186,17 +147,13 @@ mod imp {
                 current.set(Some(i));
                 playing.set(true);
                 position.set(0.0);
-                let element = element.clone();
-                let org = org.clone();
-                spawn(async move {
-                    match element_for(&org, &hash).await {
-                        Ok(el) => {
-                            let _ = el.play();
-                            *element.borrow_mut() = Some(el);
-                        }
-                        Err(e) => tracing::warn!("stream: `{}`: {e}", track.slug),
+                match element_for(&org, &track.slug, &file) {
+                    Ok(el) => {
+                        let _ = el.play();
+                        *element.borrow_mut() = Some(el);
                     }
-                });
+                    Err(e) => tracing::warn!("stream: `{}`: {e}", track.slug),
+                }
             }
         });
 
