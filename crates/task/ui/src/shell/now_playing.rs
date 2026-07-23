@@ -102,72 +102,81 @@ pub fn NowPlayingTab() -> Element {
     };
 
     rsx! {
-        // Compact mini-player tab (Spotify-style): album-art tile, title +
-        // queue subtitle, round transport, and a custom seek bar (thin track
-        // + filled fill + hover thumb, with an invisible range overlay doing
-        // the actual seeking). ~2× the status-bar height, rounded top, poking
-        // up out of the status line.
+        // Wide mini-player tab (Spotify-desktop-bar style), single row:
+        // album art · title/subtitle · a stretchy custom seek bar · time ·
+        // spaced-out SVG transport with a proper play button. ~2× the
+        // status-bar height, rounded top, poking up out of the status line.
         div {
-            class: "flex h-12 w-80 items-center gap-2.5 rounded-t-lg border border-b-0 border-border bg-card/95 px-2.5 shadow-md backdrop-blur",
+            class: "flex h-12 w-[30rem] items-center gap-3 rounded-t-lg border border-b-0 border-border bg-card/95 px-3 shadow-md backdrop-blur",
             title: "{label}",
             // album-art tile (gradient placeholder w/ the title initial)
-            div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/80 to-primary/30 text-xs font-bold text-primary-foreground shadow-sm",
+            div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/80 to-primary/30 text-sm font-bold text-primary-foreground shadow-sm",
                 "{title.chars().next().unwrap_or('♪')}"
             }
-            // title + subtitle + seek bar stacked
-            div { class: "flex min-w-0 flex-1 flex-col justify-center gap-1",
-                div { class: "flex items-baseline gap-2",
-                    span { class: "min-w-0 flex-1 truncate text-xs font-semibold leading-none text-foreground", "{title}" }
-                    span { class: "shrink-0 text-[9px] tabular-nums text-muted-foreground", "{fmt_mmss(pos)} / {fmt_mmss(dur)}" }
+            // title + subtitle
+            div { class: "w-36 shrink-0 leading-tight",
+                div { class: "truncate text-xs font-semibold text-foreground", "{title}" }
+                div { class: "truncate text-[10px] text-muted-foreground", "{label}" }
+            }
+            // stretchy custom seek bar (fills the extra width)
+            div { class: "group/seek relative flex h-2.5 min-w-0 flex-1 items-center",
+                div { class: "h-1 w-full overflow-hidden rounded-full bg-muted",
+                    div { class: "h-full rounded-full bg-primary", style: "width: {frac * 100.0}%" }
                 }
-                div { class: "flex items-center gap-2",
-                    span { class: "min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground", "{label}" }
+                div {
+                    class: "pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow transition-opacity group-hover/seek:opacity-100",
+                    style: "left: {frac * 100.0}%",
                 }
-                // custom seek bar
-                div { class: "group/seek relative flex h-2.5 w-full items-center",
-                    div { class: "h-1 w-full overflow-hidden rounded-full bg-muted",
-                        div { class: "h-full rounded-full bg-primary", style: "width: {frac * 100.0}%" }
-                    }
-                    div {
-                        class: "pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow transition-opacity group-hover/seek:opacity-100",
-                        style: "left: {frac * 100.0}%",
-                    }
-                    // invisible native range on top → robust click + drag seek
-                    input {
-                        r#type: "range",
-                        min: "0",
-                        max: "1000",
-                        value: "{(frac * 1000.0) as i64}",
-                        class: "absolute inset-0 h-full w-full cursor-pointer opacity-0",
-                        oninput: move |e| {
-                            if let Ok(v) = e.value().parse::<f64>() {
-                                send(NpCmd::Seek(v / 1000.0));
-                            }
-                        },
-                    }
+                input {
+                    r#type: "range",
+                    min: "0",
+                    max: "1000",
+                    value: "{(frac * 1000.0) as i64}",
+                    class: "absolute inset-0 h-full w-full cursor-pointer opacity-0",
+                    oninput: move |e| {
+                        if let Ok(v) = e.value().parse::<f64>() {
+                            send(NpCmd::Seek(v / 1000.0));
+                        }
+                    },
                 }
             }
-            // transport
-            div { class: "flex shrink-0 items-center gap-1",
+            // time
+            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground",
+                "{fmt_mmss(pos)} / {fmt_mmss(dur)}"
+            }
+            // transport — spaced out; SVG icons; a proper round play button
+            div { class: "flex shrink-0 items-center gap-3",
                 button {
                     r#type: "button",
-                    class: "text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30",
+                    class: "text-muted-foreground hover:text-foreground disabled:opacity-30",
                     disabled: !can_prev,
                     onclick: move |_| send(NpCmd::Prev),
-                    "⏮"
+                    svg { view_box: "0 0 24 24", fill: "currentColor", class: "h-3.5 w-3.5",
+                        path { d: "M7 6h2v12H7zM19 6l-9 6 9 6z" }
+                    }
                 }
                 button {
                     r#type: "button",
-                    class: "flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground shadow-sm hover:opacity-90",
+                    class: "flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow transition-transform hover:scale-105 active:scale-95",
                     onclick: move |_| send(NpCmd::Toggle),
-                    if playing { "⏸" } else { "▶" }
+                    if playing {
+                        svg { view_box: "0 0 24 24", fill: "currentColor", class: "h-4 w-4",
+                            path { d: "M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" }
+                        }
+                    } else {
+                        svg { view_box: "0 0 24 24", fill: "currentColor", class: "h-4 w-4 translate-x-px",
+                            path { d: "M8 5v14l11-7z" }
+                        }
+                    }
                 }
                 button {
                     r#type: "button",
-                    class: "text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-30",
+                    class: "text-muted-foreground hover:text-foreground disabled:opacity-30",
                     disabled: !can_next,
                     onclick: move |_| send(NpCmd::Next),
-                    "⏭"
+                    svg { view_box: "0 0 24 24", fill: "currentColor", class: "h-3.5 w-3.5",
+                        path { d: "M15 6h2v12h-2zM5 6l9 6-9 6z" }
+                    }
                 }
             }
         }
