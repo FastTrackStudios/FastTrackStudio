@@ -1189,6 +1189,46 @@ fn pick_server_orgs(
     Ok(scanned.into_iter().map(|(org, _)| org).collect())
 }
 
+/// Filesystem-first song media: `GET /org/{slug}/media/<path>` serves
+/// `<data_root>/orgs/{slug}/resources/<path>` straight off disk — no
+/// ingest, no content-addressing, drop-a-file-and-it-serves (fits network
+/// storage). `/org/*` is already edge-routed to task-server, so this is
+/// reachable where a bare `/media` (behind the web SPA) is not. Traversal
+/// guarded; content-type by extension.
+async fn per_org_media_handler(
+    State(state): State<AppState>,
+    axum::extract::Path((slug, rel)): axum::extract::Path<(String, String)>,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    if rel.split('/').any(|s| s == ".." || s.is_empty()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let file = state
+        .data_root
+        .org(slug.as_str())
+        .path()
+        .join("resources")
+        .join(&rel);
+    if !file.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match tokio::fs::read(&file).await {
+        Ok(bytes) => {
+            let ct = match file.extension().and_then(|x| x.to_str()) {
+                Some("json") => "application/json",
+                Some("ogg") => "audio/ogg",
+                Some("wav") => "audio/wav",
+                Some("mp3") => "audio/mpeg",
+                Some("webm") => "audio/webm",
+                Some("kf") | Some("txt") | Some("md") => "text/plain; charset=utf-8",
+                _ => "application/octet-stream",
+            };
+            ([(header::CONTENT_TYPE, ct)], bytes).into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 pub fn router(state: AppState) -> Router {
     use attachments::routes::AttachmentRouteState;
     use axum::routing::any;
@@ -1227,6 +1267,7 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(webhooks::forge_webhook_handler),
         )
         .route("/org/{slug}/share/{token}", get(share_landing_handler))
+        .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
         .with_state(state.clone());
 
     // Server-management vox: `OrgManagementService` +
