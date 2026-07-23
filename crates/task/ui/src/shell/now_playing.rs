@@ -102,54 +102,55 @@ pub fn NowPlayingTab() -> Element {
     };
 
     rsx! {
+        // A proper mini-player tab: ~twice the status-bar height (h-12 vs
+        // h-6) so it pokes well up out of the status line, wide, with a
+        // full-width seekable progress bar and transport always visible.
+        // Rounded top, open bottom → reads as a tab embedded in the bar.
         div {
-            // `self-end` + a taller height than the h-6 status bar makes the
-            // tab sit flush at the base and poke up a few px above the status
-            // line (the "embedded tab" look). Rounded top, open bottom.
-            class: "group relative flex h-7 max-w-[13rem] items-center gap-1.5 self-end overflow-hidden rounded-t-md border border-b-0 border-border bg-card px-1.5 shadow-sm transition-[max-width] duration-150 hover:max-w-[26rem]",
+            class: "flex h-12 w-80 flex-col justify-center gap-1 rounded-t-lg border border-b-0 border-border bg-card px-3 py-1.5 shadow-md",
             title: "{label}",
-            button {
-                r#type: "button",
-                class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground hover:opacity-90",
-                onclick: move |_| send(NpCmd::Toggle),
-                if playing { "⏸" } else { "▶" }
-            }
-            span { class: "min-w-0 truncate text-[11px] font-medium text-foreground", "{title}" }
-            // hover-revealed transport
-            div { class: "hidden shrink-0 items-center gap-1.5 group-hover:flex",
+            // row 1: transport · title/queue · time
+            div { class: "flex items-center gap-2",
                 button {
                     r#type: "button",
-                    class: "text-xs text-muted-foreground hover:text-foreground disabled:opacity-30",
+                    class: "shrink-0 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30",
                     disabled: !can_prev,
                     onclick: move |_| send(NpCmd::Prev),
                     "⏮"
                 }
                 button {
                     r#type: "button",
-                    class: "text-xs text-muted-foreground hover:text-foreground disabled:opacity-30",
+                    class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] text-primary-foreground hover:opacity-90",
+                    onclick: move |_| send(NpCmd::Toggle),
+                    if playing { "⏸" } else { "▶" }
+                }
+                button {
+                    r#type: "button",
+                    class: "shrink-0 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30",
                     disabled: !can_next,
                     onclick: move |_| send(NpCmd::Next),
                     "⏭"
                 }
-                input {
-                    r#type: "range",
-                    min: "0",
-                    max: "1000",
-                    value: "{(frac * 1000.0) as i64}",
-                    class: "h-1 w-24 cursor-pointer accent-primary",
-                    oninput: move |e| {
-                        if let Ok(v) = e.value().parse::<f64>() {
-                            send(NpCmd::Seek(v / 1000.0));
-                        }
-                    },
+                div { class: "min-w-0 flex-1 leading-tight",
+                    div { class: "truncate text-xs font-semibold text-foreground", "{title}" }
+                    div { class: "truncate text-[10px] text-muted-foreground", "{label}" }
                 }
                 span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground",
-                    "{fmt_mmss(pos)}/{fmt_mmss(dur)}"
+                    "{fmt_mmss(pos)} / {fmt_mmss(dur)}"
                 }
             }
-            // hairline progress along the bottom edge
-            div { class: "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-muted",
-                div { class: "h-full bg-primary", style: "width: {frac * 100.0}%" }
+            // row 2: full-width seekable progress bar
+            input {
+                r#type: "range",
+                min: "0",
+                max: "1000",
+                value: "{(frac * 1000.0) as i64}",
+                class: "h-1 w-full cursor-pointer accent-primary",
+                oninput: move |e| {
+                    if let Ok(v) = e.value().parse::<f64>() {
+                        send(NpCmd::Seek(v / 1000.0));
+                    }
+                },
             }
         }
     }

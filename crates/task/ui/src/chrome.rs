@@ -257,7 +257,7 @@ pub fn StatusBar() -> Element {
     let info = use_context::<StatusBarInfo>().0;
     let doc = info.read().clone();
     rsx! {
-        div { class: "z-20 hidden h-6 shrink-0 items-center gap-3 border-t border-border bg-card/60 px-3 text-[11px] text-muted-foreground md:flex",
+        div { class: "relative z-20 hidden h-6 shrink-0 items-center gap-3 border-t border-border bg-card/60 px-3 text-[11px] text-muted-foreground md:flex",
             if let Some(d) = doc {
                 if let Some(vim) = d.vim {
                     span { class: "rounded bg-accent px-1.5 font-semibold uppercase tracking-wide text-foreground",
@@ -289,9 +289,13 @@ pub fn StatusBar() -> Element {
                 ViewModeToggle {}
                 crate::presence::ConnectionBadge {}
             }
-            // Now Playing tab — docked in the bottom-right corner, poking up
-            // out of the status line. Renders nothing until something plays.
-            crate::shell::now_playing::NowPlayingTab {}
+            // Now Playing tab — parked ~2/3 into the note view (before the
+            // right sidebar), poking up out of the status line. Absolute so
+            // it doesn't shift the status segments. Renders nothing until
+            // something plays.
+            div { class: "absolute bottom-0 left-2/3 z-30",
+                crate::shell::now_playing::NowPlayingTab {}
+            }
         }
     }
 }
