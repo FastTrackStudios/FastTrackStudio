@@ -676,11 +676,12 @@ pub(crate) mod imp {
 
     // ── the component ───────────────────────────────────────────────────────
 
-    /// The `type: song` player. When the note's frontmatter carries a
-    /// `stems:` block (content-addressed attachments), the stems stream
-    /// from the org's blob store via short-lived signed URLs; otherwise
-    /// `slug` selects the legacy media at `/media/songs/{slug}/…`.
-    /// Rendered above the note editor in the vault.
+    /// The `type: song` player. Filesystem-first: stems play from the
+    /// on-disk manifest at `/org/{org}/media/songs/{slug}/…` (real file
+    /// paths, no blob ingest). If there's no manifest on disk but the note
+    /// carries a frontmatter `stems:` block, it falls back to streaming the
+    /// content-addressed blobs over vox / signed URLs. Rendered above the
+    /// note editor in the vault.
     #[component]
     pub fn SongView(
         slug: String,
@@ -708,17 +709,29 @@ pub(crate) mod imp {
             let title = title_r.clone();
             let front = front_r.clone();
             async move {
-                let (manifest, sources) = if front.stems.is_empty() {
-                    let manifest =
-                        fetch_manifest(&format!("/org/{org}/media/songs/{slug}/manifest.json")).await?;
-                    let sources = manifest
-                        .stems
-                        .iter()
-                        .map(|s| StemSource::Url(format!("/org/{org}/media/songs/{slug}/{}", s.file)))
-                        .collect();
-                    (manifest, sources)
-                } else {
-                    resolve_front(&org, &title, &front).await?
+                // Filesystem-first: the on-disk `/media` manifest is authoritative
+                // for playback (real file paths, no blob ingest). Try it regardless
+                // of whether the note carries frontmatter `stems:` — the latter is
+                // mixer metadata, and its `content_hash` blobs are usually not
+                // ingested (User(NotFound)). Only fall back to the frontmatter
+                // (blob) resolver when there's no manifest on disk (404). Matches
+                // the setlist players (#55, commit 53d980ae1). Refs #56.
+                let manifest_url = format!("/org/{org}/media/songs/{slug}/manifest.json");
+                let (manifest, sources) = match fetch_manifest(&manifest_url).await {
+                    Ok(manifest) => {
+                        let sources = manifest
+                            .stems
+                            .iter()
+                            .map(|s| {
+                                StemSource::Url(format!("/org/{org}/media/songs/{slug}/{}", s.file))
+                            })
+                            .collect();
+                        (manifest, sources)
+                    }
+                    Err(_) if !front.stems.is_empty() => {
+                        resolve_front(&org, &title, &front).await?
+                    }
+                    Err(e) => return Err(e),
                 };
                 let eng = build_engine(&manifest, &sources)?;
                 Ok::<(Manifest, Engine), String>((manifest, eng))
