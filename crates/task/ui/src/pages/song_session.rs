@@ -284,15 +284,65 @@ pub(crate) mod imp {
         serde_json::from_str(&txt).map_err(|e| format!("{url}: bad manifest json: {e}"))
     }
 
-    // ── manifest-optional: derive a song model from the chart + a stem
-    // directory listing (the colocated "drop a folder and it plays" path) ────
+    // ── manifest-optional: derive a song model from the colocated `song`
+    // folder schema — song.md + arrangements/<dir>/arrangement.md (features/
+    // song) — so a folder plays without a hand-authored manifest.json ───────
 
-    /// One entry from the server's `/media` directory listing.
+    /// Fields of `song.md` the player needs (the `song` folder index).
     #[derive(Deserialize)]
-    pub(crate) struct DirEntry {
-        pub(crate) name: String,
+    #[serde(rename_all = "camelCase")]
+    struct SongIndexLite {
         #[serde(default)]
-        pub(crate) dir: bool,
+        title: Option<String>,
+        #[serde(default)]
+        default_arrangement: Option<String>,
+        #[serde(default)]
+        arrangements: Vec<ArrIndexLite>,
+    }
+
+    #[derive(Deserialize)]
+    struct ArrIndexLite {
+        id: String,
+        dir: String,
+    }
+
+    /// Fields of `arrangement.md` the player needs.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ArrangementLite {
+        #[serde(default)]
+        key: Option<String>,
+        #[serde(default)]
+        chart_ref: Option<ChartRefLite>,
+        #[serde(default)]
+        attachment_refs: Vec<AttachmentRefLite>,
+    }
+
+    #[derive(Deserialize)]
+    struct ChartRefLite {
+        #[serde(default)]
+        path: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AttachmentRefLite {
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        kind: Option<String>,
+    }
+
+    /// The YAML body of a `---\n…\n---` frontmatter block.
+    fn frontmatter_yaml(src: &str) -> Option<&str> {
+        let rest = src.strip_prefix("---\n")?;
+        let end = rest.find("\n---")?;
+        Some(&rest[..=end])
+    }
+
+    fn parse_fm<T: serde::de::DeserializeOwned>(src: &str, what: &str) -> Result<T, String> {
+        let body = frontmatter_yaml(src).ok_or_else(|| format!("{what}: no frontmatter"))?;
+        serde_yaml::from_str(body).map_err(|e| format!("{what}: {e}"))
     }
 
     /// Human-facing section name for a laid-out chart section: a quoted label
@@ -337,9 +387,11 @@ pub(crate) mod imp {
     }
 
     /// Infer a stem's display name, mixer group, and default-mute from its
-    /// filename (`NN-slug.ogg` → "Slug"). Guide stems (click/cue/count)
-    /// default muted; the original/reference track is the audible baseline.
-    pub(crate) fn stem_spec_from_file(dir: &str, filename: &str) -> StemSpec {
+    /// in-folder path (`stems/03-original-track.ogg` → "Original Track").
+    /// Guide stems (click/cue/count) default muted; the original/reference
+    /// track is the audible baseline.
+    pub(crate) fn stem_spec_from_path(path: &str) -> StemSpec {
+        let filename = path.rsplit('/').next().unwrap_or(path);
         let stem = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(filename);
         // Drop a leading `NN-` ordering prefix.
         let core = stem
@@ -374,75 +426,86 @@ pub(crate) mod imp {
         StemSpec {
             name: if name.is_empty() { core.to_string() } else { name },
             group: Some(group.to_string()),
-            file: format!("{dir}/{filename}"),
+            file: path.to_string(),
             default_muted: is_guide,
         }
     }
 
-    /// List a `/media` directory — the server returns a JSON array of
-    /// `{name, dir, size}`. Empty on any failure (missing dir, bad json).
-    async fn list_media_dir(url: &str) -> Vec<DirEntry> {
-        match fetch_text(url).await {
-            Ok(txt) => serde_json::from_str::<Vec<DirEntry>>(&txt).unwrap_or_default(),
-            Err(_) => Vec::new(),
-        }
-    }
-
-    /// Build a [`Manifest`] with NO `manifest.json`: derive structure/tempo/key
-    /// from the keyflow chart (`arrangements/original.kf`, or legacy
-    /// `chart.kf`) via [`session::chart_import::chart_to_layout`], and
-    /// enumerate stems by listing the song's `media/proxy/` (or legacy
-    /// `stems/`) directory. The "drop a song folder and it plays" path — no
-    /// hand-authored manifest required (issue #59 / the colocated layout).
+    /// Build a [`Manifest`] with NO `manifest.json`, from the colocated
+    /// `song` folder schema (issues #57/#59): read `song.md` → the default
+    /// arrangement's `arrangement.md` → its `chartRef` (chart → sections via
+    /// [`session::chart_import::chart_to_layout`]) and `attachmentRefs` (the
+    /// audio stems). The "drop a song folder and it plays" path.
     pub(crate) async fn fetch_kf_manifest(org: &str, slug: &str) -> Result<Manifest, String> {
         let base = format!("/org/{org}/media/songs/{slug}");
-        // Chart: prefer the colocated arrangements path, fall back to legacy.
-        let chart_text = match fetch_text(&format!("{base}/arrangements/original.kf")).await {
-            Ok(t) => t,
-            Err(_) => fetch_text(&format!("{base}/chart.kf"))
-                .await
-                .map_err(|e| format!("no chart for `{slug}`: {e}"))?,
-        };
-        let layout = session::chart_import::chart_to_layout(&chart_text)
-            .map_err(|e| format!("chart `{slug}`: {e}"))?;
-        let sections: Vec<Section> = layout
-            .sections
+        // song.md → the default arrangement's folder.
+        let song_md = fetch_text(&format!("{base}/song.md"))
+            .await
+            .map_err(|e| format!("no song.md for `{slug}`: {e}"))?;
+        let idx: SongIndexLite = parse_fm(&song_md, "song.md")?;
+        let dir = idx
+            .arrangements
             .iter()
-            .filter(|s| s.kind != session::keyflow_actions::SectionKind::CountIn)
-            .map(|s| Section {
-                name: laid_section_name(s),
-                start_sec: s.start_seconds,
-                end_sec: s.end_seconds,
-            })
-            .collect();
-        // Stems: prefer the colocated proxy dir, fall back to legacy `stems/`.
-        let (stem_dir, entries) = {
-            let proxy = list_media_dir(&format!("{base}/media/proxy")).await;
-            if proxy.iter().any(|e| !e.dir && is_audio_file(&e.name)) {
-                ("media/proxy", proxy)
-            } else {
-                ("stems", list_media_dir(&format!("{base}/stems")).await)
-            }
-        };
-        let mut stems: Vec<StemSpec> = entries
+            .find(|a| Some(&a.id) == idx.default_arrangement.as_ref())
+            .or_else(|| idx.arrangements.first())
+            .map(|a| a.dir.clone())
+            .ok_or_else(|| format!("`{slug}`: no arrangements"))?;
+        // arrangement.md → chartRef + attachmentRefs.
+        let arr_md = fetch_text(&format!("{base}/arrangements/{dir}/arrangement.md"))
+            .await
+            .map_err(|e| format!("`{slug}` arrangement `{dir}`: {e}"))?;
+        let arr: ArrangementLite = parse_fm(&arr_md, "arrangement.md")?;
+        // Stems = the audio attachment refs (paths relative to the song root).
+        let mut stems: Vec<StemSpec> = arr
+            .attachment_refs
             .iter()
-            .filter(|e| !e.dir && is_audio_file(&e.name))
-            .map(|e| stem_spec_from_file(stem_dir, &e.name))
+            .filter_map(|a| a.path.as_deref())
+            .filter(|p| is_audio_file(p))
+            .map(stem_spec_from_path)
             .collect();
         stems.sort_by(|a, b| a.file.cmp(&b.file));
         if stems.is_empty() {
-            return Err(format!("no stems for `{slug}`"));
+            return Err(format!("`{slug}`: no audio stems"));
         }
-        let duration_sec = layout
-            .song_end_seconds
-            .max(sections.last().map(|s| s.end_sec).unwrap_or(0.0));
+        // Structure / tempo from the referenced chart (optional — a song can
+        // play stems with no chart, just without a section timeline).
+        let chart_path = arr.chart_ref.as_ref().and_then(|c| c.path.clone());
+        let mut sections = Vec::new();
+        let mut bpm = None;
+        let mut time_signature = None;
+        let mut chart_key = None;
+        let mut chart_title = None;
+        let mut chart_end = 0.0f64;
+        if let Some(cp) = chart_path {
+            if let Ok(chart_text) = fetch_text(&format!("{base}/{cp}")).await {
+                if let Ok(layout) = session::chart_import::chart_to_layout(&chart_text) {
+                    sections = layout
+                        .sections
+                        .iter()
+                        .filter(|s| s.kind != session::keyflow_actions::SectionKind::CountIn)
+                        .map(|s| Section {
+                            name: laid_section_name(s),
+                            start_sec: s.start_seconds,
+                            end_sec: s.end_seconds,
+                        })
+                        .collect();
+                    bpm = Some(layout.tempo_bpm);
+                    time_signature =
+                        Some(format!("{}/{}", layout.time_sig_num, layout.time_sig_den));
+                    chart_key = layout.key;
+                    chart_title = layout.title;
+                    chart_end = layout.song_end_seconds;
+                }
+            }
+        }
+        let duration_sec = chart_end.max(sections.last().map(|s| s.end_sec).unwrap_or(0.0));
         Ok(Manifest {
             slug: Some(slug.to_owned()),
-            title: layout.title,
-            artist: layout.artist,
-            key: layout.key,
-            bpm: Some(layout.tempo_bpm),
-            time_signature: Some(format!("{}/{}", layout.time_sig_num, layout.time_sig_den)),
+            title: idx.title.or(chart_title),
+            artist: None,
+            key: arr.key.or(chart_key),
+            bpm,
+            time_signature,
             duration_sec,
             sections,
             stems,

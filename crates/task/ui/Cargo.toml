@@ -169,6 +169,9 @@ fake.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+# Parses the song.md / arrangement.md frontmatter (the `song` folder schema)
+# when playing a manifest-less colocated song.
+serde_yaml.workspace = true
 
 # Browser glue. Compiles cleanly on native too; the source uses
 # them only inside `cfg(target_arch = "wasm32")` blocks.
