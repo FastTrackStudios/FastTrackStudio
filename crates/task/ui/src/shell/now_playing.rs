@@ -1,28 +1,159 @@
 //! The global **Now Playing** mini-player.
 //!
-//! Mounted once in [`crate::shell::app_shell::AppShell`], OUTSIDE the
-//! route `Outlet`, so its single `<audio>` element — and therefore the
-//! music — survives navigation. You can open the setlist, hit play, then
-//! wander off into other notes and keep hearing it; skip-next stays
-//! setlist-aware because the player owns a copy of the queue captured at
-//! play time (see [`crate::chrome::NowPlayingRequest`]), not a live
-//! reference to whichever note is on screen.
+//! Split in two so the music survives navigation while the UI lives in the
+//! status bar:
+//!
+//! - [`GlobalNowPlayer`] is the headless engine — mounted once in
+//!   [`crate::shell::app_shell::AppShell`], OUTSIDE the route `Outlet`, so
+//!   its single `<audio>` element keeps playing across route changes. It
+//!   owns the queue (captured at play time, see
+//!   [`crate::chrome::NowPlayingRequest`]), mirrors its state into
+//!   [`NowPlayingCtl`], and executes transport commands the UI posts back.
+//!   It renders nothing.
+//! - [`NowPlayingTab`] is the UI — a small rounded tab docked in the
+//!   bottom-right of the IDE status bar (poking up a few px above the status
+//!   line), expanding on hover to reveal prev/next + a scrubber. It reads
+//!   [`NowPlayingCtl`] and posts transport commands.
 //!
 //! It plays each song's REFERENCE stem (one `<audio>` at a time, streamed
-//! off disk from `/org/{org}/media/songs/{slug}/{file}`) — the same
-//! filesystem-first source as the inline setlist stream player, whose
-//! `Track`/`load_tracks`/`element_for` helpers it reuses. The multitrack
-//! rehearsal rig (fullscreen `SetlistPlayer`) and the per-song page
-//! (`SongView`) remain separate, richer experiences.
+//! off disk from `/org/{org}/media/songs/{slug}/{file}`), reusing the
+//! setlist stream player's `Track`/`load_tracks`/`element_for`. The
+//! multitrack rehearsal rig and the per-song page stay separate.
 //!
-//! The queue loads through `use_resource` (which owns its async task's
-//! lifecycle) rather than a `spawn` inside an effect — an effect re-run
-//! would cancel an in-flight `spawn`, so rapid play clicks used to drop
-//! the load and never render the bar. A pending start index waits for the
-//! resource to resolve and then plays.
-//!
-//! Future: a `video:` queue would swap the `<audio>` for a `<video>` and
-//! surface the frame here — the transport + queue plumbing is unchanged.
+//! Future: a `video:` queue swaps the `<audio>` for a `<video>`.
+
+use dioxus::prelude::*;
+
+/// A transport command the [`NowPlayingTab`] UI posts to the headless
+/// [`GlobalNowPlayer`] engine. `Seek` carries a 0..1 fraction of duration.
+#[derive(Clone, Copy, PartialEq)]
+pub enum NpCmd {
+    Toggle,
+    Next,
+    Prev,
+    Seek(f64),
+}
+
+/// Shared control surface between the engine and the status-bar UI. The
+/// engine WRITES the view signals and READS `cmd`; the tab READS the view
+/// and WRITES `cmd`. Provided once at the app shell so both (siblings) see
+/// the same instance.
+#[derive(Clone, Copy)]
+pub struct NowPlayingCtl {
+    /// Current track title. `None` ⇒ nothing playing ⇒ the tab hides.
+    pub track_title: Signal<Option<String>>,
+    /// Queue label, e.g. `"Sunday Worship · 1/6"`.
+    pub queue_label: Signal<String>,
+    pub playing: Signal<bool>,
+    /// Progress 0..1.
+    pub frac: Signal<f64>,
+    pub pos: Signal<f64>,
+    pub dur: Signal<f64>,
+    pub can_prev: Signal<bool>,
+    pub can_next: Signal<bool>,
+    /// Command bus: `(generation, cmd)` — a bumped generation makes repeats
+    /// observable.
+    pub cmd: Signal<(u64, NpCmd)>,
+}
+
+/// Install [`NowPlayingCtl`]. Call once in the app shell, above both the
+/// engine and the status bar.
+pub fn provide_now_playing_ctl() {
+    use_context_provider(|| NowPlayingCtl {
+        track_title: Signal::new(None),
+        queue_label: Signal::new(String::new()),
+        playing: Signal::new(false),
+        frac: Signal::new(0.0),
+        pos: Signal::new(0.0),
+        dur: Signal::new(0.0),
+        can_prev: Signal::new(false),
+        can_next: Signal::new(false),
+        cmd: Signal::new((0, NpCmd::Toggle)),
+    });
+}
+
+fn fmt_mmss(s: f64) -> String {
+    let s = s.max(0.0) as u64;
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// The bottom-right status-bar tab. Renders nothing until something plays.
+/// Collapsed it's just play/pause + title + a hairline progress bar; on
+/// hover it expands to prev/next + a scrubber + times.
+#[component]
+pub fn NowPlayingTab() -> Element {
+    let ctl = use_context::<NowPlayingCtl>();
+    let title = ctl.track_title.read().clone();
+    let Some(title) = title else {
+        return rsx! {};
+    };
+    let label = ctl.queue_label.read().clone();
+    let playing = (ctl.playing)();
+    let frac = (ctl.frac)();
+    let pos = (ctl.pos)();
+    let dur = (ctl.dur)();
+    let can_prev = (ctl.can_prev)();
+    let can_next = (ctl.can_next)();
+    let cmd = ctl.cmd;
+    let send = move |c: NpCmd| {
+        let mut cmd = cmd; // local Copy of the signal handle → `send` stays `Fn`
+        let g = cmd.peek().0 + 1;
+        cmd.set((g, c));
+    };
+
+    rsx! {
+        div {
+            // `self-end` + a taller height than the h-6 status bar makes the
+            // tab sit flush at the base and poke up a few px above the status
+            // line (the "embedded tab" look). Rounded top, open bottom.
+            class: "group relative flex h-7 max-w-[13rem] items-center gap-1.5 self-end overflow-hidden rounded-t-md border border-b-0 border-border bg-card px-1.5 shadow-sm transition-[max-width] duration-150 hover:max-w-[26rem]",
+            title: "{label}",
+            button {
+                r#type: "button",
+                class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground hover:opacity-90",
+                onclick: move |_| send(NpCmd::Toggle),
+                if playing { "⏸" } else { "▶" }
+            }
+            span { class: "min-w-0 truncate text-[11px] font-medium text-foreground", "{title}" }
+            // hover-revealed transport
+            div { class: "hidden shrink-0 items-center gap-1.5 group-hover:flex",
+                button {
+                    r#type: "button",
+                    class: "text-xs text-muted-foreground hover:text-foreground disabled:opacity-30",
+                    disabled: !can_prev,
+                    onclick: move |_| send(NpCmd::Prev),
+                    "⏮"
+                }
+                button {
+                    r#type: "button",
+                    class: "text-xs text-muted-foreground hover:text-foreground disabled:opacity-30",
+                    disabled: !can_next,
+                    onclick: move |_| send(NpCmd::Next),
+                    "⏭"
+                }
+                input {
+                    r#type: "range",
+                    min: "0",
+                    max: "1000",
+                    value: "{(frac * 1000.0) as i64}",
+                    class: "h-1 w-24 cursor-pointer accent-primary",
+                    oninput: move |e| {
+                        if let Ok(v) = e.value().parse::<f64>() {
+                            send(NpCmd::Seek(v / 1000.0));
+                        }
+                    },
+                }
+                span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground",
+                    "{fmt_mmss(pos)}/{fmt_mmss(dur)}"
+                }
+            }
+            // hairline progress along the bottom edge
+            div { class: "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-muted",
+                div { class: "h-full bg-primary", style: "width: {frac * 100.0}%" }
+            }
+        }
+    }
+}
 
 #[cfg(target_arch = "wasm32")]
 mod imp {
@@ -32,28 +163,25 @@ mod imp {
     use dioxus::prelude::*;
     use web_sys::HtmlAudioElement;
 
+    use super::{NowPlayingCtl, NpCmd};
     use crate::chrome::NowPlaying;
-    use crate::pages::setlist_stream::imp::{Track, element_for, fmt_time, load_tracks};
+    use crate::pages::setlist_stream::imp::{Track, element_for, load_tracks};
 
+    /// Headless engine: owns the audio + queue, mirrors state to
+    /// [`NowPlayingCtl`], and runs transport commands. Renders nothing (the
+    /// UI is [`super::NowPlayingTab`], in the status bar).
     #[component]
     pub fn GlobalNowPlayer() -> Element {
-        // The live element (one song at a time). Rc'd so callbacks share it;
-        // held in a hook so it lives for the app's lifetime → playback
-        // persists across route changes.
         let element: Rc<RefCell<Option<HtmlAudioElement>>> =
             use_hook(|| Rc::new(RefCell::new(None)));
-        // (org, songs) of the queue to load; drives the tracks resource.
         let mut queue_key = use_signal(|| (String::new(), Vec::<String>::new()));
         let mut title = use_signal(String::new);
         let mut current = use_signal(|| None::<usize>);
         let mut playing = use_signal(|| false);
         let mut position = use_signal(|| 0.0f64);
         let mut duration = use_signal(|| 0.0f64);
-        // A start index waiting for the queue's tracks to finish loading.
         let mut pending_start = use_signal(|| None::<usize>);
 
-        // Load the queue's tracks whenever the queue changes. use_resource
-        // owns the task, so an effect re-run can't cancel it mid-flight.
         let tracks = use_resource(move || {
             let (org, songs) = queue_key();
             async move {
@@ -65,8 +193,6 @@ mod imp {
             }
         });
 
-        // Select + play track `i` from the loaded queue. Replaces the live
-        // element (the old one pauses as it drops out of the slot).
         let select = use_callback({
             let element = element.clone();
             move |i: usize| {
@@ -133,7 +259,7 @@ mod imp {
             }
         });
 
-        // When the queue's tracks finish loading and a start is pending, play it.
+        // Play a pending start once the queue's tracks load.
         use_effect(move || {
             let ready = tracks.read().as_ref().map(|l| !l.is_empty()).unwrap_or(false);
             let pending = *pending_start.peek();
@@ -145,8 +271,7 @@ mod imp {
             }
         });
 
-        // Answer global play requests. The player captures the queue here,
-        // so it's independent of whichever note fired the request.
+        // Answer global play requests.
         {
             let req = use_context::<NowPlaying>().0;
             let mut last_gen = use_signal(|| 0u64);
@@ -163,23 +288,83 @@ mod imp {
                 if same {
                     let ready = tracks.peek().as_ref().map(|l| !l.is_empty()).unwrap_or(false);
                     if ready {
-                        // Loaded: header ▶ toggles, a strip click jumps.
                         if r.toggle {
                             toggle.call(());
                         } else {
                             select.call(r.start);
                         }
                     } else {
-                        // Still loading the same queue: play once it lands.
                         pending_start.set(Some(r.start));
                     }
                 } else {
-                    // New queue: swap it in and play `start` once loaded.
                     title.set(r.title.clone());
                     current.set(None);
                     pending_start.set(Some(r.start));
                     queue_key.set((r.org.clone(), r.songs.clone()));
                 }
+            });
+        }
+
+        // Run transport commands posted by the status-bar tab.
+        {
+            let ctl = use_context::<NowPlayingCtl>();
+            let cmd = ctl.cmd;
+            let mut last = use_signal(|| 0u64);
+            use_effect(move || {
+                let (g, c) = cmd();
+                if g == 0 || g == *last.peek() {
+                    return;
+                }
+                last.set(g);
+                match c {
+                    NpCmd::Toggle => toggle.call(()),
+                    NpCmd::Next => {
+                        let i = (*current.peek()).map(|i| i + 1).unwrap_or(0);
+                        select.call(i);
+                    }
+                    NpCmd::Prev => {
+                        let i = (*current.peek()).map(|i| i.saturating_sub(1)).unwrap_or(0);
+                        select.call(i);
+                    }
+                    NpCmd::Seek(f) => seek.call(f),
+                }
+            });
+        }
+
+        // Mirror engine state → the shared control surface for the UI.
+        {
+            let ctl = use_context::<NowPlayingCtl>();
+            use_effect(move || {
+                let cur = current();
+                let list = tracks.read();
+                let len = queue_key.read().1.len();
+                let qtitle = title();
+                match cur.and_then(|i| list.as_ref().and_then(|l| l.get(i)).map(|t| (i, t.clone()))) {
+                    Some((i, t)) => {
+                        let label = if len > 1 {
+                            format!("{qtitle} · {}/{}", i + 1, len)
+                        } else {
+                            qtitle
+                        };
+                        ctl.track_title.clone().set(Some(t.title.clone()));
+                        ctl.queue_label.clone().set(label);
+                        ctl.can_prev.clone().set(i > 0);
+                        ctl.can_next.clone().set(i + 1 < len);
+                    }
+                    None => {
+                        ctl.track_title.clone().set(None);
+                    }
+                }
+            });
+            use_effect(move || {
+                ctl.playing.clone().set(playing());
+            });
+            use_effect(move || {
+                let d = duration();
+                let p = position();
+                ctl.pos.clone().set(p);
+                ctl.dur.clone().set(d);
+                ctl.frac.clone().set(if d > 0.0 { (p / d).clamp(0.0, 1.0) } else { 0.0 });
             });
         }
 
@@ -216,85 +401,8 @@ mod imp {
             });
         }
 
-        // Nothing queued yet → no bar.
-        let Some(idx) = current() else {
-            return rsx! {};
-        };
-        let track = {
-            let list = tracks.read();
-            match list.as_ref().and_then(|l| l.get(idx).cloned()) {
-                Some(t) => t,
-                None => return rsx! {},
-            }
-        };
-        let queue_len = queue_key.peek().1.len();
-        let dur = duration();
-        let pos = position();
-        let frac = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) } else { 0.0 };
-        let is_playing = playing();
-        let qtitle = title();
-
-        rsx! {
-            div {
-                class: "fixed inset-x-0 bottom-14 z-40 border-t border-border bg-card/95 backdrop-blur md:bottom-6",
-                div { class: "mx-auto flex w-full max-w-3xl items-center gap-3 px-3 py-2",
-                    // artwork
-                    div { class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/70 to-primary/20 text-lg",
-                        "🎵"
-                    }
-                    // titles
-                    div { class: "min-w-0 flex-1",
-                        div { class: "truncate text-sm font-semibold text-foreground", "{track.title}" }
-                        div { class: "flex items-center gap-1 truncate text-[11px] uppercase tracking-wider text-muted-foreground",
-                            span { class: "truncate", "{qtitle}" }
-                            if queue_len > 1 {
-                                span { class: "shrink-0", "· {idx + 1}/{queue_len}" }
-                            }
-                        }
-                    }
-                    // transport: prev · play/pause · next
-                    button {
-                        r#type: "button",
-                        class: "shrink-0 rounded px-1 text-base text-muted-foreground hover:text-foreground disabled:opacity-30",
-                        disabled: idx == 0,
-                        onclick: move |_| select.call(idx.saturating_sub(1)),
-                        "⏮"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90",
-                        onclick: move |_| toggle.call(()),
-                        if is_playing { "⏸" } else { "▶" }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "shrink-0 rounded px-1 text-base text-muted-foreground hover:text-foreground disabled:opacity-30",
-                        disabled: idx + 1 >= queue_len,
-                        onclick: move |_| select.call(idx + 1),
-                        "⏭"
-                    }
-                    // time + scrub
-                    span { class: "hidden w-10 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground sm:inline",
-                        "{fmt_time(pos)}"
-                    }
-                    input {
-                        r#type: "range",
-                        min: "0",
-                        max: "1000",
-                        value: "{(frac * 1000.0) as i64}",
-                        class: "hidden h-1.5 w-40 shrink-0 cursor-pointer accent-primary sm:block",
-                        oninput: move |e| {
-                            if let Ok(v) = e.value().parse::<f64>() {
-                                seek.call(v / 1000.0);
-                            }
-                        },
-                    }
-                    span { class: "hidden w-10 shrink-0 text-[11px] tabular-nums text-muted-foreground sm:inline",
-                        "{fmt_time(dur)}"
-                    }
-                }
-            }
-        }
+        // Headless — the UI is the status-bar tab.
+        rsx! {}
     }
 }
 
@@ -305,7 +413,7 @@ pub use imp::GlobalNowPlayer;
 mod stub {
     use dioxus::prelude::*;
 
-    /// Server/native build: the player runs in the browser only.
+    /// Server/native build: the engine runs in the browser only.
     #[component]
     pub fn GlobalNowPlayer() -> Element {
         rsx! {}

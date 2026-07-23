@@ -289,6 +289,9 @@ pub fn StatusBar() -> Element {
                 ViewModeToggle {}
                 crate::presence::ConnectionBadge {}
             }
+            // Now Playing tab — docked in the bottom-right corner, poking up
+            // out of the status line. Renders nothing until something plays.
+            crate::shell::now_playing::NowPlayingTab {}
         }
     }
 }
