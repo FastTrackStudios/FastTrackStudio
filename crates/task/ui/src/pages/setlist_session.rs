@@ -251,6 +251,12 @@ mod imp {
         // below `set_mutes`), so mute/solo/fader are audible. Reset from the
         // current song's manifest on song switch.
         let stem_ui = use_signal(Vec::<media::StemUi>::new);
+        // The org whose vault this setlist lives in — media serves at
+        // /org/{slug}/media/... . Follows the org switcher.
+        let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+        let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+        let media_org =
+            use_memo(move || crate::orgs::active_slug(&selection.read(), &org_list.read()));
 
         // Fetch EVERY song's manifest + chart.kf once. Keyed on the slug list
         // via `use_reactive!` so it runs exactly once per setlist (charts are
@@ -259,14 +265,16 @@ mod imp {
         // strips); the setlist STRUCTURE / charts / playhead are driven by the
         // in-process engine (see the `build_for_setlist` effect below).
         let songs_r = songs.clone();
-        let loaded = use_resource(use_reactive!(|songs_r| {
+        let org_v = media_org();
+        let loaded = use_resource(use_reactive!(|songs_r, org_v| {
             let songs = songs_r.clone();
+            let org = org_v.clone();
             async move {
                 let mut out: Vec<LoadedSong> = Vec::with_capacity(songs.len());
                 for slug in &songs {
                     let manifest =
-                        media::fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
-                    let chart = media::fetch_text(&format!("/media/songs/{slug}/chart.kf"))
+                        media::fetch_manifest(&format!("/org/{org}/media/songs/{slug}/manifest.json")).await?;
+                    let chart = media::fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf"))
                         .await
                         .ok()
                         .filter(|t| !t.is_empty());
@@ -288,8 +296,9 @@ mod imp {
         // local `SETLIST_STRUCTURE.write()` hydration anymore.
         {
             let songs = songs.clone();
-            use_effect(use_reactive!(|songs| {
-                crate::session_engine::build_for_setlist(songs.clone());
+            let org_v = media_org();
+            use_effect(use_reactive!(|songs, org_v| {
+                crate::session_engine::build_for_setlist(org_v.clone(), songs.clone());
             }));
         }
 
@@ -396,7 +405,7 @@ mod imp {
                         .iter()
                         .map(|(s, m, _)| (s.clone(), m.clone()))
                         .collect();
-                    match SetlistAudio::build(&songs) {
+                    match SetlistAudio::build(&media_org(), &songs) {
                         Ok(a) => {
                             audio.set(Some(Rc::new(a)));
                             built_key.set(key);

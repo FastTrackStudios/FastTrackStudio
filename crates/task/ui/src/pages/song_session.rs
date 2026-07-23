@@ -710,11 +710,11 @@ pub(crate) mod imp {
             async move {
                 let (manifest, sources) = if front.stems.is_empty() {
                     let manifest =
-                        fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
+                        fetch_manifest(&format!("/org/{org}/media/songs/{slug}/manifest.json")).await?;
                     let sources = manifest
                         .stems
                         .iter()
-                        .map(|s| StemSource::Url(format!("/media/songs/{slug}/{}", s.file)))
+                        .map(|s| StemSource::Url(format!("/org/{org}/media/songs/{slug}/{}", s.file)))
                         .collect();
                     (manifest, sources)
                 } else {
@@ -728,11 +728,13 @@ pub(crate) mod imp {
         // Chart source (optional). Fetched async; populates SONG_CHARTS +
         // SETLIST_STRUCTURE once present (see effect below).
         let slug_c = slug.clone();
+        let org_c = org.clone();
         let mut chart_src = use_signal(String::new);
         use_future(move || {
             let slug = slug_c.clone();
+            let org = org_c.clone();
             async move {
-                if let Ok(txt) = fetch_text(&format!("/media/songs/{slug}/chart.kf")).await {
+                if let Ok(txt) = fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf")).await {
                     chart_src.set(txt);
                 }
             }
