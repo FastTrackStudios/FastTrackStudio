@@ -47,11 +47,13 @@ pub(crate) mod imp {
         let mut out = Vec::with_capacity(slugs.len());
         for slug in slugs {
             let url = format!("/org/{org}/media/songs/{slug}/manifest.json");
-            // manifest.json is authoritative; a manifest-less colocated song
-            // derives its model from the chart + stem listing (#59).
-            let resolved = match crate::pages::song_session::imp::fetch_manifest(&url).await {
+            // Colocated `song` folder (song.md) is authoritative; the legacy
+            // manifest.json is only a fallback for songs not yet migrated, so
+            // migrated songs can drop it (#57 manifest retirement).
+            let resolved = match crate::pages::song_session::imp::fetch_kf_manifest(org, slug).await
+            {
                 Ok(m) => Ok(m),
-                Err(_) => crate::pages::song_session::imp::fetch_kf_manifest(org, slug).await,
+                Err(_) => crate::pages::song_session::imp::fetch_manifest(&url).await,
             };
             match resolved {
                 Ok(m) => {

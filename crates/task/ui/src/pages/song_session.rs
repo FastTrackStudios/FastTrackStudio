@@ -412,14 +412,32 @@ pub(crate) mod imp {
             .collect::<Vec<_>>()
             .join(" ");
         let lower = core.to_lowercase();
-        let is_guide = ["click", "cue", "count", "guide"]
-            .iter()
-            .any(|k| lower.contains(k));
-        let is_ref = ["original", "reference"].iter().any(|k| lower.contains(k));
+        let words: Vec<&str> = core.split(['-', '_']).filter(|w| !w.is_empty()).collect();
+        let has = |kw: &[&str]| kw.iter().any(|k| lower.contains(k));
+        let has_word = |w: &[&str]| words.iter().any(|x| w.contains(&x.to_lowercase().as_str()));
+        let is_guide = has(&["click", "cue", "count", "guide"]);
+        // Group inference from the filename convention — reproduces the mixer
+        // groups the legacy manifest authored (Guide / Reference / Bass /
+        // Guitars / Keys / Drums / Vocals / Tracks). Order matters: `bass`
+        // before `guitar`/`synth` so `synth-bass` lands in Bass.
         let group = if is_guide {
             "Guide"
-        } else if is_ref {
+        } else if has(&["original", "reference"]) {
             "Reference"
+        } else if has(&["bass"]) {
+            "Bass"
+        } else if has(&["guitar", "gtr"]) || has_word(&["ag", "eg"]) {
+            "Guitars"
+        } else if has(&["organ", "piano", "keys", "rhodes", "wurli", "synth", "pad"])
+            || has_word(&["key"])
+        {
+            "Keys"
+        } else if has(&["drum", "perc", "kick", "snare", "hat", "cymbal", "tom", "shaker"]) {
+            "Drums"
+        } else if has(&["vocal", "vox", "bgv", "choir", "harm"]) || has_word(&["lead", "bv"]) {
+            "Vocals"
+        } else if has(&["loop", "track", "stem", "arp", "fx"]) {
+            "Tracks"
         } else {
             "Stems"
         };
@@ -904,12 +922,12 @@ pub(crate) mod imp {
 
     // ── the component ───────────────────────────────────────────────────────
 
-    /// The `type: song` player. Filesystem-first: stems play from the
-    /// on-disk manifest at `/org/{org}/media/songs/{slug}/…` (real file
-    /// paths, no blob ingest). If there's no manifest on disk but the note
-    /// carries a frontmatter `stems:` block, it falls back to streaming the
-    /// content-addressed blobs over vox / signed URLs. Rendered above the
-    /// note editor in the vault.
+    /// The `type: song` player. Colocated-schema-first: the song model is
+    /// derived from the on-disk `song` folder (`song.md` → `arrangement.md`
+    /// → chart + stem attachments) at `/org/{org}/media/songs/{slug}/…`.
+    /// Legacy `manifest.json` is a fallback for un-migrated songs; a
+    /// frontmatter `stems:` block (content-addressed blobs) is the last
+    /// resort. Rendered above the note editor in the vault.
     #[component]
     pub fn SongView(
         slug: String,
@@ -937,13 +955,12 @@ pub(crate) mod imp {
             let title = title_r.clone();
             let front = front_r.clone();
             async move {
-                // Filesystem-first: the on-disk `/media` manifest is authoritative
-                // for playback (real file paths, no blob ingest). Try it regardless
-                // of whether the note carries frontmatter `stems:` — the latter is
-                // mixer metadata, and its `content_hash` blobs are usually not
-                // ingested (User(NotFound)). Only fall back to the frontmatter
-                // (blob) resolver when there's no manifest on disk (404). Matches
-                // the setlist players (#55, commit 53d980ae1). Refs #56.
+                // Colocated-schema-first: derive the song model from the
+                // `song` folder (song.md → arrangement.md → chart + stems).
+                // The legacy `manifest.json` is now only a fallback for songs
+                // not yet migrated, so migrated songs can drop it entirely
+                // (#57 manifest retirement). A frontmatter `stems:` block (blob
+                // resolver) is the last resort. Refs #56/#57/#59.
                 let manifest_url = format!("/org/{org}/media/songs/{slug}/manifest.json");
                 let url_sources = |m: &Manifest| -> Vec<StemSource> {
                     m.stems
@@ -953,16 +970,14 @@ pub(crate) mod imp {
                         })
                         .collect()
                 };
-                let (manifest, sources) = match fetch_manifest(&manifest_url).await {
+                let (manifest, sources) = match fetch_kf_manifest(&org, &slug).await {
                     Ok(manifest) => {
                         let sources = url_sources(&manifest);
                         (manifest, sources)
                     }
-                    // No manifest.json → derive the song model from the keyflow
-                    // chart + a stem directory listing (the colocated
-                    // "drop a folder and it plays" path, #59). Only if that also
-                    // fails do we fall back to the frontmatter blob resolver.
-                    Err(_) => match fetch_kf_manifest(&org, &slug).await {
+                    // No song.md → legacy manifest.json, then the frontmatter
+                    // blob resolver.
+                    Err(_) => match fetch_manifest(&manifest_url).await {
                         Ok(manifest) => {
                             let sources = url_sources(&manifest);
                             (manifest, sources)
@@ -970,7 +985,7 @@ pub(crate) mod imp {
                         Err(_) if !front.stems.is_empty() => {
                             resolve_front(&org, &title, &front).await?
                         }
-                        Err(kf_err) => return Err(kf_err),
+                        Err(e) => return Err(e),
                     },
                 };
                 let eng = build_engine(&manifest, &sources)?;
