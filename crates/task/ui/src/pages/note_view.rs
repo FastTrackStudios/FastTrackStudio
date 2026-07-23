@@ -359,6 +359,18 @@ pub(crate) fn NoteView(
             });
             return;
         }
+        if let Some(name) = href.strip_prefix("song-more:") {
+            // "…" more-actions on a song row → open the song note (its full
+            // action surface). A dedicated inline menu is a follow-up.
+            let page = name.split(['#', '|']).next().unwrap_or(name).trim();
+            let path = lookup_for_links
+                .peek()
+                .as_ref()
+                .and_then(|ix| ix.meta(page).map(|m| m.path.clone()))
+                .unwrap_or_else(|| format!("{page}.md"));
+            nav_links.push(crate::routes::Route::VaultRoute { path, org: home() });
+            return;
+        }
         if href.starts_with("setlist-open:") {
             // Open the full-screen setlist experience (the button lives in the
             // editor's setlist-title widget, so it travels with an embedded
