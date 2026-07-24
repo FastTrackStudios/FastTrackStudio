@@ -336,6 +336,22 @@ pub struct ExplorerOpen(pub bool);
 #[derive(Clone, Copy, PartialEq)]
 pub struct RightPanelOpen(pub bool);
 
+/// Shell panel state: the right AGENT sidebar (conversations +
+/// embedded chat) — vault on the left, agents on the right.
+#[derive(Clone, Copy, PartialEq)]
+pub struct AgentPanelOpen(pub bool);
+
+/// The agent panel's open conversation (session id; empty = list
+/// only). Lives in chrome state so the selection survives panel
+/// toggles and route changes.
+#[derive(Clone, PartialEq)]
+pub struct AgentPanelSelected(pub String);
+
+/// Agent panel width in px (drag-resizable, persisted to
+/// localStorage — CodexMonitor persists its panel sizes too).
+#[derive(Clone, Copy, PartialEq)]
+pub struct AgentPanelWidth(pub f64);
+
 pub(crate) fn use_fleeting_open() -> Signal<bool> {
     use_context::<FleetingOpen>().0
 }
@@ -401,6 +417,7 @@ pub fn TopBar() -> Element {
     // actions + the right-panel toggle at the far right.
     let mut explorer = use_context::<Signal<ExplorerOpen>>();
     let mut right_panel = use_context::<Signal<RightPanelOpen>>();
+    let mut agent_panel = use_context::<Signal<AgentPanelOpen>>();
 
     rsx! {
         div {
@@ -437,6 +454,20 @@ pub fn TopBar() -> Element {
             // Who's here — avatar group opening the full roster.
             crate::presence::PresenceAvatarBar {}
 
+            button {
+                r#type: "button",
+                class: if agent_panel.read().0 {
+                    "ml-1 flex h-7 w-7 items-center justify-center rounded-md bg-accent text-foreground"
+                } else {
+                    "ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                },
+                title: "Toggle agent sidebar",
+                onclick: move |_| {
+                    let cur = agent_panel.peek().0;
+                    agent_panel.set(AgentPanelOpen(!cur));
+                },
+                fts_ui::lucide_dioxus::Bot { size: 15 }
+            }
             button {
                 r#type: "button",
                 class: "ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground",

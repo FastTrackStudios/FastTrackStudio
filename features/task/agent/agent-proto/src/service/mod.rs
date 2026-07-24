@@ -23,6 +23,7 @@
 pub mod approvals;
 pub mod attachments;
 pub mod backends;
+pub mod discovery;
 pub mod external_import;
 pub mod profiles;
 pub mod projects;

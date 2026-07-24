@@ -22,6 +22,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+mod discovery;
 mod service;
 mod stream;
 
@@ -102,6 +103,10 @@ pub struct HermesBackend {
 pub(crate) struct HermesInner {
     pub(crate) config: HermesConfig,
     pub(crate) http: reqwest::Client,
+    /// Runtime handle captured at construction — the sync Discovery
+    /// methods run on blocking dispatcher threads and drive their
+    /// HTTP hops through it.
+    pub(crate) runtime: tokio::runtime::Handle,
     pub(crate) sessions: Mutex<HashMap<String, SessionRow>>,
 }
 
@@ -112,6 +117,7 @@ impl HermesBackend {
             inner: Arc::new(HermesInner {
                 config,
                 http: reqwest::Client::new(),
+                runtime: tokio::runtime::Handle::current(),
                 sessions: Mutex::new(HashMap::new()),
             }),
         }

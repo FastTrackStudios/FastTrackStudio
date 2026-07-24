@@ -1702,6 +1702,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
         agent_proto::service::threads::threads_rpc_service_descriptor(),
         agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
+        agent_proto::service::discovery::discovery_rpc_service_descriptor(),
         timer_proto::service::timer_service_rpc_service_descriptor(),
         threads::service::threads_service_rpc_service_descriptor(),
         prefs_proto::service::prefs_service_rpc_service_descriptor(),
@@ -1841,6 +1842,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
             agent_proto::service::subscriptions::serve(org.agent_router.clone()),
+        )
+        // Agent discovery — live model/skill/capability lists for the
+        // chat UI's pickers and inspector panel.
+        .with(
+            agent_proto::service::discovery::discovery_rpc_service_descriptor(),
+            agent_proto::service::discovery::serve(org.agent_router.clone()),
         )
         // Timer — billable time tracking.
         .with(

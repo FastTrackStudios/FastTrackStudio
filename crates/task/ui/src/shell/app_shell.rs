@@ -25,6 +25,25 @@ pub fn AppShell() -> Element {
     // panel, toggled from the top bar (Obsidian-style).
     let explorer = use_context_provider(|| Signal::new(crate::chrome::ExplorerOpen(true)));
     let _ = use_context_provider(|| Signal::new(crate::chrome::RightPanelOpen(true)));
+    let agent_panel = use_context_provider(|| Signal::new(crate::chrome::AgentPanelOpen(false)));
+    let _ = use_context_provider(|| {
+        Signal::new(crate::chrome::AgentPanelSelected(String::new()))
+    });
+    let mut agent_width =
+        use_context_provider(|| Signal::new(crate::chrome::AgentPanelWidth(416.0)));
+    // Restore the persisted panel width once per shell mount.
+    use_future(move || async move {
+        let mut eval = dioxus::document::eval(
+            "dioxus.send(localStorage.getItem('task.agent-panel.width') || '');",
+        );
+        if let Ok(v) = eval.recv::<String>().await {
+            if let Ok(px) = v.parse::<f64>() {
+                agent_width.set(crate::chrome::AgentPanelWidth(px.clamp(320.0, 720.0)));
+            }
+        }
+    });
+    // Drag state: Some((pointer x at drag start, width at drag start)).
+    let mut agent_drag = use_signal(|| None::<(f64, f64)>);
     // Zen mode (Ctrl+Shift+Z): render NO desktop chrome — the open
     // view gets the whole viewport. Only the rendering is gated; the
     // explorer/right-panel signals keep their values, so exiting zen
@@ -90,6 +109,25 @@ pub fn AppShell() -> Element {
                             FleetingFab {}
                         }
                     }
+                    // The right agent sidebar: conversations + chat,
+                    // alongside whatever the center view shows. Left
+                    // edge is a drag handle (width persisted).
+                    if agent_panel.read().0 && !chromeless() {
+                        div {
+                            class: "relative hidden shrink-0 border-l border-border/60 md:flex md:min-h-0 md:flex-col md:overflow-hidden",
+                            style: "width: {agent_width.read().0}px;",
+                            div {
+                                class: "absolute left-0 top-0 z-30 h-full w-1.5 cursor-col-resize hover:bg-primary/40",
+                                onpointerdown: move |e| {
+                                    agent_drag.set(Some((
+                                        e.client_coordinates().x,
+                                        agent_width.peek().0,
+                                    )));
+                                },
+                            }
+                            crate::shell::agent_panel::AgentPanel {}
+                        }
+                    }
                 }
                 // IDE status line — spans the explorer + view (right of the
                 // full-height rail), pinned to the base.
@@ -97,6 +135,26 @@ pub fn AppShell() -> Element {
                     crate::chrome::StatusBar {}
                 }
             }
+            }
+        }
+        // Full-screen overlay while resizing the agent panel — it owns
+        // the pointer so the drag never drops into iframes/textareas.
+        if let Some((start_x, start_w)) = agent_drag() {
+            div {
+                class: "fixed inset-0 z-50 cursor-col-resize",
+                onpointermove: move |e| {
+                    // Panel is on the right: dragging left grows it.
+                    let w = (start_w + (start_x - e.client_coordinates().x)).clamp(320.0, 720.0);
+                    agent_width.set(crate::chrome::AgentPanelWidth(w));
+                },
+                onpointerup: move |_| {
+                    agent_drag.set(None);
+                    let w = agent_width.peek().0;
+                    let _ = dioxus::document::eval(&format!(
+                        "localStorage.setItem('task.agent-panel.width', '{w:.0}');"
+                    ));
+                },
+                onpointercancel: move |_| agent_drag.set(None),
             }
         }
         // Zen's only chrome: the hover-revealed exit button in the

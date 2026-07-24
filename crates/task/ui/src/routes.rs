@@ -140,8 +140,10 @@ pub enum Route {
         #[route("/wiki/source/:name")]
         WikiSourceRoute { name: String },
 
-        #[route("/agents")]
-        AgentsRoute {},
+        // `session` deep-links straight to one agent conversation
+        // (the explorer's Agents section drives this).
+        #[route("/agents?:session")]
+        AgentsRoute { session: String },
 
         #[route("/settings")]
         SettingsRoute {},
@@ -331,8 +333,8 @@ fn WikiSourceRoute(name: String) -> Element {
 }
 
 #[component]
-fn AgentsRoute() -> Element {
-    rsx! { pages::agents::AgentsView {} }
+fn AgentsRoute(session: String) -> Element {
+    rsx! { pages::agents::AgentsView { session } }
 }
 
 #[component]

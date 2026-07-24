@@ -260,7 +260,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
         NavTab {
             label: "Agents",
             icon: icon_agents,
-            route: Route::AgentsRoute {},
+            route: Route::AgentsRoute { session: String::new() },
         },
         NavTab {
             label: "Repos",
@@ -361,7 +361,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::WikiPageRoute { .. } => "Wiki page",
         Route::WikiSourcesRoute {} => "Archived sources",
         Route::WikiSourceRoute { .. } => "Source",
-        Route::AgentsRoute {} => "Agents",
+        Route::AgentsRoute { .. } => "Agents",
         Route::ReposRoute {} => "Repos",
         Route::SettingsRoute {} => "Settings",
     }
