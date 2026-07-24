@@ -1116,7 +1116,9 @@ mod imp {
 
                         // LEFT — the session-ui setlist navigator (collapsible):
                         // every song with its live section-progress strip,
-                        // driven by ACTIVE_INDICES / SETLIST_STRUCTURE.
+                        // driven by ACTIVE_INDICES / SETLIST_STRUCTURE. Hidden
+                        // for a single song (a one-song set — the song page).
+                        if count > 1 {
                         if nav_open() {
                             aside { class: "flex w-64 shrink-0 flex-col border-r border-border",
                                 div { class: "flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5",
@@ -1143,6 +1145,7 @@ mod imp {
                                 onclick: move |_| nav_open.set(true),
                                 "›"
                             }
+                        }
                         }
 
                         // CENTER — the chart on the LEFT (always), a selectable
@@ -1231,8 +1234,10 @@ mod imp {
                         }
                     }
 
-                    // BOTTOM — prev / transport / next, pinned.
+                    // BOTTOM — prev / transport / next, pinned. Prev/next are
+                    // hidden for a single song (a one-song set — the song page).
                     div { class: "flex shrink-0 items-center gap-3 border-t border-border px-4 py-2",
+                        if count > 1 {
                         button {
                             class: "flex min-w-0 max-w-[16rem] flex-1 items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40",
                             disabled: at_first,
@@ -1245,6 +1250,7 @@ mod imp {
                                 span { class: "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground", "Prev" }
                                 span { class: "truncate text-sm font-medium text-foreground", {prev_title.clone().unwrap_or_else(|| "—".to_owned())} }
                             }
+                        }
                         }
                         div { class: "h-14 flex-[2] overflow-hidden rounded-lg border border-border",
                             TransportControlBar {
@@ -1261,6 +1267,7 @@ mod imp {
                                 on_forward,
                             }
                         }
+                        if count > 1 {
                         button {
                             class: "flex min-w-0 max-w-[16rem] flex-1 items-center justify-end gap-2 rounded-lg border border-border px-3 py-1.5 text-right hover:bg-accent disabled:opacity-40",
                             disabled: at_last,
@@ -1273,6 +1280,7 @@ mod imp {
                                 span { class: "truncate text-sm font-medium text-foreground", {next_title.clone().unwrap_or_else(|| "—".to_owned())} }
                             }
                             span { class: "text-lg leading-none text-muted-foreground", "›" }
+                        }
                         }
                     }
                 }
