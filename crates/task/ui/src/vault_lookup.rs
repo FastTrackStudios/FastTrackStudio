@@ -57,6 +57,15 @@ const CONTENT_CACHE_CAP: usize = 32;
 /// flight.
 const LOADING: &str = "Loading…";
 
+/// Cache-key scheme for lazily-fetched scripture passage text —
+/// `scripture://<TX>/<osis-range>`. Shares the content cache + fetch
+/// worker with page content; the worker routes on the prefix.
+const SCRIPTURE_SCHEME: &str = "scripture://";
+
+/// Edition used for verse cards / chip tooltips when the link carries
+/// no `@TX` qualifier. WEB is always bundled (public domain).
+const DEFAULT_TRANSLATION: &str = "WEB";
+
 /// Client-side vault index: page metadata from `folder_index` +
 /// a lazy content LRU. Implements [`VaultLookup`] for the
 /// editor's live-preview pass.
@@ -187,7 +196,38 @@ pub fn use_vault_fetch_worker(
         move |mut rx: dioxus::prelude::UnboundedReceiver<String>| async move {
             while let Some(path) = rx.next().await {
                 let slug = org.peek().clone();
-                let fetched = crate::document_session::fetch_file(slug, path.clone()).await;
+                let fetched = if let Some(rest) = path.strip_prefix(SCRIPTURE_SCHEME) {
+                    // `scripture://<TX>/<osis>` → passage text via the
+                    // compare verb (handles single verses and ranges).
+                    // Errors are cached as text (not Err) so a missing
+                    // translation doesn't refetch on every decoration
+                    // pass.
+                    let (tx, osis) = rest.split_once('/').unwrap_or((DEFAULT_TRANSLATION, rest));
+                    Ok(
+                        match crate::feeds::fetch_comparison(&slug, osis, vec![tx.to_owned()])
+                            .await
+                        {
+                            Ok(cv) => {
+                                let joined = cv
+                                    .rows
+                                    .iter()
+                                    .filter_map(|r| r.cells.first())
+                                    .map(String::as_str)
+                                    .filter(|c| !c.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                if joined.is_empty() {
+                                    format!("({tx}: passage not installed)")
+                                } else {
+                                    joined
+                                }
+                            }
+                            Err(e) => format!("⚠ {e}"),
+                        },
+                    )
+                } else {
+                    crate::document_session::fetch_file(slug, path.clone()).await
+                };
                 // The index may have been swapped (folder-index refresh)
                 // mid-fetch; landing on the current one still warms the
                 // right cache (path-keyed, same org family).
@@ -295,6 +335,29 @@ impl VaultLookup for ClientVaultIndex {
             song_count: songs.len(),
             total_seconds,
             songs,
+        })
+    }
+
+    /// Scripture references: `[[John 3:16]]` / `[[John 3:16-20@ESV]]`
+    /// targets that parse as a verse reference resolve to a chip /
+    /// verse card. Only consulted when no page matches the target
+    /// (the decoration pass checks pages first), so a real
+    /// `John 3:16.md` note still wins. The passage text is fetched
+    /// lazily through the same worker as page content, keyed
+    /// `scripture://<TX>/<osis>`.
+    fn lookup_scripture(&self, target: &str) -> Option<editor::markdown::VaultScriptureHit> {
+        let scref = scripture_proto::ScriptureRef::parse(target).ok()?;
+        let translation = scref
+            .translation
+            .clone()
+            .unwrap_or_else(|| DEFAULT_TRANSLATION.to_owned());
+        let osis = scref.range.osis();
+        let text = self.content(&format!("{SCRIPTURE_SCHEME}{translation}/{osis}"));
+        Some(editor::markdown::VaultScriptureHit {
+            display: scref.range.to_string(),
+            osis,
+            text,
+            translation,
         })
     }
 

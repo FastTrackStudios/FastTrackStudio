@@ -180,7 +180,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
         NavTab {
             label: "Scripture",
             icon: icon_scripture,
-            route: Route::ScriptureRoute {},
+            route: Route::ScriptureRoute { reference: String::new() },
         },
         NavTab {
             label: "Milestones",
@@ -340,7 +340,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::VaultRoute { .. } => "Vault",
         Route::LocationsRoute {} => "Locations",
         Route::InventoryRoute {} => "Inventory",
-        Route::ScriptureRoute {} => "Scripture",
+        Route::ScriptureRoute { .. } => "Scripture",
         Route::MilestonesRoute {} => "Milestones",
         Route::FitnessRoute {} => "Fitness",
         Route::MealplanRoute {} => "Mealplan",

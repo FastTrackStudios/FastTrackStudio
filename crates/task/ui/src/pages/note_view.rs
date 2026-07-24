@@ -410,15 +410,31 @@ pub(crate) fn NoteView(
         if crate::event_tabs::handle_tab_href(&href) {
             return;
         }
+        if let Some(target) = href.strip_prefix("scripture-open:") {
+            // Verse-card "Study ›" → the reader anchored at the passage.
+            nav_links.push(crate::routes::Route::ScriptureRoute {
+                reference: target.trim().to_string(),
+            });
+            return;
+        }
         if href.starts_with("http://") || href.starts_with("https://") {
             return; // the editor already window.open()s external links
         }
         let page = href.split(['#', '|']).next().unwrap_or(&href).trim();
-        let path = lookup_for_links
+        let known = lookup_for_links
             .peek()
             .as_ref()
-            .and_then(|ix| ix.meta(page).map(|m| m.path.clone()))
-            .unwrap_or_else(|| format!("{page}.md"));
+            .and_then(|ix| ix.meta(page).map(|m| m.path.clone()));
+        // A wikilink that matches no page but parses as a scripture
+        // reference opens the reader (same resolution order as the
+        // decoration pass: real pages win).
+        if known.is_none() && scripture_proto::ScriptureRef::parse(page).is_ok() {
+            nav_links.push(crate::routes::Route::ScriptureRoute {
+                reference: page.to_string(),
+            });
+            return;
+        }
+        let path = known.unwrap_or_else(|| format!("{page}.md"));
         nav_links.push(crate::routes::Route::VaultRoute { path, org: home() });
     });
 

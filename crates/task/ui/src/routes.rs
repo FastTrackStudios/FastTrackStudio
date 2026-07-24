@@ -64,8 +64,11 @@ pub enum Route {
         #[route("/inventory")]
         InventoryRoute {},
 
-        #[route("/scripture")]
-        ScriptureRoute {},
+        // `reference` deep-links straight to a passage (`John 3:16`,
+        // `John 3:16-20@ESV`) — e.g. from a note's scripture chip;
+        // empty opens the reader at its default position.
+        #[route("/scripture?:reference")]
+        ScriptureRoute { reference: String },
 
         #[route("/milestones")]
         MilestonesRoute {},
@@ -218,8 +221,8 @@ fn InventoryRoute() -> Element {
 }
 
 #[component]
-fn ScriptureRoute() -> Element {
-    rsx! { pages::scripture::ScriptureView {} }
+fn ScriptureRoute(reference: String) -> Element {
+    rsx! { pages::scripture::ScriptureView { reference } }
 }
 
 #[component]

@@ -746,6 +746,101 @@ pub async fn fetch_chapter_backlinks(
         .map_err(|e| format!("{slug}: backlinks {book} {chapter}: {e:?}"))
 }
 
+/// Installed original-language editions (TAGNT / TAHOT / SBLGNT / OSHB).
+pub async fn fetch_original_editions(
+    slug: &str,
+) -> Result<Vec<scripture_proto::OrigEditionInfo>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .original_editions()
+        .await
+        .map_err(|e| format!("{slug}: original editions: {e:?}"))
+}
+
+/// Word-by-word interlinear of a verse in an original-language edition.
+pub async fn fetch_interlinear(
+    slug: &str,
+    edition: &str,
+    reference: &str,
+) -> Result<Vec<scripture_proto::InterlinearWord>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .interlinear(edition.to_owned(), reference.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: interlinear {edition} {reference}: {e:?}"))
+}
+
+/// Strong's-tagged breakdown of a verse in an English translation.
+pub async fn fetch_word_tokens(
+    slug: &str,
+    translation: &str,
+    reference: &str,
+) -> Result<Vec<scripture_proto::WordToken>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .word_study(translation.to_owned(), reference.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: word tokens {reference}: {e:?}"))
+}
+
+/// Full word study for a Strong's code: lexicon entry + concordance.
+pub async fn fetch_word_study(
+    slug: &str,
+    strongs: &str,
+    limit: u32,
+) -> Result<scripture_proto::WordStudyReport, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .study(strongs.to_owned(), limit)
+        .await
+        .map_err(|e| format!("{slug}: word study {strongs}: {e:?}"))
+}
+
+/// Cross-references from a verse (votes-desc, `min_votes` filters noise).
+pub async fn fetch_cross_refs(
+    slug: &str,
+    reference: &str,
+    min_votes: i32,
+) -> Result<Vec<scripture_proto::WeightedRef>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .cross_refs(reference.to_owned(), min_votes)
+        .await
+        .map_err(|e| format!("{slug}: cross refs {reference}: {e:?}"))
+}
+
+/// Topics a verse is tagged with (votes-desc).
+pub async fn fetch_topics_of(
+    slug: &str,
+    reference: &str,
+) -> Result<Vec<scripture_proto::TopicTag>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .topics_of(reference.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: topics {reference}: {e:?}"))
+}
+
+/// Verses about a topic (votes-desc, capped at `limit`; 0 ⇒ default).
+pub async fn fetch_verses_for_topic(
+    slug: &str,
+    topic: &str,
+    limit: u32,
+) -> Result<Vec<scripture_proto::WeightedRef>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .verses_for_topic(topic.to_owned(), limit)
+        .await
+        .map_err(|e| format!("{slug}: topic verses {topic}: {e:?}"))
+}
+
 // ── Inventory ───────────────────────────────────────────────────────
 
 /// Every inventory item in the org's vault (`type: item` gear /
