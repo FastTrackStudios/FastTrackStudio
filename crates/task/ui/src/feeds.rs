@@ -1739,6 +1739,18 @@ pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::Wi
         .collect())
 }
 
+/// Catalog of the org's curated wiki pages (`<org>/wiki/Knowledge/`)
+/// via the `wiki_proto` Pages service — drives the explorer's Wiki
+/// tree. Path-sorted; carries the `ai_generated` provenance flag.
+pub async fn fetch_wiki_pages(slug: &str) -> Result<Vec<wiki_proto::pages::PageInfo>, String> {
+    let client =
+        crate::vox_clients::establish_for::<wiki_proto::service::pages::PagesClient>(slug).await?;
+    client
+        .list_pages("default".to_owned())
+        .await
+        .map_err(|e| format!("{slug}: wiki pages: {e:?}"))
+}
+
 /// Fetch the **curated wiki** graph for one org — the server-built
 /// 4-signal relevance graph over `<org>/wiki/Knowledge/` (the
 /// `wiki_proto` Graph service), adapted to the renderer's

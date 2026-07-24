@@ -22,7 +22,7 @@ use crate::routes::Route;
 /// in the foot cluster, not here.
 const RAIL_TABS: &[&str] = &[
     "Home", "Inbox", "Recall", "Contacts", "Projects", "Tasks", "Schedule", "Timer", "Invoices",
-    "Members", "Connections",
+    "Members", "Wiki", "Connections",
 ];
 
 #[component]

@@ -310,12 +310,15 @@ impl Pages for WikiBackend {
                 continue;
             };
             let (title, page_type) = page_title_and_type(&rel, &body);
+            let (ai_generated, generated_by) = page_provenance(&body);
             out.push(ptypes::PageInfo {
                 path: rel,
                 title,
                 page_type,
                 size: body.len() as u64,
                 modified: mtime_utc(p),
+                ai_generated,
+                generated_by,
             });
         }
         out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -400,6 +403,30 @@ fn sanitize_page_path(path: &str) -> Result<String, WikiError> {
 
 /// Frontmatter `title:` / `type:`, with the title falling back
 /// to the first `# heading`, then the file stem.
+/// Provenance frontmatter: `ai_generated: true` marks a page as
+/// machine-produced (AI summary, ingest output) rather than the
+/// user's own writing; `generated_by:` names the model/agent.
+fn page_provenance(body: &str) -> (bool, String) {
+    let mut ai_generated = false;
+    let mut generated_by = String::new();
+    if let Some(rest) = body.strip_prefix("---\n") {
+        if let Some(end) = rest.find("\n---") {
+            for line in rest[..end].lines() {
+                let Some((k, v)) = line.split_once(':') else {
+                    continue;
+                };
+                let v = v.trim().trim_matches('"').trim_matches('\'');
+                match k.trim() {
+                    "ai_generated" => ai_generated = v.eq_ignore_ascii_case("true"),
+                    "generated_by" if generated_by.is_empty() => generated_by = v.to_string(),
+                    _ => {}
+                }
+            }
+        }
+    }
+    (ai_generated, generated_by)
+}
+
 fn page_title_and_type(rel_path: &str, body: &str) -> (String, String) {
     let mut title = String::new();
     let mut page_type = String::new();
