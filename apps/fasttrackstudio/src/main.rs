@@ -36,10 +36,21 @@ mod engines;
 #[cfg(all(feature = "session", not(target_arch = "wasm32")))]
 mod guide;
 mod prefs;
+/// In-memory log ring (tracing capture + panic hook) — rendered by the
+/// keys Logs tab on the phone, harmless elsewhere.
+#[allow(dead_code)]
+#[cfg(not(target_arch = "wasm32"))]
+mod log_ring;
 // The shared "dial the engine" plumbing every remote surface uses (rig
 // views + the browser session player).
-#[cfg(any(feature = "signal", feature = "session"))]
+#[cfg(any(feature = "signal", feature = "session", feature = "signal-guitar"))]
 mod remote;
+/// Pack downloads — list + fetch `.signalpack`s from a pack host (the
+/// studio engine or a hosted mirror) over the shared remote plumbing.
+/// (Dead-code allowed: only the iOS keys shell drives it today.)
+#[allow(dead_code)]
+#[cfg(all(feature = "signal-guitar", not(target_arch = "wasm32")))]
+mod pack_client;
 #[cfg(feature = "signal")]
 mod rig_view;
 // The in-process session player (daw-standalone + audio + guide) is
@@ -79,6 +90,12 @@ mod ios_orientation;
 mod rig_engine;
 #[cfg(all(feature = "signal-guitar", target_os = "ios"))]
 mod mobile_view;
+/// The phone keys rig view (Play + pack Library). Compiled on every
+/// native target so the Linux workspace check covers it; only the iOS
+/// shell mounts it.
+#[allow(dead_code)]
+#[cfg(all(feature = "signal-keys-rig", not(target_arch = "wasm32")))]
+mod keys_view;
 
 fn main() {
     // NVIDIA + Wayland: force the WebKitGTK webview through XWayland before
@@ -107,12 +124,19 @@ fn main() {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,vox_core=warn,schema_deser=off".into()),
-        )
-        .init();
+    {
+        use tracing_subscriber::layer::SubscriberExt as _;
+        use tracing_subscriber::util::SubscriberInitExt as _;
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "info,vox_core=warn,schema_deser=off".into()),
+            )
+            .with(tracing_subscriber::fmt::layer())
+            .with(log_ring::RingLayer::new())
+            .init();
+        log_ring::install_panic_hook();
+    }
 
     // Session: bring up the in-process engine (standalone daw + setlist
     // service + demo setlist) before the UI. Failure is non-fatal — the
@@ -140,6 +164,19 @@ fn main() {
             // Documents/FastTrackStudio/signal.
             // SAFETY: single-threaded, before the engine bootstrap spawns.
             unsafe { std::env::set_var("XDG_CONFIG_HOME", &app_root) };
+            // Downloaded keys packs (pack_client.rs) live beside the config,
+            // Files-app visible; the keys rig scans this dir.
+            #[cfg(feature = "signal-keys-rig")]
+            {
+                let packs = app_root.join("Packs/Keys");
+                let _ = std::fs::create_dir_all(&packs);
+                // SAFETY: single-threaded, before the engine bootstrap spawns.
+                unsafe { std::env::set_var("FTS_KEYSCAPE_PACKS", &packs) };
+                // Phone RAM: preload only the audition set; everything else
+                // decodes on first note-on instead of ballooning at load.
+                // SAFETY: single-threaded, before the engine bootstrap spawns.
+                unsafe { std::env::set_var("FTS_PRELOAD_PROFILE", "fast-audition") };
+            }
         }
         ios_audio::configure();
         match rig_engine::bootstrap_blocking() {

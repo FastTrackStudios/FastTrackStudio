@@ -40,6 +40,8 @@ struct State {
     tree: Option<Container>,
     midi_port: Option<String>,
     midi_handle: Option<MidiInputHandle>,
+    /// The last audio-open failure, for UIs with no log access (phones).
+    last_error: Option<String>,
 }
 
 struct Inner {
@@ -62,6 +64,23 @@ impl Default for KeysRigBackend {
     }
 }
 
+/// The backend's own small runtime. The daw-standalone engine spawns
+/// tokio tasks during open/load (prefetch, pumps); the backend drives
+/// those from plain worker threads, which have no ambient runtime —
+/// entering this one gives every spawn a reactor regardless of host
+/// (in-process iOS app, engine mode, tests).
+fn keys_runtime() -> &'static tokio::runtime::Runtime {
+    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("keys-rt")
+            .enable_all()
+            .build()
+            .expect("keys runtime")
+    })
+}
+
 impl KeysRigBackend {
     /// Build the backend and scan the Keyscape library. Does not open audio.
     pub fn new() -> Self {
@@ -75,7 +94,10 @@ impl KeysRigBackend {
                     let n = p.name.to_ascii_lowercase();
                     n.contains("rhodes") && n.contains("la custom")
                 })
-            });
+            })
+            // Whatever is installed beats nothing (a phone with only the
+            // Wurli downloaded should auto-load the Wurli).
+            .or_else(|| (!presets.is_empty()).then_some(0));
         tracing::info!(
             presets = presets.len(),
             default = default_idx.and_then(|i| presets.get(i)).map(|p| p.name.as_str()).unwrap_or("<first>"),
@@ -108,14 +130,41 @@ impl KeysRigBackend {
             }
         }
         let idx = self.inner.state.lock().ok().and_then(|s| s.loaded).unwrap_or(0);
-        let Some(tree) = self.program_for(idx) else { return false };
+        let Some(tree) = self.program_for(idx) else {
+            if let Ok(mut s) = self.inner.state.lock() {
+                s.last_error = Some("no patches downloaded yet".into());
+            }
+            return false;
+        };
         let prefs = AudioIoPrefs {
             output_device: String::new(),
             sample_rate: 0,
-            buffer_size: 256,
+            // 256 frames on desktop; on iOS the fixed-size request rides a
+            // macOS-only CoreAudio property (AVAudioSession owns the IO
+            // buffer there), so ask for the backend default instead.
+            buffer_size: if cfg!(target_os = "ios") { 0 } else { 256 },
             ..Default::default()
         };
-        match KeysRig::open(&prefs, &tree) {
+        // Brand the in-flight state and convert panics into a visible
+        // error — phone UIs have no logs, and a silent hang and a
+        // swallowed thread panic are otherwise indistinguishable from
+        // "nothing happened".
+        if let Ok(mut s) = self.inner.state.lock() {
+            s.last_error = Some("opening audio device…".into());
+        }
+        self.inner.events.publish(KeysEvent::Status(KeysRigSvc::status(self)));
+        let opened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            KeysRig::open(&prefs, &tree)
+        }))
+        .unwrap_or_else(|p| {
+            let msg = p
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| p.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "<non-string panic>".into());
+            Err(eyre::eyre!("audio open panicked: {msg}"))
+        });
+        match opened {
             Ok(r) => {
                 {
                     let mut rig = self.inner.rig.lock().unwrap();
@@ -129,19 +178,32 @@ impl KeysRigBackend {
                         p.loaded = i == idx;
                     }
                     s.tree = Some(tree);
+                    s.last_error = None;
                 }
                 true
             }
             Err(e) => {
                 tracing::error!("keys rig: audio open failed: {e}");
+                if let Ok(mut s) = self.inner.state.lock() {
+                    s.last_error = Some(format!("audio open failed: {e}"));
+                }
+                self.inner.events.publish(KeysEvent::Status(KeysRigSvc::status(self)));
                 false
             }
         }
     }
 
     fn do_load_preset(&self, index: usize) {
-        let Some(tree) = self.program_for(index) else { return };
+        let Some(tree) = self.program_for(index) else {
+            if let Ok(mut s) = self.inner.state.lock() {
+                s.last_error = Some(format!("preset {index}: spec missing (re-scan needed?)"));
+            }
+            self.publish_all();
+            return;
+        };
         if !self.ensure_open() {
+            // ensure_open recorded last_error; make sure remotes see it.
+            self.publish_all();
             return;
         }
         if let Ok(mut rig) = self.inner.rig.lock() {
@@ -242,6 +304,7 @@ impl KeysRigSvc for KeysRigBackend {
         let _ = std::thread::Builder::new()
             .name("keys-open".into())
             .spawn(move || {
+                let _rt = keys_runtime().enter();
                 if b.ensure_open() {
                     b.reattach_midi();
                 }
@@ -268,18 +331,51 @@ impl KeysRigSvc for KeysRigBackend {
         } else {
             0.0
         };
-        KeysStatus { running, loaded_preset, master_peak, voices: 0, midi_port: s.midi_port.clone() }
+        KeysStatus {
+            running,
+            loaded_preset,
+            master_peak,
+            voices: 0,
+            midi_port: s.midi_port.clone(),
+            last_error: s.last_error.clone(),
+        }
     }
 
     fn presets(&self) -> Vec<KeysPreset> {
         self.inner.state.lock().map(|s| s.presets.clone()).unwrap_or_default()
     }
 
+    fn rescan(&self) {
+        let (presets, specs) = scan_keyscape();
+        if let Ok(mut s) = self.inner.state.lock() {
+            // Keep the loaded preset marked if it survived the rescan.
+            let loaded_name =
+                s.loaded.and_then(|i| s.presets.get(i)).map(|p| p.name.clone());
+            s.loaded = loaded_name
+                .as_deref()
+                .and_then(|n| presets.iter().position(|p| p.name == n))
+                // Nothing loaded yet — same default as `new()`, so the
+                // first download lands on the LA Custom Rhodes; failing
+                // that, whatever arrived first is better than nothing.
+                .or_else(|| presets.iter().position(|p| p.name == "Rhodes - LA Custom"))
+                .or_else(|| (!presets.is_empty()).then_some(0));
+            s.presets = presets;
+            s.specs = specs;
+            if let Some(i) = s.loaded {
+                s.presets[i].loaded = true;
+            }
+        }
+        self.publish_all();
+    }
+
     fn load_preset(&self, index: u32) {
         let b = self.clone();
         let _ = std::thread::Builder::new()
             .name("keys-load".into())
-            .spawn(move || b.do_load_preset(index as usize));
+            .spawn(move || {
+                let _rt = keys_runtime().enter();
+                b.do_load_preset(index as usize)
+            });
     }
 
     fn tree(&self) -> KeysNode {

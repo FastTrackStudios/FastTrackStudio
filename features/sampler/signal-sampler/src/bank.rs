@@ -59,6 +59,15 @@ impl PreloadProfile {
         }
     }
 
+    /// How many samples this profile preloads eagerly (`None` = all).
+    pub fn preload_cap(self) -> Option<usize> {
+        match self {
+            Self::FastAudition => Some(FAST_AUDITION_PRELOAD_SAMPLES),
+            Self::Performance => Some(PERFORMANCE_PRELOAD_SAMPLES),
+            _ => None,
+        }
+    }
+
     fn ordered_paths(self, block: &SamplerBlock) -> Vec<PathBuf> {
         let mut paths = match self {
             Self::Full => block.sample_paths_owned(),
@@ -199,7 +208,13 @@ impl SamplerBank {
             block_frames: DEFAULT_BLOCK_FRAMES,
             preload_generation: Arc::new(AtomicU64::new(0)),
             cache_budget_bytes,
-            preload_profile: PreloadProfile::default(),
+            // `FTS_PRELOAD_PROFILE` overrides (e.g. "fast-audition" on
+            // phones, where a Performance-sized piano preload is GBs of
+            // decoded PCM); unset/unknown = the normal default.
+            preload_profile: std::env::var("FTS_PRELOAD_PROFILE")
+                .ok()
+                .and_then(|s| PreloadProfile::from_name(&s))
+                .unwrap_or_default(),
         }
     }
 

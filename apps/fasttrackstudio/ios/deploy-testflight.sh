@@ -27,7 +27,7 @@ cd "$SCRIPT_DIR/.."
 DX_PACKAGE="${DX_PACKAGE:-fasttrackstudio}"
 DX_APP_DIR="${DX_APP_DIR:-apps/fasttrackstudio}"
 # No colon: an explicitly-empty DX_FEATURES (Task, default features) is honored.
-DX_FEATURES="${DX_FEATURES---no-default-features --features signal-guitar}"
+DX_FEATURES="${DX_FEATURES---no-default-features --features signal-guitar,signal-keys-rig}"
 # Bundle id the App Store profile is minted for — must match the built .app's
 # CFBundleIdentifier (from the package's Dioxus.toml).
 DX_BUNDLE_ID="${DX_BUNDLE_ID:-app.fasttrackstudio}"
@@ -156,6 +156,14 @@ MARKETING_VER="${MARKETING_VER:-0.0.1}"
 /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 15.0" "$APP/Info.plist" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 15.0" "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Processes your guitar signal from the connected audio interface or microphone.'" "$APP/Info.plist" 2>/dev/null || true
+# Local network: pack downloads dial the studio engine peer-to-peer (iroh
+# direct paths / LAN WebSocket); without this key iOS silently drops the
+# traffic and the pack host is unreachable on the same Wi-Fi.
+/usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Connects to your studio engine on the local network to stream and download sound packs.'" "$APP/Info.plist" 2>/dev/null || true
+# The Bonjour type the app browses to RAISE the local-network prompt —
+# iroh's raw UDP gets silently filtered instead of prompting without it.
+/usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$APP/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :NSBonjourServices:0 string _fts._tcp" "$APP/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$APP/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$APP/Info.plist" 2>/dev/null || true
 # TestFlight requires ITSAppUsesNonExemptEncryption declared (false = no

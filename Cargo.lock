@@ -552,7 +552,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -563,7 +563,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -760,7 +760,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
  "x11rb",
 ]
 
@@ -4812,7 +4812,7 @@ dependencies = [
  "cssparser-macros 0.6.1",
  "dtoa-short",
  "itoa 1.0.18",
- "phf 0.11.3",
+ "phf 0.8.0",
  "smallvec 1.15.2",
 ]
 
@@ -7359,7 +7359,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7429,7 +7429,7 @@ checksum = "ad5208a115eaba24916f7456929832e310a81518c641f93fee4f89aa93aa3675"
 dependencies = [
  "cfg-if",
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8607,7 +8607,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9257,7 +9257,9 @@ dependencies = [
  "dioxus",
  "engine-launcher",
  "eyre",
+ "facet 0.50.0-rc.5",
  "facet-json",
+ "futures-channel",
  "futures-util",
  "getrandom 0.3.4",
  "include_dir",
@@ -9265,10 +9267,12 @@ dependencies = [
  "keyflow-sync",
  "libc",
  "objc2 0.5.2",
+ "reqwest 0.12.28",
  "session",
  "session-guide",
  "session-proto",
  "session-ui",
+ "sha2 0.10.9",
  "signal-bass",
  "signal-bass-proto",
  "signal-bass-ui",
@@ -9282,6 +9286,8 @@ dependencies = [
  "signal-keys",
  "signal-keys-proto",
  "signal-keys-ui",
+ "signal-pack-library",
+ "signal-packs-proto",
  "signal-sampler",
  "signal-synth-proto",
  "signal-synth-rig",
@@ -10737,7 +10743,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
+ "windows-link 0.1.3",
  "windows-result 0.4.1",
 ]
 
@@ -13226,7 +13232,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -16645,7 +16651,7 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -17339,7 +17345,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -18915,7 +18921,7 @@ dependencies = [
  "image",
  "itertools 0.14.0",
  "js-sys",
- "libloading 0.9.0",
+ "libloading 0.8.9",
  "log",
  "maybe-owned",
  "once_cell",
@@ -20383,7 +20389,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -20893,7 +20899,7 @@ dependencies = [
 [[package]]
 name = "reaper-common-types"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#3a9e70638dc67adc1aaf21a54fcf72ae752eeb21"
 dependencies = [
  "nutype",
  "palette",
@@ -20957,7 +20963,7 @@ dependencies = [
 [[package]]
 name = "reaper-high"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#3a9e70638dc67adc1aaf21a54fcf72ae752eeb21"
 dependencies = [
  "backtrace",
  "base64 0.13.1",
@@ -21047,7 +21053,7 @@ dependencies = [
 [[package]]
 name = "reaper-low"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#3a9e70638dc67adc1aaf21a54fcf72ae752eeb21"
 dependencies = [
  "c_str_macro",
  "cc",
@@ -21063,7 +21069,7 @@ dependencies = [
 [[package]]
 name = "reaper-macros"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#3a9e70638dc67adc1aaf21a54fcf72ae752eeb21"
 dependencies = [
  "darling 0.10.2",
  "quote",
@@ -21073,7 +21079,7 @@ dependencies = [
 [[package]]
 name = "reaper-medium"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+source = "git+https://codeberg.org/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#3a9e70638dc67adc1aaf21a54fcf72ae752eeb21"
 dependencies = [
  "camino",
  "derive_more 0.99.20",
@@ -21769,7 +21775,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -21837,7 +21843,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -22441,7 +22447,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -23382,6 +23388,7 @@ dependencies = [
  "signal-plugin-host",
  "signal-sampler",
  "signal-synth",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -23460,6 +23467,30 @@ dependencies = [
  "keyflow-orchestra",
  "session-guide",
  "signal-sampler",
+]
+
+[[package]]
+name = "signal-pack-library"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "sha2 0.10.9",
+ "signal-packs-proto",
+ "tokio",
+ "tracing",
+ "vox",
+ "walkdir",
+]
+
+[[package]]
+name = "signal-packs-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -24045,7 +24076,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -24456,7 +24487,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -25146,7 +25177,7 @@ dependencies = [
 [[package]]
 name = "swell-ui"
 version = "0.1.0"
-source = "git+https://codeberg.org/FastTrackStudios/reaper-lib.git?branch=main#845773eb1814470d4992768536150a1dc984fd12"
+source = "git+https://codeberg.org/FastTrackStudios/reaper-lib.git?branch=main#650061099e76c300e8437f0a43ab4bb2efe417cc"
 dependencies = [
  "fragile",
  "libloading 0.9.0",
@@ -25861,10 +25892,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -27047,7 +27078,7 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

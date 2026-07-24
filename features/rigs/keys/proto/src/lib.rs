@@ -49,6 +49,9 @@ pub struct KeysStatus {
     pub voices: u32,
     /// The attached MIDI input port name, if any (None = omni / all).
     pub midi_port: Option<String>,
+    /// The last audio-open / preset-load failure, if the engine isn't
+    /// running because of one (surfaced by phone UIs with no log access).
+    pub last_error: Option<String>,
 }
 
 pub mod keys {
@@ -86,6 +89,9 @@ pub mod keys {
         fn status(&self) -> KeysStatus;
         /// Every preset in the library (the browser).
         fn presets(&self) -> Vec<KeysPreset>;
+        /// Re-scan the pack library (after a download added packs) and
+        /// publish the updated preset list.
+        fn rescan(&self);
         /// Load preset `index` from [`presets`](Self::presets).
         fn load_preset(&self, index: u32);
         /// The loaded composition tree (engine → layers → blocks).
