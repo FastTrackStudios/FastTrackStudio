@@ -530,6 +530,19 @@ pub(crate) mod imp {
         })
     }
 
+    /// Resolve a song's [`Manifest`] the colocated-schema-first way: the
+    /// `song` folder (`song.md` → `arrangement.md`) first, then a legacy
+    /// `manifest.json`. Shared by the single-song and setlist players so both
+    /// read migrated (manifest-less) songs identically.
+    pub(crate) async fn load_song_manifest(org: &str, slug: &str) -> Result<Manifest, String> {
+        match fetch_kf_manifest(org, slug).await {
+            Ok(m) => Ok(m),
+            Err(_) => {
+                fetch_manifest(&format!("/org/{org}/media/songs/{slug}/manifest.json")).await
+            }
+        }
+    }
+
     /// Where one stem's audio comes from.
     #[derive(Clone, Debug, PartialEq)]
     pub(crate) enum StemSource {
@@ -922,14 +935,70 @@ pub(crate) mod imp {
 
     // ── the component ───────────────────────────────────────────────────────
 
-    /// The `type: song` player. Colocated-schema-first: the song model is
-    /// derived from the on-disk `song` folder (`song.md` → `arrangement.md`
-    /// → chart + stem attachments) at `/org/{org}/media/songs/{slug}/…`.
-    /// Legacy `manifest.json` is a fallback for un-migrated songs; a
-    /// frontmatter `stems:` block (content-addressed blobs) is the last
-    /// resort. Rendered above the note editor in the vault.
+    /// The `type: song` view. A song plays through the SAME session player
+    /// as a setlist — as a one-song set — so the single-song page and the
+    /// setlist viewer are one identical experience (header + timeline +
+    /// Session/Chart tabs + transport), not two divergent players.
+    ///
+    /// Media-served songs (a `song.md` / `manifest.json` at
+    /// `/org/{org}/media/songs/{slug}`) take that path. A song whose stems
+    /// exist only as content-addressed blobs (a frontmatter `stems:` block,
+    /// no `/media` folder) falls back to the standalone streaming player
+    /// ([`StandaloneSongPlayer`]).
     #[component]
     pub fn SongView(
+        slug: String,
+        org: String,
+        title: String,
+        front: crate::pages::vault::SongFront,
+    ) -> Element {
+        // Probe whether the song is media-served (the common, migrated case).
+        // Cheap: one HEAD-ish GET, browser-cached and re-used by SetlistPlayer.
+        let slug_p = slug.clone();
+        let org_p = org.clone();
+        let media = use_resource(use_reactive!(|slug_p, org_p| {
+            let slug = slug_p.clone();
+            let org = org_p.clone();
+            async move {
+                let base = format!("/org/{org}/media/songs/{slug}");
+                fetch_text(&format!("{base}/song.md")).await.is_ok()
+                    || fetch_text(&format!("{base}/manifest.json")).await.is_ok()
+            }
+        }));
+
+        match *media.read_unchecked() {
+            None => rsx! {
+                div { class: "flex flex-col gap-2 py-10",
+                    span { class: "text-sm text-muted-foreground", "Loading song…" }
+                }
+            },
+            // Media-served → the one-song setlist session player (embedded).
+            Some(true) => rsx! {
+                crate::pages::setlist_session::SetlistPlayer {
+                    songs: vec![slug.clone()],
+                    org: org.clone(),
+                    fullscreen: false,
+                }
+            },
+            // Blob-only → the standalone streaming player (frontmatter stems).
+            Some(false) => rsx! {
+                StandaloneSongPlayer {
+                    slug: slug.clone(),
+                    org: org.clone(),
+                    title: title.clone(),
+                    front: front.clone(),
+                }
+            },
+        }
+    }
+
+    /// The standalone single-song streaming player: resolves stems (colocated
+    /// `song.md` → legacy `manifest.json` → content-addressed blobs) and plays
+    /// them through its own Web-Audio graph. Retained as the fallback for
+    /// blob-only songs that have no `/media` folder; media-served songs go
+    /// through [`SetlistPlayer`] instead (see [`SongView`]).
+    #[component]
+    fn StandaloneSongPlayer(
         slug: String,
         org: String,
         title: String,
