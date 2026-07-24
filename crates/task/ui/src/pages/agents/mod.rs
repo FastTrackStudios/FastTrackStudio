@@ -17,7 +17,7 @@
 //! pure, tested functions (the t3code `*.logic.ts` pattern); the
 //! components are thin `rsx!` over them.
 
-mod logic;
+pub(crate) mod logic;
 mod timeline;
 
 use std::collections::HashMap;
@@ -54,9 +54,10 @@ const AGENTS_CSS: &str = r#"
 "#;
 
 #[component]
-pub fn AgentsView() -> Element {
+pub fn AgentsView(session: String) -> Element {
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let nav = use_navigator();
 
     let mut sessions = use_resource(move || async move {
         let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
@@ -96,33 +97,32 @@ pub fn AgentsView() -> Element {
     let cap_list = capabilities.read().clone().unwrap_or_default();
 
     let mut selected = use_signal(|| None::<(String, Session)>);
-    let mut search = use_signal(String::new);
-    let mut show_archived = use_signal(|| false);
     let mut show_inspector = use_signal(|| true);
-    let mut new_backend = use_signal(String::new);
     let mut create_error = use_signal(String::new);
 
-    let backends_available = use_memo(move || {
-        let mut b: Vec<String> = models
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .iter()
-            .map(|m| m.backend_id.clone())
-            .collect();
-        b.sort();
-        b.dedup();
-        b
-    });
+    // Resolve the routed session id against the fetched sessions —
+    // the explorer's Agents section owns the conversation list now.
+    use_effect(use_reactive!(|(session,)| {
+        let target = session.clone();
+        if target.is_empty() {
+            selected.set(None);
+            return;
+        }
+        let rows: Vec<(String, Session)> = match &*sessions.read() {
+            Some(Ok(rows)) => rows.clone(),
+            _ => return,
+        };
+        selected.set(rows.into_iter().find(|(_, s)| s.id == target));
+    }));
 
     let on_new_chat = move |_| {
         let Some(slug) = active() else { return };
-        let backend = new_backend.peek().clone();
         spawn(async move {
-            match crate::feeds::create_agent_session(&slug, &backend, "").await {
-                Ok(session) => {
+            match crate::feeds::create_agent_session(&slug, "", "").await {
+                Ok(s) => {
                     create_error.set(String::new());
-                    selected.set(Some((slug, session)));
+                    nav.push(crate::routes::Route::AgentsRoute { session: s.id.clone() });
+                    selected.set(Some((slug, s)));
                     sessions.restart();
                 }
                 Err(e) => create_error.set(e),
@@ -130,30 +130,10 @@ pub fn AgentsView() -> Element {
         });
     };
 
-    let rows: Vec<(String, Session)> = {
-        let q = search.read().to_lowercase();
-        let mut rows: Vec<(String, Session)> = match &*sessions.read_unchecked() {
-            Some(Ok(rows)) => rows.clone(),
-            _ => Vec::new(),
-        };
-        rows.retain(|(_, s)| {
-            (show_archived() || !s.archived)
-                && (q.is_empty() || s.title.to_lowercase().contains(&q))
-        });
-        rows.sort_by(|(_, a), (_, b)| {
-            b.pinned.cmp(&a.pinned).then_with(|| {
-                let ka = a.last_message_at.unwrap_or(a.created_at);
-                let kb = b.last_message_at.unwrap_or(b.created_at);
-                kb.cmp(&ka)
-            })
-        });
-        rows
-    };
     let fetch_err = match &*sessions.read_unchecked() {
         Some(Err(e)) => e.clone(),
         _ => String::new(),
     };
-    let selected_id = selected.read().as_ref().map(|(_, s)| s.id.clone());
 
     let mutate = use_callback(move |(slug, id, action): (String, String, SessionAction)| {
         spawn(async move {
@@ -180,7 +160,12 @@ pub fn AgentsView() -> Element {
                     if let Ok(s) = crate::feeds::fetch_agent_sessions(&[slug.clone()]).await {
                         match s.into_iter().find(|(_, s)| s.id == id) {
                             Some(row) => selected.set(Some(row)),
-                            None => selected.set(None),
+                            None => {
+                                selected.set(None);
+                                nav.push(crate::routes::Route::AgentsRoute {
+                                    session: String::new(),
+                                });
+                            }
                         }
                     }
                 }
@@ -192,76 +177,6 @@ pub fn AgentsView() -> Element {
     rsx! {
         style { {AGENTS_CSS} }
         div { class: "flex h-full min-h-0 w-full",
-            // ── Session rail ──
-            div { class: "flex w-72 shrink-0 flex-col border-r border-border/60",
-                div { class: "flex items-center justify-between gap-2 px-3 py-3",
-                    div { class: "flex items-center gap-2",
-                        Bot { size: 18 }
-                        span { class: "text-sm font-semibold", "Agents" }
-                    }
-                    div { class: "flex items-center gap-1",
-                        if backends_available().len() > 1 {
-                            select {
-                                class: "rounded-md border border-border/60 bg-card/40 px-1 py-0.5 text-[0.7rem] text-muted-foreground",
-                                value: "{new_backend}",
-                                onchange: move |e| new_backend.set(e.value()),
-                                option { value: "", "auto" }
-                                for b in backends_available().iter() {
-                                    option { key: "{b}", value: "{b}", "{b}" }
-                                }
-                            }
-                        }
-                        Button {
-                            variant: ButtonVariant::Primary,
-                            size: ButtonSize::Small,
-                            disabled: active().is_none(),
-                            on_click: on_new_chat,
-                            "New chat"
-                        }
-                    }
-                }
-                div { class: "px-3 pb-2",
-                    input {
-                        class: "w-full rounded-md border border-border/60 bg-card/30 px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60",
-                        placeholder: "Search conversations…",
-                        value: "{search}",
-                        oninput: move |e| search.set(e.value()),
-                    }
-                }
-                if !create_error.read().is_empty() {
-                    div { class: "mx-3 mb-2 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs",
-                        "{create_error}"
-                    }
-                }
-                if !fetch_err.is_empty() {
-                    div { class: "mx-3 mb-2 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs",
-                        "Couldn't reach the agent service: {fetch_err}"
-                    }
-                }
-                div { class: "min-h-0 flex-1 overflow-y-auto px-1.5 pb-1",
-                    if rows.is_empty() && fetch_err.is_empty() {
-                        div { class: "flex flex-col items-center gap-2 px-4 py-10 text-center",
-                            Bot { size: 24 }
-                            Text { variant: TextVariant::Muted, class: "text-xs",
-                                "No conversations yet — start one with New chat."
-                            }
-                        }
-                    }
-                    for (slug , s) in rows.iter() {
-                        {session_row(slug, s, selected_id.as_deref(), selected, mutate)}
-                    }
-                }
-                button {
-                    r#type: "button",
-                    class: "mx-3 mb-2 text-left text-[0.7rem] text-muted-foreground/70 hover:text-foreground",
-                    onclick: move |_| {
-                        let v = *show_archived.peek();
-                        show_archived.set(!v);
-                    },
-                    if show_archived() { "Hide archived" } else { "Show archived" }
-                }
-            }
-
             // ── Chat pane ──
             if let Some((slug, session)) = selected.read().clone() {
                 ChatPane {
@@ -282,7 +197,23 @@ pub fn AgentsView() -> Element {
                     Bot { size: 32 }
                     Heading { level: HeadingLevel::H3, "Chat with your agents" }
                     Text { variant: TextVariant::Muted, class: "max-w-sm text-sm",
-                        "Pick a conversation or start a new chat. Hermes answers by default; the inspector shows its skills and capabilities."
+                        "Pick a conversation in the sidebar's Agents section, or start a new chat. Hermes answers by default."
+                    }
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        disabled: active().is_none(),
+                        on_click: on_new_chat,
+                        "New chat"
+                    }
+                    if !create_error.read().is_empty() {
+                        div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs",
+                            "{create_error}"
+                        }
+                    }
+                    if !fetch_err.is_empty() {
+                        div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs",
+                            "Couldn't reach the agent service: {fetch_err}"
+                        }
                     }
                 }
             }
@@ -354,102 +285,6 @@ enum SessionAction {
     Archive(bool),
     Rename(String),
     Delete,
-}
-
-/// One conversation row: status pill dot, title, backend chip,
-/// hash-colored subagent chip, relative time, hover actions.
-fn session_row(
-    slug: &str,
-    s: &Session,
-    selected_id: Option<&str>,
-    mut selected: Signal<Option<(String, Session)>>,
-    mutate: Callback<(String, String, SessionAction)>,
-) -> Element {
-    let is_sel = selected_id == Some(s.id.as_str());
-    let row_slug = slug.to_string();
-    let row_session = s.clone();
-    let title = if s.title.trim().is_empty() {
-        "(untitled)".to_string()
-    } else {
-        s.title.clone()
-    };
-    let when = relative_time(s.last_message_at.unwrap_or(s.created_at));
-    let cls = if is_sel {
-        "group flex w-full flex-col gap-0.5 rounded-md bg-accent px-2 py-1.5 text-left"
-    } else {
-        "group flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-accent/40"
-    };
-    let (pin_slug, pin_id, pinned) = (slug.to_string(), s.id.clone(), s.pinned);
-    let (arc_slug, arc_id, archived) = (slug.to_string(), s.id.clone(), s.archived);
-    let pill = status_pill(s.status);
-    let subagent = (!s.subagent_nickname.is_empty()).then(|| {
-        let (h, sat, l) = hash_hsl(&s.subagent_nickname);
-        (
-            s.subagent_nickname.clone(),
-            format!("background: hsl({h} {sat}% {l}% / 0.18); color: hsl({h} {sat}% 70%);"),
-        )
-    });
-
-    rsx! {
-        div {
-            key: "{slug}/{s.id}",
-            role: "button",
-            class: "{cls}",
-            onclick: move |_| {
-                selected.set(Some((row_slug.clone(), row_session.clone())));
-            },
-            div { class: "flex items-center justify-between gap-2",
-                div { class: "flex min-w-0 items-center gap-1.5",
-                    if s.pinned {
-                        Pin { size: 10 }
-                    }
-                    span { class: "truncate text-sm text-foreground", "{title}" }
-                }
-                div { class: "flex shrink-0 items-center gap-1",
-                    button {
-                        r#type: "button",
-                        class: "hidden rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block",
-                        title: if pinned { "Unpin" } else { "Pin" },
-                        onclick: move |e| {
-                            e.stop_propagation();
-                            mutate((pin_slug.clone(), pin_id.clone(), SessionAction::Pin(!pinned)));
-                        },
-                        Pin { size: 11 }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "hidden rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block",
-                        title: if archived { "Unarchive" } else { "Archive" },
-                        onclick: move |e| {
-                            e.stop_propagation();
-                            mutate((arc_slug.clone(), arc_id.clone(), SessionAction::Archive(!archived)));
-                        },
-                        Archive { size: 11 }
-                    }
-                    if let Some(p) = &pill {
-                        span {
-                            class: if p.pulse {
-                                format!("h-2 w-2 shrink-0 rounded-full agents-dot-pulse {}", p.dot)
-                            } else {
-                                format!("h-2 w-2 shrink-0 rounded-full {}", p.dot)
-                            },
-                            title: "{p.label}",
-                        }
-                    }
-                }
-            }
-            div { class: "flex items-center gap-1.5 text-[0.7rem] text-muted-foreground",
-                span { class: backend_chip_cls(&s.backend_id), "{s.backend_id}" }
-                if let Some((nick, style)) = &subagent {
-                    span { class: "rounded-full px-1.5", style: "{style}", "{nick}" }
-                }
-                span { "{when}" }
-                if s.archived {
-                    span { class: "italic", "archived" }
-                }
-            }
-        }
-    }
 }
 
 /// Backend chip styling — Hermes gets the primary accent.
