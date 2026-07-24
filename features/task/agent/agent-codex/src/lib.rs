@@ -109,6 +109,13 @@ impl CodexBackend {
     /// `AppServerEvent` regardless of workspace. UIs prefer
     /// `subscribe_session` (in the trait) for filtered
     /// streams.
+    /// Async session-existence probe — for callers already inside
+    /// the runtime (the sync trait methods use `blocking_lock` and
+    /// must not be called from async context).
+    pub async fn has_session(&self, session_id: &str) -> bool {
+        self.inner.sessions.lock().await.contains_key(session_id)
+    }
+
     #[must_use]
     pub fn subscribe_raw(&self) -> broadcast::Receiver<AppServerEvent> {
         self.inner.sink.subscribe()

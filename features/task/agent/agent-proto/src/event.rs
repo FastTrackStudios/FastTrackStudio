@@ -110,3 +110,13 @@ pub enum AgentEvent {
     /// Generic resync signal — subscribers re-pull state.
     Resync,
 }
+
+// SelfRef compatibility (vox channel `.get()`): AgentEvent has no
+// lifetime parameters, so Ref<'a> = Self. Required to consume
+// `Subscriptions::subscribe_session` through a
+// `vox::channel::<AgentEvent>()` on the client.
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+unsafe impl vox_types::Reborrow for AgentEvent {
+    type Ref<'a> = AgentEvent;
+}

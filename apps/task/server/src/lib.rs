@@ -17,6 +17,7 @@
 //! `project-crdt` crates. CRDT now lives only at the per-file
 //! editor layer (future); vault is the sole storage path.
 
+pub mod agent_router;
 pub mod attachments;
 pub mod media;
 pub mod capability;
@@ -174,6 +175,10 @@ pub struct OrgAppState {
     /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
     /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
     pub agent_codex: agent_codex::CodexBackend,
+    /// Router over the agent backends (Codex + optional Hermes
+    /// gateway) — the surface the agent vox services are served
+    /// from. Sessions route to their owning backend.
+    pub agent_router: agent_router::AgentRouter,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
     /// Threads backend — conversations/topics anchored to any entity
@@ -667,6 +672,16 @@ pub(crate) async fn build_org_state(
         // registry + turn dispatch — hosts the `Sessions` +
         // `TurnDispatch` vox services behind the `/agents` UI.
         let agent_codex = agent_codex::CodexBackend::new();
+        // Hermes gateway backend — enabled when TASK_HERMES_URL is
+        // set (see agent_hermes::HermesConfig::from_env). When
+        // present it becomes the DEFAULT chat backend: sessions
+        // created without an explicit backend_id land on Hermes.
+        let agent_hermes = agent_hermes::HermesBackend::from_env();
+        if let Some(h) = &agent_hermes {
+            tracing::info!(url = %h.config().base_url, model = %h.config().model, "hermes agent gateway configured");
+        }
+        let agent_router =
+            agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes);
 
         // Timer store. SQLite at
         // `<data_root>/orgs/<slug>/timer.sqlite`
@@ -1064,6 +1079,7 @@ pub(crate) async fn build_org_state(
             intake,
             agent_tasks,
             agent_codex,
+            agent_router,
             agent_dispatch_vault_root: vault_root,
             timer,
             threads,
@@ -1685,6 +1701,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         agent_proto::service::sessions::sessions_rpc_service_descriptor(),
         agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
         agent_proto::service::threads::threads_rpc_service_descriptor(),
+        agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
         timer_proto::service::timer_service_rpc_service_descriptor(),
         threads::service::threads_service_rpc_service_descriptor(),
         prefs_proto::service::prefs_service_rpc_service_descriptor(),
@@ -1805,19 +1822,25 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         // sidebar listing. Served by the in-process Codex backend.
         .with(
             agent_proto::service::sessions::sessions_rpc_service_descriptor(),
-            agent_proto::service::sessions::serve(org.agent_codex.clone()),
+            agent_proto::service::sessions::serve(org.agent_router.clone()),
         )
         // Agent turn dispatch — kick off / cancel / resume a turn
         // on a session. Served by the same Codex backend.
         .with(
             agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
-            agent_proto::service::turn_dispatch::serve(org.agent_codex.clone()),
+            agent_proto::service::turn_dispatch::serve(org.agent_router.clone()),
         )
         // Agent threads — conversation threading within a session.
         // Served by the same Codex backend (impls Threads).
         .with(
             agent_proto::service::threads::threads_rpc_service_descriptor(),
-            agent_proto::service::threads::serve(org.agent_codex.clone()),
+            agent_proto::service::threads::serve(org.agent_router.clone()),
+        )
+        // Agent subscriptions — live AgentEvent streams per session;
+        // what the chat UI renders deltas from.
+        .with(
+            agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
+            agent_proto::service::subscriptions::serve(org.agent_router.clone()),
         )
         // Timer — billable time tracking.
         .with(

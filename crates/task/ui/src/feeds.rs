@@ -1952,6 +1952,100 @@ pub async fn fetch_project_agent_sessions(
     Ok(page.sessions)
 }
 
+/// Create a new agent chat session. `backend_id` picks the backend
+/// (`"hermes"`, `"codex"`); empty = the server default (Hermes when
+/// a gateway is configured).
+pub async fn create_agent_session(
+    slug: &str,
+    backend_id: &str,
+    title: &str,
+) -> Result<agent_proto::session::Session, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
+            .await?;
+    client
+        .create_session(agent_proto::service::sessions::CreateSession {
+            project_id: String::new(),
+            profile_id: String::new(),
+            backend_id: backend_id.to_owned(),
+            title: title.to_owned(),
+            workspace_path: String::new(),
+            subagent_nickname: String::new(),
+        })
+        .await
+        .map_err(|e| format!("{slug}: create agent session: {e:?}"))
+}
+
+/// Kick off one turn — the user message goes to the session's
+/// backend; events stream over `subscribe_agent_session`.
+pub async fn dispatch_agent_turn(
+    slug: &str,
+    session_id: &str,
+    text: &str,
+) -> Result<agent_proto::service::turn_dispatch::DispatchAck, String> {
+    let client = crate::vox_clients::establish_for::<
+        agent_proto::service::turn_dispatch::TurnDispatchClient,
+    >(slug)
+    .await?;
+    client
+        .dispatch_turn(agent_proto::service::turn_dispatch::DispatchTurn {
+            session_id: session_id.to_owned(),
+            text: text.to_owned(),
+            attachments: Vec::new(),
+            profile_override_id: String::new(),
+            personality_override_id: String::new(),
+            model_override: String::new(),
+        })
+        .await
+        .map_err(|e| format!("{slug}: dispatch turn: {e:?}"))
+}
+
+/// Cancel the in-flight turn on a session.
+pub async fn cancel_agent_turn(slug: &str, session_id: &str) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<
+        agent_proto::service::turn_dispatch::TurnDispatchClient,
+    >(slug)
+    .await?;
+    client
+        .cancel_turn(session_id.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: cancel turn: {e:?}"))
+}
+
+/// Full transcript for a session (backend returns newest-first;
+/// callers reverse for display).
+pub async fn fetch_agent_messages(
+    slug: &str,
+    session_id: &str,
+) -> Result<Vec<agent_proto::message::Message>, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::threads::ThreadsClient>(slug)
+            .await?;
+    client
+        .list_messages(session_id.to_owned(), 0, String::new())
+        .await
+        .map_err(|e| format!("{slug}: list messages: {e:?}"))
+}
+
+/// Open the live event stream for a session. Returns after handing
+/// the `tx` to the server — pump the paired `rx` for
+/// [`agent_proto::event::AgentEvent`]s; the call ends when the
+/// server drops the lane or the receiver is dropped.
+pub async fn subscribe_agent_session(
+    slug: &str,
+    session_id: &str,
+    tx: vox::Tx<agent_proto::event::AgentEvent>,
+) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<
+        agent_proto::service::subscriptions::SubscriptionsClient,
+    >(slug)
+    .await?;
+    client
+        .subscribe_session(session_id.to_owned(), tx)
+        .await
+        .map_err(|e| format!("{slug}: subscribe session: {e:?}"))
+}
+
 // ── Email ───────────────────────────────────────────────────────────
 
 /// Every mail account the org's `EmailSync` backend serves. An org
