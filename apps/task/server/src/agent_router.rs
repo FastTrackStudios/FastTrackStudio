@@ -15,6 +15,7 @@ use agent_hermes::HermesBackend;
 use agent_proto::error::AgentError;
 use agent_proto::event::AgentEvent;
 use agent_proto::message::Message;
+use agent_proto::service::discovery::{CapabilityFlag, Discovery, ModelInfo, SkillInfo};
 use agent_proto::service::sessions::{CreateSession, SessionFilter, SessionPage, Sessions};
 use agent_proto::service::subscriptions::Subscriptions;
 use agent_proto::service::threads::Threads;
@@ -170,6 +171,51 @@ impl Threads for AgentRouter {
 
     fn append_note(&self, session_id: &str, text: &str) -> Result<Message, AgentError> {
         route!(self, session_id, append_note(session_id, text))
+    }
+}
+
+impl Discovery for AgentRouter {
+    fn list_models(&self, backend_id: &str) -> Result<Vec<ModelInfo>, AgentError> {
+        let mut out = Vec::new();
+        if backend_id.is_empty() || backend_id == "hermes" {
+            if let Some(h) = &self.hermes {
+                match h.list_models(backend_id) {
+                    Ok(mut m) => out.append(&mut m),
+                    Err(e) => tracing::warn!("hermes list_models: {e}"),
+                }
+            }
+        }
+        if backend_id.is_empty() || backend_id == "codex" {
+            // Codex has no discovery API — its usual model set, default
+            // first. Free-form overrides still work via DispatchTurn.
+            for (i, id) in ["gpt-5.5-codex", "gpt-5.5", "o5-mini"].iter().enumerate() {
+                out.push(ModelInfo {
+                    backend_id: "codex".to_string(),
+                    id: (*id).to_string(),
+                    label: String::new(),
+                    is_default: i == 0,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    fn list_skills(&self, backend_id: &str) -> Result<Vec<SkillInfo>, AgentError> {
+        match &self.hermes {
+            Some(h) if backend_id.is_empty() || backend_id == "hermes" => {
+                h.list_skills(backend_id)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn list_capabilities(&self, backend_id: &str) -> Result<Vec<CapabilityFlag>, AgentError> {
+        match &self.hermes {
+            Some(h) if backend_id.is_empty() || backend_id == "hermes" => {
+                h.list_capabilities(backend_id)
+            }
+            _ => Ok(Vec::new()),
+        }
     }
 }
 

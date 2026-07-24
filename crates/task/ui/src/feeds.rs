@@ -2028,6 +2028,100 @@ pub async fn fetch_agent_messages(
         .map_err(|e| format!("{slug}: list messages: {e:?}"))
 }
 
+/// Live model list across the org's agent backends (Hermes gateway
+/// models + Codex's static set) — feeds the composer's model chip.
+pub async fn fetch_agent_models(
+    slug: &str,
+) -> Result<Vec<agent_proto::service::discovery::ModelInfo>, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::discovery::DiscoveryClient>(slug)
+            .await?;
+    client
+        .list_models(String::new())
+        .await
+        .map_err(|e| format!("{slug}: agent models: {e:?}"))
+}
+
+/// Agent skills (Hermes's self-improving skill library).
+pub async fn fetch_agent_skills(
+    slug: &str,
+) -> Result<Vec<agent_proto::service::discovery::SkillInfo>, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::discovery::DiscoveryClient>(slug)
+            .await?;
+    client
+        .list_skills(String::new())
+        .await
+        .map_err(|e| format!("{slug}: agent skills: {e:?}"))
+}
+
+/// Backend capability flags, for the inspector panel.
+pub async fn fetch_agent_capabilities(
+    slug: &str,
+) -> Result<Vec<agent_proto::service::discovery::CapabilityFlag>, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::discovery::DiscoveryClient>(slug)
+            .await?;
+    client
+        .list_capabilities(String::new())
+        .await
+        .map_err(|e| format!("{slug}: agent capabilities: {e:?}"))
+}
+
+/// Session mutations for the rail/inspector: rename, pin, archive,
+/// delete. Each returns the updated session (delete returns unit).
+pub async fn rename_agent_session(
+    slug: &str,
+    session_id: &str,
+    title: &str,
+) -> Result<agent_proto::session::Session, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
+            .await?;
+    client
+        .rename_session(session_id.to_owned(), title.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: rename session: {e:?}"))
+}
+
+pub async fn pin_agent_session(
+    slug: &str,
+    session_id: &str,
+    pinned: bool,
+) -> Result<agent_proto::session::Session, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
+            .await?;
+    client
+        .pin_session(session_id.to_owned(), pinned)
+        .await
+        .map_err(|e| format!("{slug}: pin session: {e:?}"))
+}
+
+pub async fn archive_agent_session(
+    slug: &str,
+    session_id: &str,
+    archived: bool,
+) -> Result<agent_proto::session::Session, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
+            .await?;
+    client
+        .archive_session(session_id.to_owned(), archived)
+        .await
+        .map_err(|e| format!("{slug}: archive session: {e:?}"))
+}
+
+pub async fn delete_agent_session(slug: &str, session_id: &str) -> Result<(), String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
+            .await?;
+    client
+        .delete_session(session_id.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: delete session: {e:?}"))
+}
+
 /// Open the live event stream for a session. Returns after handing
 /// the `tx` to the server — pump the paired `rx` for
 /// [`agent_proto::event::AgentEvent`]s; the call ends when the
