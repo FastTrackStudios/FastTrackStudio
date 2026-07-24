@@ -194,6 +194,7 @@ impl Discovery for AgentRouter {
                     id: (*id).to_string(),
                     label: String::new(),
                     is_default: i == 0,
+                    context_length: 0,
                 });
             }
         }

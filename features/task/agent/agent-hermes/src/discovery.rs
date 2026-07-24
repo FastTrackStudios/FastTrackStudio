@@ -60,6 +60,13 @@ impl Discovery for HermesBackend {
     fn list_models(&self, _backend_id: &str) -> Result<Vec<ModelInfo>, AgentError> {
         let v = self.gateway_get("/models")?;
         let default = self.inner.config.model.clone();
+        // The gateway's model rows rarely carry a window size; fall
+        // back to the deployment's configured context (the cluster
+        // config pins model.context_length) via env.
+        let fallback_ctx = std::env::var("TASK_HERMES_CONTEXT_LENGTH")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1_050_000);
         Ok(rows(&v, &["data", "models"])
             .into_iter()
             .filter_map(|m| {
@@ -71,10 +78,16 @@ impl Discovery for HermesBackend {
                 if id.is_empty() {
                     return None;
                 }
+                let ctx = m
+                    .get("context_length")
+                    .or_else(|| m.get("context_window"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(fallback_ctx);
                 Some(ModelInfo {
                     backend_id: BACKEND_ID.to_string(),
                     is_default: id == default,
                     label: s(m, "name"),
+                    context_length: ctx,
                     id,
                 })
             })

@@ -22,6 +22,9 @@ pub struct ModelInfo {
     pub label: String,
     /// True for the backend's default model.
     pub is_default: bool,
+    /// Context window in tokens; `0` = unknown (UIs hide the
+    /// context gauge's percentage and show raw counts).
+    pub context_length: u64,
 }
 
 /// One agent skill (Hermes's self-improving skill library).

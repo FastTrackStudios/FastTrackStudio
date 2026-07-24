@@ -1,30 +1,57 @@
 //! `/agents` — the agent command center.
 //!
-//! Three panes, CodexMonitor-style:
+//! Three panes, CodexMonitor/t3code-inspired:
 //!
-//! - **Session rail** — searchable, pinned-first conversation list
-//!   with hover actions (pin/archive), status dots, relative times,
-//!   and a New-chat button with a backend picker.
-//! - **Chat pane** — the transcript timeline: user bubbles,
-//!   markdown assistant messages, dim reasoning blocks with a live
-//!   accent bar, one-line mono activity pills for tool events, a
-//!   ticking "Working…" row, and a composer with a model chip fed
-//!   by live [`Discovery`] data plus a context-token gauge.
-//! - **Inspector** — a collapsible right panel: session meta +
-//!   rename/pin/archive/delete, the agent's skill library, and
-//!   backend capability flags.
+//! - **Session rail** — searchable, pinned-first, hover actions,
+//!   priority status pills, hash-colored subagent chips.
+//! - **Chat pane** — a derived row timeline ([`timeline`]): turn
+//!   folds ("N tool calls · 0:42") above settled assistant
+//!   messages, live activity chips with status glyphs, streaming
+//!   markdown, a ticking Working row; composer with queue-while-
+//!   busy sends, `/` + `$` ranked autocomplete, a model chip fed by
+//!   Discovery, and a CSS-only context ring.
+//! - **Inspector** — session meta + actions, skill library,
+//!   capability flags.
 //!
-//! Everything binds the agent-proto services (`Sessions`,
-//! `TurnDispatch`, `Threads`, `Subscriptions`, `Discovery`) served
-//! by the org's `AgentRouter` (Hermes gateway + Codex).
+//! All decidable behavior lives in [`logic`] / [`timeline`] as
+//! pure, tested functions (the t3code `*.logic.ts` pattern); the
+//! components are thin `rsx!` over them.
+
+mod logic;
+mod timeline;
+
+use std::collections::HashMap;
 
 use agent_proto::event::AgentEvent;
 use agent_proto::message::{ContentBlock, Message, Role};
+use agent_proto::question::QuestionRequest;
 use agent_proto::service::discovery::{CapabilityFlag, ModelInfo, SkillInfo};
 use agent_proto::session::{Session, SessionStatus};
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Archive, Bot, Info, Pin, Trash2};
+use fts_ui::lucide_dioxus::{Archive, Bot, Copy, Info, Pin, Trash2};
 use fts_ui::prelude::*;
+
+use logic::{
+    context_free_percent, context_ring_style, fmt_elapsed, fmt_tokens, hash_hsl, rank_by,
+    relative_time, status_pill,
+};
+use timeline::{ActivityLine, Row, ToolTone, TurnLog, fold_summary, push_line, settle_tool};
+
+/// Duty-cycled pulse (t3code: `steps()` timing keeps the
+/// compositor cheap) + halo styling utility classes can't express.
+const AGENTS_CSS: &str = r#"
+@keyframes agents-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.agents-dot-pulse {
+  animation: agents-pulse 1.2s steps(6) infinite;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .agents-dot-pulse { animation: none; }
+}
+"#;
 
 #[component]
 pub fn AgentsView() -> Element {
@@ -68,7 +95,6 @@ pub fn AgentsView() -> Element {
     let skill_list = skills.read().clone().unwrap_or_default();
     let cap_list = capabilities.read().clone().unwrap_or_default();
 
-    // The open conversation: (org slug, session).
     let mut selected = use_signal(|| None::<(String, Session)>);
     let mut search = use_signal(String::new);
     let mut show_archived = use_signal(|| false);
@@ -104,8 +130,6 @@ pub fn AgentsView() -> Element {
         });
     };
 
-    // Filter + order the rail: search, archived toggle, pinned first,
-    // then newest activity.
     let rows: Vec<(String, Session)> = {
         let q = search.read().to_lowercase();
         let mut rows: Vec<(String, Session)> = match &*sessions.read_unchecked() {
@@ -131,7 +155,6 @@ pub fn AgentsView() -> Element {
     };
     let selected_id = selected.read().as_ref().map(|(_, s)| s.id.clone());
 
-    // Session mutations shared by rail hover-actions and inspector.
     let mutate = use_callback(move |(slug, id, action): (String, String, SessionAction)| {
         spawn(async move {
             let res: Result<(), String> = match action {
@@ -149,12 +172,11 @@ pub fn AgentsView() -> Element {
             if let Err(e) = res {
                 create_error.set(e);
             } else {
-                // Keep the open pane coherent with the mutation.
-                let deleted = matches!(
+                let touched_open = matches!(
                     selected.peek().as_ref(),
                     Some((_, s)) if s.id == id
                 );
-                if deleted {
+                if touched_open {
                     if let Ok(s) = crate::feeds::fetch_agent_sessions(&[slug.clone()]).await {
                         match s.into_iter().find(|(_, s)| s.id == id) {
                             Some(row) => selected.set(Some(row)),
@@ -168,6 +190,7 @@ pub fn AgentsView() -> Element {
     });
 
     rsx! {
+        style { {AGENTS_CSS} }
         div { class: "flex h-full min-h-0 w-full",
             // ── Session rail ──
             div { class: "flex w-72 shrink-0 flex-col border-r border-border/60",
@@ -284,7 +307,6 @@ pub fn AgentsView() -> Element {
 /// One composer autocomplete row.
 #[derive(Clone, PartialEq)]
 struct CompletionRow {
-    /// Text inserted on accept (replaces the trigger token).
     insert: String,
     label: String,
     detail: String,
@@ -334,8 +356,8 @@ enum SessionAction {
     Delete,
 }
 
-/// One conversation row: status dot, title, backend chip, relative
-/// time, hover actions (pin / archive).
+/// One conversation row: status pill dot, title, backend chip,
+/// hash-colored subagent chip, relative time, hover actions.
 fn session_row(
     slug: &str,
     s: &Session,
@@ -359,12 +381,14 @@ fn session_row(
     };
     let (pin_slug, pin_id, pinned) = (slug.to_string(), s.id.clone(), s.pinned);
     let (arc_slug, arc_id, archived) = (slug.to_string(), s.id.clone(), s.archived);
-    let status_dot = match s.status {
-        SessionStatus::Running => Some("h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary"),
-        SessionStatus::Errored => Some("h-2 w-2 shrink-0 rounded-full bg-destructive"),
-        SessionStatus::AwaitingUser => Some("h-2 w-2 shrink-0 rounded-full bg-amber-500"),
-        _ => None,
-    };
+    let pill = status_pill(s.status);
+    let subagent = (!s.subagent_nickname.is_empty()).then(|| {
+        let (h, sat, l) = hash_hsl(&s.subagent_nickname);
+        (
+            s.subagent_nickname.clone(),
+            format!("background: hsl({h} {sat}% {l}% / 0.18); color: hsl({h} {sat}% 70%);"),
+        )
+    });
 
     rsx! {
         div {
@@ -382,7 +406,6 @@ fn session_row(
                     span { class: "truncate text-sm text-foreground", "{title}" }
                 }
                 div { class: "flex shrink-0 items-center gap-1",
-                    // Hover actions.
                     button {
                         r#type: "button",
                         class: "hidden rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block",
@@ -403,13 +426,23 @@ fn session_row(
                         },
                         Archive { size: 11 }
                     }
-                    if let Some(dot) = status_dot {
-                        span { class: "{dot}" }
+                    if let Some(p) = &pill {
+                        span {
+                            class: if p.pulse {
+                                format!("h-2 w-2 shrink-0 rounded-full agents-dot-pulse {}", p.dot)
+                            } else {
+                                format!("h-2 w-2 shrink-0 rounded-full {}", p.dot)
+                            },
+                            title: "{p.label}",
+                        }
                     }
                 }
             }
             div { class: "flex items-center gap-1.5 text-[0.7rem] text-muted-foreground",
                 span { class: backend_chip_cls(&s.backend_id), "{s.backend_id}" }
+                if let Some((nick, style)) = &subagent {
+                    span { class: "rounded-full px-1.5", style: "{style}", "{nick}" }
+                }
                 span { "{when}" }
                 if s.archived {
                     span { class: "italic", "archived" }
@@ -419,19 +452,7 @@ fn session_row(
     }
 }
 
-/// "44m" / "11h" / "4d" style relative timestamps for the rail.
-fn relative_time(t: chrono::DateTime<chrono::Utc>) -> String {
-    let secs = (chrono::Utc::now() - t).num_seconds().max(0);
-    match secs {
-        0..=59 => "now".to_string(),
-        60..=3599 => format!("{}m", secs / 60),
-        3600..=86_399 => format!("{}h", secs / 3600),
-        _ => format!("{}d", secs / 86_400),
-    }
-}
-
-/// Backend chip styling — Hermes gets the primary accent (it's the
-/// conversational agent), everything else stays neutral.
+/// Backend chip styling — Hermes gets the primary accent.
 fn backend_chip_cls(backend_id: &str) -> &'static str {
     if backend_id == "hermes" {
         "rounded-full bg-primary/15 px-1.5 text-primary"
@@ -440,9 +461,7 @@ fn backend_chip_cls(backend_id: &str) -> &'static str {
     }
 }
 
-/// Live event-stream health, surfaced as a chip in the chat
-/// header — a dead stream is the difference between "the agent is
-/// thinking" and "you will never hear back", so it must be visible.
+/// Live event-stream health chip state.
 #[derive(Clone, PartialEq)]
 enum StreamState {
     Connecting,
@@ -450,9 +469,9 @@ enum StreamState {
     Dead(String),
 }
 
-/// One open conversation: transcript + live stream + composer.
-/// Keyed by session id — remounting on selection change gives each
-/// session its own subscription lifecycle.
+/// One open conversation. Keyed by session id — remounting on
+/// selection change gives each session its own subscription
+/// lifecycle.
 #[component]
 fn ChatPane(
     slug: String,
@@ -464,29 +483,27 @@ fn ChatPane(
     on_activity: EventHandler<()>,
 ) -> Element {
     let session_id = session.id.clone();
-    // Chronological transcript (server returns newest-first).
     let mut messages = use_signal(Vec::<Message>::new);
-    // In-flight assistant message: (message id, text so far).
     let mut streaming = use_signal(|| None::<(String, String)>);
     let mut reasoning = use_signal(String::new);
-    // One-line activity pills for the current turn (tool events,
-    // backend warnings) — CodexMonitor's command-chip stream.
-    let mut activity = use_signal(Vec::<String>::new);
+    // Live activity for the CURRENT turn; folded into `turns` on
+    // completion (keyed by the concluding assistant message id).
+    let mut live_lines = use_signal(Vec::<ActivityLine>::new);
+    let mut turns = use_signal(HashMap::<String, TurnLog>::new);
+    let expanded_folds = use_signal(std::collections::HashSet::<String>::new);
     let mut error = use_signal(String::new);
     let mut busy = use_signal(|| matches!(session.status, SessionStatus::Running));
     let mut composer = use_signal(String::new);
-    // Composer autocomplete: selected row + user-dismissed flag
-    // (Esc closes until the trigger token changes).
+    // Queue-while-busy sends (CodexMonitor's queue intent).
+    let mut queued = use_signal(Vec::<String>::new);
+    // Pending structured question (numbered-shortcut cards).
+    let mut pending_question = use_signal(|| None::<QuestionRequest>);
     let mut completion_sel = use_signal(|| 0usize);
     let mut completion_dismissed = use_signal(String::new);
-    // Per-turn model override; empty = the backend's default. The
-    // ack's effective model is echoed back into `responding`.
     let mut model = use_signal(String::new);
     let mut responding = use_signal(String::new);
     let mut stream_state = use_signal(|| StreamState::Connecting);
-    // Cumulative token metering (live ticks); .0=input .1=output.
     let mut tokens = use_signal(|| (session.usage.input_tokens, session.usage.output_tokens));
-    // Working-timer: seconds since TurnStarted while busy.
     let mut turn_started = use_signal(|| None::<chrono::DateTime<chrono::Utc>>);
     let mut elapsed = use_signal(|| 0i64);
 
@@ -498,6 +515,45 @@ fn ChatPane(
                 elapsed.set((chrono::Utc::now() - t0).num_seconds().max(0));
             }
         }
+    });
+
+    // The send path — used by the composer, queue drain, and
+    // question cards.
+    let send_slug = slug.clone();
+    let send_sid = session_id.clone();
+    let dispatch_text = use_callback(move |text: String| {
+        messages.write().push(Message {
+            id: format!("local-{}", chrono::Utc::now().timestamp_micros()),
+            session_id: send_sid.clone(),
+            role: Role::User,
+            content: vec![ContentBlock::Text { text: text.clone() }],
+            partial: false,
+            errored: false,
+            error_text: String::new(),
+            reasoning: None,
+            created_at: chrono::Utc::now(),
+        });
+        busy.set(true);
+        error.set(String::new());
+        let slug = send_slug.clone();
+        let sid = send_sid.clone();
+        let model_override = model.peek().trim().to_string();
+        spawn(async move {
+            match crate::feeds::dispatch_agent_turn(&slug, &sid, &text, &model_override).await {
+                Ok(ack) => {
+                    let with = if ack.effective_model.is_empty() {
+                        format!("{} · default model", ack.effective_backend_id)
+                    } else {
+                        format!("{} · {}", ack.effective_backend_id, ack.effective_model)
+                    };
+                    responding.set(with);
+                }
+                Err(e) => {
+                    busy.set(false);
+                    error.set(format!("Dispatch failed: {e}"));
+                }
+            }
+        });
     });
 
     // Transcript load + live event pump, once per mounted session.
@@ -533,7 +589,7 @@ fn ChatPane(
                         busy.set(true);
                         error.set(String::new());
                         reasoning.set(String::new());
-                        activity.set(Vec::new());
+                        live_lines.set(Vec::new());
                         turn_started.set(Some(at));
                         elapsed.set(0);
                         on_activity.call(());
@@ -574,28 +630,95 @@ fn ChatPane(
                         reasoning.write().push_str(&delta);
                     }
                     AgentEvent::ToolStarted { tool_call } => {
-                        push_activity(&mut activity, format!("▸ {}", tool_call.title));
+                        push_line(
+                            &mut live_lines.write(),
+                            ActivityLine {
+                                tone: ToolTone::Running,
+                                text: if tool_call.title.is_empty() {
+                                    tool_call.name.clone()
+                                } else {
+                                    tool_call.title.clone()
+                                },
+                                tool_id: tool_call.id.clone(),
+                            },
+                        );
                     }
                     AgentEvent::ToolFinished { tool_call } => {
-                        push_activity(&mut activity, format!("✓ {}", tool_call.title));
+                        let ok = !matches!(tool_call.status, agent_proto::tool::ToolStatus::Error);
+                        settle_tool(
+                            &mut live_lines.write(),
+                            &tool_call.id,
+                            if tool_call.title.is_empty() {
+                                tool_call.name.clone()
+                            } else {
+                                tool_call.title.clone()
+                            },
+                            ok,
+                            tool_call.duration_ms,
+                        );
                     }
                     AgentEvent::ToolProgress { preview, .. } => {
-                        push_activity(&mut activity, preview);
+                        push_line(
+                            &mut live_lines.write(),
+                            ActivityLine {
+                                tone: ToolTone::Note,
+                                text: preview,
+                                tool_id: String::new(),
+                            },
+                        );
                     }
                     AgentEvent::Warning { kind, message, .. } => {
-                        push_activity(&mut activity, format!("{kind}: {message}"));
+                        push_line(
+                            &mut live_lines.write(),
+                            ActivityLine {
+                                tone: ToolTone::Note,
+                                text: format!("{kind}: {message}"),
+                                tool_id: String::new(),
+                            },
+                        );
                     }
+                    AgentEvent::QuestionAsked { request } => {
+                        pending_question.set(Some(request));
+                    }
+                    AgentEvent::QuestionResolved { .. } => pending_question.set(None),
                     AgentEvent::Metering {
                         input_tokens,
                         output_tokens,
                         ..
                     } => tokens.set((input_tokens, output_tokens)),
-                    AgentEvent::TurnFinished { .. } => {
+                    AgentEvent::TurnFinished { message_id, at, .. } => {
+                        // Fold the live work log behind its assistant
+                        // message (t3code's turn fold).
+                        let duration = turn_started
+                            .peek()
+                            .as_ref()
+                            .map(|t0| (at - *t0).num_seconds().max(0))
+                            .unwrap_or(0);
+                        let lines = std::mem::take(&mut *live_lines.write());
+                        let r = std::mem::take(&mut *reasoning.write());
+                        if !lines.is_empty() || !r.is_empty() {
+                            turns.write().insert(
+                                message_id,
+                                TurnLog {
+                                    lines,
+                                    reasoning: r,
+                                    duration_secs: duration,
+                                },
+                            );
+                        }
                         busy.set(false);
                         streaming.set(None);
                         responding.set(String::new());
                         turn_started.set(None);
                         on_activity.call(());
+                        // Drain the queue.
+                        let next = {
+                            let mut q = queued.write();
+                            if q.is_empty() { None } else { Some(q.remove(0)) }
+                        };
+                        if let Some(text) = next {
+                            dispatch_text(text);
+                        }
                     }
                     AgentEvent::TurnErrored { kind, message, .. } => {
                         busy.set(false);
@@ -610,7 +733,14 @@ fn ChatPane(
                         streaming.set(None);
                         responding.set(String::new());
                         turn_started.set(None);
-                        push_activity(&mut activity, "cancelled".to_string());
+                        push_line(
+                            &mut live_lines.write(),
+                            ActivityLine {
+                                tone: ToolTone::Note,
+                                text: "cancelled".to_string(),
+                                tool_id: String::new(),
+                            },
+                        );
                         on_activity.call(());
                     }
                     AgentEvent::Resync => {
@@ -626,46 +756,19 @@ fn ChatPane(
         }
     });
 
-    let send_slug = slug.clone();
-    let send_sid = session_id.clone();
+    // Send-or-queue (CodexMonitor: the button morphs; typing while
+    // the agent runs queues the message for the next turn).
     let send = use_callback(move |_: ()| {
         let text = composer.peek().trim().to_string();
-        if text.is_empty() || *busy.peek() {
+        if text.is_empty() {
             return;
         }
         composer.set(String::new());
-        messages.write().push(Message {
-            id: format!("local-{}", chrono::Utc::now().timestamp_micros()),
-            session_id: send_sid.clone(),
-            role: Role::User,
-            content: vec![ContentBlock::Text { text: text.clone() }],
-            partial: false,
-            errored: false,
-            error_text: String::new(),
-            reasoning: None,
-            created_at: chrono::Utc::now(),
-        });
-        busy.set(true);
-        error.set(String::new());
-        let slug = send_slug.clone();
-        let sid = send_sid.clone();
-        let model_override = model.peek().trim().to_string();
-        spawn(async move {
-            match crate::feeds::dispatch_agent_turn(&slug, &sid, &text, &model_override).await {
-                Ok(ack) => {
-                    let with = if ack.effective_model.is_empty() {
-                        format!("{} · default model", ack.effective_backend_id)
-                    } else {
-                        format!("{} · {}", ack.effective_backend_id, ack.effective_model)
-                    };
-                    responding.set(with);
-                }
-                Err(e) => {
-                    busy.set(false);
-                    error.set(format!("Dispatch failed: {e}"));
-                }
-            }
-        });
+        if *busy.peek() {
+            queued.write().push(text);
+        } else {
+            dispatch_text(text);
+        }
     });
 
     let stop_slug = slug.clone();
@@ -678,6 +781,14 @@ fn ChatPane(
         });
     };
 
+    // Answer a question card: dispatch the chosen option's label as
+    // the user turn. Provisional until backends grow a first-class
+    // answer verb — conversational agents handle it naturally.
+    let answer_question = use_callback(move |label: String| {
+        pending_question.set(None);
+        dispatch_text(label);
+    });
+
     let title = if session.title.trim().is_empty() {
         "(untitled)".to_string()
     } else {
@@ -685,58 +796,82 @@ fn ChatPane(
     };
     let streaming_view = streaming.read().clone();
     let reasoning_text = reasoning.read().clone();
-    let activity_view = activity.read().clone();
+    let live_view = live_lines.read().clone();
     let (tok_in, tok_out) = tokens();
     let stream = stream_state.read().clone();
-    // Only models for this session's backend in the chip.
     let session_models: Vec<ModelInfo> = models
         .iter()
         .filter(|m| m.backend_id == session.backend_id)
         .cloned()
         .collect();
+    // Context ring: window of the selected (or default) model.
+    let context_window = {
+        let chosen = model.read().trim().to_string();
+        session_models
+            .iter()
+            .find(|m| {
+                if chosen.is_empty() {
+                    m.is_default
+                } else {
+                    m.id == chosen
+                }
+            })
+            .map(|m| m.context_length)
+            .unwrap_or(0)
+    };
+    let ring = context_free_percent(tok_in, context_window);
+    let ring_pct_used = ring.map(|f| 100.0 - f);
 
-    // Composer autocomplete rows for the current trigger token.
-    let completion: Option<(char, usize, Vec<CompletionRow>)> = {
+    // Derived transcript rows (pure).
+    let derived_rows = timeline::build_rows(&messages.read(), &turns.read());
+    let msgs_snapshot = messages.read().clone();
+    let turns_snapshot = turns.read().clone();
+
+    // Composer autocomplete (ranked: exact > prefix > substring >
+    // subsequence).
+    let completion: Option<(usize, Vec<CompletionRow>)> = {
         let text = composer.read().clone();
         completion_trigger(&text).and_then(|(mode, query, start)| {
             if *completion_dismissed.read() == text {
                 return None;
             }
             let rows: Vec<CompletionRow> = match mode {
-                '/' if session.backend_id == "hermes" => HERMES_COMMANDS
-                    .iter()
-                    .filter(|(c, _)| c[1..].starts_with(&query))
-                    .map(|(c, d)| CompletionRow {
-                        insert: (*c).to_string(),
-                        label: (*c).to_string(),
-                        detail: (*d).to_string(),
-                    })
-                    .collect(),
-                '$' => skills
-                    .iter()
-                    .filter(|sk| sk.enabled && sk.name.to_lowercase().contains(&query))
-                    .take(8)
-                    .map(|sk| CompletionRow {
-                        insert: format!("${}", sk.name),
-                        label: sk.name.clone(),
-                        detail: sk.description.clone(),
-                    })
-                    .collect(),
+                '/' if session.backend_id == "hermes" => {
+                    let all: Vec<CompletionRow> = HERMES_COMMANDS
+                        .iter()
+                        .map(|(c, d)| CompletionRow {
+                            insert: (*c).to_string(),
+                            label: (*c).to_string(),
+                            detail: (*d).to_string(),
+                        })
+                        .collect();
+                    rank_by(&all, &query, |r| r.label[1..].to_string(), 10)
+                }
+                '$' => {
+                    let all: Vec<CompletionRow> = skills
+                        .iter()
+                        .filter(|sk| sk.enabled)
+                        .map(|sk| CompletionRow {
+                            insert: format!("${}", sk.name),
+                            label: sk.name.clone(),
+                            detail: sk.description.clone(),
+                        })
+                        .collect();
+                    rank_by(&all, &query, |r| r.label.clone(), 8)
+                }
                 _ => Vec::new(),
             };
-            (!rows.is_empty()).then_some((mode, start, rows))
+            (!rows.is_empty()).then_some((start, rows))
         })
     };
     let completion_open = completion.is_some();
     let completion_rows = completion
         .as_ref()
-        .map(|(_, _, r)| r.clone())
+        .map(|(_, r)| r.clone())
         .unwrap_or_default();
-    let completion_start = completion.as_ref().map(|(_, s, _)| *s).unwrap_or(0);
+    let completion_start = completion.as_ref().map(|(s, _)| *s).unwrap_or(0);
     let sel = completion_sel().min(completion_rows.len().saturating_sub(1));
 
-    // Accept a completion: replace the trigger token, refocus flow
-    // continues naturally (the textarea keeps focus).
     let accept = use_callback(move |(start, insert): (usize, String)| {
         let mut text = composer.peek().clone();
         text.truncate(start);
@@ -749,11 +884,14 @@ fn ChatPane(
     use_effect(move || {
         let _ = messages.read().len();
         let _ = streaming.read().is_some();
-        let _ = activity.read().len();
+        let _ = live_lines.read().len();
         let _ = dioxus::document::eval(
             "const el = document.getElementById('agent-transcript'); if (el) el.scrollTop = el.scrollHeight;",
         );
     });
+
+    let question_view = pending_question.read().clone();
+    let queued_view = queued.read().clone();
 
     rsx! {
         div { class: "flex min-w-0 flex-1 flex-col",
@@ -810,19 +948,29 @@ fn ChatPane(
                 }
             }
 
-            // Transcript timeline.
+            // Transcript timeline (derived rows + live tail).
             div {
                 id: "agent-transcript",
                 class: "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
-                for m in messages.read().iter() {
-                    {message_view(m)}
+                for row in derived_rows.iter() {
+                    match row {
+                        Row::Message(i) => rsx! {
+                            if let Some(m) = msgs_snapshot.get(*i) {
+                                {message_view(m)}
+                            }
+                        },
+                        Row::TurnFold { anchor, tool_count, duration_secs } => rsx! {
+                            {turn_fold_view(anchor, *tool_count, *duration_secs, &turns_snapshot, expanded_folds)}
+                        },
+                    }
                 }
+                // Live turn tail: reasoning, activity, streaming, timer.
                 if !reasoning_text.is_empty() {
                     div { class: "border-l-2 border-primary/40 pl-3",
                         details { class: "text-xs text-muted-foreground", open: busy(),
                             summary { class: "cursor-pointer select-none font-medium",
                                 if busy() {
-                                    span { class: "mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-primary align-middle" }
+                                    span { class: "mr-1 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle agents-dot-pulse" }
                                 }
                                 "Thinking"
                             }
@@ -830,32 +978,55 @@ fn ChatPane(
                         }
                     }
                 }
-                if !activity_view.is_empty() {
+                if !live_view.is_empty() {
                     div { class: "flex flex-col gap-1",
-                        for (i , line) in activity_view.iter().enumerate() {
-                            div {
-                                key: "{i}",
-                                class: "w-fit max-w-full truncate rounded-md bg-muted/40 px-2 py-0.5 font-mono text-[0.72rem] text-muted-foreground",
-                                "{line}"
-                            }
+                        for (i , line) in live_view.iter().enumerate() {
+                            {activity_line_view(i, line)}
                         }
                     }
                 }
                 if let Some((_, text)) = &streaming_view {
                     div { class: "max-w-none",
                         task_ui::Markdown { source: text.clone() }
-                        span { class: "ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70" }
+                        span { class: "ml-0.5 inline-block h-4 w-2 bg-primary/70 agents-dot-pulse" }
                     }
                 }
                 if busy() {
                     div { class: "flex items-center gap-2 text-sm text-muted-foreground",
                         Spinner { size: SpinnerSize::Small }
-                        span { "{fmt_elapsed(elapsed())} Working…" }
+                        span { class: "tabular-nums", "{fmt_elapsed(elapsed())} Working…" }
                     }
                 }
                 if !error.read().is_empty() {
                     div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
                         "{error}"
+                    }
+                }
+            }
+
+            // Pending question card (numbered-shortcut options).
+            if let Some(q) = &question_view {
+                {question_card(q, answer_question)}
+            }
+
+            // Queued sends.
+            if !queued_view.is_empty() {
+                div { class: "flex flex-wrap items-center gap-1.5 border-t border-border/40 px-4 pt-2",
+                    span { class: "text-[0.7rem] text-muted-foreground", "Queued:" }
+                    for (i , q) in queued_view.iter().enumerate() {
+                        span {
+                            key: "{i}",
+                            class: "flex max-w-64 items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-xs",
+                            span { class: "truncate", "{q}" }
+                            button {
+                                r#type: "button",
+                                class: "text-muted-foreground hover:text-foreground",
+                                onclick: move |_| {
+                                    queued.write().remove(i);
+                                },
+                                "×"
+                            }
+                        }
                     }
                 }
             }
@@ -942,13 +1113,12 @@ fn ChatPane(
                     }
                     Button {
                         variant: ButtonVariant::Primary,
-                        disabled: busy() || composer.read().trim().is_empty(),
+                        disabled: composer.read().trim().is_empty(),
                         on_click: move |_| send(()),
-                        "Send"
+                        if busy() { "Queue" } else { "Send" }
                     }
                 }
                 div { class: "mt-1.5 flex items-center gap-2",
-                    // Model chip — live Discovery data for this backend.
                     select {
                         class: "w-52 rounded-md border border-border/60 bg-card/30 px-2 py-0.5 text-xs text-foreground outline-none focus:border-primary/60",
                         value: "{model}",
@@ -966,13 +1136,137 @@ fn ChatPane(
                             }
                         }
                     }
-                    // Context gauge (right-aligned): tokens in/out.
-                    span { class: "ml-auto text-[0.7rem] tabular-nums text-muted-foreground",
-                        title: "context (input) / generated (output) tokens",
-                        if tok_in + tok_out > 0 {
-                            "{fmt_tokens(tok_in)} ctx · {fmt_tokens(tok_out)} out"
-                        } else {
-                            "no usage yet"
+                    // Context gauge: conic-gradient ring when the
+                    // window is known, raw counter otherwise.
+                    div { class: "ml-auto flex items-center gap-1.5 text-[0.7rem] tabular-nums text-muted-foreground",
+                        if let (Some(free), Some(used_pct)) = (ring, ring_pct_used) {
+                            span {
+                                class: "inline-block h-5 w-5 rounded-full",
+                                style: "{context_ring_style(free)}",
+                                title: "{used_pct:.0}% of context used — {fmt_tokens(tok_in)} of {fmt_tokens(context_window)} tokens",
+                            }
+                        }
+                        span {
+                            title: "context (input) / generated (output) tokens",
+                            if tok_in + tok_out > 0 {
+                                "{fmt_tokens(tok_in)} ctx · {fmt_tokens(tok_out)} out"
+                            } else {
+                                "no usage yet"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A folded completed turn: one-line summary, expandable to the
+/// retained activity log + reasoning.
+fn turn_fold_view(
+    anchor: &str,
+    tool_count: usize,
+    duration_secs: i64,
+    turns: &HashMap<String, TurnLog>,
+    mut expanded: Signal<std::collections::HashSet<String>>,
+) -> Element {
+    let is_open = expanded.read().contains(anchor);
+    let key = anchor.to_string();
+    let summary = fold_summary(tool_count, duration_secs);
+    let log = turns.get(anchor).cloned().unwrap_or_default();
+
+    rsx! {
+        div { key: "fold-{anchor}", class: "flex flex-col gap-1",
+            button {
+                r#type: "button",
+                class: "flex w-fit items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[0.72rem] text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+                onclick: move |_| {
+                    let mut set = expanded.write();
+                    if !set.remove(&key) {
+                        set.insert(key.clone());
+                    }
+                },
+                span { class: if is_open { "inline-block rotate-90 transition-transform" } else { "inline-block transition-transform" }, "›" }
+                span { "{summary}" }
+            }
+            if is_open {
+                div { class: "flex flex-col gap-1 border-l border-border/40 pl-3",
+                    if !log.reasoning.is_empty() {
+                        details { class: "text-xs text-muted-foreground",
+                            summary { class: "cursor-pointer select-none font-medium", "Thinking" }
+                            pre { class: "mt-1 whitespace-pre-wrap font-sans leading-relaxed", "{log.reasoning}" }
+                        }
+                    }
+                    for (i , line) in log.lines.iter().enumerate() {
+                        {activity_line_view(i, line)}
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One activity line: status glyph + mono text (t3code's
+/// `SimpleWorkEntryRow` glyph state machine, compact form).
+fn activity_line_view(i: usize, line: &ActivityLine) -> Element {
+    let (glyph, glyph_cls) = match line.tone {
+        ToolTone::Running => ("▸", "text-primary"),
+        ToolTone::Ok => ("✓", "text-emerald-500"),
+        ToolTone::Fail => ("✗", "text-destructive"),
+        ToolTone::Note => ("·", "text-muted-foreground/70"),
+    };
+    rsx! {
+        div {
+            key: "{i}",
+            class: "flex w-fit max-w-full items-baseline gap-1.5 rounded-md bg-muted/40 px-2 py-0.5 font-mono text-[0.72rem] text-muted-foreground",
+            span { class: "{glyph_cls}", "{glyph}" }
+            span { class: "truncate", title: "{line.text}", "{line.text}" }
+        }
+    }
+}
+
+/// A pending structured question: numbered option cards (t3code's
+/// `ComposerPendingUserInputPanel`, compact form). Answering
+/// dispatches the option label as the user's turn.
+fn question_card(q: &QuestionRequest, answer: Callback<String>) -> Element {
+    let Some(first) = q.questions.first() else {
+        return rsx! {};
+    };
+    let total = q.questions.len();
+
+    rsx! {
+        div { class: "border-t border-border/60 bg-card/40 px-4 py-3",
+            div { class: "mb-2 flex items-center gap-2",
+                if !first.header.is_empty() {
+                    span { class: "rounded-full bg-primary/15 px-2 py-0.5 text-[0.7rem] font-medium text-primary",
+                        "{first.header}"
+                    }
+                }
+                span { class: "text-sm font-medium", "{first.text}" }
+                if total > 1 {
+                    span { class: "ml-auto rounded-full bg-muted/60 px-2 py-0.5 text-[0.7rem] text-muted-foreground",
+                        "1/{total}"
+                    }
+                }
+            }
+            div { class: "flex flex-col gap-1",
+                for (i , opt) in first.options.iter().enumerate().take(9) {
+                    {
+                        let label = opt.label.clone();
+                        rsx! {
+                            button {
+                                key: "{opt.label}",
+                                r#type: "button",
+                                class: "flex w-full items-baseline gap-2 rounded-lg border border-border/60 px-3 py-1.5 text-left hover:border-primary/60 hover:bg-primary/5",
+                                onclick: move |_| answer(label.clone()),
+                                kbd { class: "rounded border border-border/60 bg-muted/40 px-1 font-mono text-[0.7rem] text-muted-foreground",
+                                    "{i + 1}"
+                                }
+                                span { class: "text-sm", "{opt.label}" }
+                                if !opt.description.is_empty() {
+                                    span { class: "truncate text-xs text-muted-foreground", "{opt.description}" }
+                                }
+                            }
                         }
                     }
                 }
@@ -999,7 +1293,6 @@ fn Inspector(
 
     rsx! {
         div { class: "flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border/60 px-3 py-3",
-            // ── Session ──
             div { class: "flex flex-col gap-2",
                 span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
                     "Session"
@@ -1024,10 +1317,22 @@ fn Inspector(
                     }
                 }
                 div { class: "flex flex-col gap-1 text-xs text-muted-foreground",
-                    div { class: "flex justify-between", span { "Backend" } span { class: backend_chip_cls(&session.backend_id), "{session.backend_id}" } }
-                    div { class: "flex justify-between", span { "Created" } span { "{created}" } }
-                    div { class: "flex justify-between", span { "Tokens" } span { class: "tabular-nums", "{fmt_tokens(tokens)}" } }
-                    div { class: "flex justify-between", span { "Status" } span { "{status_label(session.status)}" } }
+                    div { class: "flex justify-between",
+                        span { "Backend" }
+                        span { class: backend_chip_cls(&session.backend_id), "{session.backend_id}" }
+                    }
+                    div { class: "flex justify-between",
+                        span { "Created" }
+                        span { "{created}" }
+                    }
+                    div { class: "flex justify-between",
+                        span { "Tokens" }
+                        span { class: "tabular-nums", "{fmt_tokens(tokens)}" }
+                    }
+                    div { class: "flex justify-between",
+                        span { "Status" }
+                        span { "{status_text(session.status)}" }
+                    }
                 }
                 div { class: "flex items-center gap-1.5",
                     Button {
@@ -1067,7 +1372,6 @@ fn Inspector(
                 }
             }
 
-            // ── Skills ──
             div { class: "flex flex-col gap-1.5",
                 span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
                     "Skills ({skills.len()})"
@@ -1094,7 +1398,6 @@ fn Inspector(
                 }
             }
 
-            // ── Capabilities ──
             if !capabilities.is_empty() {
                 div { class: "flex flex-col gap-1",
                     span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
@@ -1119,33 +1422,7 @@ fn Inspector(
     }
 }
 
-/// Append an activity pill, deduping immediate repeats and capping
-/// the per-turn list.
-fn push_activity(activity: &mut Signal<Vec<String>>, line: String) {
-    let mut list = activity.write();
-    if list.last() == Some(&line) {
-        return;
-    }
-    list.push(line);
-    let overflow = list.len().saturating_sub(200);
-    if overflow > 0 {
-        list.drain(..overflow);
-    }
-}
-
-fn fmt_elapsed(secs: i64) -> String {
-    format!("{}:{:02}", secs / 60, secs % 60)
-}
-
-fn fmt_tokens(n: u64) -> String {
-    if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1000.0)
-    } else {
-        n.to_string()
-    }
-}
-
-fn status_label(status: SessionStatus) -> &'static str {
+fn status_text(status: SessionStatus) -> &'static str {
     match status {
         SessionStatus::Idle => "Idle",
         SessionStatus::Running => "Running",
@@ -1167,9 +1444,17 @@ fn text_of(m: &Message) -> String {
         .join("\n")
 }
 
-/// One transcript entry. User messages are right-aligned bubbles;
-/// assistant messages render as markdown; system notes + errors get
-/// muted/destructive styling.
+/// Copy text to the clipboard via the browser API.
+fn copy_text(text: &str) {
+    let js = format!(
+        "navigator.clipboard && navigator.clipboard.writeText({});",
+        serde_json::to_string(text).unwrap_or_default()
+    );
+    let _ = dioxus::document::eval(&js);
+}
+
+/// One transcript entry. Assistant messages get a hover copy
+/// button; user messages are right-aligned bubbles.
 fn message_view(m: &Message) -> Element {
     let text = text_of(m);
     if m.errored {
@@ -1187,11 +1472,21 @@ fn message_view(m: &Message) -> Element {
                 }
             }
         },
-        Role::Assistant => rsx! {
-            div { key: "{m.id}", class: "max-w-none",
-                task_ui::Markdown { source: text }
+        Role::Assistant => {
+            let copy_source = text.clone();
+            rsx! {
+                div { key: "{m.id}", class: "group relative max-w-none",
+                    task_ui::Markdown { source: text }
+                    button {
+                        r#type: "button",
+                        class: "absolute -top-1 right-0 hidden rounded-md border border-border/60 bg-card/80 p-1 text-muted-foreground hover:text-foreground group-hover:block",
+                        title: "Copy message",
+                        onclick: move |_| copy_text(&copy_source),
+                        Copy { size: 12 }
+                    }
+                }
             }
-        },
+        }
         Role::System | Role::Tool => rsx! {
             div { key: "{m.id}", class: "text-xs italic text-muted-foreground", "{text}" }
         },
