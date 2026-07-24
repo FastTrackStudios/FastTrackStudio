@@ -347,6 +347,11 @@ pub struct AgentPanelOpen(pub bool);
 #[derive(Clone, PartialEq)]
 pub struct AgentPanelSelected(pub String);
 
+/// Agent panel width in px (drag-resizable, persisted to
+/// localStorage — CodexMonitor persists its panel sizes too).
+#[derive(Clone, Copy, PartialEq)]
+pub struct AgentPanelWidth(pub f64);
+
 pub(crate) fn use_fleeting_open() -> Signal<bool> {
     use_context::<FleetingOpen>().0
 }
