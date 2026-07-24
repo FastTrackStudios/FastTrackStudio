@@ -1982,6 +1982,7 @@ pub async fn dispatch_agent_turn(
     slug: &str,
     session_id: &str,
     text: &str,
+    model_override: &str,
 ) -> Result<agent_proto::service::turn_dispatch::DispatchAck, String> {
     let client = crate::vox_clients::establish_for::<
         agent_proto::service::turn_dispatch::TurnDispatchClient,
@@ -1994,7 +1995,7 @@ pub async fn dispatch_agent_turn(
             attachments: Vec::new(),
             profile_override_id: String::new(),
             personality_override_id: String::new(),
-            model_override: String::new(),
+            model_override: model_override.to_owned(),
         })
         .await
         .map_err(|e| format!("{slug}: dispatch turn: {e:?}"))

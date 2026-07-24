@@ -158,7 +158,14 @@ pub fn AgentsView() -> Element {
 
             // ── Chat pane ──
             if let Some((slug, session)) = selected.read().clone() {
-                ChatPane { key: "{session.id}", slug, session }
+                ChatPane {
+                    key: "{session.id}",
+                    slug,
+                    session,
+                    // Turn lifecycle changes refresh the rail (status
+                    // pulses, timestamps, token counts).
+                    on_activity: move |()| sessions.restart(),
+                }
             } else {
                 div { class: "flex flex-1 flex-col items-center justify-center gap-3 text-center",
                     Bot { size: 32 }
@@ -182,11 +189,21 @@ fn backend_chip_cls(backend_id: &str) -> &'static str {
     }
 }
 
+/// Live event-stream health, surfaced as a chip in the chat
+/// header — a dead stream is the difference between "the agent is
+/// thinking" and "you will never hear back", so it must be visible.
+#[derive(Clone, PartialEq)]
+enum StreamState {
+    Connecting,
+    Live,
+    Dead(String),
+}
+
 /// One open conversation: transcript + live stream + composer.
 /// Keyed by session id — remounting on selection change gives each
 /// session its own subscription lifecycle.
 #[component]
-fn ChatPane(slug: String, session: Session) -> Element {
+fn ChatPane(slug: String, session: Session, on_activity: EventHandler<()>) -> Element {
     let session_id = session.id.clone();
     // Chronological transcript (server returns newest-first).
     let mut messages = use_signal(Vec::<Message>::new);
@@ -197,6 +214,13 @@ fn ChatPane(slug: String, session: Session) -> Element {
     let mut error = use_signal(String::new);
     let mut busy = use_signal(|| matches!(session.status, SessionStatus::Running));
     let mut composer = use_signal(String::new);
+    // Per-turn model override; empty = the backend's default. The
+    // ack's effective model is echoed back into `responding`.
+    let mut model = use_signal(String::new);
+    let mut responding = use_signal(String::new);
+    let mut stream_state = use_signal(|| StreamState::Connecting);
+    // Cumulative token metering for this session (live ticks).
+    let mut tokens = use_signal(|| (session.usage.input_tokens, session.usage.output_tokens));
 
     // Transcript load + live event pump, once per mounted session.
     let stream_slug = slug.clone();
@@ -210,18 +234,23 @@ fn ChatPane(slug: String, session: Session) -> Element {
                     msgs.reverse();
                     messages.set(msgs);
                 }
-                Err(e) => error.set(e),
+                Err(e) => error.set(format!("Couldn't load the transcript: {e}")),
             }
 
             let (tx, mut rx) = vox::channel::<AgentEvent>();
             let sub_slug = slug.clone();
             let sub_sid = sid.clone();
             spawn(async move {
-                if let Err(e) = crate::feeds::subscribe_agent_session(&sub_slug, &sub_sid, tx).await
-                {
-                    tracing::warn!("agent session subscription ended: {e}");
-                }
+                // The call returns only when the stream ends — a clean
+                // close or a transport failure both mean we're deaf.
+                let outcome = crate::feeds::subscribe_agent_session(&sub_slug, &sub_sid, tx).await;
+                let msg = match outcome {
+                    Ok(()) => "event stream closed by the server".to_string(),
+                    Err(e) => e,
+                };
+                stream_state.set(StreamState::Dead(msg));
             });
+            stream_state.set(StreamState::Live);
             while let Ok(Some(ev)) = rx.recv().await {
                 match ev.get().clone() {
                     AgentEvent::TurnStarted { .. } => {
@@ -229,6 +258,7 @@ fn ChatPane(slug: String, session: Session) -> Element {
                         status.set(String::new());
                         error.set(String::new());
                         reasoning.set(String::new());
+                        on_activity.call(());
                     }
                     AgentEvent::MessageWritten { message } => {
                         if streaming
@@ -269,22 +299,35 @@ fn ChatPane(slug: String, session: Session) -> Element {
                         reasoning.write().push_str(&delta);
                     }
                     AgentEvent::ToolProgress { preview, .. } => status.set(preview),
-                    AgentEvent::Warning { message, .. } => status.set(message),
+                    AgentEvent::Warning { kind, message, .. } => {
+                        status.set(format!("{kind}: {message}"));
+                    }
+                    AgentEvent::Metering {
+                        input_tokens,
+                        output_tokens,
+                        ..
+                    } => tokens.set((input_tokens, output_tokens)),
                     AgentEvent::TurnFinished { .. } => {
                         busy.set(false);
                         status.set(String::new());
                         streaming.set(None);
+                        responding.set(String::new());
+                        on_activity.call(());
                     }
-                    AgentEvent::TurnErrored { message, .. } => {
+                    AgentEvent::TurnErrored { kind, message, .. } => {
                         busy.set(false);
                         status.set(String::new());
                         streaming.set(None);
-                        error.set(message);
+                        responding.set(String::new());
+                        error.set(format!("{kind}: {message}"));
+                        on_activity.call(());
                     }
                     AgentEvent::TurnCancelled { .. } => {
                         busy.set(false);
                         status.set("Cancelled".to_string());
                         streaming.set(None);
+                        responding.set(String::new());
+                        on_activity.call(());
                     }
                     AgentEvent::Resync => {
                         if let Ok(mut msgs) = crate::feeds::fetch_agent_messages(&slug, &sid).await
@@ -325,10 +368,23 @@ fn ChatPane(slug: String, session: Session) -> Element {
         error.set(String::new());
         let slug = send_slug.clone();
         let sid = send_sid.clone();
+        let model_override = model.peek().trim().to_string();
         spawn(async move {
-            if let Err(e) = crate::feeds::dispatch_agent_turn(&slug, &sid, &text).await {
-                busy.set(false);
-                error.set(e);
+            match crate::feeds::dispatch_agent_turn(&slug, &sid, &text, &model_override).await {
+                Ok(ack) => {
+                    // Echo what's actually answering — backend + model
+                    // resolution happens server-side.
+                    let with = if ack.effective_model.is_empty() {
+                        format!("{} · default model", ack.effective_backend_id)
+                    } else {
+                        format!("{} · {}", ack.effective_backend_id, ack.effective_model)
+                    };
+                    responding.set(with);
+                }
+                Err(e) => {
+                    busy.set(false);
+                    error.set(format!("Dispatch failed: {e}"));
+                }
             }
         });
     });
@@ -350,6 +406,17 @@ fn ChatPane(slug: String, session: Session) -> Element {
     };
     let streaming_view = streaming.read().clone();
     let reasoning_text = reasoning.read().clone();
+    let (tok_in, tok_out) = tokens();
+    let stream = stream_state.read().clone();
+
+    // Keep the transcript pinned to the newest content.
+    use_effect(move || {
+        let _ = messages.read().len();
+        let _ = streaming.read().is_some();
+        let _ = dioxus::document::eval(
+            "const el = document.getElementById('agent-transcript'); if (el) el.scrollTop = el.scrollHeight;",
+        );
+    });
 
     rsx! {
         div { class: "flex min-w-0 flex-1 flex-col",
@@ -358,19 +425,54 @@ fn ChatPane(slug: String, session: Session) -> Element {
                 div { class: "flex min-w-0 items-center gap-2",
                     span { class: "truncate text-sm font-semibold", "{title}" }
                     span { class: backend_chip_cls(&session.backend_id), "{session.backend_id}" }
+                    match &stream {
+                        StreamState::Connecting => rsx! {
+                            span { class: "rounded-full bg-muted/60 px-1.5 text-[0.7rem] text-muted-foreground",
+                                "connecting…"
+                            }
+                        },
+                        StreamState::Live => rsx! {
+                            span {
+                                class: "rounded-full bg-emerald-500/15 px-1.5 text-[0.7rem] text-emerald-500",
+                                title: "Live event stream connected",
+                                "● live"
+                            }
+                        },
+                        StreamState::Dead(why) => rsx! {
+                            span {
+                                class: "rounded-full bg-destructive/15 px-1.5 text-[0.7rem] text-destructive",
+                                title: "{why}",
+                                "○ stream down — reselect the chat to reconnect"
+                            }
+                        },
+                    }
                 }
-                if busy() {
-                    Button {
-                        variant: ButtonVariant::Outline,
-                        size: ButtonSize::Small,
-                        on_click: on_stop,
-                        "Stop"
+                div { class: "flex shrink-0 items-center gap-2",
+                    if tok_in + tok_out > 0 {
+                        span {
+                            class: "text-[0.7rem] tabular-nums text-muted-foreground",
+                            title: "input / output tokens",
+                            "{tok_in}↑ {tok_out}↓"
+                        }
+                    }
+                    if !responding.read().is_empty() {
+                        span { class: "text-[0.7rem] text-muted-foreground", "{responding}" }
+                    }
+                    if busy() {
+                        Button {
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Small,
+                            on_click: on_stop,
+                            "Stop"
+                        }
                     }
                 }
             }
 
             // Transcript.
-            div { class: "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
+            div {
+                id: "agent-transcript",
+                class: "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
                 for m in messages.read().iter() {
                     {message_view(m)}
                 }
@@ -425,6 +527,35 @@ fn ChatPane(slug: String, session: Session) -> Element {
                         disabled: busy() || composer.read().trim().is_empty(),
                         on_click: move |_| send(()),
                         "Send"
+                    }
+                }
+                // Model override — free-form with suggestions; empty
+                // rides the backend's default. Resolution happens
+                // server-side (gateway profile / provider routing),
+                // so this is a hint, echoed back via the ack.
+                div { class: "mt-1.5 flex items-center gap-2",
+                    span { class: "text-[0.7rem] text-muted-foreground", "Model" }
+                    input {
+                        class: "w-48 rounded-md border border-border/60 bg-card/30 px-2 py-0.5 text-xs text-foreground outline-none focus:border-primary/60",
+                        placeholder: "backend default",
+                        list: "agent-model-suggestions",
+                        value: "{model}",
+                        oninput: move |e| model.set(e.value()),
+                    }
+                    datalist { id: "agent-model-suggestions",
+                        option { value: "hermes" }
+                        option { value: "gpt-5.5" }
+                        option { value: "gpt-5.5-mini" }
+                        option { value: "claude-opus-4-8" }
+                        option { value: "deepseek-v4" }
+                    }
+                    if !model.read().trim().is_empty() {
+                        button {
+                            r#type: "button",
+                            class: "text-[0.7rem] text-muted-foreground hover:text-foreground",
+                            onclick: move |_| model.set(String::new()),
+                            "reset"
+                        }
                     }
                 }
             }
