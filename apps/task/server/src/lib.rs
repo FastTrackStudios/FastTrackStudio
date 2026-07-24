@@ -19,12 +19,13 @@
 
 pub mod agent_router;
 pub mod attachments;
-pub mod media;
 pub mod capability;
 pub mod connections;
 pub mod forge_sync;
 pub mod identity_mgmt;
 pub mod link_sync;
+pub mod mcp;
+pub mod media;
 pub mod presence;
 pub mod server_mgmt;
 pub mod share;
@@ -680,8 +681,7 @@ pub(crate) async fn build_org_state(
         if let Some(h) = &agent_hermes {
             tracing::info!(url = %h.config().base_url, model = %h.config().model, "hermes agent gateway configured");
         }
-        let agent_router =
-            agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes);
+        let agent_router = agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes);
 
         // Timer store. SQLite at
         // `<data_root>/orgs/<slug>/timer.sqlite`
@@ -1354,7 +1354,10 @@ async fn per_org_media_handler(
             [
                 (header::CONTENT_TYPE, ct.to_string()),
                 (header::ACCEPT_RANGES, "bytes".to_string()),
-                (header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}")),
+                (
+                    header::CONTENT_RANGE,
+                    format!("bytes {start}-{end}/{total}"),
+                ),
                 (header::CONTENT_LENGTH, len.to_string()),
             ],
             buf,
@@ -1415,6 +1418,9 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(webhooks::forge_webhook_handler),
         )
         .route("/org/{slug}/share/{token}", get(share_landing_handler))
+        // MCP — Task as a tool surface for agents (Hermes gateway,
+        // Claude Code, any MCP client). See `mcp`.
+        .route("/org/{slug}/mcp", axum::routing::post(mcp::mcp_handler))
         .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
         .with_state(state.clone());
 
@@ -1659,9 +1665,7 @@ const MEDIA_PERMITS: architect_permissions::ServicePermits =
 /// any validated user (per-row membership sync lands with shares), permit
 /// tables for the share-relevant services. Observe-only unless
 /// `TASK_ENFORCE_PERMISSIONS=1`.
-fn build_org_permissions_gate(
-    auth: &AuthState,
-) -> architect::permissions_gate::PermissionsGate {
+fn build_org_permissions_gate(auth: &AuthState) -> architect::permissions_gate::PermissionsGate {
     use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
     let roles = architect_permissions::RoleEngine::new().with_default_user_role("member");
     let identity = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
@@ -1670,7 +1674,10 @@ fn build_org_permissions_gate(
         .unlisted(UnlistedPolicy::Allow)
         .observe_only(!enforce)
         .permit(vault_proto::descriptor(), VAULT_PERMITS)
-        .permit(media_proto::media_service_service_descriptor(), MEDIA_PERMITS)
+        .permit(
+            media_proto::media_service_service_descriptor(),
+            MEDIA_PERMITS,
+        )
 }
 
 /// Schema stamps for every vox service [`org_layer_router`]
@@ -2150,7 +2157,8 @@ fn share_public_base() -> String {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
-            let bind = std::env::var("TASK_SERVER_BIND").unwrap_or_else(|_| "127.0.0.1:3456".into());
+            let bind =
+                std::env::var("TASK_SERVER_BIND").unwrap_or_else(|_| "127.0.0.1:3456".into());
             format!("http://{bind}")
         })
 }
@@ -2214,7 +2222,10 @@ mod range_tests {
 
     #[test]
     fn mid_range() {
-        assert_eq!(parse_byte_range("bytes=500-799", 3_415_886), Some((500, 799)));
+        assert_eq!(
+            parse_byte_range("bytes=500-799", 3_415_886),
+            Some((500, 799))
+        );
     }
 
     #[test]
