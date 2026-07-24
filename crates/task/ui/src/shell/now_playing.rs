@@ -51,6 +51,12 @@ pub struct NowPlayingCtl {
     pub dur: Signal<f64>,
     pub can_prev: Signal<bool>,
     pub can_next: Signal<bool>,
+    /// Slug of the currently playing song, so the setlist list can mark the
+    /// matching row (`None` ⇒ nothing playing).
+    pub current_slug: Signal<Option<String>>,
+    /// Live output amplitude 0..1 (smoothed), driving the now-playing
+    /// waveform over the row artwork.
+    pub amp: Signal<f64>,
     /// Command bus: `(generation, cmd)` — a bumped generation makes repeats
     /// observable.
     pub cmd: Signal<(u64, NpCmd)>,
@@ -68,6 +74,8 @@ pub fn provide_now_playing_ctl() {
         dur: Signal::new(0.0),
         can_prev: Signal::new(false),
         can_next: Signal::new(false),
+        current_slug: Signal::new(None),
+        amp: Signal::new(0.0),
         cmd: Signal::new((0, NpCmd::Toggle)),
     });
 }
@@ -190,7 +198,8 @@ mod imp {
     use std::rc::Rc;
 
     use dioxus::prelude::*;
-    use web_sys::HtmlAudioElement;
+    use wasm_bindgen::JsCast;
+    use web_sys::{AnalyserNode, AudioContext, HtmlAudioElement, MediaElementAudioSourceNode};
 
     use super::{NowPlayingCtl, NpCmd};
     use crate::chrome::NowPlaying;
@@ -202,6 +211,12 @@ mod imp {
     #[component]
     pub fn GlobalNowPlayer() -> Element {
         let element: Rc<RefCell<Option<HtmlAudioElement>>> =
+            use_hook(|| Rc::new(RefCell::new(None)));
+        // Web Audio graph for the now-playing waveform amplitude — created
+        // lazily on first play. The source (per element) is kept alive here.
+        let audio_ctx: Rc<RefCell<Option<(AudioContext, AnalyserNode)>>> =
+            use_hook(|| Rc::new(RefCell::new(None)));
+        let audio_src: Rc<RefCell<Option<MediaElementAudioSourceNode>>> =
             use_hook(|| Rc::new(RefCell::new(None)));
         let mut queue_key = use_signal(|| (String::new(), Vec::<String>::new()));
         let mut title = use_signal(String::new);
@@ -224,6 +239,8 @@ mod imp {
 
         let select = use_callback({
             let element = element.clone();
+            let audio_ctx = audio_ctx.clone();
+            let audio_src = audio_src.clone();
             move |i: usize| {
                 let track = {
                     let list = tracks.peek();
@@ -247,6 +264,29 @@ mod imp {
                 match element_for(&org, &track.slug, &file) {
                     Ok(el) => {
                         let _ = el.play();
+                        // Best-effort: route through a Web Audio analyser so the
+                        // waveform can track amplitude. If anything fails the
+                        // element still plays normally (no source is created).
+                        {
+                            let mut g = audio_ctx.borrow_mut();
+                            if g.is_none() {
+                                if let Ok(ctx) = AudioContext::new() {
+                                    if let Ok(an) = ctx.create_analyser() {
+                                        an.set_fft_size(256);
+                                        an.set_smoothing_time_constant(0.75);
+                                        let _ = an.connect_with_audio_node(&ctx.destination());
+                                        *g = Some((ctx, an));
+                                    }
+                                }
+                            }
+                            if let Some((ctx, an)) = g.as_ref() {
+                                let _ = ctx.resume();
+                                if let Ok(src) = ctx.create_media_element_source(&el) {
+                                    let _ = src.connect_with_audio_node(an);
+                                    *audio_src.borrow_mut() = Some(src);
+                                }
+                            }
+                        }
                         *element.borrow_mut() = Some(el);
                     }
                     Err(e) => tracing::warn!("now-playing: `{}`: {e}", track.slug),
@@ -379,9 +419,11 @@ mod imp {
                         ctl.queue_label.clone().set(label);
                         ctl.can_prev.clone().set(i > 0);
                         ctl.can_next.clone().set(i + 1 < len);
+                        ctl.current_slug.clone().set(queue_key.read().1.get(i).cloned());
                     }
                     None => {
                         ctl.track_title.clone().set(None);
+                        ctl.current_slug.clone().set(None);
                     }
                 }
             });
@@ -430,13 +472,111 @@ mod imp {
             });
         }
 
+        // ~30 fps amplitude poll: RMS of the analyser's time-domain data →
+        // a smoothed 0..1 level that drives the now-playing waveform.
+        {
+            let ctl = use_context::<NowPlayingCtl>();
+            let audio_ctx = audio_ctx.clone();
+            let mut amp = ctl.amp;
+            use_future(move || {
+                let audio_ctx = audio_ctx.clone();
+                async move {
+                    let mut smooth = 0.0f64;
+                    let mut buf = [0u8; 128];
+                    loop {
+                        architect::platform::sleep(std::time::Duration::from_millis(33)).await;
+                        let is_playing = *playing.peek();
+                        let rms = if is_playing {
+                            match audio_ctx.borrow().as_ref() {
+                                Some((_, an)) => {
+                                    an.get_byte_time_domain_data(&mut buf);
+                                    let sum: f64 = buf
+                                        .iter()
+                                        .map(|&b| {
+                                            let v = (b as f64 - 128.0) / 128.0;
+                                            v * v
+                                        })
+                                        .sum();
+                                    (sum / buf.len() as f64).sqrt()
+                                }
+                                None => 0.0,
+                            }
+                        } else {
+                            0.0
+                        };
+                        // Boost (stems sit well below 0 dBFS) + asymmetric smooth
+                        // (fast attack, slow release) for a lively-but-stable bar.
+                        let target = (rms * 3.2).min(1.0);
+                        smooth = if target > smooth {
+                            smooth * 0.4 + target * 0.6
+                        } else {
+                            smooth * 0.82 + target * 0.18
+                        };
+                        amp.set(smooth);
+                    }
+                }
+            });
+        }
+
         // Headless — the UI is the status-bar tab.
         rsx! {}
+    }
+
+    /// Headless: marks whichever setlist song-row matches the currently
+    /// playing song with `md-song-strip--playing` and feeds it the live
+    /// amplitude via a `--amp` custom property (driving the waveform over the
+    /// row artwork). The rows are editor-rendered HTML, so this reconciles the
+    /// DOM directly rather than through rsx.
+    #[component]
+    pub fn NowPlayingStripHighlighter() -> Element {
+        let ctl = use_context::<NowPlayingCtl>();
+        use_future(move || async move {
+            loop {
+                architect::platform::sleep(std::time::Duration::from_millis(33)).await;
+                let active = if *ctl.playing.peek() {
+                    ctl.current_slug.read().clone()
+                } else {
+                    None
+                };
+                let amp = *ctl.amp.peek();
+                mark_playing_rows(active.as_deref(), amp);
+            }
+        });
+        rsx! {}
+    }
+
+    /// Reconcile the `md-song-strip--playing` class + `--amp` across all
+    /// on-screen song rows against the active slug.
+    fn mark_playing_rows(active_slug: Option<&str>, amp: f64) {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let Ok(rows) = doc.query_selector_all(".md-song-strip") else {
+            return;
+        };
+        let amp_str = format!("{amp:.3}");
+        for i in 0..rows.length() {
+            let Some(el) = rows.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+            else {
+                continue;
+            };
+            let is_active = el
+                .get_attribute("data-href")
+                .and_then(|h| h.strip_prefix("song-play:").map(crate::pages::vault::slugify))
+                .as_deref()
+                == active_slug;
+            if is_active {
+                let _ = el.class_list().add_1("md-song-strip--playing");
+                let _ = el.style().set_property("--amp", &amp_str);
+            } else {
+                let _ = el.class_list().remove_1("md-song-strip--playing");
+            }
+        }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use imp::GlobalNowPlayer;
+pub use imp::{GlobalNowPlayer, NowPlayingStripHighlighter};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod stub {
@@ -447,7 +587,12 @@ mod stub {
     pub fn GlobalNowPlayer() -> Element {
         rsx! {}
     }
+
+    #[component]
+    pub fn NowPlayingStripHighlighter() -> Element {
+        rsx! {}
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use stub::GlobalNowPlayer;
+pub use stub::{GlobalNowPlayer, NowPlayingStripHighlighter};

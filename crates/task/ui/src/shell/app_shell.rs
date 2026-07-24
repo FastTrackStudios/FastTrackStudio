@@ -108,6 +108,8 @@ pub fn AppShell() -> Element {
         // route Outlet) so playback survives navigation. The UI is the
         // status-bar tab (desktop) / the floating tab below (mobile).
         crate::shell::now_playing::GlobalNowPlayer {}
+        // Marks the playing setlist row + feeds its artwork waveform.
+        crate::shell::now_playing::NowPlayingStripHighlighter {}
         // Mobile: no desktop status bar, so float the same tab above the
         // bottom tab bar. Renders nothing until something plays.
         if !share {

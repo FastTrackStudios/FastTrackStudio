@@ -199,6 +199,10 @@ web-sys = { workspace = true, features = [
     "KeyboardEvent",
     "Element",
     "HtmlElement",
+    # Now-playing setlist-row highlighter: toggle a class + set a `--amp`
+    # custom property on the matching row (waveform over the artwork).
+    "DomTokenList",
+    "CssStyleDeclaration",
     "Storage",
     "Clipboard",
     "console",
