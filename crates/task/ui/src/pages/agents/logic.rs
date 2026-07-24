@@ -168,6 +168,27 @@ pub fn cost_badge(cost_in: f64, cost_out: f64) -> Option<String> {
     Some(format!("{}/{}", c(cost_in), c(cost_out)))
 }
 
+/// How close to the bottom (px) still counts as "following the tail".
+const STICK_THRESHOLD_PX: u32 = 120;
+
+/// Autoscroll script for the transcript container.
+///
+/// Two rules, because they conflict: jump to the bottom the first
+/// time the list renders (you want the newest message), but after
+/// that only follow the tail if the reader is already near it —
+/// otherwise scrolling up to re-read something is undone by the next
+/// streamed token. `dataset.init` marks the first pass, so this needs
+/// no state on the Rust side.
+#[must_use]
+pub fn autoscroll_js(element_id: &str) -> String {
+    format!(
+        "(() => {{ const el = document.getElementById('{element_id}'); if (!el) return; \
+         const gap = el.scrollHeight - el.scrollTop - el.clientHeight; \
+         if (el.dataset.init !== '1' || gap < {STICK_THRESHOLD_PX}) {{ \
+         el.scrollTop = el.scrollHeight; el.dataset.init = '1'; }} }})();"
+    )
+}
+
 pub fn fmt_elapsed(secs: i64) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
 }
@@ -282,6 +303,23 @@ mod tests {
         assert_eq!(cost_badge(0.0, 0.0), None);
         assert_eq!(cost_badge(0.25, 2.0), Some("$0.25/$2".into()));
         assert_eq!(cost_badge(15.0, 75.0), Some("$15/$75".into()));
+    }
+
+    #[test]
+    fn autoscroll_targets_the_element_and_respects_the_stick_threshold() {
+        let js = autoscroll_js("agent-transcript-sess-42");
+        assert!(
+            js.contains("getElementById('agent-transcript-sess-42')"),
+            "{js}"
+        );
+        // Both rules must be present: the first-render jump and the
+        // near-the-bottom check that keeps a scrolled-up reader put.
+        assert!(js.contains("dataset.init"), "{js}");
+        assert!(js.contains(&STICK_THRESHOLD_PX.to_string()), "{js}");
+        assert!(
+            js.contains("scrollHeight - el.scrollTop - el.clientHeight"),
+            "{js}"
+        );
     }
 
     #[test]

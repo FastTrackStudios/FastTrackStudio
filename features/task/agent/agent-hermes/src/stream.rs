@@ -24,8 +24,8 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
-use crate::HermesConfig;
 use crate::responses::{TurnError, run_turn_responses};
+use crate::{Cancel, HermesConfig};
 
 /// Outcome of one streamed turn.
 #[derive(Default)]
@@ -58,7 +58,7 @@ pub(crate) fn price_turn(model: &str, input_tokens: u64, output_tokens: u64) -> 
 /// ignored — every payload we care about names its own `type`.
 pub(crate) async fn pump_sse<F>(
     resp: reqwest::Response,
-    cancel: &Arc<AtomicBool>,
+    cancel: &Cancel,
     mut on_data: F,
 ) -> Result<(), String>
 where
@@ -66,10 +66,18 @@ where
 {
     let mut buf = String::new();
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
+    loop {
+        // Race the body against Stop. Polling between chunks would
+        // leave a cancel unnoticed for as long as the agent stays
+        // quiet — i.e. the whole of a long tool call.
+        let chunk = tokio::select! {
+            biased;
+            () = cancel.cancelled() => break,
+            next = stream.next() => match next {
+                Some(c) => c,
+                None => break,
+            },
+        };
         let bytes = chunk.map_err(|e| format!("hermes stream: {e}"))?;
         buf.push_str(&String::from_utf8_lossy(&bytes));
         while let Some(pos) = buf.find('\n') {
@@ -148,7 +156,7 @@ pub(crate) async fn run_turn(
     previous_response_id: &str,
     legacy_transport: &AtomicBool,
     events_tx: &broadcast::Sender<AgentEvent>,
-    cancel: &Arc<AtomicBool>,
+    cancel: &Cancel,
 ) -> Result<TurnOutcome, String> {
     let mut chain = previous_response_id;
     while !legacy_transport.load(Ordering::Relaxed) {
@@ -229,7 +237,7 @@ async fn run_turn_chat(
     model: &str,
     messages: Vec<Value>,
     events_tx: &broadcast::Sender<AgentEvent>,
-    cancel: &Arc<AtomicBool>,
+    cancel: &Cancel,
 ) -> Result<TurnOutcome, String> {
     let url = format!("{}/chat/completions", cfg.base_url);
     let body = json!({

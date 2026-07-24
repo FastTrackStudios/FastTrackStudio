@@ -74,7 +74,7 @@ impl Sessions for HermesBackend {
                 session: session.clone(),
                 events_tx,
                 messages: Vec::new(),
-                cancel: Arc::new(AtomicBool::new(false)),
+                cancel: crate::Cancel::default(),
                 last_response_id: String::new(),
             },
         );
@@ -212,7 +212,7 @@ impl TurnDispatch for HermesBackend {
             row.session.updated_at = started_at;
             row.session.composer_draft.text = String::new();
             row.messages.push(user_msg.clone());
-            row.cancel = Arc::new(AtomicBool::new(false));
+            row.cancel = crate::Cancel::default();
             // `/new` wipes the gateway's context, so drop the chain
             // with it — otherwise the next turn resurrects the old
             // session server-side.
@@ -268,7 +268,7 @@ impl TurnDispatch for HermesBackend {
             };
             match result {
                 Ok(outcome) => {
-                    let cancelled = cancel.load(Ordering::Relaxed);
+                    let cancelled = cancel.is_cancelled();
                     let message = Message {
                         id: assistant_id.clone(),
                         session_id: session_id.clone(),
@@ -360,7 +360,7 @@ impl TurnDispatch for HermesBackend {
         let row = sessions
             .get_mut(session_id)
             .ok_or_else(|| AgentError::SessionNotFound(session_id.to_string()))?;
-        row.cancel.store(true, Ordering::Relaxed);
+        row.cancel.cancel();
         Ok(())
     }
 

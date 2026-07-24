@@ -33,8 +33,8 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
-use crate::HermesConfig;
 use crate::stream::{TurnOutcome, pump_sse};
+use crate::{Cancel, HermesConfig};
 
 /// Why a turn couldn't run on this transport.
 pub(crate) enum TurnError {
@@ -176,7 +176,7 @@ pub(crate) async fn run_turn_responses(
     messages: &[Value],
     previous_response_id: &str,
     events_tx: &broadcast::Sender<AgentEvent>,
-    cancel: &Arc<AtomicBool>,
+    cancel: &Cancel,
 ) -> Result<TurnOutcome, TurnError> {
     let Some(last) = messages.last() else {
         return Err(TurnError::Failed("hermes: empty turn".to_string()));

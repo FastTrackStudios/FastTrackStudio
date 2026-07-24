@@ -80,6 +80,47 @@ impl HermesConfig {
     }
 }
 
+/// A turn's stop signal.
+///
+/// A bare `AtomicBool` was only observed *between* SSE chunks, so
+/// Stop did nothing while the agent sat in a long tool call — exactly
+/// when you want to stop it. Pairing the flag with a `Notify` lets
+/// the stream pump `select!` on cancellation and return at once;
+/// dropping the response closes the connection, which the gateway
+/// treats as a client disconnect and answers by interrupting the
+/// agent (`_write_sse_responses`).
+#[derive(Clone, Default)]
+pub(crate) struct Cancel {
+    flag: Arc<AtomicBool>,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl Cancel {
+    pub(crate) fn cancel(&self) {
+        self.flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.notify.notify_waiters();
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.flag.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Resolves once cancelled. Registers the waiter *before*
+    /// re-checking the flag so a cancel racing the await isn't lost.
+    pub(crate) async fn cancelled(&self) {
+        loop {
+            let waiting = self.notify.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            waiting.await;
+            if self.is_cancelled() {
+                return;
+            }
+        }
+    }
+}
+
 /// Per-session bookkeeping.
 pub(crate) struct SessionRow {
     pub(crate) session: Session,
@@ -89,9 +130,9 @@ pub(crate) struct SessionRow {
     /// Full transcript (user + assistant), chronological. Replayed
     /// as the `messages` array on each turn.
     pub(crate) messages: Vec<Message>,
-    /// Set by `cancel_turn`; the streaming worker checks it
-    /// between chunks and stops cleanly.
-    pub(crate) cancel: Arc<AtomicBool>,
+    /// Tripped by `cancel_turn`; the streaming worker races it
+    /// against the SSE body and stops immediately.
+    pub(crate) cancel: Cancel,
     /// Response id of the last completed turn — chains the next one
     /// onto the same gateway-side session (see [`responses`]).
     pub(crate) last_response_id: String,
@@ -149,5 +190,42 @@ impl HermesBackend {
     /// must not be called from async context).
     pub async fn has_session(&self, session_id: &str) -> bool {
         self.inner.sessions.lock().await.contains_key(session_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancel_wakes_a_waiter_immediately() {
+        let cancel = Cancel::default();
+        assert!(!cancel.is_cancelled());
+        let watcher = cancel.clone();
+        let waited = tokio::spawn(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(5), watcher.cancelled()).await
+        });
+        // Give the task a chance to park on `notified()`.
+        tokio::task::yield_now().await;
+        cancel.cancel();
+        assert!(
+            waited.await.expect("join").is_ok(),
+            "cancel didn't wake the waiter"
+        );
+        assert!(cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancelling_before_the_await_is_not_lost() {
+        // The race the plain `Notify` would drop: cancel fires before
+        // anyone is waiting, so `notify_waiters` reaches nobody. The
+        // flag check inside `cancelled()` has to catch it.
+        let cancel = Cancel::default();
+        cancel.cancel();
+        let got = tokio::time::timeout(std::time::Duration::from_secs(5), cancel.cancelled()).await;
+        assert!(
+            got.is_ok(),
+            "an already-cancelled token must resolve at once"
+        );
     }
 }

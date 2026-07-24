@@ -635,6 +635,8 @@ pub(crate) fn ChatPane(
     let mut model = use_signal(String::new);
     let mut responding = use_signal(String::new);
     let mut stream_state = use_signal(|| StreamState::Connecting);
+    // Set while a cancel is in flight; cleared by the terminal event.
+    let mut stopping = use_signal(|| false);
     // Why the last subscription ended — read back by the reconnect
     // loop so the chip can say what went wrong.
     let closed_reason = use_signal(String::new);
@@ -753,6 +755,7 @@ pub(crate) fn ChatPane(
                     match ev.get().clone() {
                         AgentEvent::TurnStarted { at, .. } => {
                             busy.set(true);
+                            stopping.set(false);
                             error.set(String::new());
                             reasoning.set(String::new());
                             live_lines.set(Vec::new());
@@ -883,6 +886,7 @@ pub(crate) fn ChatPane(
                                 );
                             }
                             busy.set(false);
+                            stopping.set(false);
                             streaming.set(None);
                             responding.set(String::new());
                             turn_started.set(None);
@@ -902,6 +906,7 @@ pub(crate) fn ChatPane(
                         }
                         AgentEvent::TurnErrored { kind, message, .. } => {
                             busy.set(false);
+                            stopping.set(false);
                             streaming.set(None);
                             responding.set(String::new());
                             turn_started.set(None);
@@ -910,6 +915,7 @@ pub(crate) fn ChatPane(
                         }
                         AgentEvent::TurnCancelled { .. } => {
                             busy.set(false);
+                            stopping.set(false);
                             streaming.set(None);
                             responding.set(String::new());
                             turn_started.set(None);
@@ -947,6 +953,7 @@ pub(crate) fn ChatPane(
                     secs: 0,
                 });
                 busy.set(false);
+                stopping.set(false);
                 streaming.set(None);
             }
         }
@@ -969,11 +976,21 @@ pub(crate) fn ChatPane(
 
     let stop_slug = slug.clone();
     let stop_sid = session_id.clone();
+    // Stop is optimistic: flip the button the moment it's pressed, so
+    // there's feedback while the request and the backend's teardown
+    // land. `stopping` clears on whichever terminal event arrives.
     let on_stop = move |_| {
+        if *stopping.peek() {
+            return;
+        }
+        stopping.set(true);
         let slug = stop_slug.clone();
         let sid = stop_sid.clone();
         spawn(async move {
-            let _ = crate::feeds::cancel_agent_turn(&slug, &sid).await;
+            if let Err(e) = crate::feeds::cancel_agent_turn(&slug, &sid).await {
+                stopping.set(false);
+                error.set(format!("Couldn't stop the turn: {e}"));
+            }
         });
     };
 
@@ -1077,20 +1094,30 @@ pub(crate) fn ChatPane(
         completion_sel.set(0);
     });
 
-    use_effect(move || {
-        let _ = messages.read().len();
-        let _ = streaming.read().is_some();
-        let _ = live_lines.read().len();
-        let _ = dioxus::document::eval(
-            "const el = document.getElementById('agent-transcript'); if (el) el.scrollTop = el.scrollHeight;",
-        );
+    // Follow the tail as the turn streams — but only while the reader
+    // is already at the bottom. Scrolling up to re-read something used
+    // to be undone by the next token.
+    let transcript_id = format!("agent-transcript-{session_id}");
+    use_effect({
+        let transcript_id = transcript_id.clone();
+        move || {
+            let _ = messages.read().len();
+            let _ = streaming.read().is_some();
+            let _ = live_lines.read().len();
+            let _ = dioxus::document::eval(&logic::autoscroll_js(&transcript_id));
+        }
     });
 
     let question_view = pending_question.read().clone();
     let queued_view = queued.read().clone();
 
     rsx! {
-        div { class: "flex min-w-0 flex-1 flex-col",
+        // `min-h-0` is load-bearing: without it this column can't
+        // shrink below its content, so the transcript's
+        // `overflow-y-auto` never engages — the list just grows and
+        // the composer gets pushed out of view with nothing to
+        // scroll.
+        div { class: "flex min-h-0 min-w-0 flex-1 flex-col",
             // Header.
             div { class: "flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5",
                 div { class: "flex min-w-0 items-center gap-2",
@@ -1132,8 +1159,9 @@ pub(crate) fn ChatPane(
                         Button {
                             variant: ButtonVariant::Outline,
                             size: ButtonSize::Small,
+                            disabled: stopping(),
                             on_click: on_stop,
-                            "Stop"
+                            if stopping() { "Stopping…" } else { "Stop" }
                         }
                     }
                     button {
@@ -1150,9 +1178,11 @@ pub(crate) fn ChatPane(
                 }
             }
 
-            // Transcript timeline (derived rows + live tail).
+            // Transcript timeline (derived rows + live tail). The id is
+            // per-session because the panel and the /agents page can
+            // both be mounted at once.
             div {
-                id: "agent-transcript",
+                id: "{transcript_id}",
                 class: "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
                 for row in derived_rows.iter() {
                     match row {
