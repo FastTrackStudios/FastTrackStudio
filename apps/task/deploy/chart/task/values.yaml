@@ -113,13 +113,15 @@ ingress:
   annotations: {}
   # Path prefixes routed to task-server; the rest goes to the static
   # web app. /org covers per-org endpoints (/org/<slug>/vox, webhooks),
-  # /server the server-management vox, /blobs attachment up/downloads.
+  # /server the server-management vox, /blobs attachment up/downloads,
+  # /media song stems + manifests served from org resources/ (org-resolved).
   serverPaths:
     - /vox
     - /org
     - /server
     - /blobs
     - /.well-known
+    - /media
   # TLS is usually terminated OUTSIDE the cluster (or by cert-manager);
   # passthrough list in standard ingress.spec.tls shape:
   #   tls:

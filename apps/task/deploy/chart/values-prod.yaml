@@ -10,10 +10,20 @@ server:
   image:
     tag: latest
   publicUrl: https://tasks.starcommand.live
-  # REQUIRED for prod: a Secret with TASK_SERVER_SEALING_KEY (and any
-  # integration tokens). Without it the server seals secrets with a
-  # machine-dev key.
-  # existingSecret: task-env
+  env:
+    # Hermes agent gateway (hermes-agent's OpenAI-compatible API) —
+    # setting this makes Hermes the DEFAULT chat backend for the
+    # /agents page. Points at the in-cluster gateway Service
+    # (starcommand modules/services/hermes/cluster.nix); until that
+    # cutover is live, swap in the node-IP:8642 of the host service.
+    # The bearer token rides in the existingSecret as
+    # TASK_HERMES_API_KEY.
+    TASK_HERMES_URL: http://hermes-gateway.hermes.svc:8642/v1
+  # Env from the cluster-managed `task-env` Secret (starcommand
+  # cluster-secrets app) — carries TASK_HERMES_API_KEY today; add
+  # TASK_SERVER_SEALING_KEY there when rotating off the machine-dev
+  # sealing key.
+  existingSecret: task-env
   persistence:
     size: 50Gi
   resources:

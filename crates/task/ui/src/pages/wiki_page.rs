@@ -142,6 +142,12 @@ pub fn WikiPageView(path: String) -> Element {
                         .to_string()
                 });
             let page_type = fm_get(&fm, "type").unwrap_or_default().to_string();
+            // Provenance: `ai_generated: true` marks machine-produced
+            // content (the wiki's whole point — non-user-authored
+            // knowledge); `generated_by:` names the model/agent.
+            let ai_generated = fm_get(&fm, "ai_generated")
+                .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+            let generated_by = fm_get(&fm, "generated_by").unwrap_or_default().to_string();
             let doc_markdown = doc.markdown.clone();
             let doc_sha = doc.sha256.clone();
             rsx! {
@@ -182,13 +188,26 @@ pub fn WikiPageView(path: String) -> Element {
                         }
                     }
                     div { class: "flex flex-wrap items-center gap-2 text-xs text-muted-foreground",
+                        if ai_generated {
+                            span {
+                                class: "rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 font-medium text-primary",
+                                title: if generated_by.is_empty() { "Machine-produced content".to_string() } else { format!("Machine-produced by {generated_by}") },
+                                if generated_by.is_empty() {
+                                    "✨ AI generated"
+                                } else {
+                                    "✨ AI generated · {generated_by}"
+                                }
+                            }
+                        }
                         if !page_type.is_empty() {
                             span { class: "rounded-full border border-border/70 bg-card/60 px-2 py-0.5 font-medium uppercase tracking-wide",
                                 "{page_type}"
                             }
                         }
                         span { class: "font-mono", "{doc.path}" }
-                        for (k , v) in fm.iter().filter(|(k, _)| k != "title" && k != "type") {
+                        for (k , v) in fm.iter().filter(|(k, _)| {
+                            k != "title" && k != "type" && k != "ai_generated" && k != "generated_by"
+                        }) {
                             span { key: "{k}", "{k}: {v}" }
                         }
                     }

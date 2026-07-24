@@ -469,7 +469,7 @@ fn perform_intent(
             zen.set(!cur);
         }
         Intent::NewNote => {
-            let slug = crate::orgs::home_slug(&org_list.read());
+            let slug = crate::orgs::active_slug(&selection.read(), &org_list.read());
             if slug.is_empty() {
                 return;
             }
@@ -480,7 +480,7 @@ fn perform_intent(
             spawn(async move {
                 match crate::pages::vault::create_new_file(slug, name.clone()).await {
                     Ok(_) => {
-                        nav.push(crate::routes::Route::VaultRoute { path: name });
+                        nav.push(crate::routes::Route::VaultRoute { path: name, org: String::new() });
                     }
                     Err(e) => tracing::warn!(%e, "new note failed"),
                 }

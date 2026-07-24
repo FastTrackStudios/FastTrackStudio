@@ -465,6 +465,9 @@
   .bottom-\[30\%\] {
     bottom: 30%;
   }
+  .bottom-\[calc\(3\.5rem\+env\(safe-area-inset-bottom\,0px\)\)\] {
+    bottom: calc(3.5rem + env(safe-area-inset-bottom,0px));
+  }
   .bottom-full {
     bottom: 100%;
   }
@@ -485,6 +488,9 @@
   }
   .left-2 {
     left: calc(var(--spacing) * 2);
+  }
+  .left-2\/3 {
+    left: calc(2 / 3 * 100%);
   }
   .left-3 {
     left: calc(var(--spacing) * 3);
@@ -567,6 +573,9 @@
   .mx-3 {
     margin-inline: calc(var(--spacing) * 3);
   }
+  .mx-4 {
+    margin-inline: calc(var(--spacing) * 4);
+  }
   .mx-auto {
     margin-inline: auto;
   }
@@ -578,6 +587,9 @@
   }
   .my-1 {
     margin-block: calc(var(--spacing) * 1);
+  }
+  .my-4 {
+    margin-block: calc(var(--spacing) * 4);
   }
   .my-px {
     margin-block: 1px;
@@ -1120,6 +1132,9 @@
   .w-\[30\%\] {
     width: 30%;
   }
+  .w-\[40rem\] {
+    width: 40rem;
+  }
   .w-\[58px\] {
     width: 58px;
   }
@@ -1357,6 +1372,14 @@
   }
   .translate-x-4 {
     --tw-translate-x: calc(var(--spacing) * 4);
+    translate: var(--tw-translate-x) var(--tw-translate-y);
+  }
+  .translate-x-\[1px\] {
+    --tw-translate-x: 1px;
+    translate: var(--tw-translate-x) var(--tw-translate-y);
+  }
+  .translate-x-px {
+    --tw-translate-x: 1px;
     translate: var(--tw-translate-x) var(--tw-translate-y);
   }
   .-translate-y-1\/2 {
@@ -1753,6 +1776,10 @@
     border-top-left-radius: var(--radius-2xl);
     border-top-right-radius: var(--radius-2xl);
   }
+  .rounded-t-lg {
+    border-top-left-radius: var(--radius);
+    border-top-right-radius: var(--radius);
+  }
   .rounded-t-sm {
     border-top-left-radius: calc(var(--radius) - 4px);
     border-top-right-radius: calc(var(--radius) - 4px);
@@ -1832,6 +1859,10 @@
   .border-b {
     border-bottom-style: var(--tw-border-style);
     border-bottom-width: 1px;
+  }
+  .border-b-0 {
+    border-bottom-style: var(--tw-border-style);
+    border-bottom-width: 0px;
   }
   .border-b-2 {
     border-bottom-style: var(--tw-border-style);
@@ -2941,10 +2972,28 @@
     }
     --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
   }
+  .from-primary\/80 {
+    --tw-gradient-from: var(--primary);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-gradient-from: color-mix(in oklab, var(--primary) 80%, transparent);
+    }
+    --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
+  }
+  .to-primary {
+    --tw-gradient-to: var(--primary);
+    --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
+  }
   .to-primary\/20 {
     --tw-gradient-to: var(--primary);
     @supports (color: color-mix(in lab, red, red)) {
       --tw-gradient-to: color-mix(in oklab, var(--primary) 20%, transparent);
+    }
+    --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
+  }
+  .to-primary\/30 {
+    --tw-gradient-to: var(--primary);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-gradient-to: color-mix(in oklab, var(--primary) 30%, transparent);
     }
     --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position));
   }
@@ -4117,6 +4166,13 @@
       }
     }
   }
+  .group-hover\/seek\:opacity-100 {
+    &:is(:where(.group\/seek):hover *) {
+      @media (hover: hover) {
+        opacity: 100%;
+      }
+    }
+  }
   .group-aria-expanded\:rotate-180 {
     &:is(:where(.group)[aria-expanded="true"] *) {
       rotate: 180deg;
@@ -5213,6 +5269,11 @@
   .disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
+    }
+  }
+  .disabled\:opacity-30 {
+    &:disabled {
+      opacity: 30%;
     }
   }
   .disabled\:opacity-40 {

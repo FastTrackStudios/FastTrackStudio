@@ -110,6 +110,7 @@ pub fn WikiView() -> Element {
                                         },
                                         GraphSource::Vault => crate::routes::Route::VaultRoute {
                                             path: path.clone(),
+                                            org: String::new(),
                                         },
                                     };
                                     nav.push(route);

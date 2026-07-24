@@ -849,6 +849,7 @@ agent-proto = { path = "features/task/agent/agent-proto" }
 agent-wiki = { path = "features/task/agent/agent-wiki" }
 agent-inbox = { path = "features/task/agent/agent-inbox" }
 agent-codex = { path = "features/task/agent/agent-codex" }
+agent-hermes = { path = "features/task/agent/agent-hermes" }
 agent-tasks = { path = "features/task/agent/agent-tasks" }
 agent-dispatch = { path = "features/task/agent/agent-dispatch" }
 # features/task/workflows — WorkSession / Transition / Handoff

@@ -21,6 +21,9 @@ use fts_ui::lucide_dioxus::Minimize2;
 pub enum ExperienceKind {
     /// The setlist player — navigator + transport + chart/mixer.
     Setlist,
+    /// The single-song player — the same immersive chart/mixer/transport
+    /// experience as a one-song set.
+    Song,
     /// Inbox triage — process captured items one at a time.
     Inbox,
 }
@@ -33,6 +36,10 @@ impl ExperienceKind {
             // player); the fullscreen rehearsal Experience is entered
             // deliberately via the Setlist button.
             ExperienceKind::Setlist => false,
+            // A song note IS its player: opening it drops straight into the
+            // full-screen experience. The embedded (minimized) view is the
+            // compact streaming card.
+            ExperienceKind::Song => true,
             // Inbox is entered deliberately (a "Process" button), not on
             // every note open.
             ExperienceKind::Inbox => false,
@@ -48,6 +55,7 @@ pub fn experience_of(note_type: Option<&str>, experience: Option<&str>) -> Optio
     let want = experience.map(str::trim).filter(|s| !s.is_empty());
     match (note_type, want) {
         (Some("setlist"), _) | (_, Some("setlist")) => Some(ExperienceKind::Setlist),
+        (Some("song"), _) | (_, Some("song")) => Some(ExperienceKind::Song),
         (_, Some("inbox")) => Some(ExperienceKind::Inbox),
         _ => None,
     }

@@ -17,6 +17,7 @@
 //! `project-crdt` crates. CRDT now lives only at the per-file
 //! editor layer (future); vault is the sole storage path.
 
+pub mod agent_router;
 pub mod attachments;
 pub mod media;
 pub mod capability;
@@ -174,6 +175,10 @@ pub struct OrgAppState {
     /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
     /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
     pub agent_codex: agent_codex::CodexBackend,
+    /// Router over the agent backends (Codex + optional Hermes
+    /// gateway) — the surface the agent vox services are served
+    /// from. Sessions route to their owning backend.
+    pub agent_router: agent_router::AgentRouter,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
     /// Threads backend — conversations/topics anchored to any entity
@@ -667,6 +672,16 @@ pub(crate) async fn build_org_state(
         // registry + turn dispatch — hosts the `Sessions` +
         // `TurnDispatch` vox services behind the `/agents` UI.
         let agent_codex = agent_codex::CodexBackend::new();
+        // Hermes gateway backend — enabled when TASK_HERMES_URL is
+        // set (see agent_hermes::HermesConfig::from_env). When
+        // present it becomes the DEFAULT chat backend: sessions
+        // created without an explicit backend_id land on Hermes.
+        let agent_hermes = agent_hermes::HermesBackend::from_env();
+        if let Some(h) = &agent_hermes {
+            tracing::info!(url = %h.config().base_url, model = %h.config().model, "hermes agent gateway configured");
+        }
+        let agent_router =
+            agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes);
 
         // Timer store. SQLite at
         // `<data_root>/orgs/<slug>/timer.sqlite`
@@ -1064,6 +1079,7 @@ pub(crate) async fn build_org_state(
             intake,
             agent_tasks,
             agent_codex,
+            agent_router,
             agent_dispatch_vault_root: vault_root,
             timer,
             threads,
@@ -1189,6 +1205,178 @@ fn pick_server_orgs(
     Ok(scanned.into_iter().map(|(org, _)| org).collect())
 }
 
+/// Parse a single HTTP byte-range request (`bytes=start-end`, `bytes=start-`,
+/// or the suffix form `bytes=-N`) against a known total size, returning the
+/// inclusive `[start, end]` it resolves to. Multi-range and unsatisfiable
+/// requests return `None` (the caller then serves the full body).
+fn parse_byte_range(value: &str, total: u64) -> Option<(u64, u64)> {
+    if total == 0 {
+        return None;
+    }
+    let spec = value.trim().strip_prefix("bytes=")?;
+    // Only a single range is supported; a comma means multi-range → fall back.
+    if spec.contains(',') {
+        return None;
+    }
+    let (a, b) = spec.split_once('-')?;
+    let last = total - 1;
+    let (start, end) = if a.is_empty() {
+        // Suffix range: the final N bytes.
+        let n: u64 = b.trim().parse().ok()?;
+        if n == 0 {
+            return None;
+        }
+        (total.saturating_sub(n), last)
+    } else {
+        let start: u64 = a.trim().parse().ok()?;
+        let end = if b.trim().is_empty() {
+            last
+        } else {
+            b.trim().parse::<u64>().ok()?.min(last)
+        };
+        (start, end)
+    };
+    if start > end || start > last {
+        return None;
+    }
+    Some((start, end))
+}
+
+/// JSON listing of a media directory's immediate entries, sorted by name.
+/// Each entry is `{ "name": String, "dir": bool, "size": u64 }` (`size` is 0
+/// for directories). Lets a manifest-less song enumerate its stem files over
+/// HTTP (e.g. `GET /org/{slug}/media/songs/{slug}/stems/`).
+async fn media_dir_listing(dir: &std::path::Path) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    let mut rd = match tokio::fs::read_dir(dir).await {
+        Ok(rd) => rd,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    while let Ok(Some(e)) = rd.next_entry().await {
+        let name = e.file_name().to_string_lossy().into_owned();
+        // Skip hidden/dotfiles.
+        if name.starts_with('.') {
+            continue;
+        }
+        let (dir, size) = match e.metadata().await {
+            Ok(m) => (m.is_dir(), if m.is_dir() { 0 } else { m.len() }),
+            Err(_) => continue,
+        };
+        entries.push(serde_json::json!({ "name": name, "dir": dir, "size": size }));
+    }
+    entries.sort_by(|a, b| {
+        a["name"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(b["name"].as_str().unwrap_or_default())
+    });
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::to_string(&entries).unwrap_or_else(|_| "[]".into()),
+    )
+        .into_response()
+}
+
+/// Filesystem-first song media: `GET /org/{slug}/media/<path>` serves
+/// `<data_root>/orgs/{slug}/resources/<path>` straight off disk — no
+/// ingest, no content-addressing, drop-a-file-and-it-serves (fits network
+/// storage). `/org/*` is already edge-routed to task-server, so this is
+/// reachable where a bare `/media` (behind the web SPA) is not. Traversal
+/// guarded; content-type by extension.
+///
+/// Serves HTTP Range requests (`Accept-Ranges: bytes`, `206 Partial
+/// Content`): browser media elements need this to determine seekability —
+/// without it Chrome's `<audio>` loader stalls at `readyState 0` on Ogg
+/// (which needs a seek to the tail to read its duration), so stems never
+/// actually play. The reference stem player streams these directly.
+async fn per_org_media_handler(
+    State(state): State<AppState>,
+    axum::extract::Path((slug, rel)): axum::extract::Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    if rel.split('/').any(|s| s == ".." || s.is_empty()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let file = state
+        .data_root
+        .org(slug.as_str())
+        .path()
+        .join("resources")
+        .join(&rel);
+    let meta = match tokio::fs::metadata(&file).await {
+        Ok(m) => m,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    // A directory → JSON listing of its immediate entries. This is how a
+    // manifest-less colocated song enumerates its stems (`…/stems/`,
+    // `…/media/proxy/`) — the client lists the dir and derives the stem set,
+    // deriving structure separately from `arrangements/original.kf`.
+    if meta.is_dir() {
+        return media_dir_listing(&file).await;
+    }
+    if !meta.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let total = meta.len();
+    let ct = match file.extension().and_then(|x| x.to_str()) {
+        Some("json") => "application/json",
+        Some("ogg") => "audio/ogg",
+        Some("wav") => "audio/wav",
+        Some("mp3") => "audio/mpeg",
+        Some("webm") => "audio/webm",
+        Some("kf") | Some("txt") | Some("md") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+
+    // Honour a single byte-range request → 206 Partial Content.
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| parse_byte_range(s, total));
+    if let Some((start, end)) = range {
+        let len = end - start + 1;
+        let mut f = match tokio::fs::File::open(&file).await {
+            Ok(f) => f,
+            Err(_) => return StatusCode::NOT_FOUND.into_response(),
+        };
+        if f.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        let mut buf = vec![0u8; len as usize];
+        if f.read_exact(&mut buf).await.is_err() {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        return (
+            StatusCode::PARTIAL_CONTENT,
+            [
+                (header::CONTENT_TYPE, ct.to_string()),
+                (header::ACCEPT_RANGES, "bytes".to_string()),
+                (header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}")),
+                (header::CONTENT_LENGTH, len.to_string()),
+            ],
+            buf,
+        )
+            .into_response();
+    }
+
+    // No (or unsatisfiable) range → full body, but still advertise range support.
+    match tokio::fs::read(&file).await {
+        Ok(bytes) => (
+            [
+                (header::CONTENT_TYPE, ct.to_string()),
+                (header::ACCEPT_RANGES, "bytes".to_string()),
+                (header::CONTENT_LENGTH, total.to_string()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 pub fn router(state: AppState) -> Router {
     use attachments::routes::AttachmentRouteState;
     use axum::routing::any;
@@ -1227,6 +1415,7 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(webhooks::forge_webhook_handler),
         )
         .route("/org/{slug}/share/{token}", get(share_landing_handler))
+        .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
         .with_state(state.clone());
 
     // Server-management vox: `OrgManagementService` +
@@ -1512,6 +1701,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         agent_proto::service::sessions::sessions_rpc_service_descriptor(),
         agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
         agent_proto::service::threads::threads_rpc_service_descriptor(),
+        agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
         timer_proto::service::timer_service_rpc_service_descriptor(),
         threads::service::threads_service_rpc_service_descriptor(),
         prefs_proto::service::prefs_service_rpc_service_descriptor(),
@@ -1632,19 +1822,25 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         // sidebar listing. Served by the in-process Codex backend.
         .with(
             agent_proto::service::sessions::sessions_rpc_service_descriptor(),
-            agent_proto::service::sessions::serve(org.agent_codex.clone()),
+            agent_proto::service::sessions::serve(org.agent_router.clone()),
         )
         // Agent turn dispatch — kick off / cancel / resume a turn
         // on a session. Served by the same Codex backend.
         .with(
             agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
-            agent_proto::service::turn_dispatch::serve(org.agent_codex.clone()),
+            agent_proto::service::turn_dispatch::serve(org.agent_router.clone()),
         )
         // Agent threads — conversation threading within a session.
         // Served by the same Codex backend (impls Threads).
         .with(
             agent_proto::service::threads::threads_rpc_service_descriptor(),
-            agent_proto::service::threads::serve(org.agent_codex.clone()),
+            agent_proto::service::threads::serve(org.agent_router.clone()),
+        )
+        // Agent subscriptions — live AgentEvent streams per session;
+        // what the chat UI renders deltas from.
+        .with(
+            agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
+            agent_proto::service::subscriptions::serve(org.agent_router.clone()),
         )
         // Timer — billable time tracking.
         .with(
@@ -1992,4 +2188,40 @@ fn serve_org_vox(
         architect::permissions_gate::PermissionsGate::wrap_shared(org.permissions.clone(), router);
     ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
         .into_response()
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::parse_byte_range;
+
+    #[test]
+    fn full_open_range() {
+        // Chrome's initial media probe: `bytes=0-`.
+        assert_eq!(parse_byte_range("bytes=0-", 1000), Some((0, 999)));
+    }
+
+    #[test]
+    fn clamped_end() {
+        assert_eq!(parse_byte_range("bytes=0-100000", 1000), Some((0, 999)));
+    }
+
+    #[test]
+    fn mid_range() {
+        assert_eq!(parse_byte_range("bytes=500-799", 3_415_886), Some((500, 799)));
+    }
+
+    #[test]
+    fn suffix_range() {
+        assert_eq!(parse_byte_range("bytes=-500", 1000), Some((500, 999)));
+    }
+
+    #[test]
+    fn rejects_bad() {
+        assert_eq!(parse_byte_range("bytes=-0", 1000), None);
+        assert_eq!(parse_byte_range("bytes=800-500", 1000), None); // start > end
+        assert_eq!(parse_byte_range("bytes=0-", 0), None); // empty file
+        assert_eq!(parse_byte_range("bytes=0-10,20-30", 1000), None); // multi-range
+        assert_eq!(parse_byte_range("garbage", 1000), None);
+        assert_eq!(parse_byte_range("bytes=5000-6000", 1000), None); // start past end
+    }
 }

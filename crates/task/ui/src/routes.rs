@@ -55,8 +55,8 @@ pub enum Route {
         // `path` deep-links straight to a note (vault-relative path,
         // e.g. from a knowledge-graph node click); empty opens the
         // tree with nothing selected.
-        #[route("/vault?:path")]
-        VaultRoute { path: String },
+        #[route("/vault?:path&:org")]
+        VaultRoute { path: String, org: String },
 
         #[route("/locations")]
         LocationsRoute {},
@@ -64,8 +64,11 @@ pub enum Route {
         #[route("/inventory")]
         InventoryRoute {},
 
-        #[route("/scripture")]
-        ScriptureRoute {},
+        // `reference` deep-links straight to a passage (`John 3:16`,
+        // `John 3:16-20@ESV`) — e.g. from a note's scripture chip;
+        // empty opens the reader at its default position.
+        #[route("/scripture?:reference")]
+        ScriptureRoute { reference: String },
 
         #[route("/milestones")]
         MilestonesRoute {},
@@ -203,8 +206,8 @@ fn TaskDetailRoute(id: uuid::Uuid) -> Element {
 }
 
 #[component]
-fn VaultRoute(path: String) -> Element {
-    rsx! { pages::vault::VaultView { initial_path: path } }
+fn VaultRoute(path: String, org: String) -> Element {
+    rsx! { pages::vault::VaultView { initial_path: path, initial_org: org } }
 }
 
 #[component]
@@ -218,8 +221,8 @@ fn InventoryRoute() -> Element {
 }
 
 #[component]
-fn ScriptureRoute() -> Element {
-    rsx! { pages::scripture::ScriptureView {} }
+fn ScriptureRoute(reference: String) -> Element {
+    rsx! { pages::scripture::ScriptureView { reference } }
 }
 
 #[component]

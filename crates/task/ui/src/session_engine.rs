@@ -233,7 +233,7 @@ pub fn bootstrap() {
 /// This is the Stage 4b-1 entry point: it wires `session_ui::Session` (so the
 /// UI can command the engine over RPC) and the [`SessionEventBridge`] the page
 /// mounts folds the engine's streams back into the session-ui globals.
-pub fn build_for_setlist(slugs: Vec<String>) {
+pub fn build_for_setlist(org: String, slugs: Vec<String>) {
     // The setlist page's effect fires once with an EMPTY slug list before its
     // `songs` prop is populated. Building that produces a 0-song setlist that
     // fails ("no songs") and needlessly churns the engine (and, downstream, the
@@ -261,7 +261,7 @@ pub fn build_for_setlist(slugs: Vec<String>) {
         // `_scope` / `_daw` links (and the global daw facade) are released
         // ahead of the replacement.
         ENGINE.with(|c| c.borrow_mut().take());
-        match build_setlist(slugs, key).await {
+        match build_setlist(org, slugs, key).await {
             // Always wire the session client for a real setlist — the page's
             // transport callbacks command the engine through it.
             Ok(engine) => park(engine, true),
@@ -298,16 +298,16 @@ async fn build_demo() -> eyre::Result<SessionEngine> {
 /// standalone project per song (stable slug-derived guid, zero-padded name for
 /// authored order), then assemble the in-process RPC engine — the SAME
 /// pipeline the demo uses, just fed from manifests.
-async fn build_setlist(slugs: Vec<String>, key: String) -> eyre::Result<SessionEngine> {
+async fn build_setlist(org: String, slugs: Vec<String>, key: String) -> eyre::Result<SessionEngine> {
     tracing::info!("session engine: seeding setlist from {} song(s) …", slugs.len());
     let standalone = Standalone::new();
     let mut song_guids: Vec<String> = Vec::with_capacity(slugs.len());
     for (i, slug) in slugs.iter().enumerate() {
         // Fetch this song's manifest (+ optional chart) from `/media`.
-        let manifest = media::fetch_manifest(&format!("/media/songs/{slug}/manifest.json"))
+        let manifest = media::fetch_manifest(&format!("/org/{org}/media/songs/{slug}/manifest.json"))
             .await
             .map_err(|e| eyre::eyre!("fetch manifest for {slug}: {e}"))?;
-        let chart = media::fetch_text(&format!("/media/songs/{slug}/chart.kf"))
+        let chart = media::fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf"))
             .await
             .ok()
             .filter(|t| !t.is_empty());

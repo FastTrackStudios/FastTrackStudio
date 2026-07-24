@@ -57,6 +57,16 @@ pub trait VaultLookup {
     fn lookup_setlist(&self, _name: &str) -> Option<VaultSetlistHit> {
         None
     }
+    /// Scripture reference resolution: when `target` parses as a verse
+    /// reference (`John 3:16`, `John 3:16-20`, `Rom 5:8@ESV`) the host
+    /// returns display info + (possibly still loading) verse text, and
+    /// the link renders as a scripture chip / verse card instead of an
+    /// unresolved wikilink. Only consulted when no page matches the
+    /// target, so a real `John 3:16.md` note still wins. `None`
+    /// (default) = plain link.
+    fn lookup_scripture(&self, _target: &str) -> Option<VaultScriptureHit> {
+        None
+    }
     /// Find a block by Obsidian short-id `Page#^id`.
     fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String>;
 }
@@ -93,6 +103,23 @@ pub struct VaultSetlistSongRow {
     pub artist: Option<String>,
     pub duration_sec: f64,
     pub stem_count: usize,
+}
+
+/// A wikilink target that parses as a scripture reference — drives the
+/// inline SCRIPTURE CHIP (any `[[John 3:16]]` in running text) and the
+/// VERSE CARD (a standalone `[[John 3:16]]` line embeds the verse text).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultScriptureHit {
+    /// Canonical display reference, e.g. `John 3:16–20`.
+    pub display: String,
+    /// OSIS id / range (`John.3.16`), the stable anchor key.
+    pub osis: String,
+    /// The verse text (range text joined), or `None` while the host is
+    /// still fetching — the card shows a loading row, the chip renders
+    /// resolved either way.
+    pub text: Option<String>,
+    /// Translation id the text came from (`WEB`, `ESV`).
+    pub translation: String,
 }
 
 /// Song metadata for a wikilink that targets a `type: song` note —
@@ -531,6 +558,21 @@ pub fn live_preview_with_lookups(
                             out.push(Decoration::atomic(span.outer.clone()));
                             continue;
                         }
+                        // VERSE CARD: a standalone scripture reference
+                        // embeds the verse text. Real pages win (checked
+                        // above via setlist/song; the general page check
+                        // below keeps ordinary links untouched).
+                        if vault.is_some_and(|v| v.lookup_page(page_part).is_none()) {
+                            if let Some(sc) = vault.and_then(|v| v.lookup_scripture(page_part)) {
+                                out.push(Decoration::replace(span.outer.clone()));
+                                out.push(Decoration::widget(
+                                    span.outer.start,
+                                    scripture_card_html(page_part, &sc),
+                                ));
+                                out.push(Decoration::atomic(span.outer.clone()));
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -541,6 +583,7 @@ pub fn live_preview_with_lookups(
                 // unresolved — `#Heading` / `#^id` suffixes are
                 // stripped before the page-name lookup so
                 // `[[Page#Section]]` resolves when Page exists.
+                let mut scripture_hit: Option<VaultScriptureHit> = None;
                 let cls = if span.class == "md-wikilink" {
                     let page_part = h.split(['#', '|']).next().unwrap_or(&h).trim();
                     let resolved = vault.is_some_and(|v| v.lookup_page(page_part).is_some());
@@ -554,17 +597,27 @@ pub fn live_preview_with_lookups(
                             Some("contact") => "md-wikilink md-contact-chip",
                             _ => "md-wikilink",
                         }
+                    } else if let Some(sc) =
+                        vault.and_then(|v| v.lookup_scripture(page_part))
+                    {
+                        // Scripture reference: resolved chip, verse text
+                        // as hover tooltip once it lands.
+                        scripture_hit = Some(sc);
+                        "md-wikilink md-scripture-chip"
                     } else {
                         "md-wikilink md-wikilink-unresolved"
                     }
                 } else {
                     span.class
                 };
-                out.push(Decoration::mark_with_attrs(
-                    display.clone(),
-                    cls,
-                    vec![("data-href".into(), h)],
-                ));
+                let mut attrs = vec![("data-href".into(), h)];
+                if let Some(text) = scripture_hit.and_then(|sc| {
+                    sc.text
+                        .map(|t| format!("{} ({})\n{}", sc.display, sc.translation, t))
+                }) {
+                    attrs.push(("title".into(), text));
+                }
+                out.push(Decoration::mark_with_attrs(display.clone(), cls, attrs));
                 if !cursor_touches(primary, span.outer.clone()) {
                     // Caret elsewhere: treat the link as one
                     // atomic unit. Clicks anywhere inside snap
@@ -928,17 +981,14 @@ fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
         .enumerate()
         .map(|(i, row)| {
             let link = html_escape(&row.link);
-            let artist = row
-                .artist
-                .as_deref()
-                .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(a)))
+            let (disp_title, disp_artist) = split_title_artist(&row.link, row.artist.as_deref());
+            let title = html_escape(&disp_title);
+            let artist = disp_artist
+                .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(&a)))
                 .unwrap_or_default();
-            let stems = if row.stem_count > 0 {
-                format!(r#"<span class="md-song-strip-badge">{} stems</span>"#, row.stem_count)
-            } else {
-                String::new()
-            };
-            let secs = row.duration_sec.max(0.0) as u64;
+            let initial = html_escape(
+                &disp_title.chars().next().unwrap_or('♪').to_uppercase().to_string(),
+            );
             let mut cls = String::from("md-song-strip");
             if i > 0 {
                 cls.push_str(" md-song-strip--ja");
@@ -950,10 +1000,8 @@ fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
                 cls.push_str(" md-song-strip--alt");
             }
             format!(
-                r#"<span class="{cls}" data-href="{link}"><span class="md-song-strip-num" data-href="song-play:{link}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-song-strip-title">{link}</span>{artist}{stems}<span class="md-song-strip-time">{m}:{s:02}</span></span>"#,
+                r#"<span class="{cls}" data-href="song-play:{link}"><span class="md-song-strip-num" data-href="song-play:{link}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art"><span class="md-ss-art-i">{initial}</span><span class="md-ss-eq"><i></i><i></i><i></i><i></i></span></span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span><span class="md-ss-open" data-href="{link}" title="Open song"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg></span><span class="md-ss-more" data-href="song-more:{link}"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></span></span>"#,
                 idx = i + 1,
-                m = secs / 60,
-                s = secs % 60,
             )
         })
         .collect();
@@ -962,28 +1010,33 @@ fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
     )
 }
 
+/// Split a `"Title - Artist"` display string into (title, artist). Falls back
+/// to `fallback` for the artist when there's no ` - ` separator, so the strip
+/// shows a clean title with the artist as a subtitle rather than repeating
+/// `"Song - Artist"` on the title line.
+fn split_title_artist(raw: &str, fallback: Option<&str>) -> (String, Option<String>) {
+    if let Some((t, a)) = raw.split_once(" - ") {
+        let a = a.trim();
+        (
+            t.trim().to_string(),
+            (!a.is_empty()).then(|| a.to_string()),
+        )
+    } else {
+        (raw.trim().to_string(), fallback.map(|s| s.to_string()))
+    }
+}
+
 /// The inline song-strip widget for a standalone `[[Song]]` wikilink.
 /// The whole strip navigates (`data-href` = the link target); the play
 /// control carries `data-href="song-play:<target>"` — the host's
 /// `on_link_click` intercepts the scheme and drives playback.
 fn song_strip_html(target: &str, song: &VaultSongHit, ctx: StripRunCtx) -> String {
     let safe = html_escape(target);
-    let title = html_escape(&song.title);
-    let artist = song
-        .artist
-        .as_deref()
-        .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(a)))
+    let (disp_title, disp_artist) = split_title_artist(&song.title, song.artist.as_deref());
+    let title = html_escape(&disp_title);
+    let artist = disp_artist
+        .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(&a)))
         .unwrap_or_default();
-    let stems = if song.stem_count > 0 {
-        format!(
-            r#"<span class="md-song-strip-badge">{} stems</span>"#,
-            song.stem_count
-        )
-    } else {
-        String::new()
-    };
-    let secs = song.duration_sec.max(0.0) as u64;
-    let time = format!("{}:{:02}", secs / 60, secs % 60);
     let mut cls = String::from("md-song-strip");
     if ctx.joined_above {
         cls.push_str(" md-song-strip--ja");
@@ -995,8 +1048,28 @@ fn song_strip_html(target: &str, song: &VaultSongHit, ctx: StripRunCtx) -> Strin
         cls.push_str(" md-song-strip--alt");
     }
     let idx = ctx.index.max(1);
+    let initial =
+        html_escape(&disp_title.chars().next().unwrap_or('♪').to_uppercase().to_string());
     format!(
-        r#"<span class="{cls}" data-href="{safe}"><span class="md-song-strip-num" data-href="song-play:{safe}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-song-strip-title">{title}</span>{artist}{stems}<span class="md-song-strip-time">{time}</span></span>"#
+        r#"<span class="{cls}" data-href="song-play:{safe}"><span class="md-song-strip-num" data-href="song-play:{safe}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art"><span class="md-ss-art-i">{initial}</span><span class="md-ss-eq"><i></i><i></i><i></i><i></i></span></span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span><span class="md-ss-open" data-href="{safe}" title="Open song"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg></span><span class="md-ss-more" data-href="song-more:{safe}"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></span></span>"#
+    )
+}
+
+/// The inline verse-card widget for a standalone `[[John 3:16]]`
+/// wikilink: the verse text as a block quote with the reference +
+/// translation as the caption. The card carries
+/// `data-href="scripture-open:<target>"` — the host routes it to the
+/// scripture reader anchored at the verse.
+fn scripture_card_html(target: &str, sc: &VaultScriptureHit) -> String {
+    let safe = html_escape(target);
+    let display = html_escape(&sc.display);
+    let tx = html_escape(&sc.translation);
+    let body = match &sc.text {
+        Some(t) => html_escape(t),
+        None => "Loading…".to_string(),
+    };
+    format!(
+        r#"<span class="md-scripture-card" data-href="scripture-open:{safe}"><span class="md-scripture-card-text">{body}</span><span class="md-scripture-card-ref"><span class="md-scripture-card-display">{display}</span><span class="md-scripture-card-tx">{tx}</span><span class="md-scripture-card-open">Study ›</span></span></span>"#
     )
 }
 
@@ -1671,7 +1744,7 @@ fn scan_blocks(
                 out.push(Decoration::widget(
                     line_from,
                     format!(
-                        r#"<span class="md-setlist-header"><span class="md-setlist-art">🎵</span><span class="md-setlist-titles"><span class="md-setlist-title">{title}</span><span class="md-setlist-kind">Setlist</span></span><span class="md-setlist-playbtn" data-href="setlist-play:">▶</span></span>"#
+                        r#"<span class="md-setlist-header"><span class="md-setlist-art">🎵</span><span class="md-setlist-titles"><span class="md-setlist-title">{title}</span><span class="md-setlist-kind">Setlist</span></span><span class="md-setlist-playbtn" data-href="setlist-play:">▶</span><span class="md-setlist-openbtn" data-href="setlist-open:">Open</span></span>"#
                     ),
                 ));
                 out.push(Decoration::atomic(line_from..line_to));
@@ -3276,10 +3349,12 @@ mod tests {
 
     /// Stub vault for cross-doc resolution tests.
     #[allow(clippy::struct_field_names)]
+    #[derive(Default)]
     struct FakeVault {
         block_hits: std::collections::HashMap<String, super::VaultBlockHit>,
         page_hits: std::collections::HashMap<String, super::VaultPageHit>,
         section_hits: std::collections::HashMap<(String, String), String>,
+        scripture_hits: std::collections::HashMap<String, super::VaultScriptureHit>,
     }
     impl super::VaultLookup for FakeVault {
         fn lookup_block(&self, u: &str) -> Option<super::VaultBlockHit> {
@@ -3293,6 +3368,9 @@ mod tests {
         }
         fn lookup_block_short(&self, _p: &str, _id: &str) -> Option<String> {
             None
+        }
+        fn lookup_scripture(&self, t: &str) -> Option<super::VaultScriptureHit> {
+            self.scripture_hits.get(t).cloned()
         }
     }
 
@@ -3312,6 +3390,7 @@ mod tests {
             block_hits,
             page_hits: Default::default(),
             section_hits: Default::default(),
+            ..Default::default()
         };
         let decs = super::live_preview_with(&s, Some(&vault));
         let chip_html = decs
@@ -3330,6 +3409,58 @@ mod tests {
         assert!(!chip_html.contains("md-block-ref-unresolved"));
     }
 
+    fn scripture_vault(target: &str, text: Option<&str>) -> FakeVault {
+        let mut scripture_hits = std::collections::HashMap::new();
+        scripture_hits.insert(
+            target.to_string(),
+            super::VaultScriptureHit {
+                display: "John 3:16".into(),
+                osis: "John.3.16".into(),
+                text: text.map(str::to_string),
+                translation: "WEB".into(),
+            },
+        );
+        FakeVault {
+            scripture_hits,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn inline_scripture_link_renders_chip() {
+        let s = state("see [[John 3:16]] here", 0);
+        let vault = scripture_vault("John 3:16", Some("For God so loved the world…"));
+        let decs = super::live_preview_with(&s, Some(&vault));
+        let chip = decs.iter().any(|d| {
+            matches!(&d.kind,
+            crate::decoration::DecorationKind::Mark { class, .. }
+                if class == "md-wikilink md-scripture-chip")
+        });
+        assert!(chip, "decs = {decs:?}");
+    }
+
+    #[test]
+    fn standalone_scripture_link_renders_verse_card() {
+        // Caret far from the line so the widget fires.
+        let s = state("intro\n\n[[John 3:16]]\n\ntail", 0);
+        let vault = scripture_vault("John 3:16", Some("For God so loved the world…"));
+        let decs = super::live_preview_with(&s, Some(&vault));
+        let card = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-scripture-card") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("verse card widget");
+        assert!(card.contains("For God so loved the world…"));
+        assert!(card.contains("scripture-open:John 3:16"));
+        assert!(card.contains("WEB"));
+    }
+
     #[test]
     fn wikilink_resolved_class_when_vault_finds_page() {
         let s = state("see [[OtherPage]]", 0);
@@ -3344,6 +3475,7 @@ mod tests {
             block_hits: Default::default(),
             page_hits,
             section_hits: Default::default(),
+            ..Default::default()
         };
         let decs = super::live_preview_with(&s, Some(&vault));
         // The wikilink's mark class should NOT carry the
@@ -3370,6 +3502,7 @@ mod tests {
             block_hits: Default::default(),
             page_hits: Default::default(),
             section_hits,
+            ..Default::default()
         };
         let decs = super::live_preview_with(&s, Some(&vault));
         let card = decs

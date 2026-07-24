@@ -109,13 +109,27 @@ pub(crate) struct TreeNode {
 }
 
 #[component]
-pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element {
-    // The vault lives in the home org; resolve its slug from the
-    // discovered org list (re-runs when discovery lands).
+pub fn VaultView(
+    #[props(default)] initial_path: ReadSignal<String>,
+    #[props(default)] initial_org: ReadSignal<String>,
+) -> Element {
+    // The vault follows the org switcher: browse the selected org's
+    // vault (or the home org when viewing All). A non-empty `initial_org`
+    // from the route — a cross-org search hit — overrides, so the note
+    // opens in its own org WITHOUT changing the switcher. Re-runs when the
+    // selection, route org, or org discovery changes.
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
-    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let active = use_memo(move || {
+        let route_org = initial_org();
+        if route_org.is_empty() {
+            crate::orgs::active_slug(&selection.read(), &org_list.read())
+        } else {
+            route_org
+        }
+    });
     let mut files = use_resource(move || {
-        let slug = home();
+        let slug = active();
         async move { fetch_folder_index(slug).await }
     });
 
@@ -291,7 +305,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             return;
         }
         last_link.set(sel.clone());
-        nav.push(crate::routes::Route::VaultRoute { path: sel });
+        nav.push(crate::routes::Route::VaultRoute { path: sel, org: active() });
     });
 
     // Autocomplete tags — `#` completes vault tags pulled once per org
@@ -299,7 +313,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     // tags). Shared by every mounted NoteView's completion source.
     let mut tag_rows = use_signal(Vec::<TagCount>::new);
     use_effect(move || {
-        let slug = home();
+        let slug = active();
         let _refresh = *focus_tick.read();
         spawn(async move {
             if let Ok(tags) = vault_lookup::tag_candidates(slug).await {
@@ -313,7 +327,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     let do_move = use_callback(
         move |(path, prev_sha, parent): (String, String, Option<String>)| {
             spawn(async move {
-                match move_to_folder(home(), path, parent, prev_sha).await {
+                match move_to_folder(active(), path, parent, prev_sha).await {
                     Ok(_new_sha) => {
                         move_target.set(None);
                         files.restart();
@@ -341,13 +355,13 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
         }
         let parent = create_parent.peek().clone();
         spawn(async move {
-            match create_new_file(home(), name.clone()).await {
+            match create_new_file(active(), name.clone()).await {
                 Ok(created_sha) => {
                     new_name.set(String::new());
                     create_parent.set(None);
                     let mut open_sha = created_sha.clone();
                     if let Some(parent) = parent {
-                        match move_to_folder(home(), name.clone(), Some(parent), created_sha).await {
+                        match move_to_folder(active(), name.clone(), Some(parent), created_sha).await {
                             Ok(new_sha) => open_sha = new_sha,
                             Err(e) => {
                                 if let Some(n) = notify {
@@ -398,7 +412,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     let shell_right = use_context::<Signal<crate::chrome::RightPanelOpen>>();
     let backlinks_open = use_memo(move || shell_right.read().0);
     let backlinks = use_resource(move || {
-        let slug = home();
+        let slug = active();
         let path = selected();
         let _refresh = *focus_tick.read();
         async move {
@@ -411,7 +425,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
 
     // Outgoing wikilinks of the focused note.
     let outlinks = use_resource(move || {
-        let slug = home();
+        let slug = active();
         let path = selected();
         let _refresh = *focus_tick.read();
         async move {
@@ -425,7 +439,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
     // Verses the focused note references (from synced note→verse
     // links), with their text — the inline scripture reader.
     let verses = use_resource(move || {
-        let slug = home();
+        let slug = active();
         let path = selected();
         let _refresh = *focus_tick.read();
         async move {
@@ -761,7 +775,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                                     key: "{pi}:{tab.path}",
                                     path: tab.path.clone(),
                                     sha: tab.sha.clone(),
-                                    home,
+                                    home: active,
                                     pane_index: pi,
                                     focused,
                                     pages: pages_memo,
@@ -823,7 +837,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
                         if right_tab() == RightTab::Properties {
                             crate::pages::note_properties::NoteProperties {}
                         } else if right_tab() == RightTab::Share {
-                            crate::pages::share_panel::SharePanel { slug: home(), path: selected() }
+                            crate::pages::share_panel::SharePanel { slug: active(), path: selected() }
                         } else {
                             {backlinks_body.clone()}
                         }
@@ -901,7 +915,7 @@ pub fn VaultView(#[props(default)] initial_path: ReadSignal<String>) -> Element 
             if right_tab() == RightTab::Properties {
                 crate::pages::note_properties::NoteProperties {}
             } else if right_tab() == RightTab::Share {
-                crate::pages::share_panel::SharePanel { slug: home(), path: selected() }
+                crate::pages::share_panel::SharePanel { slug: active(), path: selected() }
             } else {
                 {backlinks_body}
             }

@@ -14,7 +14,8 @@
 //!   through the shared [`actions_standalone::StandaloneActions`]
 //!   registry — the exact path a keyboard shortcut takes.
 //! - **Pages** — every app destination from [`crate::nav::nav_tabs`].
-//! - **Notes** — every vault note from the home org's folder index.
+//! - **Notes** — every vault note from the active org's folder index
+//!   (the org the switcher is scoped to, else the home org).
 //!
 //! The omni-picker ([`OmniPicker`], Ctrl+O) is the Notes section on its
 //! own: uncapped, fuzzy over the whole vault.
@@ -149,21 +150,31 @@ fn PaletteModal() -> Element {
 
     let nav = use_navigator();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let slugs = use_memo(move || crate::orgs::selected_slugs(&selection.read(), &org_list.read()));
 
     let mut query = use_signal(String::new);
     let mut cursor = use_signal(|| 0usize);
 
     let notes = use_resource(move || {
         let want = open();
-        let slug = home();
+        let slugs = slugs();
         async move {
             if !want {
                 return Vec::new();
             }
-            crate::pages::vault::fetch_folder_index(slug)
-                .await
-                .unwrap_or_default()
+            // Fan out across the selected orgs (every hosted org under
+            // "All") so search spans all vaults; tag each hit with its
+            // org so opening routes to the right one.
+            let mut out = Vec::new();
+            for slug in slugs {
+                if let Ok(pages) = crate::pages::vault::fetch_folder_index(slug.clone()).await {
+                    for p in pages {
+                        out.push((p, slug.clone()));
+                    }
+                }
+            }
+            out
         }
     });
 
@@ -198,7 +209,7 @@ fn PaletteModal() -> Element {
         });
     }
     if let Some(pages) = &*notes.read() {
-        for meta in pages {
+        for (meta, org) in pages {
             let label = if meta.title.is_empty() {
                 meta.basename.clone()
             } else {
@@ -209,6 +220,7 @@ fn PaletteModal() -> Element {
                 detail: meta.path.clone(),
                 target: Target::Route(Route::VaultRoute {
                     path: meta.path.clone(),
+                    org: org.clone(),
                 }),
                 icon: None,
                 kind: Kind::Note,
@@ -342,21 +354,31 @@ pub fn OmniPicker() -> Element {
     let mut open = use_context::<OmniOpen>().0;
     let nav = use_navigator();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
-    let home = use_memo(move || crate::orgs::home_slug(&org_list.read()));
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let slugs = use_memo(move || crate::orgs::selected_slugs(&selection.read(), &org_list.read()));
 
     let mut query = use_signal(String::new);
     let mut cursor = use_signal(|| 0usize);
 
     let notes = use_resource(move || {
         let want = open();
-        let slug = home();
+        let slugs = slugs();
         async move {
             if !want {
                 return Vec::new();
             }
-            crate::pages::vault::fetch_folder_index(slug)
-                .await
-                .unwrap_or_default()
+            // Fan out across the selected orgs (every hosted org under
+            // "All") so search spans all vaults; tag each hit with its
+            // org so opening routes to the right one.
+            let mut out = Vec::new();
+            for slug in slugs {
+                if let Ok(pages) = crate::pages::vault::fetch_folder_index(slug.clone()).await {
+                    for p in pages {
+                        out.push((p, slug.clone()));
+                    }
+                }
+            }
+            out
         }
     });
 
@@ -371,29 +393,29 @@ pub fn OmniPicker() -> Element {
     };
 
     // All notes, fuzzy-ranked (title + path), uncapped.
-    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut entries: Vec<(String, String, String)> = Vec::new();
     if let Some(pages) = &*notes.read() {
-        for meta in pages {
+        for (meta, org) in pages {
             let label = if meta.title.is_empty() {
                 meta.basename.clone()
             } else {
                 meta.title.clone()
             };
-            entries.push((label, meta.path.clone()));
+            entries.push((label, meta.path.clone(), org.clone()));
         }
     }
-    let ranked: Vec<(String, String)> = if query().is_empty() {
+    let ranked: Vec<(String, String, String)> = if query().is_empty() {
         entries
     } else {
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         let pattern = Pattern::parse(&query(), CaseMatching::Ignore, Normalization::Smart);
         let mut buf = Vec::new();
-        let mut scored: Vec<(u32, (String, String))> = entries
+        let mut scored: Vec<(u32, (String, String, String))> = entries
             .into_iter()
-            .filter_map(|(label, path)| {
+            .filter_map(|(label, path, org)| {
                 let hay = format!("{label} {path}");
                 let score = pattern.score(Utf32Str::new(&hay, &mut buf), &mut matcher)?;
-                Some((score, (label, path)))
+                Some((score, (label, path, org)))
             })
             .collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0));
@@ -405,8 +427,8 @@ pub fn OmniPicker() -> Element {
     let go = {
         let ranked = ranked.clone();
         move |i: usize| {
-            if let Some((_, path)) = ranked.get(i) {
-                nav.push(Route::VaultRoute { path: path.clone() });
+            if let Some((_, path, org)) = ranked.get(i) {
+                nav.push(Route::VaultRoute { path: path.clone(), org: org.clone() });
             }
             close();
         }
@@ -462,7 +484,7 @@ pub fn OmniPicker() -> Element {
                     if count == 0 {
                         div { class: "px-3 py-4 text-center text-sm text-muted-foreground", "No notes." }
                     }
-                    for (i, (label, path)) in ranked.iter().enumerate() {
+                    for (i, (label, path, _org)) in ranked.iter().enumerate() {
                         button {
                             key: "{path}",
                             r#type: "button",

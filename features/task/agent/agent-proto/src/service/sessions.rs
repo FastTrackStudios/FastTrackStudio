@@ -12,6 +12,11 @@ use facet::Facet;
 pub struct CreateSession {
     pub project_id: String,
     pub profile_id: String,
+    /// Target backend id (`"codex"`, `"hermes"`). Empty ⇒ the
+    /// server's default backend. Routers use this to pick which
+    /// backend owns the new session; single-backend servers ignore
+    /// it.
+    pub backend_id: String,
     /// Optional title. Empty ⇒ backend auto-generates.
     pub title: String,
     /// Override workspace path (defaults to project.path).

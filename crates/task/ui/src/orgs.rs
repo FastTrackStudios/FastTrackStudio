@@ -90,6 +90,20 @@ pub fn home_slug(orgs: &[OrgMeta]) -> String {
         .unwrap_or_default()
 }
 
+/// The single org that org-scoped surfaces (the vault page, the note
+/// palette/omni-picker) should read from. When the switcher is scoped to
+/// `One`, that org; otherwise the home org. `All` has no single vault to
+/// show, so it falls back to home — pick a specific org in the switcher
+/// to browse or search its vault. This is what lets the vault/palette
+/// follow the org switcher instead of being pinned to the home org.
+#[must_use]
+pub fn active_slug(sel: &OrgSelection, orgs: &[OrgMeta]) -> String {
+    match sel {
+        OrgSelection::One(slug) => slug.clone(),
+        OrgSelection::All => home_slug(orgs),
+    }
+}
+
 // ── discovery ───────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]

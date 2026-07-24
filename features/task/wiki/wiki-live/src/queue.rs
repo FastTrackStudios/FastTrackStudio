@@ -221,7 +221,7 @@ impl WikiLive {
             }
             let tmp = abs.with_extension(format!("tmp.{}", Uuid::new_v4().simple()));
             let mut f = fs::File::create(&tmp)?;
-            f.write_all(page.markdown.as_bytes())?;
+            f.write_all(stamp_ai_generated(&page.markdown).as_bytes())?;
             f.sync_all()?;
             fs::rename(&tmp, &abs)?;
         }
@@ -269,6 +269,28 @@ fn find_task<'a>(
         .ok_or_else(|| WikiLiveError::TaskNotFound(task_id.to_string()))
 }
 
+/// Every page written through the ingest pipeline is machine-produced,
+/// so stamp `ai_generated: true` into the frontmatter (creating a
+/// block when there is none) unless the draft already declares the
+/// key. This is the provenance flag the UI's Wiki tree and page
+/// header surface — the wiki holds knowledge that isn't the user's
+/// own writing, and generated pages must say so.
+fn stamp_ai_generated(markdown: &str) -> String {
+    if let Some(rest) = markdown.strip_prefix("---\n") {
+        if let Some(end) = rest.find("\n---") {
+            let head = &rest[..end];
+            if head
+                .lines()
+                .any(|l| l.trim_start().starts_with("ai_generated:"))
+            {
+                return markdown.to_string();
+            }
+            return format!("---\n{head}\nai_generated: true{}", &rest[end..]);
+        }
+    }
+    format!("---\nai_generated: true\n---\n\n{markdown}")
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
@@ -281,4 +303,31 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[allow(dead_code)]
 fn touch_dead_code_for_atomic_write() {
     let _ = atomic_write::<()>;
+}
+
+#[cfg(test)]
+mod stamp_tests {
+    use super::stamp_ai_generated;
+
+    #[test]
+    fn adds_key_to_existing_frontmatter() {
+        let md = "---\ntitle: X\nsources: [a.md]\n---\n\nBody.\n";
+        let out = stamp_ai_generated(md);
+        assert_eq!(
+            out,
+            "---\ntitle: X\nsources: [a.md]\nai_generated: true\n---\n\nBody.\n"
+        );
+    }
+
+    #[test]
+    fn creates_frontmatter_when_absent() {
+        let out = stamp_ai_generated("# Page\n\nBody.\n");
+        assert_eq!(out, "---\nai_generated: true\n---\n\n# Page\n\nBody.\n");
+    }
+
+    #[test]
+    fn respects_explicit_declaration() {
+        let md = "---\nai_generated: false\n---\nBody.\n";
+        assert_eq!(stamp_ai_generated(md), md);
+    }
 }

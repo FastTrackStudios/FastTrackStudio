@@ -90,7 +90,7 @@ pub fn BasesView() -> Element {
                 div { class: "flex flex-col gap-6",
                     for view in views.clone() {
                         BaseViewRender { key: "{view.name}", view, on_open: move |path: String| {
-                            nav.push(crate::routes::Route::VaultRoute { path });
+                            nav.push(crate::routes::Route::VaultRoute { path, org: String::new() });
                         } }
                     }
                 }

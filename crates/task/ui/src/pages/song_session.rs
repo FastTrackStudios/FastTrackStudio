@@ -284,6 +284,265 @@ pub(crate) mod imp {
         serde_json::from_str(&txt).map_err(|e| format!("{url}: bad manifest json: {e}"))
     }
 
+    // ── manifest-optional: derive a song model from the colocated `song`
+    // folder schema — song.md + arrangements/<dir>/arrangement.md (features/
+    // song) — so a folder plays without a hand-authored manifest.json ───────
+
+    /// Fields of `song.md` the player needs (the `song` folder index).
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SongIndexLite {
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        default_arrangement: Option<String>,
+        #[serde(default)]
+        arrangements: Vec<ArrIndexLite>,
+    }
+
+    #[derive(Deserialize)]
+    struct ArrIndexLite {
+        id: String,
+        dir: String,
+    }
+
+    /// Fields of `arrangement.md` the player needs.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ArrangementLite {
+        #[serde(default)]
+        key: Option<String>,
+        #[serde(default)]
+        chart_ref: Option<ChartRefLite>,
+        #[serde(default)]
+        attachment_refs: Vec<AttachmentRefLite>,
+    }
+
+    #[derive(Deserialize)]
+    struct ChartRefLite {
+        #[serde(default)]
+        path: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AttachmentRefLite {
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        kind: Option<String>,
+    }
+
+    /// The YAML body of a `---\n…\n---` frontmatter block.
+    fn frontmatter_yaml(src: &str) -> Option<&str> {
+        let rest = src.strip_prefix("---\n")?;
+        let end = rest.find("\n---")?;
+        Some(&rest[..=end])
+    }
+
+    fn parse_fm<T: serde::de::DeserializeOwned>(src: &str, what: &str) -> Result<T, String> {
+        let body = frontmatter_yaml(src).ok_or_else(|| format!("{what}: no frontmatter"))?;
+        serde_yaml::from_str(body).map_err(|e| format!("{what}: {e}"))
+    }
+
+    /// Human-facing section name for a laid-out chart section: a quoted label
+    /// wins (`Interlude "Breakdown"` → "Breakdown"), else the kind plus its
+    /// occurrence number ("Verse 1", "Intro").
+    fn laid_section_name(s: &session::chart_import::LaidSection) -> String {
+        use session::keyflow_actions::SectionKind::*;
+        if let Some(label) = &s.label {
+            if !label.trim().is_empty() {
+                return label.clone();
+            }
+        }
+        let base = match s.kind {
+            Intro => "Intro",
+            Verse => "Verse",
+            PreChorus => "Pre-Chorus",
+            Chorus => "Chorus",
+            Bridge => "Bridge",
+            Outro => "Outro",
+            Instrumental => "Instrumental",
+            Solo => "Solo",
+            Hits => "Hits",
+            Interlude => "Interlude",
+            Breakdown => "Breakdown",
+            Vamp => "Vamp",
+            Refrain => "Refrain",
+            Turnaround => "Turnaround",
+            CountIn => "Count-In",
+            End => "End",
+        };
+        match s.number {
+            Some(n) => format!("{base} {n}"),
+            None => base.to_string(),
+        }
+    }
+
+    fn is_audio_file(name: &str) -> bool {
+        let l = name.to_lowercase();
+        [".ogg", ".mp3", ".wav", ".webm", ".m4a", ".opus"]
+            .iter()
+            .any(|e| l.ends_with(e))
+    }
+
+    /// Infer a stem's display name, mixer group, and default-mute from its
+    /// in-folder path (`stems/03-original-track.ogg` → "Original Track").
+    /// Guide stems (click/cue/count) default muted; the original/reference
+    /// track is the audible baseline.
+    pub(crate) fn stem_spec_from_path(path: &str) -> StemSpec {
+        let filename = path.rsplit('/').next().unwrap_or(path);
+        let stem = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(filename);
+        // Drop a leading `NN-` ordering prefix.
+        let core = stem
+            .split_once('-')
+            .filter(|(p, _)| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+            .map(|(_, rest)| rest)
+            .unwrap_or(stem);
+        let name = core
+            .split(['-', '_'])
+            .filter(|w| !w.is_empty())
+            .map(|w| {
+                let mut cs = w.chars();
+                match cs.next() {
+                    Some(f) => f.to_uppercase().collect::<String>() + cs.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let lower = core.to_lowercase();
+        let words: Vec<&str> = core.split(['-', '_']).filter(|w| !w.is_empty()).collect();
+        let has = |kw: &[&str]| kw.iter().any(|k| lower.contains(k));
+        let has_word = |w: &[&str]| words.iter().any(|x| w.contains(&x.to_lowercase().as_str()));
+        let is_guide = has(&["click", "cue", "count", "guide"]);
+        // Group inference from the filename convention — reproduces the mixer
+        // groups the legacy manifest authored (Guide / Reference / Bass /
+        // Guitars / Keys / Drums / Vocals / Tracks). Order matters: `bass`
+        // before `guitar`/`synth` so `synth-bass` lands in Bass.
+        let group = if is_guide {
+            "Guide"
+        } else if has(&["original", "reference"]) {
+            "Reference"
+        } else if has(&["bass"]) {
+            "Bass"
+        } else if has(&["guitar", "gtr"]) || has_word(&["ag", "eg"]) {
+            "Guitars"
+        } else if has(&["organ", "piano", "keys", "rhodes", "wurli", "synth", "pad"])
+            || has_word(&["key"])
+        {
+            "Keys"
+        } else if has(&["drum", "perc", "kick", "snare", "hat", "cymbal", "tom", "shaker"]) {
+            "Drums"
+        } else if has(&["vocal", "vox", "bgv", "choir", "harm"]) || has_word(&["lead", "bv"]) {
+            "Vocals"
+        } else if has(&["loop", "track", "stem", "arp", "fx"]) {
+            "Tracks"
+        } else {
+            "Stems"
+        };
+        StemSpec {
+            name: if name.is_empty() { core.to_string() } else { name },
+            group: Some(group.to_string()),
+            file: path.to_string(),
+            default_muted: is_guide,
+        }
+    }
+
+    /// Build a [`Manifest`] with NO `manifest.json`, from the colocated
+    /// `song` folder schema (issues #57/#59): read `song.md` → the default
+    /// arrangement's `arrangement.md` → its `chartRef` (chart → sections via
+    /// [`session::chart_import::chart_to_layout`]) and `attachmentRefs` (the
+    /// audio stems). The "drop a song folder and it plays" path.
+    pub(crate) async fn fetch_kf_manifest(org: &str, slug: &str) -> Result<Manifest, String> {
+        let base = format!("/org/{org}/media/songs/{slug}");
+        // song.md → the default arrangement's folder.
+        let song_md = fetch_text(&format!("{base}/song.md"))
+            .await
+            .map_err(|e| format!("no song.md for `{slug}`: {e}"))?;
+        let idx: SongIndexLite = parse_fm(&song_md, "song.md")?;
+        let dir = idx
+            .arrangements
+            .iter()
+            .find(|a| Some(&a.id) == idx.default_arrangement.as_ref())
+            .or_else(|| idx.arrangements.first())
+            .map(|a| a.dir.clone())
+            .ok_or_else(|| format!("`{slug}`: no arrangements"))?;
+        // arrangement.md → chartRef + attachmentRefs.
+        let arr_md = fetch_text(&format!("{base}/arrangements/{dir}/arrangement.md"))
+            .await
+            .map_err(|e| format!("`{slug}` arrangement `{dir}`: {e}"))?;
+        let arr: ArrangementLite = parse_fm(&arr_md, "arrangement.md")?;
+        // Stems = the audio attachment refs (paths relative to the song root).
+        let mut stems: Vec<StemSpec> = arr
+            .attachment_refs
+            .iter()
+            .filter_map(|a| a.path.as_deref())
+            .filter(|p| is_audio_file(p))
+            .map(stem_spec_from_path)
+            .collect();
+        stems.sort_by(|a, b| a.file.cmp(&b.file));
+        if stems.is_empty() {
+            return Err(format!("`{slug}`: no audio stems"));
+        }
+        // Structure / tempo from the referenced chart (optional — a song can
+        // play stems with no chart, just without a section timeline).
+        let chart_path = arr.chart_ref.as_ref().and_then(|c| c.path.clone());
+        let mut sections = Vec::new();
+        let mut bpm = None;
+        let mut time_signature = None;
+        let mut chart_key = None;
+        let mut chart_title = None;
+        let mut chart_end = 0.0f64;
+        if let Some(cp) = chart_path {
+            if let Ok(chart_text) = fetch_text(&format!("{base}/{cp}")).await {
+                if let Ok(layout) = session::chart_import::chart_to_layout(&chart_text) {
+                    sections = layout
+                        .sections
+                        .iter()
+                        .filter(|s| s.kind != session::keyflow_actions::SectionKind::CountIn)
+                        .map(|s| Section {
+                            name: laid_section_name(s),
+                            start_sec: s.start_seconds,
+                            end_sec: s.end_seconds,
+                        })
+                        .collect();
+                    bpm = Some(layout.tempo_bpm);
+                    time_signature =
+                        Some(format!("{}/{}", layout.time_sig_num, layout.time_sig_den));
+                    chart_key = layout.key;
+                    chart_title = layout.title;
+                    chart_end = layout.song_end_seconds;
+                }
+            }
+        }
+        let duration_sec = chart_end.max(sections.last().map(|s| s.end_sec).unwrap_or(0.0));
+        Ok(Manifest {
+            slug: Some(slug.to_owned()),
+            title: idx.title.or(chart_title),
+            artist: None,
+            key: arr.key.or(chart_key),
+            bpm,
+            time_signature,
+            duration_sec,
+            sections,
+            stems,
+        })
+    }
+
+    /// Resolve a song's [`Manifest`] the colocated-schema-first way: the
+    /// `song` folder (`song.md` → `arrangement.md`) first, then a legacy
+    /// `manifest.json`. Shared by the single-song and setlist players so both
+    /// read migrated (manifest-less) songs identically.
+    pub(crate) async fn load_song_manifest(org: &str, slug: &str) -> Result<Manifest, String> {
+        match fetch_kf_manifest(org, slug).await {
+            Ok(m) => Ok(m),
+            Err(_) => {
+                fetch_manifest(&format!("/org/{org}/media/songs/{slug}/manifest.json")).await
+            }
+        }
+    }
+
     /// Where one stem's audio comes from.
     #[derive(Clone, Debug, PartialEq)]
     pub(crate) enum StemSource {
@@ -619,6 +878,12 @@ pub(crate) mod imp {
 
     /// Deterministic accent color (0xRRGGBB) for a stem group.
     fn group_color(group: &str) -> u32 {
+        // The Reference group is always neutral gray — the reference / original
+        // track is a backing reference, not an instrument, so it reads quiet and
+        // sits apart from the colored instrument folders.
+        if group.eq_ignore_ascii_case("reference") {
+            return 0x71717a; // zinc-500
+        }
         // Small fixed palette, hashed by group name for stable coloring.
         const PALETTE: [u32; 8] = [
             0x3B82F6, // blue
@@ -676,13 +941,70 @@ pub(crate) mod imp {
 
     // ── the component ───────────────────────────────────────────────────────
 
-    /// The `type: song` player. When the note's frontmatter carries a
-    /// `stems:` block (content-addressed attachments), the stems stream
-    /// from the org's blob store via short-lived signed URLs; otherwise
-    /// `slug` selects the legacy media at `/media/songs/{slug}/…`.
-    /// Rendered above the note editor in the vault.
+    /// The `type: song` view. A song plays through the SAME session player
+    /// as a setlist — as a one-song set — so the single-song page and the
+    /// setlist viewer are one identical experience (header + timeline +
+    /// Session/Chart tabs + transport), not two divergent players.
+    ///
+    /// Media-served songs (a `song.md` / `manifest.json` at
+    /// `/org/{org}/media/songs/{slug}`) take that path. A song whose stems
+    /// exist only as content-addressed blobs (a frontmatter `stems:` block,
+    /// no `/media` folder) falls back to the standalone streaming player
+    /// ([`StandaloneSongPlayer`]).
     #[component]
     pub fn SongView(
+        slug: String,
+        org: String,
+        title: String,
+        front: crate::pages::vault::SongFront,
+    ) -> Element {
+        // Probe whether the song is media-served (the common, migrated case).
+        // Cheap: one HEAD-ish GET, browser-cached and re-used by SetlistPlayer.
+        let slug_p = slug.clone();
+        let org_p = org.clone();
+        let media = use_resource(use_reactive!(|slug_p, org_p| {
+            let slug = slug_p.clone();
+            let org = org_p.clone();
+            async move {
+                let base = format!("/org/{org}/media/songs/{slug}");
+                fetch_text(&format!("{base}/song.md")).await.is_ok()
+                    || fetch_text(&format!("{base}/manifest.json")).await.is_ok()
+            }
+        }));
+
+        match *media.read_unchecked() {
+            None => rsx! {
+                div { class: "flex flex-col gap-2 py-10",
+                    span { class: "text-sm text-muted-foreground", "Loading song…" }
+                }
+            },
+            // Media-served → the one-song setlist session player (embedded).
+            Some(true) => rsx! {
+                crate::pages::setlist_session::SetlistPlayer {
+                    songs: vec![slug.clone()],
+                    org: org.clone(),
+                    fullscreen: false,
+                }
+            },
+            // Blob-only → the standalone streaming player (frontmatter stems).
+            Some(false) => rsx! {
+                StandaloneSongPlayer {
+                    slug: slug.clone(),
+                    org: org.clone(),
+                    title: title.clone(),
+                    front: front.clone(),
+                }
+            },
+        }
+    }
+
+    /// The standalone single-song streaming player: resolves stems (colocated
+    /// `song.md` → legacy `manifest.json` → content-addressed blobs) and plays
+    /// them through its own Web-Audio graph. Retained as the fallback for
+    /// blob-only songs that have no `/media` folder; media-served songs go
+    /// through [`SetlistPlayer`] instead (see [`SongView`]).
+    #[component]
+    fn StandaloneSongPlayer(
         slug: String,
         org: String,
         title: String,
@@ -708,17 +1030,38 @@ pub(crate) mod imp {
             let title = title_r.clone();
             let front = front_r.clone();
             async move {
-                let (manifest, sources) = if front.stems.is_empty() {
-                    let manifest =
-                        fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
-                    let sources = manifest
-                        .stems
+                // Colocated-schema-first: derive the song model from the
+                // `song` folder (song.md → arrangement.md → chart + stems).
+                // The legacy `manifest.json` is now only a fallback for songs
+                // not yet migrated, so migrated songs can drop it entirely
+                // (#57 manifest retirement). A frontmatter `stems:` block (blob
+                // resolver) is the last resort. Refs #56/#57/#59.
+                let manifest_url = format!("/org/{org}/media/songs/{slug}/manifest.json");
+                let url_sources = |m: &Manifest| -> Vec<StemSource> {
+                    m.stems
                         .iter()
-                        .map(|s| StemSource::Url(format!("/media/songs/{slug}/{}", s.file)))
-                        .collect();
-                    (manifest, sources)
-                } else {
-                    resolve_front(&org, &title, &front).await?
+                        .map(|s| {
+                            StemSource::Url(format!("/org/{org}/media/songs/{slug}/{}", s.file))
+                        })
+                        .collect()
+                };
+                let (manifest, sources) = match fetch_kf_manifest(&org, &slug).await {
+                    Ok(manifest) => {
+                        let sources = url_sources(&manifest);
+                        (manifest, sources)
+                    }
+                    // No song.md → legacy manifest.json, then the frontmatter
+                    // blob resolver.
+                    Err(_) => match fetch_manifest(&manifest_url).await {
+                        Ok(manifest) => {
+                            let sources = url_sources(&manifest);
+                            (manifest, sources)
+                        }
+                        Err(_) if !front.stems.is_empty() => {
+                            resolve_front(&org, &title, &front).await?
+                        }
+                        Err(e) => return Err(e),
+                    },
                 };
                 let eng = build_engine(&manifest, &sources)?;
                 Ok::<(Manifest, Engine), String>((manifest, eng))
@@ -728,11 +1071,13 @@ pub(crate) mod imp {
         // Chart source (optional). Fetched async; populates SONG_CHARTS +
         // SETLIST_STRUCTURE once present (see effect below).
         let slug_c = slug.clone();
+        let org_c = org.clone();
         let mut chart_src = use_signal(String::new);
         use_future(move || {
             let slug = slug_c.clone();
+            let org = org_c.clone();
             async move {
-                if let Ok(txt) = fetch_text(&format!("/media/songs/{slug}/chart.kf")).await {
+                if let Ok(txt) = fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf")).await {
                     chart_src.set(txt);
                 }
             }
@@ -827,6 +1172,18 @@ pub(crate) mod imp {
                 let Some(eng) = engine_of() else {
                     continue;
                 };
+                // Self-correct the total from the real audio once it loads —
+                // a chart-derived duration omits any outro past the last
+                // charted section, and the end-detect below must not stop
+                // playback early. (The authoritative length is the audio.)
+                {
+                    let mut e = eng.borrow_mut();
+                    if let Some(real) = e.stems.first().map(|s| s.el.duration()) {
+                        if real.is_finite() && real > e.duration {
+                            e.duration = real;
+                        }
+                    }
+                }
                 let (rc, total, is_playing, pos, dur) = {
                     let e = eng.borrow();
                     (

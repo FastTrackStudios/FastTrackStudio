@@ -27,6 +27,15 @@ pub struct PageInfo {
     pub size: u64,
     /// Filesystem mtime.
     pub modified: DateTime<Utc>,
+    /// Frontmatter `ai_generated: true` — machine-produced content
+    /// (AI summaries, ingests). The wiki is the home for material
+    /// that isn't the user's own writing; this flag is the
+    /// provenance badge distinguishing generated pages from curated
+    /// human ones.
+    pub ai_generated: bool,
+    /// Frontmatter `generated_by:` — the model/agent that produced
+    /// an `ai_generated` page; empty when absent.
+    pub generated_by: String,
 }
 
 /// One page with its full markdown, plus the sha the editor

@@ -746,6 +746,101 @@ pub async fn fetch_chapter_backlinks(
         .map_err(|e| format!("{slug}: backlinks {book} {chapter}: {e:?}"))
 }
 
+/// Installed original-language editions (TAGNT / TAHOT / SBLGNT / OSHB).
+pub async fn fetch_original_editions(
+    slug: &str,
+) -> Result<Vec<scripture_proto::OrigEditionInfo>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .original_editions()
+        .await
+        .map_err(|e| format!("{slug}: original editions: {e:?}"))
+}
+
+/// Word-by-word interlinear of a verse in an original-language edition.
+pub async fn fetch_interlinear(
+    slug: &str,
+    edition: &str,
+    reference: &str,
+) -> Result<Vec<scripture_proto::InterlinearWord>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .interlinear(edition.to_owned(), reference.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: interlinear {edition} {reference}: {e:?}"))
+}
+
+/// Strong's-tagged breakdown of a verse in an English translation.
+pub async fn fetch_word_tokens(
+    slug: &str,
+    translation: &str,
+    reference: &str,
+) -> Result<Vec<scripture_proto::WordToken>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .word_study(translation.to_owned(), reference.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: word tokens {reference}: {e:?}"))
+}
+
+/// Full word study for a Strong's code: lexicon entry + concordance.
+pub async fn fetch_word_study(
+    slug: &str,
+    strongs: &str,
+    limit: u32,
+) -> Result<scripture_proto::WordStudyReport, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .study(strongs.to_owned(), limit)
+        .await
+        .map_err(|e| format!("{slug}: word study {strongs}: {e:?}"))
+}
+
+/// Cross-references from a verse (votes-desc, `min_votes` filters noise).
+pub async fn fetch_cross_refs(
+    slug: &str,
+    reference: &str,
+    min_votes: i32,
+) -> Result<Vec<scripture_proto::WeightedRef>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .cross_refs(reference.to_owned(), min_votes)
+        .await
+        .map_err(|e| format!("{slug}: cross refs {reference}: {e:?}"))
+}
+
+/// Topics a verse is tagged with (votes-desc).
+pub async fn fetch_topics_of(
+    slug: &str,
+    reference: &str,
+) -> Result<Vec<scripture_proto::TopicTag>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .topics_of(reference.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: topics {reference}: {e:?}"))
+}
+
+/// Verses about a topic (votes-desc, capped at `limit`; 0 ⇒ default).
+pub async fn fetch_verses_for_topic(
+    slug: &str,
+    topic: &str,
+    limit: u32,
+) -> Result<Vec<scripture_proto::WeightedRef>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    client
+        .verses_for_topic(topic.to_owned(), limit)
+        .await
+        .map_err(|e| format!("{slug}: topic verses {topic}: {e:?}"))
+}
+
 // ── Inventory ───────────────────────────────────────────────────────
 
 /// Every inventory item in the org's vault (`type: item` gear /
@@ -1644,6 +1739,18 @@ pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::Wi
         .collect())
 }
 
+/// Catalog of the org's curated wiki pages (`<org>/wiki/Knowledge/`)
+/// via the `wiki_proto` Pages service — drives the explorer's Wiki
+/// tree. Path-sorted; carries the `ai_generated` provenance flag.
+pub async fn fetch_wiki_pages(slug: &str) -> Result<Vec<wiki_proto::pages::PageInfo>, String> {
+    let client =
+        crate::vox_clients::establish_for::<wiki_proto::service::pages::PagesClient>(slug).await?;
+    client
+        .list_pages("default".to_owned())
+        .await
+        .map_err(|e| format!("{slug}: wiki pages: {e:?}"))
+}
+
 /// Fetch the **curated wiki** graph for one org — the server-built
 /// 4-signal relevance graph over `<org>/wiki/Knowledge/` (the
 /// `wiki_proto` Graph service), adapted to the renderer's
@@ -1843,6 +1950,101 @@ pub async fn fetch_project_agent_sessions(
         .await
         .map_err(|e| format!("{slug}: list agent sessions: {e:?}"))?;
     Ok(page.sessions)
+}
+
+/// Create a new agent chat session. `backend_id` picks the backend
+/// (`"hermes"`, `"codex"`); empty = the server default (Hermes when
+/// a gateway is configured).
+pub async fn create_agent_session(
+    slug: &str,
+    backend_id: &str,
+    title: &str,
+) -> Result<agent_proto::session::Session, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
+            .await?;
+    client
+        .create_session(agent_proto::service::sessions::CreateSession {
+            project_id: String::new(),
+            profile_id: String::new(),
+            backend_id: backend_id.to_owned(),
+            title: title.to_owned(),
+            workspace_path: String::new(),
+            subagent_nickname: String::new(),
+        })
+        .await
+        .map_err(|e| format!("{slug}: create agent session: {e:?}"))
+}
+
+/// Kick off one turn — the user message goes to the session's
+/// backend; events stream over `subscribe_agent_session`.
+pub async fn dispatch_agent_turn(
+    slug: &str,
+    session_id: &str,
+    text: &str,
+    model_override: &str,
+) -> Result<agent_proto::service::turn_dispatch::DispatchAck, String> {
+    let client = crate::vox_clients::establish_for::<
+        agent_proto::service::turn_dispatch::TurnDispatchClient,
+    >(slug)
+    .await?;
+    client
+        .dispatch_turn(agent_proto::service::turn_dispatch::DispatchTurn {
+            session_id: session_id.to_owned(),
+            text: text.to_owned(),
+            attachments: Vec::new(),
+            profile_override_id: String::new(),
+            personality_override_id: String::new(),
+            model_override: model_override.to_owned(),
+        })
+        .await
+        .map_err(|e| format!("{slug}: dispatch turn: {e:?}"))
+}
+
+/// Cancel the in-flight turn on a session.
+pub async fn cancel_agent_turn(slug: &str, session_id: &str) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<
+        agent_proto::service::turn_dispatch::TurnDispatchClient,
+    >(slug)
+    .await?;
+    client
+        .cancel_turn(session_id.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: cancel turn: {e:?}"))
+}
+
+/// Full transcript for a session (backend returns newest-first;
+/// callers reverse for display).
+pub async fn fetch_agent_messages(
+    slug: &str,
+    session_id: &str,
+) -> Result<Vec<agent_proto::message::Message>, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::threads::ThreadsClient>(slug)
+            .await?;
+    client
+        .list_messages(session_id.to_owned(), 0, String::new())
+        .await
+        .map_err(|e| format!("{slug}: list messages: {e:?}"))
+}
+
+/// Open the live event stream for a session. Returns after handing
+/// the `tx` to the server — pump the paired `rx` for
+/// [`agent_proto::event::AgentEvent`]s; the call ends when the
+/// server drops the lane or the receiver is dropped.
+pub async fn subscribe_agent_session(
+    slug: &str,
+    session_id: &str,
+    tx: vox::Tx<agent_proto::event::AgentEvent>,
+) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<
+        agent_proto::service::subscriptions::SubscriptionsClient,
+    >(slug)
+    .await?;
+    client
+        .subscribe_session(session_id.to_owned(), tx)
+        .await
+        .map_err(|e| format!("{slug}: subscribe session: {e:?}"))
 }
 
 // ── Email ───────────────────────────────────────────────────────────

@@ -292,7 +292,7 @@ mod imp {
         /// assets, create the node, seed every song as its own project with a
         /// track per stem. PCM decoding is per-song, driven by
         /// [`select_song`](Self::select_song).
-        pub(crate) fn build(songs_in: &[(String, Manifest)]) -> Result<SetlistAudio, String> {
+        pub(crate) fn build(org: &str, songs_in: &[(String, Manifest)]) -> Result<SetlistAudio, String> {
             let ctx = shared_ctx()?;
             let songs: Vec<SongStems> = songs_in
                 .iter()
@@ -308,7 +308,7 @@ mod imp {
                             (
                                 s.name.clone(),
                                 stem_take_guid(i, j),
-                                format!("/media/songs/{slug}/{}", s.file),
+                                format!("/org/{org}/media/songs/{slug}/{}", s.file),
                             )
                         })
                         .collect(),

@@ -263,6 +263,21 @@ pub(crate) fn NoteView(
         crate::pages::experience::experience_of(current_type.read().as_deref(), exp.as_deref())
     };
     let is_setlist = note_experience == Some(crate::pages::experience::ExperienceKind::Setlist);
+    // A song note IS its player: once the type resolves, drop straight into
+    // the full-screen experience (this view remounts per note, so `armed`
+    // fires this exactly once — `Esc`/minimize then stays minimized on the
+    // compact streaming card until the next note).
+    {
+        let mut setlist_fullscreen = setlist_fullscreen;
+        let mut armed = use_signal(|| true);
+        use_effect(move || {
+            let is_song_now = current_type.read().as_deref() == Some("song");
+            if is_song_now && *armed.peek() {
+                armed.set(false);
+                setlist_fullscreen.set(true);
+            }
+        });
+    }
     let is_base = path
         .rsplit_once('.')
         .is_some_and(|(_, e)| e.eq_ignore_ascii_case("base"));
@@ -323,37 +338,104 @@ pub(crate) fn NoteView(
         Vec::new()
     };
 
-    // Editor link clicks: `song-play:<name>` drives the mounted stream
-    // player (inline song-strip play buttons); wikilink targets navigate
-    // to the note (resolved through the vault index when possible).
+    // Editor link clicks: `song-play:<name>` / `setlist-play:` drive the
+    // GLOBAL Now Playing player (mounted in the app shell, so playback
+    // survives navigation); wikilink targets navigate to the note
+    // (resolved through the vault index when possible).
     let nav_links = use_navigator();
     let lookup_for_links = lookup;
-    let mut play_req = use_context::<crate::chrome::SongPlayRequest>().0;
+    let mut now_playing = use_context::<crate::chrome::NowPlaying>().0;
+    // The queue these strips belong to: the setlist's own songs, or (for a
+    // note that merely embeds a setlist) the embedded queue.
+    let queue_songs = if is_setlist {
+        setlist_songs_value.clone()
+    } else {
+        embedded_setlist_songs.clone()
+    };
+    let queue_title = basename_of(&path).to_string();
     let on_link_click = use_callback(move |href: String| {
         if let Some(name) = href.strip_prefix("song-play:") {
-            let generation = play_req.peek().0 + 1;
-            play_req.set((generation, name.to_string()));
+            let slug = crate::pages::vault::slugify(name);
+            // Play within the note's queue; a lone strip becomes a 1-song queue.
+            let songs = if queue_songs.is_empty() {
+                vec![slug.clone()]
+            } else {
+                queue_songs.clone()
+            };
+            let start = songs.iter().position(|s| *s == slug).unwrap_or(0);
+            let generation = now_playing.peek().generation + 1;
+            now_playing.set(crate::chrome::NowPlayingRequest {
+                generation,
+                org: home.read().clone(),
+                title: queue_title.clone(),
+                songs,
+                start,
+                toggle: false,
+            });
+            return;
+        }
+        if let Some(name) = href.strip_prefix("song-more:") {
+            // "…" more-actions on a song row → open the song note (its full
+            // action surface). A dedicated inline menu is a follow-up.
+            let page = name.split(['#', '|']).next().unwrap_or(name).trim();
+            let path = lookup_for_links
+                .peek()
+                .as_ref()
+                .and_then(|ix| ix.meta(page).map(|m| m.path.clone()))
+                .unwrap_or_else(|| format!("{page}.md"));
+            nav_links.push(crate::routes::Route::VaultRoute { path, org: home() });
+            return;
+        }
+        if href.starts_with("setlist-open:") {
+            // Open the full-screen setlist experience (the button lives in the
+            // editor's setlist-title widget, so it travels with an embedded
+            // setlist too).
+            setlist_fullscreen.set(true);
             return;
         }
         if href.starts_with("setlist-play:") {
-            let generation = play_req.peek().0 + 1;
-            play_req.set((generation, String::new())); // empty = toggle
+            // Header ▶: start the whole setlist, or toggle if it's already
+            // the loaded queue.
+            let generation = now_playing.peek().generation + 1;
+            now_playing.set(crate::chrome::NowPlayingRequest {
+                generation,
+                org: home.read().clone(),
+                title: queue_title.clone(),
+                songs: queue_songs.clone(),
+                start: 0,
+                toggle: true,
+            });
             return;
         }
-        if let Some(tab) = href.strip_prefix("event-tab:") {
-            *crate::event_tabs::EVENT_ACTIVE_TAB.write() = tab.to_string();
+        if crate::event_tabs::handle_tab_href(&href) {
+            return;
+        }
+        if let Some(target) = href.strip_prefix("scripture-open:") {
+            // Verse-card "Study ›" → the reader anchored at the passage.
+            nav_links.push(crate::routes::Route::ScriptureRoute {
+                reference: target.trim().to_string(),
+            });
             return;
         }
         if href.starts_with("http://") || href.starts_with("https://") {
             return; // the editor already window.open()s external links
         }
         let page = href.split(['#', '|']).next().unwrap_or(&href).trim();
-        let path = lookup_for_links
+        let known = lookup_for_links
             .peek()
             .as_ref()
-            .and_then(|ix| ix.meta(page).map(|m| m.path.clone()))
-            .unwrap_or_else(|| format!("{page}.md"));
-        nav_links.push(crate::routes::Route::VaultRoute { path });
+            .and_then(|ix| ix.meta(page).map(|m| m.path.clone()));
+        // A wikilink that matches no page but parses as a scripture
+        // reference opens the reader (same resolution order as the
+        // decoration pass: real pages win).
+        if known.is_none() && scripture_proto::ScriptureRef::parse(page).is_ok() {
+            nav_links.push(crate::routes::Route::ScriptureRoute {
+                reference: page.to_string(),
+            });
+            return;
+        }
+        let path = known.unwrap_or_else(|| format!("{page}.md"));
+        nav_links.push(crate::routes::Route::VaultRoute { path, org: home() });
     });
 
     // ── Save / conflict state ─────────────────────────────────
@@ -483,23 +565,46 @@ pub(crate) fn NoteView(
                     }
                 } else {
                     if is_song {
-                        crate::pages::song_session::SongView {
-                            slug: song_slug_value.clone(),
-                            org: home.read().clone(),
-                            title: basename_of(&path).to_string(),
-                            front: song_front_value.clone(),
+                        // A song IS its player. Full-screen (default on open):
+                        // the same immersive experience as a one-song set. Esc /
+                        // minimize drops to the compact streaming card below.
+                        if setlist_fullscreen() {
+                            crate::pages::experience::FullscreenExperience {
+                                title: basename_of(&path).to_string(),
+                                on_exit: move |_| setlist_fullscreen.set(false),
+                                crate::pages::setlist_session::SetlistPlayer {
+                                    songs: vec![song_slug_value.clone()],
+                                    org: home.read().clone(),
+                                    fullscreen: true,
+                                }
+                            }
+                        } else {
+                            SongCard {
+                                title: basename_of(&path).to_string(),
+                                on_play: {
+                                    let slug = song_slug_value.clone();
+                                    let org = home.read().clone();
+                                    let qtitle = basename_of(&path).to_string();
+                                    move |_| {
+                                        let generation = now_playing.peek().generation + 1;
+                                        now_playing.set(crate::chrome::NowPlayingRequest {
+                                            generation,
+                                            org: org.clone(),
+                                            title: qtitle.clone(),
+                                            songs: vec![slug.clone()],
+                                            start: 0,
+                                            toggle: true,
+                                        });
+                                    }
+                                },
+                                on_open: move |_| setlist_fullscreen.set(true),
+                            }
                         }
                     }
-                    if !is_setlist && !embedded_setlist_songs.is_empty() {
-                        // Headless queue for embedded-setlist playback.
-                        crate::pages::setlist_stream::SetlistStreamPlayer {
-                            org: home.read().clone(),
-                            title: basename_of(&path).to_string(),
-                            songs: embedded_setlist_songs.clone(),
-                            show_rows: false,
-                            headless: true,
-                        }
-                    }
+                    // Embedded-setlist + setlist playback now flows through the
+                    // GLOBAL Now Playing player (mounted in the app shell) so it
+                    // survives navigation — the strip/header clicks fire a
+                    // `NowPlayingRequest` via `on_link_click`. No per-note player.
                     if is_setlist {
                         // Setlist Experience: auto full-screen (an overlay
                         // that escapes the pane + sidebars), Esc to exit.
@@ -510,30 +615,19 @@ pub(crate) fn NoteView(
                                 on_exit: move |_| setlist_fullscreen.set(false),
                                 crate::pages::setlist_session::SetlistPlayer {
                                     songs: setlist_songs_value.clone(),
+                                    org: home.read().clone(),
                                     fullscreen: true,
                                 }
                             }
-                        } else {
-                            crate::pages::experience::EnterExperienceButton {
-                                label: "Setlist",
-                                on_enter: move |_| setlist_fullscreen.set(true),
-                            }
-                            // Streaming header (icon · title · play) — the
-                            // setlist's H1 replacement. Rows render INLINE in
-                            // the editor as song strips; this header owns
-                            // playback (one reference track at a time over
-                            // vox MediaService) and answers strip play clicks.
-                            // HEADLESS: the editor's setlist-header widget
-                            // (the note's own H1) is the visible header; this
-                            // just owns playback + answers play requests.
-                            crate::pages::setlist_stream::SetlistStreamPlayer {
-                                org: home.read().clone(),
-                                title: basename_of(&path).to_string(),
-                                songs: setlist_songs_value.clone(),
-                                show_rows: false,
-                                headless: true,
-                            }
                         }
+                        // The visible setlist header + song strips are the
+                        // editor's own widgets (the note's H1). Their ▶ clicks
+                        // route to the global Now Playing player, and the
+                        // header's "Open" button opens the full-screen
+                        // experience — both via `on_link_click`. So the
+                        // embedded (non-fullscreen) view needs nothing mounted
+                        // here, and the Open control travels with an embedded
+                        // setlist.
                     }
                     // The note body (frontmatter + Markdown editor) is bound to
                     // `session.state`, which autosaves to the note file. A
@@ -543,7 +637,7 @@ pub(crate) fn NoteView(
                     // autosave them into the note — which corrupted the setlist's
                     // frontmatter when the keyflow-source editor was used. So skip
                     // it entirely while a fullscreen experience owns the screen.
-                    if note_body_visible(is_setlist, setlist_fullscreen()) {
+                    if note_body_visible(is_setlist || is_song, setlist_fullscreen()) {
                         // Setlists + events: the typed title widget in the
                         // editor IS the title — skip the duplicate header.
                         if !is_setlist && current_type.read().as_deref() != Some("event") {
@@ -610,8 +704,58 @@ fn raw_body_text(text: &str) -> String {
 /// frontmatter (chart text written to the top of the file, breaking the `---`
 /// fence so `type: setlist` no longer parsed and the experience stopped
 /// opening). Not mounting it removes that sink entirely.
-fn note_body_visible(is_setlist: bool, setlist_fullscreen: bool) -> bool {
-    !(is_setlist && setlist_fullscreen)
+fn note_body_visible(is_experience_note: bool, fullscreen: bool) -> bool {
+    !(is_experience_note && fullscreen)
+}
+
+/// The compact, Apple-Music-style card for a song note in its minimized
+/// (embedded) state: artwork tile + title / artist + a Play button (drives the
+/// global Now Playing stream) and an "Open" that launches the full-screen
+/// player experience. The title splits on `" - "` (`Praise - Elevation
+/// Worship` → title `Praise`, artist `Elevation Worship`).
+#[component]
+fn SongCard(title: String, on_play: EventHandler<()>, on_open: EventHandler<()>) -> Element {
+    let (name, artist) = match title.split_once(" - ") {
+        Some((t, a)) => (t.trim().to_string(), a.trim().to_string()),
+        None => (title.clone(), String::new()),
+    };
+    let initial = name
+        .chars()
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_else(|| "♪".to_string());
+    rsx! {
+        div { class: "mx-4 my-4 flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm",
+            // Artwork tile (initial placeholder — real art slots in later).
+            div { class: "flex size-12 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/70 to-primary text-lg font-bold text-primary-foreground",
+                "{initial}"
+            }
+            div { class: "min-w-0 flex-1",
+                div { class: "truncate text-sm font-semibold text-foreground", "{name}" }
+                if !artist.is_empty() {
+                    div { class: "truncate text-xs text-muted-foreground", "{artist}" }
+                }
+            }
+            // Play → global Now Playing stream.
+            button {
+                class: "flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90",
+                title: "Play",
+                onclick: move |_| on_play.call(()),
+                svg {
+                    view_box: "0 0 24 24",
+                    fill: "currentColor",
+                    class: "size-4 translate-x-[1px]",
+                    path { d: "M8 5v14l11-7z" }
+                }
+            }
+            // Open → the full-screen player experience.
+            button {
+                class: "shrink-0 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                onclick: move |_| on_open.call(()),
+                "Open"
+            }
+        }
+    }
 }
 
 #[cfg(test)]

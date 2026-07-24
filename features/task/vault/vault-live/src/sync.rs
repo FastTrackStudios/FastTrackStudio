@@ -426,13 +426,21 @@ impl VaultSync for Backend {
         // the tree shows them and deep links resolve. Title = the
         // basename; `page_type: "base"` lets clients badge them.
         for b in &vault.bases {
+            // A base carries its own `folder:` / `tags:` (top-level YAML
+            // keys parsed into `ParsedBase`), so it lands in the folder
+            // tree + tags sidebar like a page. Fall back to empty when
+            // the base failed to parse.
+            let (folder, tags) = match &b.parsed {
+                Ok(pb) => (pb.folder.clone(), pb.tags.clone()),
+                Err(_) => (String::new(), Vec::new()),
+            };
             pages.push(PageMeta {
                 path: b.rel_path.clone(),
                 basename: b.basename.clone(),
                 title: b.basename.clone(),
                 page_type: "base".to_string(),
-                folder: String::new(),
-                tags: Vec::new(),
+                folder,
+                tags,
                 icon: String::new(),
                 sha256: sha256_hex(b.raw.as_bytes()),
                 aliases: Vec::new(),

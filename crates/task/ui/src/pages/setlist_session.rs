@@ -230,7 +230,7 @@ mod imp {
     /// (from the note's `songs:` frontmatter). Rendered above the note editor
     /// (embedded) or inside the full-screen setlist Experience.
     #[component]
-    pub fn SetlistPlayer(songs: Vec<String>, #[props(default)] fullscreen: bool) -> Element {
+    pub fn SetlistPlayer(songs: Vec<String>, org: String, #[props(default)] fullscreen: bool) -> Element {
         // Current song in the set. Mirrored FROM the engine's `ACTIVE_INDICES`
         // (published by `SessionEventBridge`), and set optimistically by the
         // navigation callbacks so the UI responds immediately.
@@ -251,6 +251,8 @@ mod imp {
         // below `set_mutes`), so mute/solo/fader are audible. Reset from the
         // current song's manifest on song switch.
         let stem_ui = use_signal(Vec::<media::StemUi>::new);
+        // The org whose vault this setlist lives in — media serves at
+        // /org/{slug}/media/... . Follows the org switcher.
 
         // Fetch EVERY song's manifest + chart.kf once. Keyed on the slug list
         // via `use_reactive!` so it runs exactly once per setlist (charts are
@@ -259,14 +261,18 @@ mod imp {
         // strips); the setlist STRUCTURE / charts / playhead are driven by the
         // in-process engine (see the `build_for_setlist` effect below).
         let songs_r = songs.clone();
-        let loaded = use_resource(use_reactive!(|songs_r| {
+        let org_v = org.clone();
+        let loaded = use_resource(use_reactive!(|songs_r, org_v| {
             let songs = songs_r.clone();
+            let org = org_v.clone();
             async move {
                 let mut out: Vec<LoadedSong> = Vec::with_capacity(songs.len());
                 for slug in &songs {
-                    let manifest =
-                        media::fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
-                    let chart = media::fetch_text(&format!("/media/songs/{slug}/chart.kf"))
+                    // Colocated-schema-first (song.md → arrangement.md), then a
+                    // legacy manifest.json — so migrated, manifest-less songs
+                    // load in a setlist exactly like the single-song player.
+                    let manifest = media::load_song_manifest(&org, slug).await?;
+                    let chart = media::fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf"))
                         .await
                         .ok()
                         .filter(|t| !t.is_empty());
@@ -288,8 +294,9 @@ mod imp {
         // local `SETLIST_STRUCTURE.write()` hydration anymore.
         {
             let songs = songs.clone();
-            use_effect(use_reactive!(|songs| {
-                crate::session_engine::build_for_setlist(songs.clone());
+            let org_v = org.clone();
+            use_effect(use_reactive!(|songs, org_v| {
+                crate::session_engine::build_for_setlist(org_v.clone(), songs.clone());
             }));
         }
 
@@ -396,7 +403,7 @@ mod imp {
                         .iter()
                         .map(|(s, m, _)| (s.clone(), m.clone()))
                         .collect();
-                    match SetlistAudio::build(&songs) {
+                    match SetlistAudio::build(&org, &songs) {
                         Ok(a) => {
                             audio.set(Some(Rc::new(a)));
                             built_key.set(key);
@@ -449,6 +456,7 @@ mod imp {
         // `SessionEventBridge` (ACTIVE_INDICES → the follow-effect above). We
         // also nudge the local signals optimistically so the UI is snappy.
         // STAGE 4b-2: real audio playback replaces the (silent) soft clock.
+        let np_ctl = use_context::<crate::shell::now_playing::NowPlayingCtl>();
         let play_pause: Callback<()> = use_callback({
             let mut playing = playing;
             let audio = audio;
@@ -460,6 +468,12 @@ mod imp {
                 // gesture, so `play()` resumes the AudioContext.
                 if let Some(a) = audio.peek().clone() {
                     if want {
+                        // Starting the multitrack rig → stop the global Now
+                        // Playing stream so they don't play over each other.
+                        // (Merely opening the player doesn't do this — only Play.)
+                        let mut cmd = np_ctl.cmd;
+                        let g = cmd.peek().0 + 1;
+                        cmd.set((g, crate::shell::now_playing::NpCmd::Pause));
                         a.play();
                     } else {
                         a.pause();
@@ -481,15 +495,24 @@ mod imp {
         let seek: Callback<f64> = use_callback({
             let mut position = position;
             let audio = audio;
+            let current_song = current_song;
             move |off: f64| {
                 position.set(off); // optimistic; the bridge confirms
                 if let Some(a) = audio.peek().clone() {
                     a.seek(off);
                 }
+                // HARD INVARIANT: a progress-bar / measure seek stays in the
+                // CURRENTLY ACTIVE song. Pin the song index captured NOW and
+                // command the song-indexed `seek_to_time` (never the
+                // position-only `seek_to`, which resolves the active song at
+                // apply time and can drift to another song), clamped strictly
+                // inside that song so it can't spill onto a neighbour.
+                let idx = *current_song.peek();
+                let off = clamp_into_song(idx, off);
                 if let Some(client) = crate::session_engine::client() {
                     spawn(async move {
-                        if let Err(e) = client.seek_to(off).await {
-                            tracing::warn!("setlist: seek_to({off:.2}) failed: {e:?}");
+                        if let Err(e) = client.seek_to_time(idx, off).await {
+                            tracing::warn!("setlist: seek_to_time({idx}, {off:.2}) failed: {e:?}");
                         }
                     });
                 }
@@ -502,18 +525,26 @@ mod imp {
         let seek_quantized: Callback<(f64, f64)> = use_callback({
             let audio = audio;
             let position = position;
+            let current_song = current_song;
             move |(target, boundary): (f64, f64)| {
                 let delay = (boundary - *position.peek()).max(0.0);
                 if let Some(a) = audio.peek().clone() {
                     a.seek_quantized(target, boundary, delay);
                 }
+                // Pin the song NOW: the engine apply is scheduled after `delay`,
+                // during which the set could auto-advance to the next song. The
+                // song-indexed `seek_to_time` re-selects THIS song and lands the
+                // target inside it — so a queued section jump can never resolve
+                // onto whatever song happens to be active when the timer fires.
+                let idx = *current_song.peek();
+                let target = clamp_into_song(idx, target);
                 if let Some(client) = crate::session_engine::client() {
                     spawn(async move {
                         architect::platform::sleep(std::time::Duration::from_secs_f64(delay))
                             .await;
-                        if let Err(e) = client.seek_to(target).await {
+                        if let Err(e) = client.seek_to_time(idx, target).await {
                             tracing::warn!(
-                                "setlist: quantized seek_to({target:.2}) failed: {e:?}"
+                                "setlist: quantized seek_to_time({idx}, {target:.2}) failed: {e:?}"
                             );
                         }
                     });
@@ -1085,7 +1116,9 @@ mod imp {
 
                         // LEFT — the session-ui setlist navigator (collapsible):
                         // every song with its live section-progress strip,
-                        // driven by ACTIVE_INDICES / SETLIST_STRUCTURE.
+                        // driven by ACTIVE_INDICES / SETLIST_STRUCTURE. Hidden
+                        // for a single song (a one-song set — the song page).
+                        if count > 1 {
                         if nav_open() {
                             aside { class: "flex w-64 shrink-0 flex-col border-r border-border",
                                 div { class: "flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5",
@@ -1112,6 +1145,7 @@ mod imp {
                                 onclick: move |_| nav_open.set(true),
                                 "›"
                             }
+                        }
                         }
 
                         // CENTER — the chart on the LEFT (always), a selectable
@@ -1200,8 +1234,10 @@ mod imp {
                         }
                     }
 
-                    // BOTTOM — prev / transport / next, pinned.
+                    // BOTTOM — prev / transport / next, pinned. Prev/next are
+                    // hidden for a single song (a one-song set — the song page).
                     div { class: "flex shrink-0 items-center gap-3 border-t border-border px-4 py-2",
+                        if count > 1 {
                         button {
                             class: "flex min-w-0 max-w-[16rem] flex-1 items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40",
                             disabled: at_first,
@@ -1214,6 +1250,7 @@ mod imp {
                                 span { class: "text-[10px] font-semibold uppercase tracking-wide text-muted-foreground", "Prev" }
                                 span { class: "truncate text-sm font-medium text-foreground", {prev_title.clone().unwrap_or_else(|| "—".to_owned())} }
                             }
+                        }
                         }
                         div { class: "h-14 flex-[2] overflow-hidden rounded-lg border border-border",
                             TransportControlBar {
@@ -1230,6 +1267,7 @@ mod imp {
                                 on_forward,
                             }
                         }
+                        if count > 1 {
                         button {
                             class: "flex min-w-0 max-w-[16rem] flex-1 items-center justify-end gap-2 rounded-lg border border-border px-3 py-1.5 text-right hover:bg-accent disabled:opacity-40",
                             disabled: at_last,
@@ -1243,6 +1281,7 @@ mod imp {
                             }
                             span { class: "text-lg leading-none text-muted-foreground", "›" }
                         }
+                        }
                     }
                 }
             };
@@ -1252,6 +1291,9 @@ mod imp {
             div { class: "flex flex-col gap-4 md:flex-row md:gap-5",
 
                 // ── Setlist navigator: every song visible + scannable ─────────
+                // Hidden for a single song (a one-song set — e.g. the standalone
+                // song page): no navigator to scan.
+                if count > 1 {
                 aside { class: "shrink-0 md:w-64",
                     div { class: "rounded-xl border border-border bg-card overflow-hidden",
                         div { class: "flex items-baseline justify-between px-3 pt-3 pb-2",
@@ -1364,6 +1406,7 @@ mod imp {
                         }
                     }
                 }
+                }
 
                 // ── Current song: the hero — header, timeline, transport, tabs ─
                 div { class: "flex min-w-0 flex-1 flex-col gap-4",
@@ -1385,9 +1428,11 @@ mod imp {
                             }
                             div {
                                 class: "mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground",
-                                span { "Song {idx + 1} / {count}" }
-                                if let Some(k) = manifest.key.as_ref() {
+                                if count > 1 {
+                                    span { "Song {idx + 1} / {count}" }
                                     span { class: "text-border", "·" }
+                                }
+                                if let Some(k) = manifest.key.as_ref() {
                                     span { "Key {k}" }
                                 }
                                 if let Some(b) = manifest.bpm {
@@ -1446,6 +1491,7 @@ mod imp {
                                 compact: true,
                             }
                         }
+                        if count > 1 {
                         div { class: "grid grid-cols-2 gap-2",
                             button {
                                 class: "flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40 transition-colors",
@@ -1477,6 +1523,7 @@ mod imp {
                                 }
                                 span { class: "text-lg leading-none text-muted-foreground", "›" }
                             }
+                        }
                         }
                     }
 
@@ -1542,6 +1589,25 @@ mod imp {
         }
     }
 
+    /// Clamp a song-relative seek target strictly INSIDE song `idx` — a 10 ms
+    /// end margin keeps it off the boundary (on a shared timeline song N's end
+    /// == song N+1's start, and landing exactly there re-indexes to the next
+    /// song). If the duration isn't known yet the target is only floored at 0;
+    /// the song-indexed `seek_to_time` still pins the song, so it can't cross.
+    fn clamp_into_song(idx: usize, target: f64) -> f64 {
+        let dur = SETLIST_STRUCTURE
+            .read()
+            .songs
+            .get(idx)
+            .map(|s| s.duration())
+            .unwrap_or(0.0);
+        if dur > 0.0 {
+            target.clamp(0.0, (dur - 0.01).max(0.0))
+        } else {
+            target.max(0.0)
+        }
+    }
+
     /// `mm:ss` for the timeline caption's elapsed / total readout.
     fn fmt_time(secs: f64) -> String {
         let s = secs.max(0.0);
@@ -1562,7 +1628,7 @@ mod stub {
     use dioxus::prelude::*;
 
     #[component]
-    pub fn SetlistPlayer(songs: Vec<String>, #[props(default)] fullscreen: bool) -> Element {
+    pub fn SetlistPlayer(songs: Vec<String>, org: String, #[props(default)] fullscreen: bool) -> Element {
         let _ = (&songs, fullscreen);
         rsx! {
             div { class: "mx-auto max-w-3xl px-4 py-10",
