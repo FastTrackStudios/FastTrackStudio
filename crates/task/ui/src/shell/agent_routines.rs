@@ -53,9 +53,9 @@ pub fn RoutinesPanel(slug: String) -> Element {
                     RowAction::Pause(v) => crate::feeds::set_agent_routine_paused(&slug, &id, v)
                         .await
                         .map(|_| ()),
-                    RowAction::RunNow => {
-                        crate::feeds::run_agent_routine(&slug, &id).await.map(|_| ())
-                    }
+                    RowAction::RunNow => crate::feeds::run_agent_routine(&slug, &id)
+                        .await
+                        .map(|_| ()),
                     RowAction::Delete => crate::feeds::delete_agent_routine(&slug, &id).await,
                 };
                 busy_id.set(String::new());
@@ -107,9 +107,9 @@ pub fn RoutinesPanel(slug: String) -> Element {
     });
 
     rsx! {
-        div { class: "flex items-center justify-between gap-2 px-3 py-2",
-            div { class: "flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
-                CalendarClock { size: 13 }
+        div { class: "flex items-center justify-between gap-2 px-3 pb-1 pt-3",
+            div { class: "flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground",
+                CalendarClock { size: 12 }
                 span { "Routines" }
                 if !rows.is_empty() {
                     span { class: "font-normal tabular-nums tracking-normal text-muted-foreground/60",
@@ -129,7 +129,7 @@ pub fn RoutinesPanel(slug: String) -> Element {
             }
         }
 
-        div { class: "flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 pb-2",
+        div { class: "flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-3",
             if !error.read().is_empty() {
                 div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs",
                     "{error}"
@@ -142,7 +142,7 @@ pub fn RoutinesPanel(slug: String) -> Element {
             }
 
             if composing() {
-                div { class: "flex flex-col gap-1.5 rounded-lg border border-border/60 bg-card/40 p-2",
+                div { class: "flex flex-col gap-2 rounded-lg border border-border/60 bg-card/40 p-2.5",
                     input {
                         class: "rounded-md border border-border/60 bg-card/30 px-2 py-1 text-xs outline-none focus:border-primary/60",
                         placeholder: "Name (optional)",
@@ -158,7 +158,7 @@ pub fn RoutinesPanel(slug: String) -> Element {
                     // The schedule grammar is the one thing people get
                     // wrong here, so echo the interpretation live.
                     if let Some(hint) = schedule_hint(&draft_schedule.read()) {
-                        span { class: "px-0.5 text-[0.65rem] text-muted-foreground", "{hint}" }
+                        span { class: "px-0.5 text-[11px] text-muted-foreground", "{hint}" }
                     }
                     textarea {
                         class: "min-h-16 resize-y rounded-md border border-border/60 bg-card/30 px-2 py-1 text-xs leading-relaxed outline-none focus:border-primary/60",
@@ -187,8 +187,8 @@ pub fn RoutinesPanel(slug: String) -> Element {
                 div { class: "px-2 py-3 text-xs text-muted-foreground", "Loading routines…" }
             } else if rows.is_empty() && fetch_err.is_empty() && !composing() {
                 div { class: "flex flex-col gap-1 px-2 py-3",
-                    Text { variant: TextVariant::Muted, class: "text-xs",
-                        "No routines yet. Schedule one with + — a prompt the agent runs on its own, like a morning brief or a weekly review."
+                    Text { variant: TextVariant::Muted, class: "text-xs leading-relaxed",
+                        "No routines yet. A routine is a prompt the agent runs on its own — a morning brief, a weekly review. Add one with +."
                     }
                 }
             }
@@ -221,20 +221,22 @@ fn routine_row(r: &Routine, busy: bool, act: Callback<(String, RowAction)>) -> E
     let id = r.id.clone();
 
     let card = if paused {
-        "flex flex-col gap-1 rounded-lg border border-border/40 bg-card/20 px-2 py-1.5 opacity-60"
+        "flex flex-col gap-1.5 rounded-lg border border-border/60 bg-card/20 px-2.5 py-2 opacity-60 transition-opacity hover:opacity-90"
     } else if failed {
-        "flex flex-col gap-1 rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5"
+        "flex flex-col gap-1.5 rounded-lg border border-destructive/40 bg-destructive/5 px-2.5 py-2"
     } else {
-        "flex flex-col gap-1 rounded-lg border border-border/50 bg-card/30 px-2 py-1.5"
+        "flex flex-col gap-1.5 rounded-lg border border-border/60 bg-card/30 px-2.5 py-2 transition-colors hover:border-border"
     };
 
     rsx! {
         div { key: "{r.id}", class: "{card}",
             div { class: "flex items-baseline gap-1.5",
-                span { class: "truncate text-[13px] font-medium text-foreground", title: "{r.prompt}", "{name}" }
-                span { class: "ml-auto shrink-0 font-mono text-[0.65rem] text-muted-foreground", "{r.schedule}" }
+                span { class: "truncate text-sm font-medium text-foreground", title: "{r.prompt}", "{name}" }
+                span { class: "ml-auto shrink-0 rounded bg-muted/50 px-1.5 font-mono text-[11px] text-muted-foreground",
+                    "{r.schedule}"
+                }
             }
-            div { class: "flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.68rem] text-muted-foreground",
+            div { class: "flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground",
                 if paused {
                     span { "paused" }
                 } else if let Some(n) = &next {
@@ -251,12 +253,12 @@ fn routine_row(r: &Routine, busy: bool, act: Callback<(String, RowAction)>) -> E
                 }
             }
             if failed {
-                p { class: "line-clamp-2 text-[0.68rem] leading-snug text-destructive", "{r.last_error}" }
+                p { class: "line-clamp-2 text-[11px] leading-snug text-destructive", "{r.last_error}" }
             }
-            div { class: "flex items-center gap-0.5",
+            div { class: "-mx-1 flex items-center gap-0.5 border-t border-border/60 pt-1.5",
                 button {
                     r#type: "button",
-                    class: "rounded p-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground disabled:opacity-40",
+                    class: "rounded p-1 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
                     disabled: busy,
                     title: if paused { "Resume" } else { "Pause" },
                     onclick: {
@@ -271,7 +273,7 @@ fn routine_row(r: &Routine, busy: bool, act: Callback<(String, RowAction)>) -> E
                 }
                 button {
                     r#type: "button",
-                    class: "rounded px-1.5 py-1 text-[0.68rem] text-muted-foreground hover:bg-accent/40 hover:text-foreground disabled:opacity-40",
+                    class: "rounded px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
                     disabled: busy,
                     title: "Run once now, without disturbing the schedule",
                     onclick: {
@@ -282,7 +284,7 @@ fn routine_row(r: &Routine, busy: bool, act: Callback<(String, RowAction)>) -> E
                 }
                 button {
                     r#type: "button",
-                    class: "ml-auto rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40",
+                    class: "ml-auto rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
                     disabled: busy,
                     title: "Delete routine",
                     onclick: {

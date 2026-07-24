@@ -46,6 +46,36 @@ use logic::{
 };
 use timeline::{ActivityLine, Row, ToolTone, TurnLog, push_line, running_tool, settle_tool};
 
+/// The agent surface's visual vocabulary.
+///
+/// This screen had drifted to six type sizes below `text-sm`, four
+/// border opacities and nine padding values picked ad hoc, which is
+/// what made it read as unconsidered. Three sizes, one border, one
+/// rhythm — named here so the discipline is visible and hard to
+/// drift from again. The one structural edge weight is
+/// `border-border/60`, used inline.
+///
+/// The transcript is a **work log**, not a messaging app: every turn
+/// changes the user's real tasks, calendar and notes. So turns hang
+/// off a single hairline rail ([`RAIL`]) that carries chronology and
+/// causality down the left edge, and nothing else competes with it.
+mod style {
+    /// Message prose — the only text read continuously.
+    pub const BODY: &str = "text-sm leading-relaxed";
+    /// Controls, metadata, secondary rows.
+    pub const UI: &str = "text-xs";
+    /// Chips, counters, timestamps. Used sparingly.
+    pub const MICRO: &str = "text-[11px]";
+    /// Section eyebrows.
+    pub const EYEBROW: &str =
+        "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground";
+    /// The turn spine every activity row hangs from.
+    pub const RAIL: &str = "border-l border-border/60 pl-3";
+    /// Keyboard focus, applied to every interactive control.
+    pub const FOCUS: &str =
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
+}
+
 /// Duty-cycled pulse (t3code: `steps()` timing keeps the
 /// compositor cheap) + halo styling utility classes can't express.
 const AGENTS_CSS: &str = r#"
@@ -213,8 +243,8 @@ pub fn AgentsView(session: String) -> Element {
                 div { class: "flex flex-1 flex-col items-center justify-center gap-3 text-center",
                     Bot { size: 32 }
                     Heading { level: HeadingLevel::H3, "Chat with your agents" }
-                    Text { variant: TextVariant::Muted, class: "max-w-sm text-sm",
-                        "Pick a conversation in the sidebar's Agents section, or start a new chat. Hermes answers by default."
+                    Text { variant: TextVariant::Muted, class: "max-w-sm text-sm leading-relaxed",
+                        "Ask about your tasks, calendar, or notes — the agent can read and change them. Pick a conversation from the sidebar, or start a new one."
                     }
                     Button {
                         variant: ButtonVariant::Primary,
@@ -228,8 +258,8 @@ pub fn AgentsView(session: String) -> Element {
                         }
                     }
                     if !fetch_err.is_empty() {
-                        div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs",
-                            "Couldn't reach the agent service: {fetch_err}"
+                        div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs leading-relaxed",
+                            "Can't reach the agent service. {fetch_err}"
                         }
                     }
                 }
@@ -337,9 +367,9 @@ fn pretty_json(raw: &str) -> String {
 /// Backend chip styling — Hermes gets the primary accent.
 fn backend_chip_cls(backend_id: &str) -> &'static str {
     if backend_id == "hermes" {
-        "rounded-full bg-primary/15 px-1.5 text-primary"
+        "shrink-0 rounded-full bg-primary/15 px-1.5 text-[11px] text-primary"
     } else {
-        "rounded-full bg-muted/60 px-1.5"
+        "shrink-0 rounded-full bg-muted/60 px-1.5 text-[11px] text-muted-foreground"
     }
 }
 
@@ -416,7 +446,7 @@ fn ModelPicker(
                     }
                     div { class: "flex min-h-0 flex-1",
                         // Provider rail.
-                        div { class: "flex w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/40 p-1",
+                        div { class: "flex w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/60 p-1",
                             button {
                                 r#type: "button",
                                 class: if provider.read().is_none() {
@@ -426,7 +456,7 @@ fn ModelPicker(
                                 },
                                 onclick: move |_| provider.set(None),
                                 span { "All models" }
-                                span { class: "text-[0.65rem] text-muted-foreground", "{total}" }
+                                span { class: "text-[11px] text-muted-foreground", "{total}" }
                             }
                             for (pid , pname , ms) in groups.iter() {
                                 {
@@ -450,7 +480,7 @@ fn ModelPicker(
                                                 }
                                             },
                                             span { class: "truncate", "{pname}" }
-                                            span { class: "text-[0.65rem] text-muted-foreground", "{ms.len()}" }
+                                            span { class: "text-[11px] text-muted-foreground", "{ms.len()}" }
                                         }
                                     }
                                 }
@@ -487,7 +517,7 @@ fn ModelPicker(
                                                 if is_active {
                                                     span { class: "text-emerald-500", "✓" }
                                                 }
-                                                span { class: "ml-auto flex shrink-0 items-center gap-1 text-[0.65rem] text-muted-foreground",
+                                                span { class: "ml-auto flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground",
                                                     if m.reasoning {
                                                         span { class: "rounded-full bg-purple-500/15 px-1 text-purple-400", title: "Reasoning model", "R" }
                                                     }
@@ -499,14 +529,14 @@ fn ModelPicker(
                                                     }
                                                 }
                                             }
-                                            span { class: "truncate text-[0.68rem] text-muted-foreground", "{sub}" }
+                                            span { class: "truncate text-[11px] text-muted-foreground", "{sub}" }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    div { class: "border-t border-border/40 px-2 py-1 text-[0.65rem] text-muted-foreground/70",
+                    div { class: "border-t border-border/60 px-2 py-1 text-[11px] text-muted-foreground/70",
                         "Catalog models switch the Hermes session via /model — review + send the prefilled command."
                     }
                 }
@@ -581,9 +611,9 @@ pub(crate) fn GatewayChip(slug: String, backend_id: String) -> Element {
     if !h.reachable {
         return rsx! {
             span {
-                class: "shrink-0 rounded-full bg-destructive/15 px-1.5 text-[0.7rem] text-destructive",
+                class: "shrink-0 rounded-full bg-destructive/15 px-1.5 {style::MICRO} text-destructive",
                 title: "{tooltip}",
-                "⚠ {backend_id} unreachable"
+                "{backend_id} unreachable"
             }
         };
     }
@@ -591,7 +621,7 @@ pub(crate) fn GatewayChip(slug: String, backend_id: String) -> Element {
     // but keep the tooltip and a busy count when work is in flight.
     rsx! {
         span {
-            class: "shrink-0 rounded-full bg-muted/50 px-1.5 text-[0.7rem] text-muted-foreground",
+            class: "shrink-0 rounded-full bg-muted/50 px-1.5 {style::MICRO} text-muted-foreground",
             title: "{tooltip}",
             if h.active_agents > 0 {
                 "{backend_id} · {h.active_agents} busy"
@@ -1155,19 +1185,19 @@ pub(crate) fn ChatPane(
         // scroll.
         div { class: "flex min-h-0 min-w-0 flex-1 flex-col",
             // Header.
-            div { class: "flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5",
+            div { class: "flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4",
                 div { class: "flex min-w-0 items-center gap-2",
-                    span { class: "truncate text-sm font-semibold", "{title}" }
+                    span { class: "truncate text-sm font-medium text-foreground", title: "{title}", "{title}" }
                     span { class: backend_chip_cls(&session.backend_id), "{session.backend_id}" }
                     match &stream {
                         StreamState::Connecting => rsx! {
-                            span { class: "shrink-0 rounded-full bg-muted/60 px-1.5 text-[0.7rem] text-muted-foreground",
-                                "connecting…"
+                            span { class: "shrink-0 rounded-full bg-muted/60 px-1.5 {style::MICRO} text-muted-foreground",
+                                "connecting"
                             }
                         },
                         StreamState::Live(reconnects) => rsx! {
                             span {
-                                class: "shrink-0 rounded-full bg-emerald-500/15 px-1.5 text-[0.7rem] text-emerald-500",
+                                class: "shrink-0 rounded-full bg-emerald-500/15 px-1.5 {style::MICRO} text-emerald-500",
                                 title: if *reconnects > 0 {
                                     format!("Live — reconnected {reconnects} time(s) this session")
                                 } else {
@@ -1178,7 +1208,7 @@ pub(crate) fn ChatPane(
                         },
                         StreamState::Retrying { why, secs } => rsx! {
                             span {
-                                class: "shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[0.7rem] text-amber-500",
+                                class: "shrink-0 rounded-full bg-amber-500/15 px-1.5 {style::MICRO} text-amber-500",
                                 title: "{why}",
                                 if *secs > 0 {
                                     "○ reconnecting in {secs}s"
@@ -1219,7 +1249,7 @@ pub(crate) fn ChatPane(
             // both be mounted at once.
             div {
                 id: "{transcript_id}",
-                class: "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
+                class: "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4",
                 onscroll: move |e| {
                     let d = e.data();
                     scroll.set(scroll_mode(
@@ -1242,8 +1272,8 @@ pub(crate) fn ChatPane(
                 }
                 // Live turn tail: reasoning, activity, streaming, timer.
                 if !reasoning_text.is_empty() {
-                    div { class: "border-l-2 border-primary/40 pl-3",
-                        details { class: "text-xs text-muted-foreground", open: busy(),
+                    div { class: "{style::RAIL}",
+                        details { class: "{style::UI} text-muted-foreground", open: busy(),
                             summary { class: "cursor-pointer select-none font-medium",
                                 if busy() {
                                     span { class: "mr-1 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle agents-dot-pulse" }
@@ -1255,7 +1285,7 @@ pub(crate) fn ChatPane(
                     }
                 }
                 if !live_view.is_empty() {
-                    div { class: "flex flex-col gap-1",
+                    div { class: "flex flex-col gap-0.5",
                         for (i , line) in live_view.iter().enumerate() {
                             {activity_line_view(i, line)}
                         }
@@ -1268,7 +1298,7 @@ pub(crate) fn ChatPane(
                     }
                 }
                 if busy() {
-                    div { class: "flex items-center gap-2 text-sm text-muted-foreground",
+                    div { class: "flex items-center gap-2 {style::UI} text-muted-foreground",
                         Spinner { size: SpinnerSize::Small }
                         // What it's actually doing beats a bare
                         // "Working…" — the in-flight tool if there is
@@ -1281,18 +1311,18 @@ pub(crate) fn ChatPane(
                                 None => "Working".to_string(),
                             }
                         }
-                        span { class: "shrink-0 tabular-nums text-muted-foreground/70",
+                        span { class: "shrink-0 tabular-nums text-muted-foreground/60",
                             "{fmt_elapsed(elapsed())}"
                         }
                         if !responding.read().is_empty() {
-                            span { class: "hidden shrink-0 truncate text-[0.7rem] text-muted-foreground/60 sm:inline",
+                            span { class: "hidden shrink-0 truncate text-xs text-muted-foreground/60 sm:inline",
                                 "· {responding}"
                             }
                         }
                     }
                 }
                 if !error.read().is_empty() {
-                    div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                    div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 {style::UI} leading-relaxed",
                         "{error}"
                     }
                 }
@@ -1326,8 +1356,8 @@ pub(crate) fn ChatPane(
 
             // Queued sends.
             if !queued_view.is_empty() {
-                div { class: "flex flex-wrap items-center gap-1.5 border-t border-border/40 px-4 pt-2",
-                    span { class: "text-[0.7rem] text-muted-foreground", "Queued:" }
+                div { class: "flex flex-wrap items-center gap-1.5 border-t border-border/60 px-4 pt-2",
+                    span { class: "{style::MICRO} uppercase tracking-[0.14em] text-muted-foreground", "Queued" }
                     for (i , q) in queued_view.iter().enumerate() {
                         span {
                             key: "{i}",
@@ -1367,20 +1397,20 @@ pub(crate) fn ChatPane(
                                             accept((completion_start, insert.clone()));
                                         },
                                         span { class: "shrink-0 font-mono text-xs font-semibold text-foreground", "{row.label}" }
-                                        span { class: "truncate text-[0.72rem] text-muted-foreground", "{row.detail}" }
+                                        span { class: "truncate text-xs text-muted-foreground", "{row.detail}" }
                                     }
                                 }
                             }
                         }
-                        div { class: "mt-0.5 border-t border-border/40 px-2 pt-1 text-[0.65rem] text-muted-foreground/70",
+                        div { class: "mt-0.5 border-t border-border/60 px-2 pt-1 text-[11px] text-muted-foreground/70",
                             "↑↓ navigate · Tab/Enter accept · Esc dismiss"
                         }
                     }
                 }
-                div { class: "flex items-end gap-2",
+                div { class: "flex flex-col rounded-xl border border-border/60 bg-card/30 transition-colors focus-within:border-primary/60",
                     textarea {
-                        class: "max-h-40 min-h-[2.5rem] w-full flex-1 resize-y rounded-xl border border-border/70 bg-card/30 px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:border-primary/60",
-                        placeholder: "Message the agent… (/ commands, $ skills, Enter to send)",
+                        class: "max-h-40 min-h-[2.75rem] w-full resize-y border-0 bg-transparent px-3 pb-1 pt-2.5 {style::BODY} text-foreground outline-none placeholder:text-muted-foreground/60",
+                        placeholder: "Message the agent — / for commands, $ for skills",
                         value: "{composer}",
                         oninput: move |e| {
                             composer.set(e.value());
@@ -1448,14 +1478,7 @@ pub(crate) fn ChatPane(
                             }
                         },
                     }
-                    Button {
-                        variant: ButtonVariant::Primary,
-                        disabled: composer.read().trim().is_empty(),
-                        on_click: move |_| send(()),
-                        if busy() { "Queue" } else { "Send" }
-                    }
-                }
-                div { class: "mt-1.5 flex items-center gap-2",
+                div { class: "flex items-center gap-2 px-2 pb-2 pt-0.5",
                     ModelPicker {
                         models: session_models.clone(),
                         current: model.read().clone(),
@@ -1480,7 +1503,7 @@ pub(crate) fn ChatPane(
                     }
                     // Context gauge: conic-gradient ring when the
                     // window is known, raw counter otherwise.
-                    div { class: "ml-auto flex items-center gap-1.5 text-[0.7rem] tabular-nums text-muted-foreground",
+                    div { class: "ml-auto flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground",
                         if let (Some(free), Some(used_pct)) = (ring, ring_pct_used) {
                             span {
                                 class: "inline-block h-5 w-5 rounded-full",
@@ -1504,7 +1527,18 @@ pub(crate) fn ChatPane(
                             }
                         }
                     }
+                    // Send lives inside the field, after the meta, so
+                    // the composer reads as one control rather than a
+                    // box with a button parked beside it.
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        size: ButtonSize::Small,
+                        disabled: composer.read().trim().is_empty(),
+                        on_click: move |_| send(()),
+                        if busy() { "Queue" } else { "Send" }
+                    }
                 }
+            }
             }
         }
     }
@@ -1526,22 +1560,29 @@ fn turn_fold_view(
         div { key: "fold-{anchor}", class: "flex flex-col gap-1",
             button {
                 r#type: "button",
-                class: "flex w-fit items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[0.72rem] text-muted-foreground hover:bg-muted/40 hover:text-foreground",
+                class: "flex w-fit items-center gap-1.5 rounded-md py-0.5 pr-2 {style::MICRO} text-muted-foreground/80 hover:text-foreground {style::FOCUS}",
                 onclick: move |_| {
                     let mut set = expanded.write();
                     if !set.remove(&key) {
                         set.insert(key.clone());
                     }
                 },
-                span { class: if is_open { "inline-block rotate-90 transition-transform" } else { "inline-block transition-transform" }, "›" }
+                span {
+                    class: if is_open {
+                        "inline-block w-3 rotate-90 text-center transition-transform"
+                    } else {
+                        "inline-block w-3 text-center transition-transform"
+                    },
+                    "›"
+                }
                 span { "{summary}" }
             }
             if is_open {
-                div { class: "flex flex-col gap-1 border-l border-border/40 pl-3",
+                div { class: "ml-1.5 flex flex-col gap-1.5 {style::RAIL}",
                     if !log.reasoning.is_empty() {
-                        details { class: "text-xs text-muted-foreground",
-                            summary { class: "cursor-pointer select-none font-medium", "Thinking" }
-                            pre { class: "mt-1 whitespace-pre-wrap font-sans leading-relaxed", "{log.reasoning}" }
+                        details { class: "{style::UI} text-muted-foreground",
+                            summary { class: "cursor-pointer select-none font-medium {style::FOCUS}", "Thinking" }
+                            pre { class: "mt-1.5 whitespace-pre-wrap font-sans leading-relaxed", "{log.reasoning}" }
                         }
                     }
                     for (i , line) in log.lines.iter().enumerate() {
@@ -1564,14 +1605,16 @@ fn activity_line_view(i: usize, line: &ActivityLine) -> Element {
         ToolTone::Note => ("·", "text-muted-foreground/70"),
     };
     let took = (line.duration_ms > 0).then(|| fmt_duration(line.duration_ms));
+    // Fixed-width glyph column: every tool name starts at the same x,
+    // so a turn's activity reads as a list instead of a ragged pile.
     let head = rsx! {
-        span { class: "{glyph_cls}", "{glyph}" }
-        span { class: "truncate", title: "{line.text}", "{line.text}" }
+        span { class: "w-3 shrink-0 text-center {glyph_cls}", "{glyph}" }
+        span { class: "min-w-0 truncate", title: "{line.text}", "{line.text}" }
         if let Some(t) = &took {
-            span { class: "shrink-0 tabular-nums text-muted-foreground/60", "{t}" }
+            span { class: "ml-auto shrink-0 pl-2 tabular-nums text-muted-foreground/50", "{t}" }
         }
     };
-    let row_cls = "flex w-fit max-w-full items-baseline gap-1.5 rounded-md bg-muted/40 px-2 py-0.5 font-mono text-[0.72rem] text-muted-foreground";
+    let row_cls = "flex w-full items-baseline gap-2 rounded-md px-2 py-1 font-mono text-[11px] text-muted-foreground";
 
     if !line.has_detail() {
         return rsx! {
@@ -1580,19 +1623,19 @@ fn activity_line_view(i: usize, line: &ActivityLine) -> Element {
     }
     rsx! {
         details { key: "{i}", class: "w-full",
-            summary { class: "{row_cls} cursor-pointer list-none hover:bg-muted/70", {head} }
-            div { class: "mt-1 flex flex-col gap-1 border-l border-border/40 pl-3",
+            summary { class: "{row_cls} cursor-pointer list-none rounded-md hover:bg-muted/50 {style::FOCUS}", {head} }
+            div { class: "ml-3 mt-1 flex flex-col gap-1.5 {style::RAIL}",
                 if !line.args.is_empty() {
-                    pre { class: "max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/30 px-2 py-1 font-mono text-[0.68rem] leading-snug text-muted-foreground",
+                    pre { class: "max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground",
                         "{line.args}"
                     }
                 }
                 if !line.output.is_empty() {
                     pre {
                         class: if line.tone == ToolTone::Fail {
-                            "max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 font-mono text-[0.68rem] leading-snug text-muted-foreground"
+                            "max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground"
                         } else {
-                            "max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-muted/20 px-2 py-1 font-mono text-[0.68rem] leading-snug text-muted-foreground"
+                            "max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-muted/25 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground"
                         },
                         "{line.output}"
                     }
@@ -1615,13 +1658,13 @@ fn question_card(q: &QuestionRequest, answer: Callback<String>) -> Element {
         div { class: "border-t border-border/60 bg-card/40 px-4 py-3",
             div { class: "mb-2 flex items-center gap-2",
                 if !first.header.is_empty() {
-                    span { class: "rounded-full bg-primary/15 px-2 py-0.5 text-[0.7rem] font-medium text-primary",
+                    span { class: "rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary",
                         "{first.header}"
                     }
                 }
                 span { class: "text-sm font-medium", "{first.text}" }
                 if total > 1 {
-                    span { class: "ml-auto rounded-full bg-muted/60 px-2 py-0.5 text-[0.7rem] text-muted-foreground",
+                    span { class: "ml-auto rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground",
                         "1/{total}"
                     }
                 }
@@ -1636,7 +1679,7 @@ fn question_card(q: &QuestionRequest, answer: Callback<String>) -> Element {
                                 r#type: "button",
                                 class: "flex w-full items-baseline gap-2 rounded-lg border border-border/60 px-3 py-1.5 text-left hover:border-primary/60 hover:bg-primary/5",
                                 onclick: move |_| answer(label.clone()),
-                                kbd { class: "rounded border border-border/60 bg-muted/40 px-1 font-mono text-[0.7rem] text-muted-foreground",
+                                kbd { class: "rounded border border-border/60 bg-muted/40 px-1 font-mono text-xs text-muted-foreground",
                                     "{i + 1}"
                                 }
                                 span { class: "text-sm", "{opt.label}" }
@@ -1669,9 +1712,9 @@ fn Inspector(
     let sslug = slug.clone();
 
     rsx! {
-        div { class: "flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border/60 px-3 py-3",
+        div { class: "flex w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l border-border/60 px-4 py-4",
             div { class: "flex flex-col gap-2",
-                span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
+                span { class: "{style::EYEBROW}",
                     "Session"
                 }
                 div { class: "flex items-center gap-1.5",
@@ -1758,7 +1801,7 @@ fn Inspector(
             BackendHealthPanel { slug: slug.clone(), backend_id: session.backend_id.clone() }
 
             div { class: "flex flex-col gap-1.5",
-                span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
+                span { class: "{style::EYEBROW}",
                     "Skills ({skills.len()})"
                 }
                 if skills.is_empty() {
@@ -1767,15 +1810,15 @@ fn Inspector(
                     }
                 }
                 for sk in skills.iter() {
-                    div { key: "{sk.backend_id}/{sk.name}", class: "rounded-md border border-border/50 bg-card/30 px-2 py-1.5",
+                    div { key: "{sk.backend_id}/{sk.name}", class: "rounded-md border border-border/60 bg-card/30 px-2 py-1.5",
                         div { class: "flex items-center justify-between gap-2",
                             span { class: "truncate text-xs font-medium text-foreground", "{sk.name}" }
                             if !sk.enabled {
-                                span { class: "text-[0.65rem] text-muted-foreground", "off" }
+                                span { class: "text-[11px] text-muted-foreground", "off" }
                             }
                         }
                         if !sk.description.is_empty() {
-                            p { class: "mt-0.5 line-clamp-2 text-[0.7rem] leading-snug text-muted-foreground",
+                            p { class: "mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground",
                                 "{sk.description}"
                             }
                         }
@@ -1785,7 +1828,7 @@ fn Inspector(
 
             if !capabilities.is_empty() {
                 div { class: "flex flex-col gap-1",
-                    span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
+                    span { class: "{style::EYEBROW}",
                         "Capabilities"
                     }
                     div { class: "flex flex-wrap gap-1",
@@ -1793,9 +1836,9 @@ fn Inspector(
                             span {
                                 key: "{c.backend_id}/{c.name}",
                                 class: if c.enabled {
-                                    "rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] text-emerald-500"
+                                    "rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-500"
                                 } else {
-                                    "rounded-full bg-muted/40 px-1.5 py-0.5 text-[0.65rem] text-muted-foreground line-through"
+                                    "rounded-full bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground line-through"
                                 },
                                 "{c.name}"
                             }
@@ -1839,11 +1882,11 @@ fn BackendHealthPanel(slug: String, backend_id: String) -> Element {
 
     rsx! {
         div { class: "flex flex-col gap-1",
-            span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
+            span { class: "{style::EYEBROW}",
                 "Backend"
             }
             if !err.is_empty() {
-                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-[0.7rem]",
+                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs",
                     "{err}"
                 }
             }
@@ -1889,14 +1932,14 @@ fn BackendHealthPanel(slug: String, backend_id: String) -> Element {
                             for p in h.platforms.iter() {
                                 span {
                                     key: "{p}",
-                                    class: "rounded-full bg-muted/50 px-1.5 py-0.5 text-[0.65rem]",
+                                    class: "rounded-full bg-muted/50 px-1.5 py-0.5 text-[11px]",
                                     "{p}"
                                 }
                             }
                         }
                     }
                     if !h.status_text.is_empty() {
-                        p { class: "pt-0.5 text-[0.7rem] leading-snug text-muted-foreground/80",
+                        p { class: "pt-0.5 text-xs leading-snug text-muted-foreground/80",
                             "{h.status_text}"
                         }
                     }
@@ -1949,7 +1992,7 @@ fn note_chip(path: &str) -> Element {
         Link {
             key: "{path}",
             to,
-            class: "flex max-w-64 items-center gap-1 rounded-full border border-border/50 bg-muted/40 px-2 py-0.5 text-[0.68rem] text-muted-foreground hover:border-primary/50 hover:text-foreground",
+            class: "flex max-w-64 items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary/50 hover:text-foreground",
             title: "{path}",
             FileText { size: 10 }
             span { class: "truncate", "{name}" }
@@ -1957,23 +2000,30 @@ fn note_chip(path: &str) -> Element {
     }
 }
 
-/// One transcript entry. Assistant messages get a hover copy
-/// button; user messages are right-aligned bubbles.
+/// One transcript entry.
+///
+/// Both roles run flush left against the turn rail rather than the
+/// usual left/right bubble pair. In a 400px sidebar a right-aligned
+/// bubble throws away half the width and breaks the vertical scan
+/// line that the tool activity between messages depends on. The ask
+/// is a quiet, indented prompt; the answer is the primary prose.
 fn message_view(m: &Message) -> Element {
     let text = text_of(m);
     if m.errored {
         return rsx! {
-            div { key: "{m.id}", class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+            div {
+                key: "{m.id}",
+                class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 {style::BODY}",
                 "{m.error_text}"
             }
         };
     }
     match m.role {
         Role::User => rsx! {
-            div { key: "{m.id}", class: "flex justify-end",
-                div { class: "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary/15 px-3.5 py-2 text-sm leading-relaxed",
-                    "{text}"
-                }
+            div {
+                key: "{m.id}",
+                class: "whitespace-pre-wrap border-l-2 border-primary/60 pl-3 {style::BODY} text-foreground/90",
+                "{text}"
             }
         },
         Role::Assistant => {
@@ -1985,7 +2035,8 @@ fn message_view(m: &Message) -> Element {
                 div { key: "{m.id}", class: "group relative max-w-none",
                     task_ui::Markdown { source: text }
                     if !refs.is_empty() {
-                        div { class: "mt-1.5 flex flex-wrap items-center gap-1",
+                        div { class: "mt-2 flex flex-wrap items-center gap-1",
+                            span { class: "{style::MICRO} text-muted-foreground/60", "Notes" }
                             for path in refs.iter() {
                                 {note_chip(path)}
                             }
@@ -1993,7 +2044,7 @@ fn message_view(m: &Message) -> Element {
                     }
                     button {
                         r#type: "button",
-                        class: "absolute -top-1 right-0 hidden rounded-md border border-border/60 bg-card/80 p-1 text-muted-foreground hover:text-foreground group-hover:block",
+                        class: "absolute -top-1 right-0 hidden rounded-md border border-border/60 bg-card/90 p-1 text-muted-foreground hover:text-foreground group-hover:block {style::FOCUS}",
                         title: "Copy message",
                         onclick: move |_| copy_text(&copy_source),
                         Copy { size: 12 }

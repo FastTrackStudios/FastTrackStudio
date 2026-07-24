@@ -31,13 +31,13 @@ fn tab_switch(mut tab: Signal<AgentTab>) -> Element {
     let current = *tab.read();
     let cls = |mine: AgentTab| {
         if mine == current {
-            "flex-1 rounded-md bg-accent px-2 py-1 text-[0.7rem] font-medium text-foreground"
+            "flex-1 rounded-md bg-accent px-2 py-1 text-xs font-medium text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         } else {
-            "flex-1 rounded-md px-2 py-1 text-[0.7rem] text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+            "flex-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         }
     };
     rsx! {
-        div { class: "flex items-center gap-0.5 border-b border-border/60 px-2 py-1.5",
+        div { class: "flex h-11 shrink-0 items-center gap-0.5 border-b border-border/60 px-3",
             button {
                 r#type: "button",
                 class: cls(AgentTab::Chats),
@@ -139,10 +139,10 @@ pub fn AgentPanel() -> Element {
     rsx! {
         {tab_switch(tab)}
         // ── Conversations segment ──
-        div { class: "flex items-center justify-between gap-2 px-3 py-2",
-            div { class: "flex min-w-0 items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
-                Bot { size: 13 }
-                span { "Agents" }
+        div { class: "flex items-center justify-between gap-2 px-3 pb-1 pt-3",
+            div { class: "flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground",
+                Bot { size: 12 }
+                span { "Conversations" }
                 if !rows.is_empty() {
                     span { class: "font-normal tabular-nums tracking-normal text-muted-foreground/60",
                         "{rows.len()}"
@@ -183,15 +183,15 @@ pub fn AgentPanel() -> Element {
                 }
             }
         }
-        div { class: "max-h-40 shrink-0 overflow-y-auto px-1.5 pb-1",
+        div { class: "max-h-44 shrink-0 overflow-y-auto px-1.5 pb-2",
             if !fetch_err.is_empty() {
                 div { class: "mx-1.5 mb-1 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs",
-                    "Agent service unreachable: {fetch_err}"
+                    "Can't reach the agent service. {fetch_err}"
                 }
             }
             if rows.is_empty() && fetch_err.is_empty() {
-                div { class: "px-3 py-2 text-xs text-muted-foreground",
-                    "No conversations yet — start one with +."
+                div { class: "px-2 py-3 text-xs leading-relaxed text-muted-foreground",
+                    "Nothing open. Start a chat to ask the agent about your tasks, calendar, or notes — it can act on them."
                 }
             }
             for (_slug , s) in rows.iter() {
@@ -206,9 +206,9 @@ pub fn AgentPanel() -> Element {
                     let pill = crate::pages::agents::logic::status_pill(s.status);
                     let hermes = s.backend_id == "hermes";
                     let cls = if is_sel {
-                        "flex w-full items-center gap-1.5 rounded-md bg-accent px-1.5 py-1 text-left text-[13px] text-foreground"
+                        "flex w-full items-center gap-1.5 rounded-md bg-accent px-2 py-1.5 text-left text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     } else {
-                        "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[13px] text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                        "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     };
                     rsx! {
                         button {
@@ -219,7 +219,7 @@ pub fn AgentPanel() -> Element {
                             span { class: "truncate", "{title}" }
                             span { class: "ml-auto flex shrink-0 items-center gap-1",
                                 if hermes {
-                                    span { class: "rounded-full bg-primary/15 px-1 text-[0.6rem] text-primary", "h" }
+                                    span { class: "rounded-full bg-primary/15 px-1 text-[11px] text-primary", "h" }
                                 }
                                 if let Some(p) = &pill {
                                     span {
@@ -254,8 +254,8 @@ pub fn AgentPanel() -> Element {
             } else {
                 div { class: "flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center",
                     Bot { size: 24 }
-                    Text { variant: TextVariant::Muted, class: "text-xs",
-                        "Pick a conversation above, or start one with +."
+                    Text { variant: TextVariant::Muted, class: "max-w-56 text-xs leading-relaxed",
+                        "Pick a conversation above, or start a new one."
                     }
                 }
             }
