@@ -472,7 +472,7 @@ enum StreamState {
 /// selection change gives each session its own subscription
 /// lifecycle.
 #[component]
-fn ChatPane(
+pub(crate) fn ChatPane(
     slug: String,
     session: Session,
     models: Vec<ModelInfo>,

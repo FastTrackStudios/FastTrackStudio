@@ -13,19 +13,14 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    BookOpen, Bot, Brain, Briefcase, Calendar, ChefHat, ChevronRight, Church, DollarSign, Dumbbell,
+    BookOpen, Brain, Briefcase, Calendar, ChefHat, ChevronRight, Church, DollarSign, Dumbbell,
     FileText, Flame, Globe, GraduationCap, Hash, Heart, HeartPulse, House, Leaf, ListTodo, MapPin,
-    Moon, Music, NotebookPen, Package, PenLine, Plus, Repeat, Sparkles, SquareKanban, Star, Sun, Users,
+    Moon, Music, NotebookPen, Package, PenLine, Repeat, Sparkles, SquareKanban, Star, Sun, Users,
     Utensils, Wrench,
 };
 use fts_ui::prelude::*;
 
 use crate::pages::vault::{TreeNode, build_tree, fetch_folder_index};
-
-/// Session type re-export for the Agents section.
-mod vault_agents {
-    pub use agent_proto::session::Session;
-}
 use crate::routes::Route;
 
 /// How the explorer organizes the vault. `Folders` is the default —
@@ -207,28 +202,13 @@ pub fn VaultExplorer() -> Element {
     // navigation substrate; the wiki is the reference shelf.
     let mut wiki_open = use_signal(|| false);
 
-    // Agent conversations — a handful at most, so they live here
-    // as a bottom section instead of a second sidebar on /agents.
-    let mut agent_sessions = use_resource(move || {
-        let slug = active();
-        async move { crate::feeds::fetch_agent_sessions(&[slug]).await }
-    });
-
     // Selection = the current route's vault path.
     let route = use_route::<Route>();
-    let (selected, wiki_selected, agent_selected) = match &route {
-        Route::VaultRoute { path, .. } => (path.clone(), String::new(), String::new()),
-        Route::WikiPageRoute { path } => (String::new(), path.clone(), String::new()),
-        Route::AgentsRoute { session } => (String::new(), String::new(), session.clone()),
-        _ => (String::new(), String::new(), String::new()),
+    let (selected, wiki_selected) = match &route {
+        Route::VaultRoute { path, .. } => (path.clone(), String::new()),
+        Route::WikiPageRoute { path } => (String::new(), path.clone()),
+        _ => (String::new(), String::new()),
     };
-    // Refresh the conversation list whenever the routed agent
-    // session changes (covers entering /agents and switching chats).
-    let agent_route_key = agent_selected.clone();
-    use_effect(use_reactive!(|(agent_route_key,)| {
-        let _ = &agent_route_key;
-        agent_sessions.restart();
-    }));
     // Auto-open the section when a wiki page is the current route
     // (deep link / graph click), so the selection is visible.
     if !wiki_selected.is_empty() && !*wiki_open.peek() {
@@ -306,8 +286,6 @@ pub fn VaultExplorer() -> Element {
                         }
                     },
                 }
-                // ── Agents: live conversations (≤ a handful) ──
-                {agents_section(&agent_sessions.read_unchecked(), agent_selected.clone(), active())}
                 // ── Wiki: the org's knowledge shelf (not personal notes) ──
                 if let Some(Ok(pages)) = &*wiki_files.read_unchecked() {
                     if !pages.is_empty() {
@@ -694,119 +672,6 @@ fn loose_section(
             if !is_collapsed {
                 for page in pages {
                     {page_row(page, 1, selected.clone())}
-                }
-            }
-        }
-    }
-}
-
-/// The explorer's Agents section: every non-archived conversation
-/// (pinned first, newest activity next) with a status dot, plus a
-/// `+` starting a fresh chat. Lives here instead of a second
-/// sidebar — there are rarely more than a handful.
-fn agents_section(
-    fetched: &Option<Result<Vec<(String, vault_agents::Session)>, String>>,
-    selected: String,
-    active_slug: String,
-) -> Element {
-    let nav = use_navigator();
-    let mut rows: Vec<(String, vault_agents::Session)> = match fetched {
-        Some(Ok(rows)) => rows.iter().filter(|(_, s)| !s.archived).cloned().collect(),
-        _ => Vec::new(),
-    };
-    rows.sort_by(|(_, a), (_, b)| {
-        b.pinned.cmp(&a.pinned).then_with(|| {
-            let ka = a.last_message_at.unwrap_or(a.created_at);
-            let kb = b.last_message_at.unwrap_or(b.created_at);
-            kb.cmp(&ka)
-        })
-    });
-    let count = rows.len();
-    let new_slug = active_slug.clone();
-
-    rsx! {
-        div { class: "mt-2 border-t border-border/40 px-1.5 pt-1",
-            div { class: "flex items-center justify-between px-1.5 py-1",
-                div { class: "flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
-                    Bot { size: 13 }
-                    span { "Agents" }
-                    if count > 0 {
-                        span { class: "font-normal tabular-nums tracking-normal text-muted-foreground/60", "{count}" }
-                    }
-                }
-                button {
-                    r#type: "button",
-                    class: "rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground",
-                    title: "New agent chat",
-                    onclick: move |_| {
-                        let slug = new_slug.clone();
-                        spawn(async move {
-                            if let Ok(s) = crate::feeds::create_agent_session(&slug, "", "").await {
-                                nav.push(Route::AgentsRoute { session: s.id });
-                            }
-                        });
-                    },
-                    Plus { size: 13 }
-                }
-            }
-            nav { class: "flex flex-col gap-px",
-                if rows.is_empty() {
-                    button {
-                        r#type: "button",
-                        class: "rounded-md px-1.5 py-1 text-left text-[13px] text-muted-foreground/70 hover:bg-accent/40 hover:text-foreground",
-                        onclick: move |_| {
-                            nav.push(Route::AgentsRoute { session: String::new() });
-                        },
-                        "Open agent chat…"
-                    }
-                }
-                for (slug , s) in rows.iter() {
-                    {
-                        let is_sel = !selected.is_empty() && s.id == selected;
-                        let sid = s.id.clone();
-                        let title = if s.title.trim().is_empty() {
-                            "(untitled)".to_string()
-                        } else {
-                            s.title.clone()
-                        };
-                        let pill = crate::pages::agents::logic::status_pill(s.status);
-                        let backend_hermes = s.backend_id == "hermes";
-                        let row_cls = if is_sel {
-                            "flex w-full items-center gap-1.5 rounded-md bg-accent px-1.5 py-1 text-left text-[13px] text-foreground"
-                        } else {
-                            "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[13px] text-muted-foreground hover:bg-accent/40 hover:text-foreground"
-                        };
-                        let _ = slug;
-                        rsx! {
-                            button {
-                                key: "{s.id}",
-                                r#type: "button",
-                                class: "{row_cls}",
-                                onclick: move |_| {
-                                    nav.push(Route::AgentsRoute { session: sid.clone() });
-                                },
-                                span { class: "flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground/80",
-                                    Bot { size: 12 }
-                                }
-                                span { class: "truncate", "{title}" }
-                                span { class: "ml-auto flex shrink-0 items-center gap-1",
-                                    if backend_hermes {
-                                        span { class: "rounded-full bg-primary/15 px-1 text-[0.6rem] text-primary", "h" }
-                                    }
-                                    if let Some(p) = &pill {
-                                        span {
-                                            class: if p.pulse {
-                                                format!("h-2 w-2 rounded-full animate-pulse {}", p.dot)
-                                            } else {
-                                                format!("h-2 w-2 rounded-full {}", p.dot)
-                                            },
-                                            title: "{p.label}",
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }

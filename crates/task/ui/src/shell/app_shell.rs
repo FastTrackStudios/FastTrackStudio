@@ -25,6 +25,10 @@ pub fn AppShell() -> Element {
     // panel, toggled from the top bar (Obsidian-style).
     let explorer = use_context_provider(|| Signal::new(crate::chrome::ExplorerOpen(true)));
     let _ = use_context_provider(|| Signal::new(crate::chrome::RightPanelOpen(true)));
+    let agent_panel = use_context_provider(|| Signal::new(crate::chrome::AgentPanelOpen(false)));
+    let _ = use_context_provider(|| {
+        Signal::new(crate::chrome::AgentPanelSelected(String::new()))
+    });
     // Zen mode (Ctrl+Shift+Z): render NO desktop chrome — the open
     // view gets the whole viewport. Only the rendering is gated; the
     // explorer/right-panel signals keep their values, so exiting zen
@@ -88,6 +92,13 @@ pub fn AppShell() -> Element {
                         if !share {
                             BottomTabBar { current }
                             FleetingFab {}
+                        }
+                    }
+                    // The right agent sidebar: conversations + chat,
+                    // alongside whatever the center view shows.
+                    if agent_panel.read().0 && !chromeless() {
+                        div { class: "hidden w-[26rem] shrink-0 border-l border-border/60 md:flex md:min-h-0 md:flex-col md:overflow-hidden",
+                            crate::shell::agent_panel::AgentPanel {}
                         }
                     }
                 }
