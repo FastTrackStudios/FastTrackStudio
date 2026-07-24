@@ -878,6 +878,12 @@ pub(crate) mod imp {
 
     /// Deterministic accent color (0xRRGGBB) for a stem group.
     fn group_color(group: &str) -> u32 {
+        // The Reference group is always neutral gray — the reference / original
+        // track is a backing reference, not an instrument, so it reads quiet and
+        // sits apart from the colored instrument folders.
+        if group.eq_ignore_ascii_case("reference") {
+            return 0x71717a; // zinc-500
+        }
         // Small fixed palette, hashed by group name for stable coloring.
         const PALETTE: [u32; 8] = [
             0x3B82F6, // blue
