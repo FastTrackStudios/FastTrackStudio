@@ -246,6 +246,7 @@ pub fn AgentsView() -> Element {
                     slug,
                     session,
                     models: model_list.clone(),
+                    skills: skill_list.clone(),
                     inspector_open: show_inspector(),
                     on_toggle_inspector: move |()| {
                         let v = *show_inspector.peek();
@@ -278,6 +279,50 @@ pub fn AgentsView() -> Element {
             }
         }
     }
+}
+
+/// One composer autocomplete row.
+#[derive(Clone, PartialEq)]
+struct CompletionRow {
+    /// Text inserted on accept (replaces the trigger token).
+    insert: String,
+    label: String,
+    detail: String,
+}
+
+/// Hermes slash commands the gateway understands (v0.19). Curated —
+/// the gateway has no commands-discovery endpoint yet; keep in sync
+/// with `hermes --help` when bumping the input.
+const HERMES_COMMANDS: &[(&str, &str)] = &[
+    ("/new", "Start a fresh context (clears the session's history)"),
+    ("/model", "Show or switch the model for this session"),
+    ("/skills", "List the agent's learned skills"),
+    ("/learn", "Teach the agent a new skill from this conversation"),
+    ("/journey", "Show what the agent has learned over time"),
+    ("/compact", "Compress older context into a summary"),
+    ("/status", "Agent + backend status"),
+    ("/memory", "Inspect the agent's persistent memory"),
+    ("/tools", "List available toolsets"),
+    ("/help", "List available commands"),
+];
+
+/// The trigger token under the caret-at-end heuristic: `/` only as
+/// the very first token (commands), `$` on the last whitespace-
+/// separated token (skills). Returns (mode, query, token_start).
+fn completion_trigger(text: &str) -> Option<(char, String, usize)> {
+    if let Some(rest) = text.strip_prefix('/') {
+        if !rest.contains(char::is_whitespace) {
+            return Some(('/', rest.to_lowercase(), 0));
+        }
+    }
+    let start = text
+        .rfind(char::is_whitespace)
+        .map_or(0, |i| i + text[i..].chars().next().map_or(1, char::len_utf8));
+    let token = &text[start..];
+    if let Some(q) = token.strip_prefix('$') {
+        return Some(('$', q.to_lowercase(), start));
+    }
+    None
 }
 
 /// Rail/inspector session mutations.
@@ -413,6 +458,7 @@ fn ChatPane(
     slug: String,
     session: Session,
     models: Vec<ModelInfo>,
+    skills: Vec<SkillInfo>,
     inspector_open: bool,
     on_toggle_inspector: EventHandler<()>,
     on_activity: EventHandler<()>,
@@ -429,6 +475,10 @@ fn ChatPane(
     let mut error = use_signal(String::new);
     let mut busy = use_signal(|| matches!(session.status, SessionStatus::Running));
     let mut composer = use_signal(String::new);
+    // Composer autocomplete: selected row + user-dismissed flag
+    // (Esc closes until the trigger token changes).
+    let mut completion_sel = use_signal(|| 0usize);
+    let mut completion_dismissed = use_signal(String::new);
     // Per-turn model override; empty = the backend's default. The
     // ack's effective model is echoed back into `responding`.
     let mut model = use_signal(String::new);
@@ -645,6 +695,57 @@ fn ChatPane(
         .cloned()
         .collect();
 
+    // Composer autocomplete rows for the current trigger token.
+    let completion: Option<(char, usize, Vec<CompletionRow>)> = {
+        let text = composer.read().clone();
+        completion_trigger(&text).and_then(|(mode, query, start)| {
+            if *completion_dismissed.read() == text {
+                return None;
+            }
+            let rows: Vec<CompletionRow> = match mode {
+                '/' if session.backend_id == "hermes" => HERMES_COMMANDS
+                    .iter()
+                    .filter(|(c, _)| c[1..].starts_with(&query))
+                    .map(|(c, d)| CompletionRow {
+                        insert: (*c).to_string(),
+                        label: (*c).to_string(),
+                        detail: (*d).to_string(),
+                    })
+                    .collect(),
+                '$' => skills
+                    .iter()
+                    .filter(|sk| sk.enabled && sk.name.to_lowercase().contains(&query))
+                    .take(8)
+                    .map(|sk| CompletionRow {
+                        insert: format!("${}", sk.name),
+                        label: sk.name.clone(),
+                        detail: sk.description.clone(),
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            (!rows.is_empty()).then_some((mode, start, rows))
+        })
+    };
+    let completion_open = completion.is_some();
+    let completion_rows = completion
+        .as_ref()
+        .map(|(_, _, r)| r.clone())
+        .unwrap_or_default();
+    let completion_start = completion.as_ref().map(|(_, s, _)| *s).unwrap_or(0);
+    let sel = completion_sel().min(completion_rows.len().saturating_sub(1));
+
+    // Accept a completion: replace the trigger token, refocus flow
+    // continues naturally (the textarea keeps focus).
+    let accept = use_callback(move |(start, insert): (usize, String)| {
+        let mut text = composer.peek().clone();
+        text.truncate(start);
+        text.push_str(&insert);
+        text.push(' ');
+        composer.set(text);
+        completion_sel.set(0);
+    });
+
     use_effect(move || {
         let _ = messages.read().len();
         let _ = streaming.read().is_some();
@@ -760,17 +861,82 @@ fn ChatPane(
             }
 
             // Composer + chip row.
-            div { class: "border-t border-border/60 px-4 py-3",
+            div { class: "relative border-t border-border/60 px-4 py-3",
+                if completion_open {
+                    div { class: "absolute bottom-full left-4 z-30 mb-1 max-h-64 w-[26rem] max-w-[85%] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg",
+                        for (i , row) in completion_rows.iter().enumerate() {
+                            {
+                                let insert = row.insert.clone();
+                                rsx! {
+                                    div {
+                                        key: "{row.insert}",
+                                        role: "button",
+                                        class: if i == sel {
+                                            "flex cursor-pointer items-baseline gap-2 rounded-md bg-accent px-2 py-1"
+                                        } else {
+                                            "flex cursor-pointer items-baseline gap-2 rounded-md px-2 py-1 hover:bg-accent/50"
+                                        },
+                                        onmousedown: move |e| {
+                                            e.prevent_default();
+                                            accept((completion_start, insert.clone()));
+                                        },
+                                        span { class: "shrink-0 font-mono text-xs font-semibold text-foreground", "{row.label}" }
+                                        span { class: "truncate text-[0.72rem] text-muted-foreground", "{row.detail}" }
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "mt-0.5 border-t border-border/40 px-2 pt-1 text-[0.65rem] text-muted-foreground/70",
+                            "↑↓ navigate · Tab/Enter accept · Esc dismiss"
+                        }
+                    }
+                }
                 div { class: "flex items-end gap-2",
                     textarea {
                         class: "max-h-40 min-h-[2.5rem] w-full flex-1 resize-y rounded-xl border border-border/70 bg-card/30 px-3 py-2 text-sm leading-relaxed text-foreground outline-none focus:border-primary/60",
-                        placeholder: "Message the agent… (Enter to send, Shift+Enter for newline)",
+                        placeholder: "Message the agent… (/ commands, $ skills, Enter to send)",
                         value: "{composer}",
-                        oninput: move |e| composer.set(e.value()),
-                        onkeydown: move |e| {
-                            if e.key() == Key::Enter && !e.modifiers().shift() {
-                                e.prevent_default();
-                                send(());
+                        oninput: move |e| {
+                            composer.set(e.value());
+                            completion_sel.set(0);
+                        },
+                        onkeydown: {
+                            let rows = completion_rows.clone();
+                            move |e| {
+                                if completion_open && !rows.is_empty() {
+                                    match e.key() {
+                                        Key::ArrowDown => {
+                                            e.prevent_default();
+                                            completion_sel.set((sel + 1) % rows.len());
+                                            return;
+                                        }
+                                        Key::ArrowUp => {
+                                            e.prevent_default();
+                                            completion_sel.set(sel.checked_sub(1).unwrap_or(rows.len() - 1));
+                                            return;
+                                        }
+                                        Key::Tab => {
+                                            e.prevent_default();
+                                            accept((completion_start, rows[sel].insert.clone()));
+                                            return;
+                                        }
+                                        Key::Enter if !e.modifiers().shift() => {
+                                            e.prevent_default();
+                                            accept((completion_start, rows[sel].insert.clone()));
+                                            return;
+                                        }
+                                        Key::Escape => {
+                                            e.prevent_default();
+                                            completion_dismissed.set(composer.peek().clone());
+                                            return;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                if e.key() == Key::Enter && !e.modifiers().shift() {
+                                    e.prevent_default();
+                                    send(());
+                                }
                             }
                         },
                     }
