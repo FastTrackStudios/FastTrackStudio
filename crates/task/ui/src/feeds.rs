@@ -2074,6 +2074,71 @@ pub async fn fetch_agent_health(
         .map_err(|e| format!("{slug}: agent health: {e:?}"))
 }
 
+/// Scheduled agent routines (the Hermes gateway's cron jobs).
+/// Includes paused ones — the panel shows them greyed rather than
+/// hiding them, so a paused routine isn't mistaken for a deleted one.
+pub async fn fetch_agent_routines(
+    slug: &str,
+) -> Result<Vec<agent_proto::service::routines::Routine>, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
+            .await?;
+    client
+        .list_routines(String::new(), true)
+        .await
+        .map_err(|e| format!("{slug}: agent routines: {e:?}"))
+}
+
+pub async fn create_agent_routine(
+    slug: &str,
+    routine: agent_proto::service::routines::NewRoutine,
+) -> Result<agent_proto::service::routines::Routine, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
+            .await?;
+    client
+        .create_routine(routine)
+        .await
+        .map_err(|e| format!("{slug}: create routine: {e:?}"))
+}
+
+pub async fn set_agent_routine_paused(
+    slug: &str,
+    id: &str,
+    paused: bool,
+) -> Result<agent_proto::service::routines::Routine, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
+            .await?;
+    client
+        .set_routine_paused(String::new(), id.to_owned(), paused)
+        .await
+        .map_err(|e| format!("{slug}: pause routine: {e:?}"))
+}
+
+pub async fn run_agent_routine(
+    slug: &str,
+    id: &str,
+) -> Result<agent_proto::service::routines::Routine, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
+            .await?;
+    client
+        .run_routine(String::new(), id.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: run routine: {e:?}"))
+}
+
+pub async fn delete_agent_routine(slug: &str, id: &str) -> Result<(), String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
+            .await?;
+    client
+        .delete_routine(String::new(), id.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: delete routine: {e:?}"))
+}
+
 /// Session mutations for the rail/inspector: rename, pin, archive,
 /// delete. Each returns the updated session (delete returns unit).
 pub async fn rename_agent_session(

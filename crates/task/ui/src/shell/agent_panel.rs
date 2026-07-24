@@ -17,8 +17,47 @@ use fts_ui::prelude::*;
 use crate::chrome::AgentPanelSelected;
 use crate::routes::Route;
 
+/// Which half of the agent sidebar is showing: the conversations
+/// you're having now, or the ones the agent runs on its own.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AgentTab {
+    Chats,
+    Routines,
+}
+
+/// The tab strip. Lives above both views so switching never unmounts
+/// the header.
+fn tab_switch(mut tab: Signal<AgentTab>) -> Element {
+    let current = *tab.read();
+    let cls = |mine: AgentTab| {
+        if mine == current {
+            "flex-1 rounded-md bg-accent px-2 py-1 text-[0.7rem] font-medium text-foreground"
+        } else {
+            "flex-1 rounded-md px-2 py-1 text-[0.7rem] text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+        }
+    };
+    rsx! {
+        div { class: "flex items-center gap-0.5 border-b border-border/60 px-2 py-1.5",
+            button {
+                r#type: "button",
+                class: cls(AgentTab::Chats),
+                onclick: move |_| tab.set(AgentTab::Chats),
+                "Chats"
+            }
+            button {
+                r#type: "button",
+                class: cls(AgentTab::Routines),
+                title: "Prompts the agent runs on a schedule",
+                onclick: move |_| tab.set(AgentTab::Routines),
+                "Routines"
+            }
+        }
+    }
+}
+
 #[component]
 pub fn AgentPanel() -> Element {
+    let tab = use_signal(|| AgentTab::Chats);
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
     let active = use_memo(move || crate::orgs::active_slug(&selection.read(), &org_list.read()));
@@ -90,7 +129,15 @@ pub fn AgentPanel() -> Element {
         });
     };
 
+    if matches!(*tab.read(), AgentTab::Routines) {
+        return rsx! {
+            {tab_switch(tab)}
+            crate::shell::agent_routines::RoutinesPanel { slug: active() }
+        };
+    }
+
     rsx! {
+        {tab_switch(tab)}
         // ── Conversations segment ──
         div { class: "flex items-center justify-between gap-2 px-3 py-2",
             div { class: "flex min-w-0 items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",

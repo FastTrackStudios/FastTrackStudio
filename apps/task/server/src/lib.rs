@@ -1856,6 +1856,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             agent_proto::service::discovery::discovery_rpc_service_descriptor(),
             agent_proto::service::discovery::serve(org.agent_router.clone()),
         )
+        // Agent routines — the gateway's scheduled runs, surfaced as
+        // a first-class Task feature.
+        .with(
+            agent_proto::service::routines::routines_rpc_service_descriptor(),
+            agent_proto::service::routines::serve(org.agent_router.clone()),
+        )
         // Timer — billable time tracking.
         .with(
             timer_proto::service::timer_service_rpc_service_descriptor(),

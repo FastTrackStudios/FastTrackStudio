@@ -2,6 +2,7 @@
 
 pub mod app_shell;
 pub mod agent_panel;
+pub mod agent_routines;
 pub mod explorer;
 pub mod mobile;
 pub mod now_playing;

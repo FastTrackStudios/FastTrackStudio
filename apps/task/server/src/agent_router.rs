@@ -18,6 +18,7 @@ use agent_proto::message::Message;
 use agent_proto::service::discovery::{
     BackendHealth, CapabilityFlag, Discovery, ModelInfo, SkillInfo,
 };
+use agent_proto::service::routines::{NewRoutine, Routine, Routines};
 use agent_proto::service::sessions::{CreateSession, SessionFilter, SessionPage, Sessions};
 use agent_proto::service::subscriptions::Subscriptions;
 use agent_proto::service::threads::Threads;
@@ -98,7 +99,8 @@ impl Sessions for AgentRouter {
             let hermes_page = h.list_sessions(filter.clone())?;
             page.sessions.extend(hermes_page.sessions);
         }
-        page.sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        page.sessions
+            .sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         if filter.limit > 0 {
             page.sessions.truncate(filter.limit as usize);
         }
@@ -159,7 +161,11 @@ impl Threads for AgentRouter {
         limit: u32,
         before_cursor: &str,
     ) -> Result<Vec<Message>, AgentError> {
-        route!(self, session_id, list_messages(session_id, limit, before_cursor))
+        route!(
+            self,
+            session_id,
+            list_messages(session_id, limit, before_cursor)
+        )
     }
 
     fn read_message(&self, message_id: &str) -> Result<Message, AgentError> {
@@ -210,9 +216,7 @@ impl Discovery for AgentRouter {
 
     fn list_skills(&self, backend_id: &str) -> Result<Vec<SkillInfo>, AgentError> {
         match &self.hermes {
-            Some(h) if backend_id.is_empty() || backend_id == "hermes" => {
-                h.list_skills(backend_id)
-            }
+            Some(h) if backend_id.is_empty() || backend_id == "hermes" => h.list_skills(backend_id),
             _ => Ok(Vec::new()),
         }
     }
@@ -291,5 +295,43 @@ impl Subscriptions for AgentRouter {
 
     async fn subscribe_global(&self, tx: Tx<AgentEvent>) {
         let _ = tx.close(vox::Metadata::default()).await;
+    }
+}
+
+impl Routines for AgentRouter {
+    fn list_routines(
+        &self,
+        backend_id: &str,
+        include_disabled: bool,
+    ) -> Result<Vec<Routine>, AgentError> {
+        // Only Hermes schedules today. An unconfigured gateway is an
+        // empty list, not an error — the page renders its empty state.
+        match &self.hermes {
+            Some(h) if backend_id.is_empty() || backend_id == "hermes" => {
+                h.list_routines(backend_id, include_disabled)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn create_routine(&self, routine: NewRoutine) -> Result<Routine, AgentError> {
+        self.hermes()?.create_routine(routine)
+    }
+
+    fn set_routine_paused(
+        &self,
+        backend_id: &str,
+        id: &str,
+        paused: bool,
+    ) -> Result<Routine, AgentError> {
+        self.hermes()?.set_routine_paused(backend_id, id, paused)
+    }
+
+    fn run_routine(&self, backend_id: &str, id: &str) -> Result<Routine, AgentError> {
+        self.hermes()?.run_routine(backend_id, id)
+    }
+
+    fn delete_routine(&self, backend_id: &str, id: &str) -> Result<(), AgentError> {
+        self.hermes()?.delete_routine(backend_id, id)
     }
 }

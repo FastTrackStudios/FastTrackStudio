@@ -24,6 +24,7 @@
 
 mod discovery;
 mod responses;
+mod routines;
 mod service;
 mod stream;
 
