@@ -195,6 +195,11 @@ impl Discovery for AgentRouter {
                     label: String::new(),
                     is_default: i == 0,
                     context_length: 0,
+                    provider_id: "openai".to_string(),
+                    provider_name: "OpenAI".to_string(),
+                    reasoning: true,
+                    cost_in_per_mtok: 0.0,
+                    cost_out_per_mtok: 0.0,
                 });
             }
         }

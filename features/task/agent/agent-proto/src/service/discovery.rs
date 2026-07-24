@@ -11,7 +11,7 @@ use crate::error::AgentError;
 use facet::Facet;
 
 /// One selectable model, as reported by a backend.
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 #[repr(C)]
 pub struct ModelInfo {
     /// Backend that serves it (`"hermes"`, `"codex"`).
@@ -25,6 +25,17 @@ pub struct ModelInfo {
     /// Context window in tokens; `0` = unknown (UIs hide the
     /// context gauge's percentage and show raw counts).
     pub context_length: u64,
+    /// Catalog provider id (`"openai"`, `"anthropic"`) — groups the
+    /// picker; empty = the backend itself is the provider.
+    pub provider_id: String,
+    /// Display name for the provider; falls back to `provider_id`.
+    pub provider_name: String,
+    /// The model exposes a reasoning/thinking mode.
+    pub reasoning: bool,
+    /// Cost per million input tokens in USD; `0.0` = unknown/free.
+    pub cost_in_per_mtok: f64,
+    /// Cost per million output tokens in USD; `0.0` = unknown/free.
+    pub cost_out_per_mtok: f64,
 }
 
 /// One agent skill (Hermes's self-improving skill library).

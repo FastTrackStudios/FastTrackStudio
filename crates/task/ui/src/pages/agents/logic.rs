@@ -2,6 +2,7 @@
 //! the t3code `*.logic.ts` pattern: components stay thin `rsx!`,
 //! everything decidable lives here as plain functions.
 
+use agent_proto::service::discovery::ModelInfo;
 use agent_proto::session::SessionStatus;
 
 /// Weighted completion ranking (CodexMonitor's `scoreMatch`):
@@ -109,6 +110,61 @@ pub fn context_ring_style(free_percent: f64) -> String {
     )
 }
 
+/// Group models by provider for the picker's brand rail
+/// (hermes-desktop's `groupModelsByProvider`): stable provider
+/// order = first appearance, models sorted with the ACTIVE model
+/// floated first (3-tier rank: active → default → rest, stable).
+pub fn group_models(
+    models: &[ModelInfo],
+    current: &str,
+) -> Vec<(String, String, Vec<ModelInfo>)> {
+    let mut order: Vec<(String, String)> = Vec::new();
+    let mut by_provider: std::collections::HashMap<String, Vec<ModelInfo>> =
+        std::collections::HashMap::new();
+    for m in models {
+        if !order.iter().any(|(id, _)| *id == m.provider_id) {
+            let name = if m.provider_name.is_empty() {
+                m.provider_id.clone()
+            } else {
+                m.provider_name.clone()
+            };
+            order.push((m.provider_id.clone(), name));
+        }
+        by_provider.entry(m.provider_id.clone()).or_default().push(m.clone());
+    }
+    order
+        .into_iter()
+        .map(|(id, name)| {
+            let mut ms = by_provider.remove(&id).unwrap_or_default();
+            ms.sort_by_key(|m| {
+                if m.id == current {
+                    0u8
+                } else if m.is_default {
+                    1
+                } else {
+                    2
+                }
+            });
+            (id, name, ms)
+        })
+        .collect()
+}
+
+/// Compact cost badge: "$0.25/$2" per Mtok, or None when unknown.
+pub fn cost_badge(cost_in: f64, cost_out: f64) -> Option<String> {
+    if cost_in <= 0.0 && cost_out <= 0.0 {
+        return None;
+    }
+    fn c(v: f64) -> String {
+        if v >= 10.0 {
+            format!("${v:.0}")
+        } else {
+            format!("${v:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
+        }
+    }
+    Some(format!("{}/{}", c(cost_in), c(cost_out)))
+}
+
 pub fn fmt_elapsed(secs: i64) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
 }
@@ -160,6 +216,45 @@ mod tests {
         assert_eq!(a, hash_hsl("researcher"));
         assert!(a.0 < 360 && a.1 <= 75 && a.2 <= 60);
         assert_ne!(a, hash_hsl("curator"));
+    }
+
+    fn mi(provider: &str, id: &str, default: bool) -> ModelInfo {
+        ModelInfo {
+            backend_id: "hermes".into(),
+            id: id.into(),
+            label: String::new(),
+            is_default: default,
+            context_length: 0,
+            provider_id: provider.into(),
+            provider_name: provider.to_uppercase(),
+            reasoning: false,
+            cost_in_per_mtok: 0.0,
+            cost_out_per_mtok: 0.0,
+        }
+    }
+
+    #[test]
+    fn group_models_keeps_order_and_floats_active() {
+        let models = vec![
+            mi("hermes", "hermes", true),
+            mi("openai", "openai/gpt-a", false),
+            mi("openai", "openai/gpt-b", false),
+            mi("anthropic", "anthropic/claude", false),
+        ];
+        let groups = group_models(&models, "openai/gpt-b");
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].0, "hermes");
+        assert_eq!(groups[1].0, "openai");
+        // Active model floats first within its provider.
+        assert_eq!(groups[1].2[0].id, "openai/gpt-b");
+        assert_eq!(groups[2].1, "ANTHROPIC");
+    }
+
+    #[test]
+    fn cost_badge_formats_and_hides_unknown() {
+        assert_eq!(cost_badge(0.0, 0.0), None);
+        assert_eq!(cost_badge(0.25, 2.0), Some("$0.25/$2".into()));
+        assert_eq!(cost_badge(15.0, 75.0), Some("$15/$75".into()));
     }
 
     #[test]

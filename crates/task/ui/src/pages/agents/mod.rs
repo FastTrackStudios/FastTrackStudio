@@ -32,8 +32,8 @@ use fts_ui::lucide_dioxus::{Archive, Bot, Copy, Info, Pin, Trash2};
 use fts_ui::prelude::*;
 
 use logic::{
-    context_free_percent, context_ring_style, fmt_elapsed, fmt_tokens, hash_hsl, rank_by,
-    relative_time, status_pill,
+    context_free_percent, context_ring_style, cost_badge, fmt_elapsed, fmt_tokens, group_models,
+    hash_hsl, rank_by, relative_time, status_pill,
 };
 use timeline::{ActivityLine, Row, ToolTone, TurnLog, fold_summary, push_line, settle_tool};
 
@@ -458,6 +458,170 @@ fn backend_chip_cls(backend_id: &str) -> &'static str {
         "rounded-full bg-primary/15 px-1.5 text-primary"
     } else {
         "rounded-full bg-muted/60 px-1.5"
+    }
+}
+
+/// The two-pane model picker (hermes-desktop's chat dropdown):
+/// provider rail with count badges + an All row, searched flat model
+/// list with context/cost/reasoning badges, active model floated
+/// first. Selection is session-only.
+#[component]
+fn ModelPicker(models: Vec<ModelInfo>, current: String, on_pick: EventHandler<ModelInfo>) -> Element {
+    let mut open = use_signal(|| false);
+    let mut search = use_signal(String::new);
+    let mut provider = use_signal(|| None::<String>);
+
+    let current_label = if current.is_empty() {
+        "default model".to_string()
+    } else {
+        models
+            .iter()
+            .find(|m| m.id == current)
+            .map(|m| if m.label.is_empty() { m.id.clone() } else { m.label.clone() })
+            .unwrap_or_else(|| current.clone())
+    };
+
+    let groups = group_models(&models, &current);
+    let total: usize = groups.iter().map(|(_, _, ms)| ms.len()).sum();
+    let q = search.read().to_lowercase();
+    let visible: Vec<ModelInfo> = groups
+        .iter()
+        .filter(|(pid, _, _)| provider.read().as_ref().is_none_or(|sel| sel == pid))
+        .flat_map(|(_, _, ms)| ms.iter().cloned())
+        .filter(|m| {
+            q.is_empty()
+                || m.label.to_lowercase().contains(&q)
+                || m.id.to_lowercase().contains(&q)
+        })
+        .collect();
+
+    rsx! {
+        div { class: "relative",
+            button {
+                r#type: "button",
+                class: "flex items-center gap-1 rounded-md border border-border/60 bg-card/30 px-2 py-0.5 text-xs text-foreground hover:border-primary/60",
+                onclick: move |_| {
+                    let v = *open.peek();
+                    open.set(!v);
+                    if !v {
+                        search.set(String::new());
+                    }
+                },
+                span { class: "max-w-48 truncate", "{current_label}" }
+                span { class: "text-muted-foreground", "▾" }
+            }
+            if open() {
+                div { class: "absolute bottom-full left-0 z-40 mb-1 flex h-80 w-[34rem] max-w-[90vw] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg",
+                    input {
+                        class: "m-2 rounded-md border border-border/60 bg-card/30 px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60",
+                        placeholder: "Search models…",
+                        autofocus: true,
+                        value: "{search}",
+                        oninput: move |e| search.set(e.value()),
+                        onkeydown: move |e| {
+                            if e.key() == Key::Escape {
+                                open.set(false);
+                            }
+                        },
+                    }
+                    div { class: "flex min-h-0 flex-1",
+                        // Provider rail.
+                        div { class: "flex w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/40 p-1",
+                            button {
+                                r#type: "button",
+                                class: if provider.read().is_none() {
+                                    "flex items-center justify-between rounded-md bg-accent px-2 py-1 text-left text-xs"
+                                } else {
+                                    "flex items-center justify-between rounded-md px-2 py-1 text-left text-xs hover:bg-accent/50"
+                                },
+                                onclick: move |_| provider.set(None),
+                                span { "All models" }
+                                span { class: "text-[0.65rem] text-muted-foreground", "{total}" }
+                            }
+                            for (pid , pname , ms) in groups.iter() {
+                                {
+                                    let pid_cl = pid.clone();
+                                    let is_sel = provider.read().as_deref() == Some(pid.as_str());
+                                    rsx! {
+                                        button {
+                                            key: "{pid}",
+                                            r#type: "button",
+                                            class: if is_sel {
+                                                "flex items-center justify-between rounded-md bg-accent px-2 py-1 text-left text-xs"
+                                            } else {
+                                                "flex items-center justify-between rounded-md px-2 py-1 text-left text-xs hover:bg-accent/50"
+                                            },
+                                            onclick: move |_| {
+                                                // Toggle back to All on re-click.
+                                                if provider.peek().as_deref() == Some(pid_cl.as_str()) {
+                                                    provider.set(None);
+                                                } else {
+                                                    provider.set(Some(pid_cl.clone()));
+                                                }
+                                            },
+                                            span { class: "truncate", "{pname}" }
+                                            span { class: "text-[0.65rem] text-muted-foreground", "{ms.len()}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Model list.
+                        div { class: "flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1",
+                            if visible.is_empty() {
+                                div { class: "px-2 py-4 text-center text-xs text-muted-foreground", "No models match." }
+                            }
+                            for m in visible.iter() {
+                                {
+                                    let is_active = m.id == current || (current.is_empty() && m.is_default);
+                                    let picked = m.clone();
+                                    let title_txt = if m.label.is_empty() { m.id.clone() } else { m.label.clone() };
+                                    let sub = format!("{} · {}", m.provider_name, m.id);
+                                    let ctx = (m.context_length > 0).then(|| fmt_tokens(m.context_length));
+                                    let cost = cost_badge(m.cost_in_per_mtok, m.cost_out_per_mtok);
+                                    rsx! {
+                                        button {
+                                            key: "{m.id}",
+                                            r#type: "button",
+                                            class: if is_active {
+                                                "flex w-full flex-col rounded-md bg-accent px-2 py-1 text-left"
+                                            } else {
+                                                "flex w-full flex-col rounded-md px-2 py-1 text-left hover:bg-accent/50"
+                                            },
+                                            onclick: move |_| {
+                                                on_pick.call(picked.clone());
+                                                open.set(false);
+                                            },
+                                            div { class: "flex items-center gap-1.5",
+                                                span { class: "truncate text-xs font-medium text-foreground", "{title_txt}" }
+                                                if is_active {
+                                                    span { class: "text-emerald-500", "✓" }
+                                                }
+                                                span { class: "ml-auto flex shrink-0 items-center gap-1 text-[0.65rem] text-muted-foreground",
+                                                    if m.reasoning {
+                                                        span { class: "rounded-full bg-purple-500/15 px-1 text-purple-400", title: "Reasoning model", "R" }
+                                                    }
+                                                    if let Some(c) = &ctx {
+                                                        span { title: "Context window", "{c}" }
+                                                    }
+                                                    if let Some(c) = &cost {
+                                                        span { title: "$ per Mtok in/out", "{c}" }
+                                                    }
+                                                }
+                                            }
+                                            span { class: "truncate text-[0.68rem] text-muted-foreground", "{sub}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "border-t border-border/40 px-2 py-1 text-[0.65rem] text-muted-foreground/70",
+                        "Catalog models switch the Hermes session via /model — review + send the prefilled command."
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1119,22 +1283,27 @@ fn ChatPane(
                     }
                 }
                 div { class: "mt-1.5 flex items-center gap-2",
-                    select {
-                        class: "w-52 rounded-md border border-border/60 bg-card/30 px-2 py-0.5 text-xs text-foreground outline-none focus:border-primary/60",
-                        value: "{model}",
-                        onchange: move |e| model.set(e.value()),
-                        option { value: "", "default model" }
-                        for m in session_models.iter() {
-                            option {
-                                key: "{m.id}",
-                                value: "{m.id}",
-                                if m.label.is_empty() {
-                                    "{m.id}"
-                                } else {
-                                    "{m.label}"
+                    ModelPicker {
+                        models: session_models.clone(),
+                        current: model.read().clone(),
+                        on_pick: {
+                            let backend = session.backend_id.clone();
+                            move |m: ModelInfo| {
+                            // Session-only selection (hermes-desktop's
+                            // persist:false): the override rides each
+                            // dispatch. For catalog models on Hermes,
+                            // prefill the gateway's per-session /model
+                            // switch so the change is explicit + visible.
+                            if m.provider_id == "hermes" || m.is_default {
+                                model.set(String::new());
+                            } else {
+                                model.set(m.id.clone());
+                                if backend == "hermes" {
+                                    composer.set(format!("/model {}", m.id));
                                 }
                             }
                         }
+                        },
                     }
                     // Context gauge: conic-gradient ring when the
                     // window is known, raw counter otherwise.
