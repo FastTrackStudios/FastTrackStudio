@@ -23388,6 +23388,7 @@ dependencies = [
  "signal-plugin-host",
  "signal-sampler",
  "signal-synth",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
