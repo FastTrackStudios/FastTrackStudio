@@ -75,6 +75,7 @@ impl Sessions for HermesBackend {
                 events_tx,
                 messages: Vec::new(),
                 cancel: Arc::new(AtomicBool::new(false)),
+                last_response_id: String::new(),
             },
         );
         Ok(session)
@@ -199,7 +200,7 @@ impl TurnDispatch for HermesBackend {
         };
         let assistant_id = format!("msg-{}", Uuid::new_v4().simple());
 
-        let (events_tx, wire, cancel) = {
+        let (events_tx, wire, cancel, chain) = {
             let mut sessions = self.inner.sessions.blocking_lock();
             let row = sessions
                 .get_mut(&args.session_id)
@@ -212,10 +213,17 @@ impl TurnDispatch for HermesBackend {
             row.session.composer_draft.text = String::new();
             row.messages.push(user_msg.clone());
             row.cancel = Arc::new(AtomicBool::new(false));
+            // `/new` wipes the gateway's context, so drop the chain
+            // with it — otherwise the next turn resurrects the old
+            // session server-side.
+            if args.text.trim_start().starts_with("/new") {
+                row.last_response_id.clear();
+            }
             (
                 row.events_tx.clone(),
                 wire_messages(&row.messages),
                 row.cancel.clone(),
+                row.last_response_id.clone(),
             )
         };
 
@@ -246,6 +254,8 @@ impl TurnDispatch for HermesBackend {
                 &assistant_id,
                 &model,
                 wire,
+                &chain,
+                &backend.inner.legacy_transport,
                 &events_tx,
                 &cancel,
             )
@@ -269,12 +279,30 @@ impl TurnDispatch for HermesBackend {
                         partial: false,
                         errored: false,
                         error_text: String::new(),
-                        reasoning: None,
+                        // Retained so a reloaded transcript can still
+                        // show what the agent was thinking.
+                        reasoning: (!outcome.reasoning.is_empty()).then(|| {
+                            agent_proto::reasoning::ReasoningBlock {
+                                summary: outcome
+                                    .reasoning
+                                    .lines()
+                                    .find(|l| !l.trim().is_empty())
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                content: outcome.reasoning.clone(),
+                                effort: String::new(),
+                                structured: false,
+                            }
+                        }),
                         created_at: now,
                     };
                     row.messages.push(message.clone());
+                    if !outcome.response_id.is_empty() {
+                        row.last_response_id = outcome.response_id.clone();
+                    }
                     row.session.usage.input_tokens += outcome.input_tokens;
                     row.session.usage.output_tokens += outcome.output_tokens;
+                    row.session.usage.estimated_cost_usd += outcome.cost_usd;
                     row.session.status = SessionStatus::Idle;
                     row.session.updated_at = now;
                     row.session.last_message_at = Some(now);

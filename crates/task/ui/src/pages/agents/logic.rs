@@ -114,10 +114,7 @@ pub fn context_ring_style(free_percent: f64) -> String {
 /// (hermes-desktop's `groupModelsByProvider`): stable provider
 /// order = first appearance, models sorted with the ACTIVE model
 /// floated first (3-tier rank: active → default → rest, stable).
-pub fn group_models(
-    models: &[ModelInfo],
-    current: &str,
-) -> Vec<(String, String, Vec<ModelInfo>)> {
+pub fn group_models(models: &[ModelInfo], current: &str) -> Vec<(String, String, Vec<ModelInfo>)> {
     let mut order: Vec<(String, String)> = Vec::new();
     let mut by_provider: std::collections::HashMap<String, Vec<ModelInfo>> =
         std::collections::HashMap::new();
@@ -130,7 +127,10 @@ pub fn group_models(
             };
             order.push((m.provider_id.clone(), name));
         }
-        by_provider.entry(m.provider_id.clone()).or_default().push(m.clone());
+        by_provider
+            .entry(m.provider_id.clone())
+            .or_default()
+            .push(m.clone());
     }
     order
         .into_iter()
@@ -159,7 +159,10 @@ pub fn cost_badge(cost_in: f64, cost_out: f64) -> Option<String> {
         if v >= 10.0 {
             format!("${v:.0}")
         } else {
-            format!("${v:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
+            format!("${v:.2}")
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string()
         }
     }
     Some(format!("{}/{}", c(cost_in), c(cost_out)))
@@ -167,6 +170,30 @@ pub fn cost_badge(cost_in: f64, cost_out: f64) -> Option<String> {
 
 pub fn fmt_elapsed(secs: i64) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// Tool-call wall time: sub-second in ms, then seconds, then m/s.
+pub fn fmt_duration(ms: u32) -> String {
+    match ms {
+        0..=999 => format!("{ms}ms"),
+        1000..=59_999 => format!("{:.1}s", f64::from(ms) / 1000.0),
+        _ => {
+            let secs = ms / 1000;
+            format!("{}m{:02}s", secs / 60, secs % 60)
+        }
+    }
+}
+
+/// Accrued spend for a session. Sub-cent turns still deserve a
+/// number — "$0.00" reads as free, which it isn't.
+pub fn fmt_cost(usd: f32) -> Option<String> {
+    if usd <= 0.0 {
+        return None;
+    }
+    if usd < 0.01 {
+        return Some(format!("${usd:.4}"));
+    }
+    Some(format!("${usd:.2}"))
 }
 
 pub fn fmt_tokens(n: u64) -> String {
@@ -255,6 +282,21 @@ mod tests {
         assert_eq!(cost_badge(0.0, 0.0), None);
         assert_eq!(cost_badge(0.25, 2.0), Some("$0.25/$2".into()));
         assert_eq!(cost_badge(15.0, 75.0), Some("$15/$75".into()));
+    }
+
+    #[test]
+    fn fmt_duration_switches_units() {
+        assert_eq!(fmt_duration(0), "0ms");
+        assert_eq!(fmt_duration(842), "842ms");
+        assert_eq!(fmt_duration(1500), "1.5s");
+        assert_eq!(fmt_duration(75_000), "1m15s");
+    }
+
+    #[test]
+    fn fmt_cost_keeps_sub_cent_spend_visible() {
+        assert_eq!(fmt_cost(0.0), None);
+        assert_eq!(fmt_cost(0.0004), Some("$0.0004".into()));
+        assert_eq!(fmt_cost(1.239), Some("$1.24".into()));
     }
 
     #[test]

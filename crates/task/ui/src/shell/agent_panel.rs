@@ -33,11 +33,19 @@ pub fn AgentPanel() -> Element {
     // autocomplete.
     let models = use_resource(move || {
         let slug = active();
-        async move { crate::feeds::fetch_agent_models(&slug).await.unwrap_or_default() }
+        async move {
+            crate::feeds::fetch_agent_models(&slug)
+                .await
+                .unwrap_or_default()
+        }
     });
     let skills = use_resource(move || {
         let slug = active();
-        async move { crate::feeds::fetch_agent_skills(&slug).await.unwrap_or_default() }
+        async move {
+            crate::feeds::fetch_agent_skills(&slug)
+                .await
+                .unwrap_or_default()
+        }
     });
     let model_list = models.read().clone().unwrap_or_default();
     let skill_list = skills.read().clone().unwrap_or_default();
@@ -66,7 +74,10 @@ pub fn AgentPanel() -> Element {
         .or_else(|| {
             // Nothing chosen yet: default to the most recent
             // conversation so the panel is useful on first open.
-            selected_id.is_empty().then(|| rows.first().cloned()).flatten()
+            selected_id
+                .is_empty()
+                .then(|| rows.first().cloned())
+                .flatten()
         });
 
     let new_chat = move |_| {
@@ -82,12 +93,20 @@ pub fn AgentPanel() -> Element {
     rsx! {
         // ── Conversations segment ──
         div { class: "flex items-center justify-between gap-2 px-3 py-2",
-            div { class: "flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
+            div { class: "flex min-w-0 items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground",
                 Bot { size: 13 }
                 span { "Agents" }
                 if !rows.is_empty() {
                     span { class: "font-normal tabular-nums tracking-normal text-muted-foreground/60",
                         "{rows.len()}"
+                    }
+                }
+                // Gateway reachability, so a dead backend is visible
+                // before you type into a chat that can't answer.
+                div { class: "tracking-normal",
+                    crate::pages::agents::GatewayChip {
+                        slug: active(),
+                        backend_id: "hermes".to_string(),
                     }
                 }
             }

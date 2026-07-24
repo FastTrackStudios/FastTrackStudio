@@ -1,13 +1,19 @@
-//! The streaming turn worker — one OpenAI-compatible
-//! `chat/completions` request with `stream: true`, SSE chunks
-//! translated into [`AgentEvent`]s on the session's broadcast
-//! channel.
+//! The streaming turn worker.
 //!
-//! Hermes extends the standard stream with custom event objects
-//! (e.g. `hermes.tool.progress`); anything that isn't a
-//! `chat.completion.chunk` is surfaced as `ToolProgress` /
-//! `Warning` rather than dropped, so the UI can show the agent
-//! working even before text arrives.
+//! Two transports, same [`AgentEvent`] output:
+//!
+//! 1. [`crate::responses`] — `POST /v1/responses`, the structured
+//!    stream (tool starts with arguments, tool results, usage). This
+//!    is what makes the UI's activity timeline light up, so it's
+//!    tried first.
+//! 2. This module's `chat/completions` path — text deltas and usage
+//!    only, kept as the fallback for gateways predating the
+//!    Responses API.
+//!
+//! Hermes extends the legacy stream with custom event objects (e.g.
+//! `hermes.tool.progress`); anything that isn't a
+//! `chat.completion.chunk` is surfaced as `ToolProgress` / `Warning`
+//! rather than dropped, so the UI never goes silent mid-tool.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,13 +25,75 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
 use crate::HermesConfig;
+use crate::responses::{TurnError, run_turn_responses};
 
 /// Outcome of one streamed turn.
+#[derive(Default)]
 pub(crate) struct TurnOutcome {
     pub text: String,
     pub reasoning: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Priced from the models.dev catalog when the effective model
+    /// is a known provider model; `0.0` for the gateway's own
+    /// façade model (whose cost we can't attribute).
+    pub cost_usd: f32,
+    /// Chain id for the next turn (Responses transport only).
+    pub response_id: String,
+}
+
+/// Cost in USD for a turn's token counts, from the cached catalog.
+pub(crate) fn price_turn(model: &str, input_tokens: u64, output_tokens: u64) -> f32 {
+    let Some((cin, cout)) = crate::discovery::cached_price(model) else {
+        return 0.0;
+    };
+    let dollars =
+        (input_tokens as f64 / 1_000_000.0) * cin + (output_tokens as f64 / 1_000_000.0) * cout;
+    dollars as f32
+}
+
+/// Drive an SSE body, handing each decoded `data:` payload to
+/// `on_data` (returning `false` stops the pump). Frames may straddle
+/// TCP chunks, so the tail stays buffered; `event:` lines are
+/// ignored — every payload we care about names its own `type`.
+pub(crate) async fn pump_sse<F>(
+    resp: reqwest::Response,
+    cancel: &Arc<AtomicBool>,
+    mut on_data: F,
+) -> Result<(), String>
+where
+    F: FnMut(&Value) -> bool,
+{
+    let mut buf = String::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let bytes = chunk.map_err(|e| format!("hermes stream: {e}"))?;
+        buf.push_str(&String::from_utf8_lossy(&bytes));
+        while let Some(pos) = buf.find('\n') {
+            let line = buf[..pos].trim().to_string();
+            buf.drain(..=pos);
+            let Some(data) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data.is_empty() {
+                continue;
+            }
+            if data == "[DONE]" {
+                return Ok(());
+            }
+            let Ok(v) = serde_json::from_str::<Value>(data) else {
+                continue;
+            };
+            if !on_data(&v) {
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Serialize the Task-side transcript into the OpenAI `messages`
@@ -58,13 +126,101 @@ pub(crate) fn wire_messages(history: &[Message]) -> Vec<Value> {
         .collect()
 }
 
-/// Run one streaming turn against the gateway. Emits
-/// `MessageDelta` / `ReasoningDelta` / `ToolProgress` on
-/// `events_tx` as chunks arrive; returns the accumulated result.
-/// Checks `cancel` between chunks — a cancelled turn returns what
-/// it has with no error.
+/// Run one streaming turn against the gateway, preferring the
+/// structured Responses transport and falling back to
+/// `chat/completions` when the gateway doesn't serve it.
+///
+/// `previous_response_id` chains this turn onto the last one so the
+/// agent keeps its gateway-side session; a dropped chain silently
+/// replays the full transcript. Emits `MessageDelta` /
+/// `ReasoningDelta` / `ToolStarted` / `ToolFinished` / `Metering` on
+/// `events_tx` as the turn runs; a cancelled turn returns what it
+/// has with no error.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_turn(
+    http: &reqwest::Client,
+    cfg: &HermesConfig,
+    session_id: &str,
+    session_key: &str,
+    message_id: &str,
+    model: &str,
+    messages: Vec<Value>,
+    previous_response_id: &str,
+    legacy_transport: &AtomicBool,
+    events_tx: &broadcast::Sender<AgentEvent>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<TurnOutcome, String> {
+    let mut chain = previous_response_id;
+    while !legacy_transport.load(Ordering::Relaxed) {
+        for attempt in 0..2 {
+            match run_turn_responses(
+                http,
+                cfg,
+                session_id,
+                session_key,
+                message_id,
+                model,
+                &messages,
+                chain,
+                events_tx,
+                cancel,
+            )
+            .await
+            {
+                Ok(mut outcome) => {
+                    outcome.cost_usd =
+                        price_turn(model, outcome.input_tokens, outcome.output_tokens);
+                    if outcome.cost_usd > 0.0 {
+                        let _ = events_tx.send(AgentEvent::Metering {
+                            session_id: session_id.to_string(),
+                            input_tokens: outcome.input_tokens,
+                            output_tokens: outcome.output_tokens,
+                            estimated_cost_usd: outcome.cost_usd,
+                        });
+                    }
+                    return Ok(outcome);
+                }
+                // The gateway forgot the chain (restart, eviction) —
+                // replay everything, which also re-seeds it.
+                Err(TurnError::ChainLost) if attempt == 0 => {
+                    let _ = events_tx.send(AgentEvent::Warning {
+                        session_id: session_id.to_string(),
+                        kind: "session".to_string(),
+                        message: "gateway session expired — replaying the transcript".to_string(),
+                    });
+                    chain = "";
+                }
+                Err(TurnError::ChainLost) => {
+                    return Err("hermes: lost the session chain".to_string());
+                }
+                // Pre-Responses gateway: latch the verdict so later
+                // turns don't pay the failed round-trip.
+                Err(TurnError::Unsupported) => {
+                    legacy_transport.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Err(TurnError::Failed(e)) => return Err(e),
+            }
+        }
+        break;
+    }
+    run_turn_chat(
+        http,
+        cfg,
+        session_id,
+        session_key,
+        message_id,
+        model,
+        messages,
+        events_tx,
+        cancel,
+    )
+    .await
+}
+
+/// The legacy `chat/completions` transport — text and usage only.
+#[allow(clippy::too_many_arguments)]
+async fn run_turn_chat(
     http: &reqwest::Client,
     cfg: &HermesConfig,
     session_id: &str,
@@ -102,41 +258,13 @@ pub(crate) async fn run_turn(
         return Err(format!("hermes: HTTP {status}: {text}"));
     }
 
-    let mut outcome = TurnOutcome {
-        text: String::new(),
-        reasoning: String::new(),
-        input_tokens: 0,
-        output_tokens: 0,
-    };
-    let mut buf = String::new();
-    let mut stream = resp.bytes_stream();
-    'outer: while let Some(chunk) = stream.next().await {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        let bytes = chunk.map_err(|e| format!("hermes stream: {e}"))?;
-        buf.push_str(&String::from_utf8_lossy(&bytes));
-        // SSE frames are `data: <json>\n\n`; a TCP chunk may carry
-        // several frames or a partial one — keep the tail in `buf`.
-        while let Some(pos) = buf.find('\n') {
-            let line = buf[..pos].trim().to_string();
-            buf.drain(..=pos);
-            let Some(data) = line.strip_prefix("data:") else {
-                continue;
-            };
-            let data = data.trim();
-            if data.is_empty() {
-                continue;
-            }
-            if data == "[DONE]" {
-                break 'outer;
-            }
-            let Ok(v) = serde_json::from_str::<Value>(data) else {
-                continue;
-            };
-            handle_chunk(&v, session_id, message_id, events_tx, &mut outcome);
-        }
-    }
+    let mut outcome = TurnOutcome::default();
+    pump_sse(resp, cancel, |v| {
+        handle_chunk(v, session_id, message_id, events_tx, &mut outcome);
+        true
+    })
+    .await?;
+    outcome.cost_usd = price_turn(model, outcome.input_tokens, outcome.output_tokens);
     Ok(outcome)
 }
 
@@ -268,12 +396,7 @@ mod tests {
     #[test]
     fn chunk_deltas_accumulate_and_emit() {
         let (tx, mut rx) = broadcast::channel(16);
-        let mut outcome = TurnOutcome {
-            text: String::new(),
-            reasoning: String::new(),
-            input_tokens: 0,
-            output_tokens: 0,
-        };
+        let mut outcome = TurnOutcome::default();
         let chunk: Value = serde_json::json!({
             "object": "chat.completion.chunk",
             "choices": [{"delta": {"content": "Hel"}}],
@@ -296,12 +419,7 @@ mod tests {
     #[test]
     fn hermes_tool_event_becomes_tool_progress() {
         let (tx, mut rx) = broadcast::channel(16);
-        let mut outcome = TurnOutcome {
-            text: String::new(),
-            reasoning: String::new(),
-            input_tokens: 0,
-            output_tokens: 0,
-        };
+        let mut outcome = TurnOutcome::default();
         let ev: Value = serde_json::json!({
             "object": "hermes.tool.progress",
             "message": "running terminal command",
@@ -309,7 +427,9 @@ mod tests {
         });
         handle_chunk(&ev, "s1", "m1", &tx, &mut outcome);
         match rx.try_recv().unwrap() {
-            AgentEvent::ToolProgress { preview, progress, .. } => {
+            AgentEvent::ToolProgress {
+                preview, progress, ..
+            } => {
                 assert_eq!(preview, "running terminal command");
                 assert!((progress - 0.5).abs() < f32::EPSILON);
             }

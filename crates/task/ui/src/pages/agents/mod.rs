@@ -5,13 +5,21 @@
 //! - **Session rail** — searchable, pinned-first, hover actions,
 //!   priority status pills, hash-colored subagent chips.
 //! - **Chat pane** — a derived row timeline ([`timeline`]): turn
-//!   folds ("N tool calls · 0:42") above settled assistant
-//!   messages, live activity chips with status glyphs, streaming
-//!   markdown, a ticking Working row; composer with queue-while-
-//!   busy sends, `/` + `$` ranked autocomplete, a model chip fed by
-//!   Discovery, and a CSS-only context ring.
-//! - **Inspector** — session meta + actions, skill library,
-//!   capability flags.
+//!   folds ("3 tool calls · 1 failed · 0:42") above settled
+//!   assistant messages, live activity rows that expand to the
+//!   call's arguments and result, streaming markdown, and a status
+//!   row naming the tool in flight. Composer with queue-while-busy
+//!   sends, `/` + `$` ranked autocomplete, a model chip fed by
+//!   Discovery, a CSS-only context ring, and running spend.
+//! - **Inspector** — session meta + actions, live backend health,
+//!   skill library, capability flags.
+//!
+//! Two health signals sit in the header: the **event lane** (this
+//! UI's subscription, which reconnects on its own with backoff) and
+//! the **backend** ([`GatewayChip`], polled from
+//! `Discovery::backend_health`). They fail independently — the lane
+//! can drop while the gateway is fine, and vice versa — so both are
+//! shown rather than collapsed into one "online" dot.
 //!
 //! All decidable behavior lives in [`logic`] / [`timeline`] as
 //! pure, tested functions (the t3code `*.logic.ts` pattern); the
@@ -32,10 +40,10 @@ use fts_ui::lucide_dioxus::{Archive, Bot, Copy, Info, Pin, Trash2};
 use fts_ui::prelude::*;
 
 use logic::{
-    context_free_percent, context_ring_style, cost_badge, fmt_elapsed, fmt_tokens, group_models,
-    hash_hsl, rank_by, relative_time, status_pill,
+    context_free_percent, context_ring_style, cost_badge, fmt_cost, fmt_duration, fmt_elapsed,
+    fmt_tokens, group_models, hash_hsl, rank_by, relative_time, status_pill,
 };
-use timeline::{ActivityLine, Row, ToolTone, TurnLog, fold_summary, push_line, settle_tool};
+use timeline::{ActivityLine, Row, ToolTone, TurnLog, push_line, running_tool, settle_tool};
 
 /// Duty-cycled pulse (t3code: `steps()` timing keeps the
 /// compositor cheap) + halo styling utility classes can't express.
@@ -76,19 +84,25 @@ pub fn AgentsView(session: String) -> Element {
     // Discovery — live models / skills / capabilities for the active org.
     let models = use_resource(move || async move {
         match active() {
-            Some(s) => crate::feeds::fetch_agent_models(&s).await.unwrap_or_default(),
+            Some(s) => crate::feeds::fetch_agent_models(&s)
+                .await
+                .unwrap_or_default(),
             None => Vec::new(),
         }
     });
     let skills = use_resource(move || async move {
         match active() {
-            Some(s) => crate::feeds::fetch_agent_skills(&s).await.unwrap_or_default(),
+            Some(s) => crate::feeds::fetch_agent_skills(&s)
+                .await
+                .unwrap_or_default(),
             None => Vec::new(),
         }
     });
     let capabilities = use_resource(move || async move {
         match active() {
-            Some(s) => crate::feeds::fetch_agent_capabilities(&s).await.unwrap_or_default(),
+            Some(s) => crate::feeds::fetch_agent_capabilities(&s)
+                .await
+                .unwrap_or_default(),
             None => Vec::new(),
         }
     });
@@ -121,7 +135,9 @@ pub fn AgentsView(session: String) -> Element {
             match crate::feeds::create_agent_session(&slug, "", "").await {
                 Ok(s) => {
                     create_error.set(String::new());
-                    nav.push(crate::routes::Route::AgentsRoute { session: s.id.clone() });
+                    nav.push(crate::routes::Route::AgentsRoute {
+                        session: s.id.clone(),
+                    });
                     selected.set(Some((slug, s)));
                     sessions.restart();
                 }
@@ -141,12 +157,12 @@ pub fn AgentsView(session: String) -> Element {
                 SessionAction::Pin(v) => crate::feeds::pin_agent_session(&slug, &id, v)
                     .await
                     .map(|_| ()),
-                SessionAction::Archive(v) => {
-                    crate::feeds::archive_agent_session(&slug, &id, v).await.map(|_| ())
-                }
-                SessionAction::Rename(t) => {
-                    crate::feeds::rename_agent_session(&slug, &id, &t).await.map(|_| ())
-                }
+                SessionAction::Archive(v) => crate::feeds::archive_agent_session(&slug, &id, v)
+                    .await
+                    .map(|_| ()),
+                SessionAction::Rename(t) => crate::feeds::rename_agent_session(&slug, &id, &t)
+                    .await
+                    .map(|_| ()),
                 SessionAction::Delete => crate::feeds::delete_agent_session(&slug, &id).await,
             };
             if let Err(e) = res {
@@ -247,10 +263,16 @@ struct CompletionRow {
 /// the gateway has no commands-discovery endpoint yet; keep in sync
 /// with `hermes --help` when bumping the input.
 const HERMES_COMMANDS: &[(&str, &str)] = &[
-    ("/new", "Start a fresh context (clears the session's history)"),
+    (
+        "/new",
+        "Start a fresh context (clears the session's history)",
+    ),
     ("/model", "Show or switch the model for this session"),
     ("/skills", "List the agent's learned skills"),
-    ("/learn", "Teach the agent a new skill from this conversation"),
+    (
+        "/learn",
+        "Teach the agent a new skill from this conversation",
+    ),
     ("/journey", "Show what the agent has learned over time"),
     ("/compact", "Compress older context into a summary"),
     ("/status", "Agent + backend status"),
@@ -268,9 +290,9 @@ fn completion_trigger(text: &str) -> Option<(char, String, usize)> {
             return Some(('/', rest.to_lowercase(), 0));
         }
     }
-    let start = text
-        .rfind(char::is_whitespace)
-        .map_or(0, |i| i + text[i..].chars().next().map_or(1, char::len_utf8));
+    let start = text.rfind(char::is_whitespace).map_or(0, |i| {
+        i + text[i..].chars().next().map_or(1, char::len_utf8)
+    });
     let token = &text[start..];
     if let Some(q) = token.strip_prefix('$') {
         return Some(('$', q.to_lowercase(), start));
@@ -287,6 +309,30 @@ enum SessionAction {
     Delete,
 }
 
+/// Display label for a tool call — the backend's own summary when
+/// it supplied one, else the bare tool name.
+fn tool_label(tool_call: &agent_proto::tool::ToolCall) -> String {
+    if tool_call.title.is_empty() {
+        tool_call.name.clone()
+    } else {
+        tool_call.title.clone()
+    }
+}
+
+/// Re-indent a JSON argument blob for the expanded tool row. Non-JSON
+/// (or empty) payloads pass through untouched — some tools take a
+/// bare string.
+fn pretty_json(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "{}" {
+        return String::new();
+    }
+    serde_json::from_str::<serde_json::Value>(trimmed)
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+        .unwrap_or_else(|| trimmed.to_string())
+}
+
 /// Backend chip styling — Hermes gets the primary accent.
 fn backend_chip_cls(backend_id: &str) -> &'static str {
     if backend_id == "hermes" {
@@ -301,7 +347,11 @@ fn backend_chip_cls(backend_id: &str) -> &'static str {
 /// list with context/cost/reasoning badges, active model floated
 /// first. Selection is session-only.
 #[component]
-fn ModelPicker(models: Vec<ModelInfo>, current: String, on_pick: EventHandler<ModelInfo>) -> Element {
+fn ModelPicker(
+    models: Vec<ModelInfo>,
+    current: String,
+    on_pick: EventHandler<ModelInfo>,
+) -> Element {
     let mut open = use_signal(|| false);
     let mut search = use_signal(String::new);
     let mut provider = use_signal(|| None::<String>);
@@ -312,7 +362,13 @@ fn ModelPicker(models: Vec<ModelInfo>, current: String, on_pick: EventHandler<Mo
         models
             .iter()
             .find(|m| m.id == current)
-            .map(|m| if m.label.is_empty() { m.id.clone() } else { m.label.clone() })
+            .map(|m| {
+                if m.label.is_empty() {
+                    m.id.clone()
+                } else {
+                    m.label.clone()
+                }
+            })
             .unwrap_or_else(|| current.clone())
     };
 
@@ -324,9 +380,7 @@ fn ModelPicker(models: Vec<ModelInfo>, current: String, on_pick: EventHandler<Mo
         .filter(|(pid, _, _)| provider.read().as_ref().is_none_or(|sel| sel == pid))
         .flat_map(|(_, _, ms)| ms.iter().cloned())
         .filter(|m| {
-            q.is_empty()
-                || m.label.to_lowercase().contains(&q)
-                || m.id.to_lowercase().contains(&q)
+            q.is_empty() || m.label.to_lowercase().contains(&q) || m.id.to_lowercase().contains(&q)
         })
         .collect();
 
@@ -464,8 +518,87 @@ fn ModelPicker(models: Vec<ModelInfo>, current: String, on_pick: EventHandler<Mo
 #[derive(Clone, PartialEq)]
 enum StreamState {
     Connecting,
-    Live,
-    Dead(String),
+    /// Connected. The count is how many times we've had to
+    /// reconnect — non-zero is worth showing.
+    Live(u32),
+    /// Disconnected, retrying in `secs`.
+    Retrying {
+        why: String,
+        secs: u32,
+    },
+}
+
+/// The backend's own status, polled from `Discovery::backend_health`.
+/// Renders as a chip whose tooltip carries the detail (state,
+/// connected platforms, in-flight agents, probe latency).
+#[component]
+pub(crate) fn GatewayChip(slug: String, backend_id: String) -> Element {
+    // Poll rather than subscribe: health is cheap, changes slowly,
+    // and a dead gateway can't push us an event saying so.
+    let mut health = use_resource(use_reactive!(|(slug,)| async move {
+        crate::feeds::fetch_agent_health(&slug).await
+    }));
+    let mut tick = use_signal(|| 0u32);
+    use_future(move || async move {
+        loop {
+            architect::platform::sleep(std::time::Duration::from_secs(20)).await;
+            tick += 1;
+        }
+    });
+    use_effect(move || {
+        let _ = tick();
+        health.restart();
+    });
+
+    let row = health.read().as_ref().and_then(|r| {
+        r.as_ref()
+            .ok()
+            .and_then(|rows| rows.iter().find(|h| h.backend_id == backend_id).cloned())
+    });
+    let Some(h) = row else {
+        return rsx! {};
+    };
+
+    let mut detail = Vec::new();
+    if !h.state.is_empty() {
+        detail.push(h.state.clone());
+    }
+    if h.active_agents > 0 {
+        detail.push(format!("{} agent(s) running", h.active_agents));
+    }
+    if !h.platforms.is_empty() {
+        detail.push(format!("via {}", h.platforms.join(", ")));
+    }
+    if h.last_ping_ms > 0 {
+        detail.push(format!("{}ms", h.last_ping_ms));
+    }
+    if !h.status_text.is_empty() {
+        detail.push(h.status_text.clone());
+    }
+    let tooltip = detail.join(" · ");
+
+    if !h.reachable {
+        return rsx! {
+            span {
+                class: "shrink-0 rounded-full bg-destructive/15 px-1.5 text-[0.7rem] text-destructive",
+                title: "{tooltip}",
+                "⚠ {backend_id} unreachable"
+            }
+        };
+    }
+    // Reachable and quiet is the normal case — stay out of the way,
+    // but keep the tooltip and a busy count when work is in flight.
+    rsx! {
+        span {
+            class: "shrink-0 rounded-full bg-muted/50 px-1.5 text-[0.7rem] text-muted-foreground",
+            title: "{tooltip}",
+            if h.active_agents > 0 {
+                "{backend_id} · {h.active_agents} busy"
+            } else {
+                "{backend_id} ok"
+            }
+        }
+    }
 }
 
 /// One open conversation. Keyed by session id — remounting on
@@ -502,7 +635,11 @@ pub(crate) fn ChatPane(
     let mut model = use_signal(String::new);
     let mut responding = use_signal(String::new);
     let mut stream_state = use_signal(|| StreamState::Connecting);
+    // Why the last subscription ended — read back by the reconnect
+    // loop so the chip can say what went wrong.
+    let closed_reason = use_signal(String::new);
     let mut tokens = use_signal(|| (session.usage.input_tokens, session.usage.output_tokens));
+    let mut spend = use_signal(|| session.usage.estimated_cost_usd);
     let mut turn_started = use_signal(|| None::<chrono::DateTime<chrono::Utc>>);
     let mut elapsed = use_signal(|| 0i64);
 
@@ -556,6 +693,9 @@ pub(crate) fn ChatPane(
     });
 
     // Transcript load + live event pump, once per mounted session.
+    // The pump reconnects on its own: a dropped lane (server
+    // restart, network blip) used to leave the chat silently dead
+    // until you reselected it.
     let stream_slug = slug.clone();
     let stream_sid = session_id.clone();
     use_future(move || {
@@ -570,187 +710,244 @@ pub(crate) fn ChatPane(
                 Err(e) => error.set(format!("Couldn't load the transcript: {e}")),
             }
 
-            let (tx, mut rx) = vox::channel::<AgentEvent>();
-            let sub_slug = slug.clone();
-            let sub_sid = sid.clone();
-            spawn(async move {
-                let outcome = crate::feeds::subscribe_agent_session(&sub_slug, &sub_sid, tx).await;
-                let msg = match outcome {
-                    Ok(()) => "event stream closed by the server".to_string(),
-                    Err(e) => e,
-                };
-                stream_state.set(StreamState::Dead(msg));
-            });
-            stream_state.set(StreamState::Live);
-            while let Ok(Some(ev)) = rx.recv().await {
-                match ev.get().clone() {
-                    AgentEvent::TurnStarted { at, .. } => {
-                        busy.set(true);
-                        error.set(String::new());
-                        reasoning.set(String::new());
-                        live_lines.set(Vec::new());
-                        turn_started.set(Some(at));
-                        elapsed.set(0);
-                        on_activity.call(());
+            // `attempt` drives the backoff and resets after a
+            // connection that actually held; `reconnects` is the
+            // lifetime count the chip reports.
+            let mut attempt: u32 = 0;
+            let mut reconnects: u32 = 0;
+            loop {
+                if attempt > 0 {
+                    // Capped exponential backoff, then re-pull the
+                    // transcript so anything missed while we were
+                    // disconnected lands before the stream resumes.
+                    let secs = 2u32.saturating_pow(attempt.min(4)).min(30);
+                    let why = match &*stream_state.peek() {
+                        StreamState::Retrying { why, .. } => why.clone(),
+                        _ => "disconnected".to_string(),
+                    };
+                    stream_state.set(StreamState::Retrying { why, secs });
+                    architect::platform::sleep(std::time::Duration::from_secs(u64::from(secs)))
+                        .await;
+                    if let Ok(mut msgs) = crate::feeds::fetch_agent_messages(&slug, &sid).await {
+                        msgs.reverse();
+                        messages.set(msgs);
                     }
-                    AgentEvent::MessageWritten { message } => {
-                        if streaming
-                            .peek()
-                            .as_ref()
-                            .is_some_and(|(id, _)| *id == message.id)
-                        {
-                            streaming.set(None);
+                }
+
+                let (tx, mut rx) = vox::channel::<AgentEvent>();
+                let mut closed_w = closed_reason;
+                let sub_slug = slug.clone();
+                let sub_sid = sid.clone();
+                spawn(async move {
+                    let outcome =
+                        crate::feeds::subscribe_agent_session(&sub_slug, &sub_sid, tx).await;
+                    closed_w.set(match outcome {
+                        Ok(()) => "the server closed the event stream".to_string(),
+                        Err(e) => e,
+                    });
+                });
+                stream_state.set(StreamState::Live(reconnects));
+                attempt += 1;
+                let connected_at = chrono::Utc::now();
+                while let Ok(Some(ev)) = rx.recv().await {
+                    match ev.get().clone() {
+                        AgentEvent::TurnStarted { at, .. } => {
+                            busy.set(true);
+                            error.set(String::new());
+                            reasoning.set(String::new());
+                            live_lines.set(Vec::new());
+                            turn_started.set(Some(at));
+                            elapsed.set(0);
+                            on_activity.call(());
                         }
-                        let mut list = messages.write();
-                        if let Some(existing) = list.iter_mut().find(|m| m.id == message.id) {
-                            *existing = message;
-                        } else if matches!(message.role, Role::User)
-                            && list.last().is_some_and(|m| {
-                                m.id.starts_with("local-") && text_of(m) == text_of(&message)
-                            })
-                        {
-                            *list.last_mut().expect("non-empty") = message;
-                        } else {
-                            list.push(message);
-                        }
-                    }
-                    AgentEvent::MessageDelta {
-                        message_id,
-                        content_delta,
-                        ..
-                    } => {
-                        let mut cur = streaming.write();
-                        match cur.as_mut() {
-                            Some((id, text)) if *id == message_id => text.push_str(&content_delta),
-                            _ => *cur = Some((message_id, content_delta)),
-                        }
-                    }
-                    AgentEvent::ReasoningDelta { delta, .. } => {
-                        reasoning.write().push_str(&delta);
-                    }
-                    AgentEvent::ToolStarted { tool_call } => {
-                        push_line(
-                            &mut live_lines.write(),
-                            ActivityLine {
-                                tone: ToolTone::Running,
-                                text: if tool_call.title.is_empty() {
-                                    tool_call.name.clone()
-                                } else {
-                                    tool_call.title.clone()
-                                },
-                                tool_id: tool_call.id.clone(),
-                            },
-                        );
-                    }
-                    AgentEvent::ToolFinished { tool_call } => {
-                        let ok = !matches!(tool_call.status, agent_proto::tool::ToolStatus::Error);
-                        settle_tool(
-                            &mut live_lines.write(),
-                            &tool_call.id,
-                            if tool_call.title.is_empty() {
-                                tool_call.name.clone()
+                        AgentEvent::MessageWritten { message } => {
+                            if streaming
+                                .peek()
+                                .as_ref()
+                                .is_some_and(|(id, _)| *id == message.id)
+                            {
+                                streaming.set(None);
+                            }
+                            let mut list = messages.write();
+                            if let Some(existing) = list.iter_mut().find(|m| m.id == message.id) {
+                                *existing = message;
+                            } else if matches!(message.role, Role::User)
+                                && list.last().is_some_and(|m| {
+                                    m.id.starts_with("local-") && text_of(m) == text_of(&message)
+                                })
+                            {
+                                *list.last_mut().expect("non-empty") = message;
                             } else {
-                                tool_call.title.clone()
-                            },
-                            ok,
-                            tool_call.duration_ms,
-                        );
-                    }
-                    AgentEvent::ToolProgress { preview, .. } => {
-                        push_line(
-                            &mut live_lines.write(),
-                            ActivityLine {
-                                tone: ToolTone::Note,
-                                text: preview,
-                                tool_id: String::new(),
-                            },
-                        );
-                    }
-                    AgentEvent::Warning { kind, message, .. } => {
-                        push_line(
-                            &mut live_lines.write(),
-                            ActivityLine {
-                                tone: ToolTone::Note,
-                                text: format!("{kind}: {message}"),
-                                tool_id: String::new(),
-                            },
-                        );
-                    }
-                    AgentEvent::QuestionAsked { request } => {
-                        pending_question.set(Some(request));
-                    }
-                    AgentEvent::QuestionResolved { .. } => pending_question.set(None),
-                    AgentEvent::Metering {
-                        input_tokens,
-                        output_tokens,
-                        ..
-                    } => tokens.set((input_tokens, output_tokens)),
-                    AgentEvent::TurnFinished { message_id, at, .. } => {
-                        // Fold the live work log behind its assistant
-                        // message (t3code's turn fold).
-                        let duration = turn_started
-                            .peek()
-                            .as_ref()
-                            .map(|t0| (at - *t0).num_seconds().max(0))
-                            .unwrap_or(0);
-                        let lines = std::mem::take(&mut *live_lines.write());
-                        let r = std::mem::take(&mut *reasoning.write());
-                        if !lines.is_empty() || !r.is_empty() {
-                            turns.write().insert(
-                                message_id,
-                                TurnLog {
-                                    lines,
-                                    reasoning: r,
-                                    duration_secs: duration,
+                                list.push(message);
+                            }
+                        }
+                        AgentEvent::MessageDelta {
+                            message_id,
+                            content_delta,
+                            ..
+                        } => {
+                            let mut cur = streaming.write();
+                            match cur.as_mut() {
+                                Some((id, text)) if *id == message_id => {
+                                    text.push_str(&content_delta)
+                                }
+                                _ => *cur = Some((message_id, content_delta)),
+                            }
+                        }
+                        AgentEvent::ReasoningDelta { delta, .. } => {
+                            reasoning.write().push_str(&delta);
+                        }
+                        AgentEvent::ToolStarted { tool_call } => {
+                            push_line(
+                                &mut live_lines.write(),
+                                ActivityLine {
+                                    tone: ToolTone::Running,
+                                    text: tool_label(&tool_call),
+                                    tool_id: tool_call.id.clone(),
+                                    args: pretty_json(&tool_call.input_json),
+                                    output: String::new(),
+                                    duration_ms: 0,
                                 },
                             );
                         }
-                        busy.set(false);
-                        streaming.set(None);
-                        responding.set(String::new());
-                        turn_started.set(None);
-                        on_activity.call(());
-                        // Drain the queue.
-                        let next = {
-                            let mut q = queued.write();
-                            if q.is_empty() { None } else { Some(q.remove(0)) }
-                        };
-                        if let Some(text) = next {
-                            dispatch_text(text);
+                        AgentEvent::ToolFinished { tool_call } => {
+                            let ok =
+                                !matches!(tool_call.status, agent_proto::tool::ToolStatus::Error);
+                            settle_tool(
+                                &mut live_lines.write(),
+                                &tool_call.id,
+                                tool_label(&tool_call),
+                                ok,
+                                tool_call.duration_ms,
+                                if tool_call.output_json.is_empty() {
+                                    tool_call.preview.clone()
+                                } else {
+                                    tool_call.output_json.clone()
+                                },
+                            );
                         }
-                    }
-                    AgentEvent::TurnErrored { kind, message, .. } => {
-                        busy.set(false);
-                        streaming.set(None);
-                        responding.set(String::new());
-                        turn_started.set(None);
-                        error.set(format!("{kind}: {message}"));
-                        on_activity.call(());
-                    }
-                    AgentEvent::TurnCancelled { .. } => {
-                        busy.set(false);
-                        streaming.set(None);
-                        responding.set(String::new());
-                        turn_started.set(None);
-                        push_line(
-                            &mut live_lines.write(),
-                            ActivityLine {
-                                tone: ToolTone::Note,
-                                text: "cancelled".to_string(),
-                                tool_id: String::new(),
-                            },
-                        );
-                        on_activity.call(());
-                    }
-                    AgentEvent::Resync => {
-                        if let Ok(mut msgs) = crate::feeds::fetch_agent_messages(&slug, &sid).await
-                        {
-                            msgs.reverse();
-                            messages.set(msgs);
+                        AgentEvent::ToolProgress { preview, .. } => {
+                            push_line(&mut live_lines.write(), ActivityLine::note(preview));
                         }
+                        AgentEvent::Warning { kind, message, .. } => {
+                            push_line(
+                                &mut live_lines.write(),
+                                ActivityLine::note(format!("{kind}: {message}")),
+                            );
+                        }
+                        AgentEvent::CompressionStarted { engine, .. } => {
+                            push_line(
+                                &mut live_lines.write(),
+                                ActivityLine::note(format!("compressing context ({engine})")),
+                            );
+                        }
+                        AgentEvent::CompressionFinished { .. } => {
+                            push_line(
+                                &mut live_lines.write(),
+                                ActivityLine::note("context compressed"),
+                            );
+                        }
+                        AgentEvent::QuestionAsked { request } => {
+                            pending_question.set(Some(request));
+                        }
+                        AgentEvent::QuestionResolved { .. } => pending_question.set(None),
+                        AgentEvent::Metering {
+                            input_tokens,
+                            output_tokens,
+                            estimated_cost_usd,
+                            ..
+                        } => {
+                            tokens.set((input_tokens, output_tokens));
+                            if estimated_cost_usd > 0.0 {
+                                spend += estimated_cost_usd;
+                            }
+                        }
+                        AgentEvent::TurnFinished { message_id, at, .. } => {
+                            // Fold the live work log behind its assistant
+                            // message (t3code's turn fold).
+                            let duration = turn_started
+                                .peek()
+                                .as_ref()
+                                .map(|t0| (at - *t0).num_seconds().max(0))
+                                .unwrap_or(0);
+                            let lines = std::mem::take(&mut *live_lines.write());
+                            let r = std::mem::take(&mut *reasoning.write());
+                            if !lines.is_empty() || !r.is_empty() {
+                                turns.write().insert(
+                                    message_id,
+                                    TurnLog {
+                                        lines,
+                                        reasoning: r,
+                                        duration_secs: duration,
+                                    },
+                                );
+                            }
+                            busy.set(false);
+                            streaming.set(None);
+                            responding.set(String::new());
+                            turn_started.set(None);
+                            on_activity.call(());
+                            // Drain the queue.
+                            let next = {
+                                let mut q = queued.write();
+                                if q.is_empty() {
+                                    None
+                                } else {
+                                    Some(q.remove(0))
+                                }
+                            };
+                            if let Some(text) = next {
+                                dispatch_text(text);
+                            }
+                        }
+                        AgentEvent::TurnErrored { kind, message, .. } => {
+                            busy.set(false);
+                            streaming.set(None);
+                            responding.set(String::new());
+                            turn_started.set(None);
+                            error.set(format!("{kind}: {message}"));
+                            on_activity.call(());
+                        }
+                        AgentEvent::TurnCancelled { .. } => {
+                            busy.set(false);
+                            streaming.set(None);
+                            responding.set(String::new());
+                            turn_started.set(None);
+                            push_line(&mut live_lines.write(), ActivityLine::note("cancelled"));
+                            on_activity.call(());
+                        }
+                        AgentEvent::Resync => {
+                            if let Ok(mut msgs) =
+                                crate::feeds::fetch_agent_messages(&slug, &sid).await
+                            {
+                                msgs.reverse();
+                                messages.set(msgs);
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
+                // The lane closed. Fall through to the backoff at
+                // the top of the loop; a turn that was in flight is
+                // no longer being reported, so stop the spinner.
+                reconnects += 1;
+                // A connection that held for a while is evidence the
+                // server is fine — don't make the next blip wait out
+                // an escalated backoff.
+                if (chrono::Utc::now() - connected_at).num_seconds() > 60 {
+                    attempt = 1;
+                }
+                let why = closed_reason.peek().clone();
+                stream_state.set(StreamState::Retrying {
+                    why: if why.is_empty() {
+                        "disconnected".to_string()
+                    } else {
+                        why
+                    },
+                    secs: 0,
+                });
+                busy.set(false);
+                streaming.set(None);
             }
         }
     });
@@ -901,30 +1098,36 @@ pub(crate) fn ChatPane(
                     span { class: backend_chip_cls(&session.backend_id), "{session.backend_id}" }
                     match &stream {
                         StreamState::Connecting => rsx! {
-                            span { class: "rounded-full bg-muted/60 px-1.5 text-[0.7rem] text-muted-foreground",
+                            span { class: "shrink-0 rounded-full bg-muted/60 px-1.5 text-[0.7rem] text-muted-foreground",
                                 "connecting…"
                             }
                         },
-                        StreamState::Live => rsx! {
+                        StreamState::Live(reconnects) => rsx! {
                             span {
-                                class: "rounded-full bg-emerald-500/15 px-1.5 text-[0.7rem] text-emerald-500",
-                                title: "Live event stream connected",
+                                class: "shrink-0 rounded-full bg-emerald-500/15 px-1.5 text-[0.7rem] text-emerald-500",
+                                title: if *reconnects > 0 {
+                                    format!("Live — reconnected {reconnects} time(s) this session")
+                                } else {
+                                    "Live event stream connected".to_string()
+                                },
                                 "● live"
                             }
                         },
-                        StreamState::Dead(why) => rsx! {
+                        StreamState::Retrying { why, secs } => rsx! {
                             span {
-                                class: "rounded-full bg-destructive/15 px-1.5 text-[0.7rem] text-destructive",
+                                class: "shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[0.7rem] text-amber-500",
                                 title: "{why}",
-                                "○ stream down — reselect the chat to reconnect"
+                                if *secs > 0 {
+                                    "○ reconnecting in {secs}s"
+                                } else {
+                                    "○ reconnecting…"
+                                }
                             }
                         },
                     }
+                    GatewayChip { slug: slug.clone(), backend_id: session.backend_id.clone() }
                 }
                 div { class: "flex shrink-0 items-center gap-2",
-                    if !responding.read().is_empty() {
-                        span { class: "text-[0.7rem] text-muted-foreground", "{responding}" }
-                    }
                     if busy() {
                         Button {
                             variant: ButtonVariant::Outline,
@@ -958,8 +1161,8 @@ pub(crate) fn ChatPane(
                                 {message_view(m)}
                             }
                         },
-                        Row::TurnFold { anchor, tool_count, duration_secs } => rsx! {
-                            {turn_fold_view(anchor, *tool_count, *duration_secs, &turns_snapshot, expanded_folds)}
+                        Row::TurnFold { anchor, summary } => rsx! {
+                            {turn_fold_view(anchor, summary, &turns_snapshot, expanded_folds)}
                         },
                     }
                 }
@@ -993,7 +1196,25 @@ pub(crate) fn ChatPane(
                 if busy() {
                     div { class: "flex items-center gap-2 text-sm text-muted-foreground",
                         Spinner { size: SpinnerSize::Small }
-                        span { class: "tabular-nums", "{fmt_elapsed(elapsed())} Working…" }
+                        // What it's actually doing beats a bare
+                        // "Working…" — the in-flight tool if there is
+                        // one, else the phase we can infer.
+                        span { class: "truncate",
+                            match running_tool(&live_view) {
+                                Some(t) => t.text.clone(),
+                                None if streaming_view.is_some() => "Writing the answer".to_string(),
+                                None if !reasoning_text.is_empty() => "Thinking".to_string(),
+                                None => "Working".to_string(),
+                            }
+                        }
+                        span { class: "shrink-0 tabular-nums text-muted-foreground/70",
+                            "{fmt_elapsed(elapsed())}"
+                        }
+                        if !responding.read().is_empty() {
+                            span { class: "hidden shrink-0 truncate text-[0.7rem] text-muted-foreground/60 sm:inline",
+                                "· {responding}"
+                            }
+                        }
                     }
                 }
                 if !error.read().is_empty() {
@@ -1158,6 +1379,13 @@ pub(crate) fn ChatPane(
                                 "no usage yet"
                             }
                         }
+                        if let Some(c) = fmt_cost(spend()) {
+                            span {
+                                class: "rounded-full bg-muted/50 px-1.5",
+                                title: "Estimated spend this session, priced from the models.dev catalog",
+                                "{c}"
+                            }
+                        }
                     }
                 }
             }
@@ -1169,14 +1397,12 @@ pub(crate) fn ChatPane(
 /// retained activity log + reasoning.
 fn turn_fold_view(
     anchor: &str,
-    tool_count: usize,
-    duration_secs: i64,
+    summary: &str,
     turns: &HashMap<String, TurnLog>,
     mut expanded: Signal<std::collections::HashSet<String>>,
 ) -> Element {
     let is_open = expanded.read().contains(anchor);
     let key = anchor.to_string();
-    let summary = fold_summary(tool_count, duration_secs);
     let log = turns.get(anchor).cloned().unwrap_or_default();
 
     rsx! {
@@ -1211,7 +1437,8 @@ fn turn_fold_view(
 }
 
 /// One activity line: status glyph + mono text (t3code's
-/// `SimpleWorkEntryRow` glyph state machine, compact form).
+/// `SimpleWorkEntryRow` glyph state machine, compact form). Tool
+/// rows carry their duration and expand to arguments + result.
 fn activity_line_view(i: usize, line: &ActivityLine) -> Element {
     let (glyph, glyph_cls) = match line.tone {
         ToolTone::Running => ("▸", "text-primary"),
@@ -1219,12 +1446,41 @@ fn activity_line_view(i: usize, line: &ActivityLine) -> Element {
         ToolTone::Fail => ("✗", "text-destructive"),
         ToolTone::Note => ("·", "text-muted-foreground/70"),
     };
+    let took = (line.duration_ms > 0).then(|| fmt_duration(line.duration_ms));
+    let head = rsx! {
+        span { class: "{glyph_cls}", "{glyph}" }
+        span { class: "truncate", title: "{line.text}", "{line.text}" }
+        if let Some(t) = &took {
+            span { class: "shrink-0 tabular-nums text-muted-foreground/60", "{t}" }
+        }
+    };
+    let row_cls = "flex w-fit max-w-full items-baseline gap-1.5 rounded-md bg-muted/40 px-2 py-0.5 font-mono text-[0.72rem] text-muted-foreground";
+
+    if !line.has_detail() {
+        return rsx! {
+            div { key: "{i}", class: "{row_cls}", {head} }
+        };
+    }
     rsx! {
-        div {
-            key: "{i}",
-            class: "flex w-fit max-w-full items-baseline gap-1.5 rounded-md bg-muted/40 px-2 py-0.5 font-mono text-[0.72rem] text-muted-foreground",
-            span { class: "{glyph_cls}", "{glyph}" }
-            span { class: "truncate", title: "{line.text}", "{line.text}" }
+        details { key: "{i}", class: "w-full",
+            summary { class: "{row_cls} cursor-pointer list-none hover:bg-muted/70", {head} }
+            div { class: "mt-1 flex flex-col gap-1 border-l border-border/40 pl-3",
+                if !line.args.is_empty() {
+                    pre { class: "max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/30 px-2 py-1 font-mono text-[0.68rem] leading-snug text-muted-foreground",
+                        "{line.args}"
+                    }
+                }
+                if !line.output.is_empty() {
+                    pre {
+                        class: if line.tone == ToolTone::Fail {
+                            "max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 font-mono text-[0.68rem] leading-snug text-muted-foreground"
+                        } else {
+                            "max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-muted/20 px-2 py-1 font-mono text-[0.68rem] leading-snug text-muted-foreground"
+                        },
+                        "{line.output}"
+                    }
+                }
+            }
         }
     }
 }
@@ -1333,6 +1589,12 @@ fn Inspector(
                         span { "Tokens" }
                         span { class: "tabular-nums", "{fmt_tokens(tokens)}" }
                     }
+                    if let Some(c) = fmt_cost(session.usage.estimated_cost_usd) {
+                        div { class: "flex justify-between",
+                            span { "Est. cost" }
+                            span { class: "tabular-nums", title: "Priced from the models.dev catalog", "{c}" }
+                        }
+                    }
                     div { class: "flex justify-between",
                         span { "Status" }
                         span { "{status_text(session.status)}" }
@@ -1376,6 +1638,8 @@ fn Inspector(
                 }
             }
 
+            BackendHealthPanel { slug: slug.clone(), backend_id: session.backend_id.clone() }
+
             div { class: "flex flex-col gap-1.5",
                 span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
                     "Skills ({skills.len()})"
@@ -1418,6 +1682,105 @@ fn Inspector(
                                 },
                                 "{c.name}"
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Inspector block for the backend serving this session: is it up,
+/// what state does it report, what's it connected to, how far away
+/// is it. Refreshes on the same 20s cadence as the header chip.
+#[component]
+fn BackendHealthPanel(slug: String, backend_id: String) -> Element {
+    let mut health = use_resource(use_reactive!(|(slug,)| async move {
+        crate::feeds::fetch_agent_health(&slug).await
+    }));
+    let mut tick = use_signal(|| 0u32);
+    use_future(move || async move {
+        loop {
+            architect::platform::sleep(std::time::Duration::from_secs(20)).await;
+            tick += 1;
+        }
+    });
+    use_effect(move || {
+        let _ = tick();
+        health.restart();
+    });
+
+    let snapshot = health.read().clone();
+    let (row, err) = match &snapshot {
+        Some(Ok(rows)) => (
+            rows.iter().find(|h| h.backend_id == backend_id).cloned(),
+            String::new(),
+        ),
+        Some(Err(e)) => (None, e.clone()),
+        None => (None, String::new()),
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-1",
+            span { class: "text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground",
+                "Backend"
+            }
+            if !err.is_empty() {
+                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-[0.7rem]",
+                    "{err}"
+                }
+            }
+            if let Some(h) = row {
+                div { class: "flex flex-col gap-1 text-xs text-muted-foreground",
+                    div { class: "flex items-center justify-between gap-2",
+                        span { "Reachable" }
+                        span {
+                            class: if h.reachable {
+                                "text-emerald-500"
+                            } else {
+                                "text-destructive"
+                            },
+                            if h.reachable { "yes" } else { "no" }
+                        }
+                    }
+                    if !h.state.is_empty() {
+                        div { class: "flex justify-between gap-2",
+                            span { "State" }
+                            span { class: "truncate", "{h.state}" }
+                        }
+                    }
+                    if !h.model.is_empty() {
+                        div { class: "flex justify-between gap-2",
+                            span { "Model" }
+                            span { class: "truncate", title: "{h.model}", "{h.model}" }
+                        }
+                    }
+                    if h.reachable {
+                        div { class: "flex justify-between gap-2",
+                            span { "In flight" }
+                            span { class: "tabular-nums", "{h.active_agents}" }
+                        }
+                    }
+                    if h.last_ping_ms > 0 {
+                        div { class: "flex justify-between gap-2",
+                            span { "Latency" }
+                            span { class: "tabular-nums", "{h.last_ping_ms}ms" }
+                        }
+                    }
+                    if !h.platforms.is_empty() {
+                        div { class: "flex flex-wrap gap-1 pt-0.5",
+                            for p in h.platforms.iter() {
+                                span {
+                                    key: "{p}",
+                                    class: "rounded-full bg-muted/50 px-1.5 py-0.5 text-[0.65rem]",
+                                    "{p}"
+                                }
+                            }
+                        }
+                    }
+                    if !h.status_text.is_empty() {
+                        p { class: "pt-0.5 text-[0.7rem] leading-snug text-muted-foreground/80",
+                            "{h.status_text}"
                         }
                     }
                 }

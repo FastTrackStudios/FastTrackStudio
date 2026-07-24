@@ -288,10 +288,7 @@ pub async fn fetch_recall_due(
 
 /// Create or update one card (keyed by id). Authoring, edits, and
 /// review-reschedules all flow through here.
-pub async fn upsert_recall_card(
-    slug: &str,
-    card: recall_proto::RecallCard,
-) -> Result<(), String> {
+pub async fn upsert_recall_card(slug: &str, card: recall_proto::RecallCard) -> Result<(), String> {
     let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
     client
         .upsert_card(card)
@@ -332,10 +329,7 @@ pub async fn fetch_contacts(slug: &str) -> Result<Vec<contacts_proto::Contact>, 
 }
 
 /// One contact by id, or `None` if the file is gone.
-pub async fn get_contact(
-    slug: &str,
-    id: &str,
-) -> Result<Option<contacts_proto::Contact>, String> {
+pub async fn get_contact(slug: &str, id: &str) -> Result<Option<contacts_proto::Contact>, String> {
     let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
     client
         .get_contact(id.to_string())
@@ -345,10 +339,7 @@ pub async fn get_contact(
 
 /// Create or update one contact (keyed by id). Author, edit, link, and
 /// archive all flow through here.
-pub async fn upsert_contact(
-    slug: &str,
-    contact: contacts_proto::Contact,
-) -> Result<(), String> {
+pub async fn upsert_contact(slug: &str, contact: contacts_proto::Contact) -> Result<(), String> {
     let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
     client
         .upsert_contact(contact)
@@ -1370,8 +1361,7 @@ pub async fn fetch_org_members(
     slug: &str,
     token: String,
 ) -> Result<Vec<auth_proto::OrgMember>, String> {
-    let client =
-        crate::vox_clients::establish_for::<auth_proto::AuthServiceClient>(slug).await?;
+    let client = crate::vox_clients::establish_for::<auth_proto::AuthServiceClient>(slug).await?;
     client
         .list_org_members(token)
         .await
@@ -2066,6 +2056,22 @@ pub async fn fetch_agent_capabilities(
         .list_capabilities(String::new())
         .await
         .map_err(|e| format!("{slug}: agent capabilities: {e:?}"))
+}
+
+/// Live per-backend health — gateway state, connected platforms,
+/// in-flight agents, probe latency. Polled by the chat header's
+/// status chip so an unreachable gateway says so instead of
+/// silently swallowing turns.
+pub async fn fetch_agent_health(
+    slug: &str,
+) -> Result<Vec<agent_proto::backend::BackendHealth>, String> {
+    let client =
+        crate::vox_clients::establish_for::<agent_proto::service::discovery::DiscoveryClient>(slug)
+            .await?;
+    client
+        .backend_health(String::new())
+        .await
+        .map_err(|e| format!("{slug}: agent health: {e:?}"))
 }
 
 /// Session mutations for the rail/inspector: rename, pin, archive,

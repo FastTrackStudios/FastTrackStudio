@@ -60,13 +60,24 @@ pub struct BackendHealth {
     pub backend_id: String,
     pub reachable: bool,
     /// Latency of the most recent ping, in milliseconds.
-    /// `0` when `reachable` is false.
+    /// `0` when the backend is local (nothing to probe).
     pub last_ping_ms: u32,
     /// Backend version string, if reported.
     pub version: String,
     /// Backend-specific status (e.g. `"model: claude-opus
-    /// reasoning: medium"`).
+    /// reasoning: medium"`), or the error text when unreachable.
     pub status_text: String,
+    /// Lifecycle state the backend reports for itself
+    /// (`"running"`, `"degraded"`, `"local"`, `"unconfigured"`).
+    /// Empty when the backend doesn't report one.
+    pub state: String,
+    /// Agent runs currently in flight inside the backend.
+    pub active_agents: u32,
+    /// Connected chat platforms / adapters (`"api_server"`,
+    /// `"discord"`, …) — Hermes gateways serve several at once.
+    pub platforms: Vec<String>,
+    /// The backend's configured default model.
+    pub model: String,
     /// When the snapshot was taken.
     pub at: DateTime<Utc>,
 }

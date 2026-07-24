@@ -9,7 +9,9 @@
 //! not an error.
 
 use agent_proto::error::AgentError;
-use agent_proto::service::discovery::{CapabilityFlag, Discovery, ModelInfo, SkillInfo};
+use agent_proto::service::discovery::{
+    BackendHealth, CapabilityFlag, Discovery, ModelInfo, SkillInfo,
+};
 use serde_json::Value;
 
 use crate::{BACKEND_ID, HermesBackend};
@@ -53,19 +55,22 @@ fn rows<'a>(v: &'a Value, keys: &[&str]) -> Vec<&'a Value> {
 }
 
 fn s(v: &Value, key: &str) -> String {
-    v.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+    v.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// models.dev provider ids surfaced in the picker when
 /// `TASK_HERMES_PROVIDERS` doesn't override — the set the gateway
 /// deployment can plausibly route to (its `/model` chat command
 /// switches providers per session).
-const DEFAULT_PROVIDERS: &str = "openai,anthropic,google,github-copilot,deepseek,x-ai,qwen,nousresearch";
+const DEFAULT_PROVIDERS: &str =
+    "openai,anthropic,google,github-copilot,deepseek,x-ai,qwen,nousresearch";
 
 /// In-process models.dev catalog cache (1h TTL) — the catalog is
 /// ~2MB of JSON and changes rarely.
-static CATALOG: std::sync::Mutex<Option<(std::time::Instant, Value)>> =
-    std::sync::Mutex::new(None);
+static CATALOG: std::sync::Mutex<Option<(std::time::Instant, Value)>> = std::sync::Mutex::new(None);
 
 impl HermesBackend {
     /// The models.dev catalog (fetched + cached). The same source
@@ -100,6 +105,95 @@ impl HermesBackend {
             *cache = Some((std::time::Instant::now(), fetched.clone()));
         }
         Some(fetched)
+    }
+}
+
+/// Catalog pricing for `provider/model`, read from the cache only —
+/// callable from async contexts (the streaming turn worker) where
+/// the blocking fetch would deadlock. `None` until the picker has
+/// warmed the cache, or for models the catalog doesn't know.
+pub(crate) fn cached_price(model_id: &str) -> Option<(f64, f64)> {
+    let (provider, model) = model_id.split_once('/')?;
+    let cache = CATALOG.lock().ok()?;
+    let (_, catalog) = cache.as_ref()?;
+    let m = catalog.pointer(&format!("/{provider}/models/{model}"))?;
+    let cin = m
+        .pointer("/cost/input")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let cout = m
+        .pointer("/cost/output")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    (cin > 0.0 || cout > 0.0).then_some((cin, cout))
+}
+
+/// Names of the platform adapters the gateway reports as connected.
+/// `/health/detailed` returns `{"platforms": {"discord": true}}` or
+/// `{"platforms": {"discord": {"connected": true}}}` depending on
+/// the release — accept both, and treat a bare present key as
+/// connected when neither shape carries a boolean.
+fn connected_platforms(v: &Value) -> Vec<String> {
+    let Some(map) = v.get("platforms").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = map
+        .iter()
+        .filter(|(_, state)| match state {
+            Value::Bool(b) => *b,
+            Value::Object(o) => o
+                .get("connected")
+                .and_then(Value::as_bool)
+                .unwrap_or_else(|| o.get("state").and_then(Value::as_str) != Some("disconnected")),
+            _ => true,
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    out.sort();
+    out
+}
+
+/// A one-line note about anything unhealthy in the gateway's
+/// `readiness` block (`state_db`, `config`, `model`, `disk`, …).
+/// Empty when everything reports ok — the chip stays quiet unless
+/// there's something to say.
+fn readiness_note(v: &Value) -> String {
+    let Some(checks) = v.pointer("/readiness/checks").and_then(Value::as_object) else {
+        return String::new();
+    };
+    let bad: Vec<String> = checks
+        .iter()
+        .filter_map(|(name, c)| {
+            let status = c.get("status").and_then(Value::as_str).unwrap_or("ok");
+            (status != "ok").then(|| format!("{name}: {status}"))
+        })
+        .collect();
+    if bad.is_empty() {
+        return String::new();
+    }
+    format!("degraded — {}", bad.join(", "))
+}
+
+/// Agent runs the gateway currently has in flight. Newer releases
+/// report `active_agents` at the top level; v0.19 only counts them
+/// under the readiness block's background-queue check.
+fn in_flight_agents(v: &Value) -> u32 {
+    v.get("active_agents")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            v.pointer("/readiness/checks/background_queues/active_api_runs")
+                .and_then(Value::as_u64)
+        })
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(0)
+}
+
+impl HermesBackend {
+    /// `/health/detailed` lives at the server root, not under the
+    /// versioned API base the rest of the client uses.
+    fn health_url(&self) -> String {
+        let root = self.inner.config.base_url.trim_end_matches("/v1");
+        format!("{root}/health/detailed")
     }
 }
 
@@ -163,10 +257,7 @@ impl Discovery for HermesBackend {
                             .unwrap_or(0),
                         provider_id: pid.clone(),
                         provider_name: pname.clone(),
-                        reasoning: m
-                            .get("reasoning")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
+                        reasoning: m.get("reasoning").and_then(Value::as_bool).unwrap_or(false),
                         cost_in_per_mtok: m
                             .pointer("/cost/input")
                             .and_then(Value::as_f64)
@@ -199,14 +290,74 @@ impl Discovery for HermesBackend {
                 Some(SkillInfo {
                     backend_id: BACKEND_ID.to_string(),
                     description: s(sk, "description"),
-                    enabled: sk
-                        .get("enabled")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(true),
+                    enabled: sk.get("enabled").and_then(Value::as_bool).unwrap_or(true),
                     name,
                 })
             })
             .collect())
+    }
+
+    fn backend_health(&self, _backend_id: &str) -> Result<Vec<BackendHealth>, AgentError> {
+        let url = self.health_url();
+        let http = self.inner.http.clone();
+        let key = self.inner.config.api_key.clone();
+        let started = std::time::Instant::now();
+        // Whether `/health/detailed` is auth-gated varies by release
+        // (newer ones serve it open for cross-container dashboards,
+        // deployed v2026.7.20 answers `invalid_api_key` without a
+        // bearer), so always send the token when we have one.
+        let probed: Result<Value, String> = self.inner.runtime.block_on(async move {
+            let mut req = http.get(&url).timeout(std::time::Duration::from_secs(5));
+            if !key.is_empty() {
+                req = req.header("Authorization", format!("Bearer {key}"));
+            }
+            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let status = resp.status();
+            if !status.is_success() {
+                return Err(format!("HTTP {status}"));
+            }
+            resp.json::<Value>().await.map_err(|e| e.to_string())
+        });
+        let latency_ms = u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX);
+
+        let at = chrono::Utc::now();
+        Ok(vec![match probed {
+            Ok(v) => BackendHealth {
+                backend_id: BACKEND_ID.to_string(),
+                reachable: true,
+                last_ping_ms: latency_ms,
+                version: s(&v, "version"),
+                // `exit_reason` is set when the gateway is winding
+                // down; otherwise report whatever readiness check is
+                // unhappy. Both are worth surfacing, neither is
+                // usually present.
+                status_text: {
+                    let exit = s(&v, "exit_reason");
+                    if exit.is_empty() {
+                        readiness_note(&v)
+                    } else {
+                        exit
+                    }
+                },
+                state: s(&v, "gateway_state"),
+                active_agents: in_flight_agents(&v),
+                platforms: connected_platforms(&v),
+                model: self.inner.config.model.clone(),
+                at,
+            },
+            Err(e) => BackendHealth {
+                backend_id: BACKEND_ID.to_string(),
+                reachable: false,
+                last_ping_ms: latency_ms,
+                version: String::new(),
+                status_text: format!("{}: {e}", self.inner.config.base_url),
+                state: String::new(),
+                active_agents: 0,
+                platforms: Vec::new(),
+                model: self.inner.config.model.clone(),
+                at,
+            },
+        }])
     }
 
     fn list_capabilities(&self, _backend_id: &str) -> Result<Vec<CapabilityFlag>, AgentError> {
@@ -241,5 +392,97 @@ impl Discovery for HermesBackend {
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn platforms_accept_both_shapes_and_skip_disconnected() {
+        let v = json!({
+            "platforms": {
+                "discord": true,
+                "slack": false,
+                "api_server": {"connected": true},
+                "matrix": {"connected": false},
+                "cron": {"state": "disconnected"},
+                "mirror": {},
+            }
+        });
+        assert_eq!(
+            connected_platforms(&v),
+            vec!["api_server".to_string(), "discord".into(), "mirror".into()]
+        );
+    }
+
+    #[test]
+    fn platforms_missing_key_is_empty() {
+        assert!(connected_platforms(&json!({"status": "ok"})).is_empty());
+    }
+
+    /// Trimmed from a live `GET /health/detailed` against the
+    /// deployed gateway (hermes-agent 0.19.0).
+    fn live_payload() -> Value {
+        json!({
+            "status": "ok",
+            "readiness": {
+                "status": "ok",
+                "checks": {
+                    "state_db": {"status": "ok"},
+                    "config": {"status": "ok"},
+                    "model": {"status": "ok"},
+                    "disk": {"status": "ok", "used_percent": 71.9},
+                    "gateway": {"status": "ok", "state": "running", "connected_platforms": 2},
+                    "background_queues": {"status": "ok", "active_api_runs": 2}
+                }
+            },
+            "platform": "hermes-agent",
+            "version": "0.19.0",
+            "gateway_state": "running",
+            "platforms": {
+                "webhook": {"state": "connected"},
+                "api_server": {"state": "connected"},
+                "nextcloud_talk": {"state": "disconnected"}
+            }
+        })
+    }
+
+    #[test]
+    fn live_health_payload_parses() {
+        let v = live_payload();
+        assert_eq!(s(&v, "version"), "0.19.0");
+        assert_eq!(s(&v, "gateway_state"), "running");
+        assert_eq!(
+            connected_platforms(&v),
+            vec!["api_server".to_string(), "webhook".into()]
+        );
+        // v0.19 has no top-level `active_agents` — read the queue check.
+        assert_eq!(in_flight_agents(&v), 2);
+        assert_eq!(readiness_note(&v), "");
+    }
+
+    #[test]
+    fn readiness_note_names_the_unhappy_checks() {
+        let mut v = live_payload();
+        v["readiness"]["checks"]["model"]["status"] = json!("error");
+        assert_eq!(readiness_note(&v), "degraded — model: error");
+        // Nothing to report when the block is absent entirely.
+        assert_eq!(readiness_note(&json!({"status": "ok"})), "");
+    }
+
+    #[test]
+    fn in_flight_prefers_the_top_level_count() {
+        let mut v = live_payload();
+        v["active_agents"] = json!(7);
+        assert_eq!(in_flight_agents(&v), 7);
+    }
+
+    #[test]
+    fn cached_price_needs_a_provider_qualified_id() {
+        // Bare ids never resolve — the catalog is keyed provider/model.
+        assert_eq!(cached_price("hermes"), None);
     }
 }

@@ -15,7 +15,9 @@ use agent_hermes::HermesBackend;
 use agent_proto::error::AgentError;
 use agent_proto::event::AgentEvent;
 use agent_proto::message::Message;
-use agent_proto::service::discovery::{CapabilityFlag, Discovery, ModelInfo, SkillInfo};
+use agent_proto::service::discovery::{
+    BackendHealth, CapabilityFlag, Discovery, ModelInfo, SkillInfo,
+};
 use agent_proto::service::sessions::{CreateSession, SessionFilter, SessionPage, Sessions};
 use agent_proto::service::subscriptions::Subscriptions;
 use agent_proto::service::threads::Threads;
@@ -222,6 +224,47 @@ impl Discovery for AgentRouter {
             }
             _ => Ok(Vec::new()),
         }
+    }
+
+    fn backend_health(&self, backend_id: &str) -> Result<Vec<BackendHealth>, AgentError> {
+        let mut out = Vec::new();
+        if backend_id.is_empty() || backend_id == "hermes" {
+            match &self.hermes {
+                Some(h) => out.extend(h.backend_health(backend_id)?),
+                // Configured-off is a status too: the UI says "no
+                // gateway configured" instead of silently offering
+                // a backend that can't answer.
+                None => out.push(BackendHealth {
+                    backend_id: "hermes".to_string(),
+                    reachable: false,
+                    last_ping_ms: 0,
+                    version: String::new(),
+                    status_text: "TASK_HERMES_URL is not set on the server".to_string(),
+                    state: "unconfigured".to_string(),
+                    active_agents: 0,
+                    platforms: Vec::new(),
+                    model: String::new(),
+                    at: chrono::Utc::now(),
+                }),
+            }
+        }
+        if backend_id.is_empty() || backend_id == "codex" {
+            // Codex runs in-process (spawned per session) — no probe
+            // to make, so report it as available.
+            out.push(BackendHealth {
+                backend_id: "codex".to_string(),
+                reachable: true,
+                last_ping_ms: 0,
+                version: String::new(),
+                status_text: "in-process app-server".to_string(),
+                state: "local".to_string(),
+                active_agents: 0,
+                platforms: Vec::new(),
+                model: String::new(),
+                at: chrono::Utc::now(),
+            });
+        }
+        Ok(out)
     }
 }
 

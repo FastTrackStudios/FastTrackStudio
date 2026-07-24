@@ -60,6 +60,8 @@ pub struct CapabilityFlag {
     pub enabled: bool,
 }
 
+pub use crate::backend::BackendHealth;
+
 #[architect::rpc]
 pub trait Discovery {
     /// Models across all configured backends (or one, when
@@ -72,4 +74,11 @@ pub trait Discovery {
 
     /// Capability flags across all configured backends.
     fn list_capabilities(&self, backend_id: &str) -> Result<Vec<CapabilityFlag>, AgentError>;
+
+    /// Live health per backend — Hermes answers from its gateway's
+    /// `/health/detailed` (state, connected platforms, in-flight
+    /// agents), local backends report themselves. Never fails for
+    /// an unreachable backend: that's a row with `reachable: false`
+    /// whose `status_text` says *why* the agent isn't answering.
+    fn backend_health(&self, backend_id: &str) -> Result<Vec<BackendHealth>, AgentError>;
 }
