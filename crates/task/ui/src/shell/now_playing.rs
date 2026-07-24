@@ -32,6 +32,9 @@ pub enum NpCmd {
     Next,
     Prev,
     Seek(f64),
+    /// Pause if currently playing (a no-op otherwise). Used by the fullscreen
+    /// setlist player to stop the global stream when it starts its own audio.
+    Pause,
 }
 
 /// Shared control surface between the engine and the status-bar UI. The
@@ -396,6 +399,11 @@ mod imp {
                         select.call(i);
                     }
                     NpCmd::Seek(f) => seek.call(f),
+                    NpCmd::Pause => {
+                        if *playing.peek() {
+                            toggle.call(());
+                        }
+                    }
                 }
             });
         }

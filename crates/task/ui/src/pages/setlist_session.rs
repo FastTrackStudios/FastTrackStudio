@@ -454,6 +454,7 @@ mod imp {
         // `SessionEventBridge` (ACTIVE_INDICES → the follow-effect above). We
         // also nudge the local signals optimistically so the UI is snappy.
         // STAGE 4b-2: real audio playback replaces the (silent) soft clock.
+        let np_ctl = use_context::<crate::shell::now_playing::NowPlayingCtl>();
         let play_pause: Callback<()> = use_callback({
             let mut playing = playing;
             let audio = audio;
@@ -465,6 +466,12 @@ mod imp {
                 // gesture, so `play()` resumes the AudioContext.
                 if let Some(a) = audio.peek().clone() {
                     if want {
+                        // Starting the multitrack rig → stop the global Now
+                        // Playing stream so they don't play over each other.
+                        // (Merely opening the player doesn't do this — only Play.)
+                        let mut cmd = np_ctl.cmd;
+                        let g = cmd.peek().0 + 1;
+                        cmd.set((g, crate::shell::now_playing::NpCmd::Pause));
                         a.play();
                     } else {
                         a.pause();
