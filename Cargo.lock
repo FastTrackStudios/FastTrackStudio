@@ -9258,6 +9258,7 @@ dependencies = [
  "engine-launcher",
  "eyre",
  "facet-json",
+ "futures-channel",
  "futures-util",
  "getrandom 0.3.4",
  "include_dir",
@@ -9269,6 +9270,7 @@ dependencies = [
  "session-guide",
  "session-proto",
  "session-ui",
+ "sha2 0.10.9",
  "signal-bass",
  "signal-bass-proto",
  "signal-bass-ui",
@@ -9282,6 +9284,8 @@ dependencies = [
  "signal-keys",
  "signal-keys-proto",
  "signal-keys-ui",
+ "signal-pack-library",
+ "signal-packs-proto",
  "signal-sampler",
  "signal-synth-proto",
  "signal-synth-rig",
@@ -23460,6 +23464,30 @@ dependencies = [
  "keyflow-orchestra",
  "session-guide",
  "signal-sampler",
+]
+
+[[package]]
+name = "signal-pack-library"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "sha2 0.10.9",
+ "signal-packs-proto",
+ "tokio",
+ "tracing",
+ "vox",
+ "walkdir",
+]
+
+[[package]]
+name = "signal-packs-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
