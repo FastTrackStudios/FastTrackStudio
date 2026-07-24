@@ -36,12 +36,13 @@ use agent_proto::question::QuestionRequest;
 use agent_proto::service::discovery::{CapabilityFlag, ModelInfo, SkillInfo};
 use agent_proto::session::{Session, SessionStatus};
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Archive, Bot, Copy, Info, Pin, Trash2};
+use fts_ui::lucide_dioxus::{Archive, Bot, Copy, FileText, Info, Pin, Trash2};
 use fts_ui::prelude::*;
 
 use logic::{
-    context_free_percent, context_ring_style, cost_badge, fmt_cost, fmt_duration, fmt_elapsed,
-    fmt_tokens, group_models, hash_hsl, rank_by, relative_time, status_pill,
+    PromptHistory, Recall, ScrollMode, autoscroll_js, context_free_percent, context_ring_style,
+    cost_badge, fmt_cost, fmt_duration, fmt_elapsed, fmt_tokens, group_models, hash_hsl, rank_by,
+    referenced_paths, relative_time, scroll_mode, scroll_to_end_js, status_pill,
 };
 use timeline::{ActivityLine, Row, ToolTone, TurnLog, push_line, running_tool, settle_tool};
 
@@ -637,6 +638,11 @@ pub(crate) fn ChatPane(
     let mut stream_state = use_signal(|| StreamState::Connecting);
     // Set while a cancel is in flight; cleared by the terminal event.
     let mut stopping = use_signal(|| false);
+    // Shell-style `↑`/`↓` recall, restored from localStorage per
+    // conversation.
+    let mut history = use_signal(PromptHistory::default);
+    // Whether the reader is following the tail; drives Jump to latest.
+    let mut scroll = use_signal(|| ScrollMode::FollowingEnd);
     // Why the last subscription ended — read back by the reconnect
     // loop so the chip can say what went wrong.
     let closed_reason = use_signal(String::new);
@@ -644,6 +650,25 @@ pub(crate) fn ChatPane(
     let mut spend = use_signal(|| session.usage.estimated_cost_usd);
     let mut turn_started = use_signal(|| None::<chrono::DateTime<chrono::Utc>>);
     let mut elapsed = use_signal(|| 0i64);
+
+    // Restore this conversation's prompt history.
+    let history_key = format!("task.agent.history.{session_id}");
+    use_future({
+        let key = history_key.clone();
+        move || {
+            let key = key.clone();
+            async move {
+                let mut js = dioxus::document::eval(&format!(
+                    "dioxus.send(localStorage.getItem('{key}') || '[]');"
+                ));
+                if let Ok(raw) = js.recv::<String>().await {
+                    if let Ok(entries) = serde_json::from_str::<Vec<String>>(&raw) {
+                        history.set(PromptHistory::from_entries(entries));
+                    }
+                }
+            }
+        }
+    });
 
     // 1s ticker driving the "Working… 0:42" row.
     use_future(move || async move {
@@ -967,6 +992,17 @@ pub(crate) fn ChatPane(
             return;
         }
         composer.set(String::new());
+        // Remember it for `↑` recall, and persist so it survives a
+        // reload the way a shell history would.
+        let stored = {
+            let mut h = history.write();
+            h.record(&text);
+            serde_json::to_string(h.entries()).unwrap_or_else(|_| "[]".to_string())
+        };
+        let _ = dioxus::document::eval(&format!(
+            "localStorage.setItem('{history_key}', {});",
+            serde_json::to_string(&stored).unwrap_or_else(|_| "\"[]\"".to_string())
+        ));
         if *busy.peek() {
             queued.write().push(text);
         } else {
@@ -1104,7 +1140,7 @@ pub(crate) fn ChatPane(
             let _ = messages.read().len();
             let _ = streaming.read().is_some();
             let _ = live_lines.read().len();
-            let _ = dioxus::document::eval(&logic::autoscroll_js(&transcript_id));
+            let _ = dioxus::document::eval(&autoscroll_js(&transcript_id));
         }
     });
 
@@ -1184,6 +1220,14 @@ pub(crate) fn ChatPane(
             div {
                 id: "{transcript_id}",
                 class: "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
+                onscroll: move |e| {
+                    let d = e.data();
+                    scroll.set(scroll_mode(
+                        d.scroll_top(),
+                        f64::from(d.scroll_height()),
+                        f64::from(d.client_height()),
+                    ));
+                },
                 for row in derived_rows.iter() {
                     match row {
                         Row::Message(i) => rsx! {
@@ -1254,6 +1298,27 @@ pub(crate) fn ChatPane(
                 }
             }
 
+            // Jump to latest — the way back once you've scrolled off
+            // the tail (t3code's free-scrolling mode made visible).
+            if *scroll.read() == ScrollMode::FreeScrolling {
+                div { class: "pointer-events-none relative z-20 h-0",
+                    div { class: "pointer-events-auto absolute bottom-1 flex w-full justify-center",
+                        button {
+                            r#type: "button",
+                            class: "rounded-full border border-border/60 bg-popover/95 px-3 py-1 text-xs text-foreground shadow-lg hover:border-primary/60",
+                            onclick: {
+                                let id = transcript_id.clone();
+                                move |_| {
+                                    let _ = dioxus::document::eval(&scroll_to_end_js(&id));
+                                    scroll.set(ScrollMode::FollowingEnd);
+                                }
+                            },
+                            if busy() { "Jump to latest ·  live" } else { "Jump to latest" }
+                        }
+                    }
+                }
+            }
+
             // Pending question card (numbered-shortcut options).
             if let Some(q) = &question_view {
                 {question_card(q, answer_question)}
@@ -1320,6 +1385,7 @@ pub(crate) fn ChatPane(
                         oninput: move |e| {
                             composer.set(e.value());
                             completion_sel.set(0);
+                            history.write().reset();
                         },
                         onkeydown: {
                             let rows = completion_rows.clone();
@@ -1352,6 +1418,27 @@ pub(crate) fn ChatPane(
                                             return;
                                         }
                                         _ => {}
+                                    }
+                                }
+                                // Shell-style recall. Deliberately after
+                                // the autocomplete arm: while the popover
+                                // is open the arrows belong to it.
+                                if matches!(e.key(), Key::ArrowUp | Key::ArrowDown)
+                                    && !e.modifiers().shift()
+                                    && !e.modifiers().ctrl()
+                                    && !e.modifiers().alt()
+                                    && !e.modifiers().meta()
+                                {
+                                    let dir = if e.key() == Key::ArrowUp {
+                                        Recall::Older
+                                    } else {
+                                        Recall::Newer
+                                    };
+                                    let current = composer.peek().clone();
+                                    if let Some(text) = history.write().recall(dir, &current) {
+                                        e.prevent_default();
+                                        composer.set(text);
+                                        return;
                                     }
                                 }
                                 if e.key() == Key::Enter && !e.modifiers().shift() {
@@ -1850,6 +1937,26 @@ fn copy_text(text: &str) {
     let _ = dioxus::document::eval(&js);
 }
 
+/// A vault note the answer referenced, as a link into the vault.
+fn note_chip(path: &str) -> Element {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let name = name.strip_suffix(".md").unwrap_or(name);
+    let to = crate::routes::Route::VaultRoute {
+        path: path.to_string(),
+        org: String::new(),
+    };
+    rsx! {
+        Link {
+            key: "{path}",
+            to,
+            class: "flex max-w-64 items-center gap-1 rounded-full border border-border/50 bg-muted/40 px-2 py-0.5 text-[0.68rem] text-muted-foreground hover:border-primary/50 hover:text-foreground",
+            title: "{path}",
+            FileText { size: 10 }
+            span { class: "truncate", "{name}" }
+        }
+    }
+}
+
 /// One transcript entry. Assistant messages get a hover copy
 /// button; user messages are right-aligned bubbles.
 fn message_view(m: &Message) -> Element {
@@ -1871,9 +1978,19 @@ fn message_view(m: &Message) -> Element {
         },
         Role::Assistant => {
             let copy_source = text.clone();
+            // Notes the answer cites — one click instead of a path you
+            // have to go find (CodexMonitor's message file links).
+            let refs = referenced_paths(&text);
             rsx! {
                 div { key: "{m.id}", class: "group relative max-w-none",
                     task_ui::Markdown { source: text }
+                    if !refs.is_empty() {
+                        div { class: "mt-1.5 flex flex-wrap items-center gap-1",
+                            for path in refs.iter() {
+                                {note_chip(path)}
+                            }
+                        }
+                    }
                     button {
                         r#type: "button",
                         class: "absolute -top-1 right-0 hidden rounded-md border border-border/60 bg-card/80 p-1 text-muted-foreground hover:text-foreground group-hover:block",

@@ -189,6 +189,178 @@ pub fn autoscroll_js(element_id: &str) -> String {
     )
 }
 
+/// Where the reader is in the transcript (t3code's
+/// `TimelineScrollMode`, minus the virtualized-list anchoring we
+/// don't have the measurements for).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScrollMode {
+    /// At (or near) the bottom — new output should scroll into view.
+    FollowingEnd,
+    /// Scrolled away to read something; leave the viewport alone and
+    /// offer a way back.
+    FreeScrolling,
+}
+
+/// Classify a scroll position. Same threshold the autoscroll script
+/// uses, so the Jump-to-latest button appears exactly when following
+/// stops.
+#[must_use]
+pub fn scroll_mode(scroll_top: f64, scroll_height: f64, client_height: f64) -> ScrollMode {
+    let gap = scroll_height - scroll_top - client_height;
+    if gap < f64::from(STICK_THRESHOLD_PX) {
+        ScrollMode::FollowingEnd
+    } else {
+        ScrollMode::FreeScrolling
+    }
+}
+
+/// Scroll the transcript to the bottom, unconditionally (the
+/// Jump-to-latest button).
+#[must_use]
+pub fn scroll_to_end_js(element_id: &str) -> String {
+    format!(
+        "(() => {{ const el = document.getElementById('{element_id}'); \
+         if (el) {{ el.scrollTop = el.scrollHeight; el.dataset.init = '1'; }} }})();"
+    )
+}
+
+/// How many prompts to keep per conversation (CodexMonitor's cap).
+const PROMPT_HISTORY_LIMIT: usize = 200;
+
+/// Which way `↑`/`↓` walks the prompt history.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Recall {
+    Older,
+    Newer,
+}
+
+/// Shell-style prompt recall for the composer (CodexMonitor's
+/// `usePromptHistory`).
+///
+/// The rules exist so recall never fights ordinary editing: `↑` only
+/// enters history from an *empty* composer (otherwise it's cursor
+/// movement), `↓` does nothing until you're already navigating, and
+/// whatever you had typed is restored when you walk back past the
+/// newest entry.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct PromptHistory {
+    entries: Vec<String>,
+    /// Position while navigating; `None` = not in history.
+    cursor: Option<usize>,
+    /// What was in the composer before navigation started.
+    draft: String,
+}
+
+impl PromptHistory {
+    #[must_use]
+    pub fn from_entries(entries: Vec<String>) -> Self {
+        let mut me = Self::default();
+        for e in entries {
+            me.record(&e);
+        }
+        me
+    }
+
+    #[must_use]
+    pub fn entries(&self) -> &[String] {
+        &self.entries
+    }
+
+    /// Remember a sent prompt. Blank and immediate-repeat sends are
+    /// dropped — resending the same thing twice shouldn't cost two
+    /// presses of `↑` to get past.
+    pub fn record(&mut self, text: &str) {
+        let trimmed = text.trim();
+        if trimmed.is_empty() || self.entries.last().map(String::as_str) == Some(trimmed) {
+            self.cursor = None;
+            return;
+        }
+        self.entries.push(trimmed.to_string());
+        let overflow = self.entries.len().saturating_sub(PROMPT_HISTORY_LIMIT);
+        if overflow > 0 {
+            self.entries.drain(..overflow);
+        }
+        self.cursor = None;
+    }
+
+    /// Leave history without changing the composer — call when the
+    /// user types.
+    pub fn reset(&mut self) {
+        self.cursor = None;
+    }
+
+    /// Step through history. `Some(text)` = put this in the composer
+    /// and consume the key; `None` = not ours, let the key through.
+    pub fn recall(&mut self, dir: Recall, current: &str) -> Option<String> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        match (self.cursor, dir) {
+            // Entering history: only from an empty composer, and only
+            // going back.
+            (None, Recall::Newer) => None,
+            (None, Recall::Older) => {
+                if !current.trim().is_empty() {
+                    return None;
+                }
+                self.draft = current.to_string();
+                let idx = self.entries.len() - 1;
+                self.cursor = Some(idx);
+                Some(self.entries[idx].clone())
+            }
+            (Some(i), Recall::Older) => {
+                let next = i.saturating_sub(1);
+                self.cursor = Some(next);
+                Some(self.entries[next].clone())
+            }
+            (Some(i), Recall::Newer) => {
+                if i + 1 >= self.entries.len() {
+                    // Past the newest: back to what you were writing.
+                    self.cursor = None;
+                    return Some(std::mem::take(&mut self.draft));
+                }
+                self.cursor = Some(i + 1);
+                Some(self.entries[i + 1].clone())
+            }
+        }
+    }
+}
+
+/// Vault paths an assistant message refers to (CodexMonitor's
+/// `messageFileLinks`, narrowed to our domain).
+///
+/// Now that the agent reads and writes notes it cites paths
+/// constantly — `Records/notes/standup.md`. Surfacing them as chips
+/// under the message turns a dead string into one click, without
+/// touching the markdown pipeline. Deduped, order preserved, capped.
+#[must_use]
+pub fn referenced_paths(text: &str) -> Vec<String> {
+    const MAX: usize = 8;
+    let mut out: Vec<String> = Vec::new();
+    for raw in text.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '<' | '>' | '"')) {
+        // Markdown and prose cling to paths: `foo.md`, "foo.md",
+        // (foo.md), foo.md. — strip the decoration, keep the path.
+        let candidate = raw.trim_matches(|c: char| matches!(c, '`' | '\'' | '[' | ']' | '*' | '_'));
+        let candidate =
+            candidate.trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?'));
+        if !candidate.ends_with(".md") || candidate.len() <= 3 {
+            continue;
+        }
+        // Vault-relative only: no URLs, no absolute paths, no
+        // parent-dir escapes.
+        if candidate.contains("://") || candidate.starts_with('/') || candidate.contains("..") {
+            continue;
+        }
+        if !out.iter().any(|p| p == candidate) {
+            out.push(candidate.to_string());
+        }
+        if out.len() >= MAX {
+            break;
+        }
+    }
+    out
+}
+
 pub fn fmt_elapsed(secs: i64) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
 }
@@ -320,6 +492,101 @@ mod tests {
             js.contains("scrollHeight - el.scrollTop - el.clientHeight"),
             "{js}"
         );
+    }
+
+    #[test]
+    fn scroll_mode_flips_at_the_stick_threshold() {
+        // Pinned to the bottom.
+        assert_eq!(scroll_mode(900.0, 1000.0, 100.0), ScrollMode::FollowingEnd);
+        // Just inside the threshold still counts as following.
+        assert_eq!(scroll_mode(810.0, 1000.0, 100.0), ScrollMode::FollowingEnd);
+        // Scrolled up to read.
+        assert_eq!(scroll_mode(200.0, 1000.0, 100.0), ScrollMode::FreeScrolling);
+        // Content shorter than the viewport can't be scrolled away from.
+        assert_eq!(scroll_mode(0.0, 50.0, 400.0), ScrollMode::FollowingEnd);
+    }
+
+    #[test]
+    fn history_enters_only_from_an_empty_composer() {
+        let mut h = PromptHistory::from_entries(vec!["first".into(), "second".into()]);
+        // Mid-edit `↑` is cursor movement, not recall.
+        assert_eq!(h.recall(Recall::Older, "half-typed"), None);
+        // `↓` does nothing until you're navigating.
+        assert_eq!(h.recall(Recall::Newer, ""), None);
+        assert_eq!(h.recall(Recall::Older, "").as_deref(), Some("second"));
+        assert_eq!(h.recall(Recall::Older, "second").as_deref(), Some("first"));
+        // Clamps at the oldest instead of wrapping.
+        assert_eq!(h.recall(Recall::Older, "first").as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn history_restores_the_draft_on_the_way_back() {
+        let mut h = PromptHistory::from_entries(vec!["older".into(), "newer".into()]);
+        // A draft is only preserved if there was one; entering
+        // requires empty, so the realistic case is an empty draft.
+        assert_eq!(h.recall(Recall::Older, "").as_deref(), Some("newer"));
+        assert_eq!(h.recall(Recall::Older, "newer").as_deref(), Some("older"));
+        assert_eq!(h.recall(Recall::Newer, "older").as_deref(), Some("newer"));
+        // Past the newest → back to the (empty) draft, not stuck.
+        assert_eq!(h.recall(Recall::Newer, "newer").as_deref(), Some(""));
+        // And we've left history, so `↓` is inert again.
+        assert_eq!(h.recall(Recall::Newer, ""), None);
+    }
+
+    #[test]
+    fn history_dedupes_repeats_and_caps() {
+        let mut h = PromptHistory::default();
+        h.record("  hi  ");
+        h.record("hi");
+        h.record("");
+        assert_eq!(h.entries(), ["hi"]);
+        for i in 0..PROMPT_HISTORY_LIMIT + 20 {
+            h.record(&format!("p{i}"));
+        }
+        assert_eq!(h.entries().len(), PROMPT_HISTORY_LIMIT);
+        // Oldest dropped, newest kept.
+        assert_eq!(h.entries().last().unwrap(), "p219");
+    }
+
+    #[test]
+    fn recording_leaves_history_navigation() {
+        let mut h = PromptHistory::from_entries(vec!["a".into()]);
+        assert!(h.recall(Recall::Older, "").is_some());
+        h.record("b");
+        // Sending resets the cursor, so the next `↑` starts fresh.
+        assert_eq!(h.recall(Recall::Older, "").as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn referenced_paths_finds_vault_notes_in_prose() {
+        let text = "I read `Records/notes/standup.md` and updated Projects/site.md. \
+                    See [the note](Wiki/Knowledge/mcp.md) too.";
+        assert_eq!(
+            referenced_paths(text),
+            vec![
+                "Records/notes/standup.md".to_string(),
+                "Projects/site.md".into(),
+                "Wiki/Knowledge/mcp.md".into(),
+            ]
+        );
+    }
+
+    #[test]
+    fn referenced_paths_rejects_what_isnt_a_vault_note() {
+        // URLs, absolute paths and traversal are not vault-relative.
+        assert!(referenced_paths("see https://example.com/a.md").is_empty());
+        assert!(referenced_paths("/etc/notes/x.md").is_empty());
+        assert!(referenced_paths("../outside/x.md").is_empty());
+        // Non-markdown and bare extensions don't qualify.
+        assert!(referenced_paths("src/main.rs and .md").is_empty());
+    }
+
+    #[test]
+    fn referenced_paths_dedupes_and_caps() {
+        let repeated = "a/x.md a/x.md a/x.md";
+        assert_eq!(referenced_paths(repeated), vec!["a/x.md".to_string()]);
+        let many: String = (0..20).map(|i| format!("d/n{i}.md ")).collect();
+        assert_eq!(referenced_paths(&many).len(), 8);
     }
 
     #[test]
