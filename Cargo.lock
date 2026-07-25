@@ -23424,6 +23424,7 @@ dependencies = [
  "fts-chrome",
  "midicore-proto",
  "midicore-ui",
+ "signal-browser",
  "signal-keys-proto",
  "signal-ui",
 ]
