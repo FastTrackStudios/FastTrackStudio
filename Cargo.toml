@@ -30,6 +30,7 @@ members = [
     "libs/architect/crdt/crdt-derive",
     "libs/architect/crdt/crdt-seaorm",
     # ── libs/ — UI + infrastructure libraries ─────────────────────────
+    "libs/fts-chrome",
     "libs/fts-ui/fts-ui",
     "libs/fts-ui/fts-ui-audio",
     "libs/fts-ui/showcase",
@@ -330,6 +331,7 @@ repository = "https://codeberg.org/FastTrackStudios/FastTrackStudio"
 
 [workspace.dependencies]
 # ── Internal — every moved crate, path declared ONCE here ─────────────
+fts-chrome = { path = "libs/fts-chrome" }
 fts-ui = { path = "libs/fts-ui/fts-ui" }
 fts-ui-audio = { path = "libs/fts-ui/fts-ui-audio" }
 fts-ui-showcase = { path = "libs/fts-ui/showcase" }
