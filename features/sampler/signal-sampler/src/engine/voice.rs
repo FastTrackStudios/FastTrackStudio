@@ -107,6 +107,11 @@ pub struct Voice {
     loop_range: Option<(usize, usize)>,
     reverse: bool,
     alternating_loop: bool,
+    /// Holds the loop region of a STREAMED sample resident while this voice
+    /// sounds. A loop reads the same frames forever and wraps backwards, so
+    /// nothing else in the streamer would keep them — see
+    /// [`crate::engine::stream::LoopPin`]. `None` for resident samples.
+    stream_pin: Option<crate::engine::stream::LoopPin>,
 
     /// Seamless forward-loop crossfade length in frames. As the read
     /// approaches `loop_end`, the pre-`loop_start` material is blended in over
@@ -404,6 +409,7 @@ impl Voice {
             loop_range: None,
             reverse: false,
             alternating_loop: false,
+            stream_pin: None,
             loop_xfade: 0,
             rate,
             gain,
@@ -469,6 +475,7 @@ impl Voice {
             loop_range: None,
             reverse: false,
             alternating_loop: false,
+            stream_pin: None,
             loop_xfade: 0,
             rate,
             gain,
@@ -738,6 +745,9 @@ impl Voice {
         self.start_frame = start;
         self.position = start as f64;
         self.end_frame = end;
+        // A streamed sample only has its head resident; a window that starts
+        // past it needs the chunk fetched before the voice arrives.
+        self.data.prefetch_at(start);
         self
     }
 
@@ -746,6 +756,10 @@ impl Voice {
         let end = loop_end.min(self.end_frame);
         if end > start + 1 {
             self.loop_range = Some((start, end));
+            // A streamed sample must be told: the loop is read for as long as
+            // the note is held, and the wrap jumps backwards past anything a
+            // forward prefetch would fetch.
+            self.stream_pin = self.data.pin_region(start, end);
         }
         self
     }
@@ -777,6 +791,9 @@ impl Voice {
         self.reverse = true;
         self.loop_range = None;
         self.position = self.end_frame.saturating_sub(1) as f64;
+        // Reverse walks *away* from what prefetching fetches, so the window
+        // is pinned for the life of the voice instead.
+        self.stream_pin = self.data.pin_region(self.start_frame, self.end_frame);
         self
     }
 
@@ -1699,12 +1716,7 @@ mod tests {
     use super::*;
 
     fn sample() -> Arc<SampleData> {
-        Arc::new(SampleData {
-            frames: Arc::new(vec![0.0; 32]),
-            channels: 1,
-            sample_rate: 48_000,
-            num_frames: 32,
-        })
+        Arc::new(SampleData::from_f32(vec![0.0; 32], 1, 48_000, 32))
     }
 
     fn voice(gain: f32) -> Voice {
@@ -1717,12 +1729,7 @@ mod tests {
         let frames: Vec<f32> = (0..n)
             .map(|i| (2.0 * std::f64::consts::PI * freq_hz * i as f64 / sr as f64).sin() as f32)
             .collect();
-        Arc::new(SampleData {
-            frames: Arc::new(frames),
-            channels: 1,
-            sample_rate: sr,
-            num_frames: n,
-        })
+        Arc::new(SampleData::from_f32(frames, 1, sr, n))
     }
 
     /// Estimate frequency by counting zero crossings in a mono buffer.
@@ -1892,12 +1899,7 @@ mod tests {
 
     #[test]
     fn sample_window_starts_and_stops_voice() {
-        let data = Arc::new(SampleData {
-            frames: Arc::new(vec![0.0, 1.0, 2.0, 3.0]),
-            channels: 1,
-            sample_rate: 48_000,
-            num_frames: 4,
-        });
+        let data = Arc::new(SampleData::from_f32(vec![0.0, 1.0, 2.0, 3.0], 1, 48_000, 4));
         let mut voice = Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8)
             .with_sample_window(1, Some(3));
 
@@ -1909,12 +1911,7 @@ mod tests {
 
     #[test]
     fn forward_loop_wraps_while_playing() {
-        let data = Arc::new(SampleData {
-            frames: Arc::new(vec![0.0, 1.0, 2.0, 3.0]),
-            channels: 1,
-            sample_rate: 48_000,
-            num_frames: 4,
-        });
+        let data = Arc::new(SampleData::from_f32(vec![0.0, 1.0, 2.0, 3.0], 1, 48_000, 4));
         let mut voice =
             Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8).with_forward_loop(1, 3);
 
@@ -1928,12 +1925,7 @@ mod tests {
 
     #[test]
     fn alternating_loop_ping_pongs_between_points() {
-        let data = Arc::new(SampleData {
-            frames: Arc::new(vec![0.0, 1.0, 2.0, 3.0]),
-            channels: 1,
-            sample_rate: 48_000,
-            num_frames: 4,
-        });
+        let data = Arc::new(SampleData::from_f32(vec![0.0, 1.0, 2.0, 3.0], 1, 48_000, 4));
         let mut voice =
             Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8).with_alternating_loop(1, 3);
 
@@ -1948,12 +1940,7 @@ mod tests {
 
     #[test]
     fn reverse_playback_walks_sample_window_backwards() {
-        let data = Arc::new(SampleData {
-            frames: Arc::new(vec![0.0, 1.0, 2.0, 3.0]),
-            channels: 1,
-            sample_rate: 48_000,
-            num_frames: 4,
-        });
+        let data = Arc::new(SampleData::from_f32(vec![0.0, 1.0, 2.0, 3.0], 1, 48_000, 4));
         let mut voice = Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8)
             .with_sample_window(1, Some(4))
             .reversed();
@@ -1967,12 +1954,7 @@ mod tests {
 
     #[test]
     fn one_shot_voice_ignores_note_off() {
-        let data = Arc::new(SampleData {
-            frames: Arc::new(vec![0.0, 1.0, 2.0]),
-            channels: 1,
-            sample_rate: 48_000,
-            num_frames: 3,
-        });
+        let data = Arc::new(SampleData::from_f32(vec![0.0, 1.0, 2.0], 1, 48_000, 3));
         let mut voice = Voice::with_rate(data, 60, VoiceKind::Short, 1.0, 1.0, 8);
 
         voice.note_off();
@@ -2012,12 +1994,7 @@ mod tests {
 
     #[test]
     fn voice_pan_applies_equal_power_gains() {
-        let data = Arc::new(SampleData {
-            frames: Arc::new(vec![1.0, 1.0]),
-            channels: 2,
-            sample_rate: 48_000,
-            num_frames: 1,
-        });
+        let data = Arc::new(SampleData::from_f32(vec![1.0, 1.0], 2, 48_000, 1));
 
         let mut left =
             Voice::with_rate(Arc::clone(&data), 60, VoiceKind::Zoned, 1.0, 1.0, 8).with_pan(-1.0);
@@ -2051,12 +2028,7 @@ mod tests {
             frames.push(s);
             frames.push(s);
         }
-        Arc::new(SampleData {
-            frames: Arc::new(frames),
-            channels: 2,
-            sample_rate: sr,
-            num_frames: n,
-        })
+        Arc::new(SampleData::from_f32(frames, 2, sr, n))
     }
 
     /// Largest absolute inter-sample jump of the mono-summed buffer, counting

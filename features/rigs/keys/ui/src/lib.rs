@@ -2,219 +2,162 @@
 //! rig. Renders purely from `signal-keys-proto` via the generated vox clients
 //! (provided in Dioxus context by the host). Inline styles only (Blitz-safe).
 //!
-//! Layout mirrors the guitar rig at a high level: a **preset browser** on the
-//! left (the loaded engine's presets — the Keyscape instruments), the
-//! **control view** in the middle (boxes for the engine + its layers, from the
-//! composition tree), and a **performance** strip (the piano) at the bottom.
+//! The rig draws no bar: it publishes its readouts and panels into the app
+//! chrome (`fts_chrome`) and renders one surface — the mixer at three zooms
+//! (mixer → engine → layer). Routing, the MIDI monitor and the on-screen
+//! keyboard are right-rail panels, so they open beside what you are playing
+//! instead of replacing it. The **Perform strip** (the profile's footswitch
+//! stacks) stays pinned to the bottom of every zoom.
 
 use dioxus::prelude::*;
-use midicore_proto::MidiEvent;
-use midicore_ui::MidiMonitorPanel;
-use signal_keys_proto::keys::{KeysEvent, KeysRigClient, KeysRigStreamClient};
-use signal_keys_proto::{KeysNode, KeysPreset, KeysStatus};
-use signal_ui::components::Piano;
 
-/// Live keys-rig view-state: seeded once, then folded from the event stream.
-#[derive(Clone, Copy)]
-struct KeysState {
-    status: Signal<KeysStatus>,
-    presets: Signal<Vec<KeysPreset>>,
-    tree: Signal<KeysNode>,
-    midi: Signal<Vec<MidiEvent>>,
-}
+mod algos;
+mod browser;
+mod control;
+mod controllers;
+mod engine_view;
+mod fader;
+mod graphs;
+mod knob;
+mod layer_macros;
+mod layer_view;
+mod macro_panel;
+mod meter;
+mod midi_light;
+mod module_edit;
+mod perform;
+mod routing;
+mod selection;
+mod state;
+mod throttle;
+mod time_fx;
+mod zoom;
 
-fn use_keys_state() -> (KeysState, Option<KeysRigClient>) {
-    let rig = use_hook(try_consume_context::<KeysRigClient>);
-    let stream = use_hook(try_consume_context::<KeysRigStreamClient>);
+pub use browser::Browser;
+pub use control::{ControlView, engine_color};
+pub use engine_view::EngineView;
+pub use knob::Knob;
+pub use layer_view::LayerView;
+pub use macro_panel::{MacroPanel, Shape, ShapeCard};
+pub use module_edit::ModuleEdit;
+pub use zoom::{OpenButton, Zoom};
+pub use fader::{Fader, fmt_db};
+pub use meter::{EdgeMeter, fmt_dbfs};
+pub use graphs::{Adsr, EnvelopeGraph, FilterCurve};
+pub use midi_light::MidiPanel;
+pub use perform::{PerformStrip, stack_color};
+pub use routing::RoutingView;
+pub use selection::{Selection, use_selection};
+pub use state::{KeysViewState, held_notes, use_keys_state};
 
-    let mut status = use_signal(KeysStatus::default);
-    let mut presets = use_signal(Vec::<KeysPreset>::new);
-    let mut tree = use_signal(KeysNode::default);
-    let mut midi = use_signal(Vec::<MidiEvent>::new);
-
-    // Seed once — start the rig, then pull the current state.
-    {
-        let rig = rig.clone();
-        use_future(move || {
-            let rig = rig.clone();
-            async move {
-                let Some(rig) = rig else { return };
-                let _ = rig.start().await;
-                if let Ok(s) = rig.status().await {
-                    status.set(s);
-                }
-                if let Ok(p) = rig.presets().await {
-                    presets.set(p);
-                }
-                if let Ok(t) = rig.tree().await {
-                    tree.set(t);
-                }
-                if let Ok(m) = rig.midi_recent().await {
-                    midi.set(m);
-                }
-            }
-        });
-    }
-
-    // Live updates.
-    {
-        let stream = stream.clone();
-        architect::use_stream(
-            move |sink| {
-                let stream = stream.clone();
-                async move {
-                    match stream {
-                        Some(s) => s.events(sink).await.is_ok(),
-                        None => false,
-                    }
-                }
-            },
-            move |ev: KeysEvent| {
-                let (mut status, mut presets, mut tree, mut midi) = (status, presets, tree, midi);
-                match ev {
-                    KeysEvent::Status(s) => status.set(s),
-                    KeysEvent::Library(p) => presets.set(p),
-                    KeysEvent::Tree(t) => tree.set(t),
-                    KeysEvent::Midi(m) => midi.set(m),
-                }
-            },
-        );
-    }
-
-    (KeysState { status, presets, tree, midi }, rig)
-}
+// The wire contract, re-exported for convenience.
+pub use signal_keys_proto as proto;
 
 /// The keys-rig remote view. Mount inside a host that has provided
 /// `KeysRigClient` + `KeysRigStreamClient` in context.
+///
+/// The rig draws no bar of its own: it publishes its readouts and its panels
+/// into the app chrome (`fts_chrome`), and the mixer/engine/layer zoom is the
+/// whole surface. Routing, the MIDI monitor and the keyboard used to be page
+/// modes — pages you had to leave the mixer to reach; they are right-rail
+/// panels now, so they open *beside* what you are playing.
 #[component]
 pub fn KeysRigRemote() -> Element {
-    let (state, rig) = use_keys_state();
+    let (state, _rig) = use_keys_state();
+    // Control-view depth: mixer → engine → layer. Shared through context so
+    // the cards can open themselves.
+    let zoom = use_context_provider(|| Signal::new(Zoom::Mixer));
+    // What the browser is pointed at — a path into the rig, set by clicking
+    // anything in the mixer.
+    let _selection = use_context_provider(|| Signal::new(selection::Selection::default()));
+    // The live state, for the panels that re-pull their own detail when the
+    // rig publishes (the mixer's macro band).
+    use_context_provider(|| state);
+    let level = fts_chrome::use_chrome_level(2);
+
     let status = state.status.read().clone();
-    let presets = state.presets.read().clone();
+    let mixer = state.mixer.read().clone();
+    let perform = state.perform.read().clone();
     let tree = state.tree.read().clone();
     let midi = state.midi.read().clone();
-    let midi_count = midi.len() as u64;
-
-    // Currently-held notes light the piano.
-    let lit: Vec<u8> = {
-        let mut held = std::collections::BTreeSet::<u8>::new();
-        for e in midi.iter() {
-            match e {
-                MidiEvent::NoteOn { key, velocity, .. } if velocity.get() > 0 => {
-                    held.insert(key.get());
-                }
-                MidiEvent::NoteOn { key, .. } | MidiEvent::NoteOff { key, .. } => {
-                    held.remove(&key.get());
-                }
-                _ => {}
-            }
-        }
-        held.into_iter().collect()
-    };
 
     let master_pct = (status.master_peak.clamp(0.0, 1.0) * 100.0) as u32;
+    let running = status.running;
+    // The header lens: the active stack IS the sound, like the guitar rig's.
+    let active_stack = perform.stacks.iter().find(|s| s.is_active);
+    let (lens_bg, lens_fg) = active_stack
+        .map(|s| stack_color(&s.name))
+        .unwrap_or(("#1c1c20", "#a1a1aa"));
+    let lens_label = active_stack
+        .map(|s| s.name.to_uppercase())
+        .or_else(|| status.loaded_preset.clone())
+        .unwrap_or_else(|| "—".into());
+    let live_lanes = mixer
+        .engines
+        .iter()
+        .flat_map(|e| e.layers.iter())
+        .filter(|l| l.live && !l.muted)
+        .count();
+    let (midi_lit, midi_color) = midi_light::use_midi_glow(&midi);
+
+    // What the rig's bar used to say, said in the app bar instead.
+    level.status(vec![
+        fts_chrome::StatusItem::pill(lens_label.clone(), lens_fg, lens_bg),
+        fts_chrome::StatusItem::text(format!(
+            "{live_lanes} lane{} live",
+            if live_lanes == 1 { "" } else { "s" }
+        )),
+        fts_chrome::StatusItem::dot(midi_lit, midi_color),
+        fts_chrome::StatusItem::dot(running, "#22c55e"),
+        fts_chrome::StatusItem::meter(status.master_peak, "#22c55e"),
+    ]);
+    // The old Routing and Session pages, as panels.
+    level.panels(vec![
+        fts_chrome::PanelSpec::new("keys.routing", "Routing", fts_chrome::Icon::Routing).width(360),
+        fts_chrome::PanelSpec::new("keys.midi", "MIDI", fts_chrome::Icon::Midi).width(360),
+    ]);
+    let held = held_notes(&midi);
+    // Where the wheels and pedals are sitting, for the strip beside the keys.
+    let controllers = controllers::Controllers::from_midi(&midi);
+    let _ = master_pct;
 
     rsx! {
-        div { style: "display:flex; flex-direction:column; gap:0; flex:1; min-height:0; color:#e4e4e7; font-family:sans-serif;",
-            // ── top bar ──
-            div { style: "display:flex; align-items:center; gap:10px; padding:6px 12px; border-bottom:1px solid #1c1c1f;",
-                span { style: "font-weight:700; font-size:13px;", "Keys" }
-                span { style: "font-size:11px; color:#a1a1aa;", {status.loaded_preset.clone().unwrap_or_else(|| "—".into())} }
-                div { style: "flex:1;" }
-                // master meter
-                div { style: "width:80px; height:8px; background:#18181b; border-radius:2px; overflow:hidden;",
-                    div { style: "height:100%; width:{master_pct}%; background:#22c55e;" }
+        div {
+            style: "display: flex; flex-direction: column; flex: 1; min-height: 0; \
+                    color: #e4e4e7; font-family: sans-serif; background: #08080a;",
+            div { style: "display: flex; flex: 1; min-height: 0;",
+                // The browser — one sidebar, pointed at the selection.
+                Browser { state }
+                div { style: "display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0;",
+                    match zoom() {
+                        Zoom::Mixer => rsx! {
+                            ControlView { mixer: mixer.clone(), held: held.clone(), controllers }
+                        },
+                        Zoom::Engine(name) => {
+                            match mixer.engines.iter().find(|e| e.name == name) {
+                                Some(engine) => rsx! {
+                                    EngineView { engine: engine.clone(), zoom }
+                                },
+                                None => rsx! {
+                                    ControlView { mixer: mixer.clone(), held: held.clone(), controllers }
+                                },
+                            }
+                        }
+                        Zoom::Layer(name) => rsx! {
+                            LayerView { layer: name, zoom, mixer: mixer.clone() }
+                        },
+                    }
+                }
+                // The rig's panels, flush against the app's right rail.
+                fts_chrome::PanelHost { id: "keys.routing".to_string(),
+                    RoutingView { tree: tree.clone() }
+                }
+                fts_chrome::PanelHost { id: "keys.midi".to_string(),
+                    midi_light::MidiPanel { midi: midi.clone(), port: status.midi_port.clone() }
                 }
             }
-            div { style: "display:flex; gap:12px; flex:1; min-height:0;",
-                // ── preset browser (left) ──
-                div { style: "display:flex; flex-direction:column; gap:4px; width:220px; min-width:220px; overflow:auto; border-right:1px solid #1c1c1f; padding:8px;",
-                    span { style: "font-size:11px; color:#71717a; text-transform:uppercase; letter-spacing:0.05em;", "Presets ({presets.len()})" }
-                    for (i, preset) in presets.iter().enumerate() {
-                        {
-                            let rig = rig.clone();
-                            rsx!{ button {
-                                key: "{preset.name}",
-                                style: preset_btn(preset.loaded),
-                                onclick: move |_| { let rig = rig.clone(); spawn(async move { if let Some(r) = rig { let _ = r.load_preset(i as u32).await; } }); },
-                                span { style: "font-size:12px; font-weight:600;", "{preset.name}" }
-                                span { style: "font-size:9px; color:#71717a;", "{preset.kind}" }
-                            } }
-                        }
-                    }
-                }
-                // ── control view + performance ──
-                div { style: "display:flex; flex-direction:column; gap:12px; flex:1; min-height:0; overflow:auto; padding:10px;",
-                    // control view: the engine/layer tree as boxes
-                    div {
-                        span { style: "font-size:11px; color:#71717a; text-transform:uppercase; letter-spacing:0.05em;", "Control" }
-                        div { style: "margin-top:6px;",
-                            NodeBoxes { node: tree }
-                        }
-                    }
-                    MidiMonitorPanel { events: midi, count: midi_count, title: "MIDI monitor".to_string() }
-                    // performance: piano
-                    div {
-                        span { style: "font-size:11px; color:#71717a; text-transform:uppercase; letter-spacing:0.05em;", "Keyboard" }
-                        {
-                            let rig_on = rig.clone();
-                            let rig_off = rig.clone();
-                            rsx!{ Piano {
-                                start_note: 21,
-                                end_note: 108,
-                                active_notes: lit,
-                                show_labels: false,
-                                waterfall: false,
-                                accent_color: "#a78bfa".to_string(),
-                                height: "132px",
-                                on_note_on: move |n: u8| { let rig = rig_on.clone(); spawn(async move { if let Some(r) = rig { let _ = r.trigger(n as u32, 100).await; } }); },
-                                on_note_off: move |n: u8| { let rig = rig_off.clone(); spawn(async move { if let Some(r) = rig { let _ = r.trigger(n as u32, 0).await; } }); },
-                            } }
-                        }
-                    }
-                }
-            }
+            // ── perform strip (every zoom) ──
+            PerformStrip { perform: perform.clone() }
         }
     }
-}
-
-/// Recursively render the composition tree as nested selectable boxes — the
-/// engine → layers → blocks structure (placeholder control surface for now).
-#[component]
-fn NodeBoxes(node: KeysNode) -> Element {
-    if node.id.is_empty() {
-        return rsx! { span { style: "font-size:11px; color:#52525b;", "no preset loaded" } };
-    }
-    let border = match node.role.as_str() {
-        "engine" => "#4c3f6b",
-        "layer" => "#3f5178",
-        "block" => {
-            if node.live { "#166534" } else { "#3f3f46" }
-        }
-        _ => "#27272a",
-    };
-    let bg = if node.role == "block" && node.live { "#14321e" } else { "#111113" };
-    rsx! {
-        div { style: format!("display:flex; flex-direction:column; gap:4px; padding:6px 8px; margin:3px 0; border-radius:8px; background:{bg}; border:1px solid {border};"),
-            div { style: "display:flex; align-items:center; gap:6px;",
-                span { style: "font-size:9px; color:#71717a; text-transform:uppercase;", "{node.role}" }
-                span { style: "font-size:12px; font-weight:600;", "{node.label}" }
-                if node.role == "block" && !node.live {
-                    span { style: "font-size:9px; color:#71717a;", "(silent)" }
-                }
-            }
-            if !node.children.is_empty() {
-                div { style: "padding-left:10px; border-left:1px solid #27272a;",
-                    for child in node.children.iter() {
-                        NodeBoxes { key: "{child.id}", node: child.clone() }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn preset_btn(loaded: bool) -> String {
-    let (bg, br, fg) = if loaded { ("#1e1b2e", "#7c3aed", "#e4e4e7") } else { ("#111113", "#27272a", "#a1a1aa") };
-    format!("display:flex; flex-direction:column; text-align:left; padding:6px 8px; border-radius:6px; background:{bg}; color:{fg}; border:1px solid {br}; font-size:12px; cursor:pointer;")
 }

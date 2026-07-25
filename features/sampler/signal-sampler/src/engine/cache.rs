@@ -38,6 +38,9 @@ pub struct PreloadStats {
     pub loaded: usize,
     pub failed: usize,
     pub bytes: usize,
+    /// Samples left on disk because the process-wide preload budget was
+    /// used up — they stream on demand. See [`super::budget`].
+    pub skipped: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -61,12 +64,152 @@ impl EvictStats {
 
 // ── Loaded sample data ────────────────────────────────────────────────────────
 
-/// A fully decoded sample file.
+/// Where a sample's PCM actually lives.
+///
+/// Kontakt-style samplers keep libraries playable without keeping them
+/// resident, and the trick is not a smarter cache — it is not decoding to
+/// float in the first place. A 12-second stereo note is 4.6 MB as `f32` and
+/// 1.2 MB as the 16-bit PCM it came from, or **zero** anonymous bytes when it
+/// can be read straight out of a memory-mapped pack, where the OS pages it in
+/// on demand and evicts it under pressure for free.
+#[derive(Debug, Clone)]
+pub enum Pcm {
+    /// Decoded float PCM. Synthesis, offline tools, tests — anything that
+    /// wants a plain slice.
+    F32(Arc<Vec<f32>>),
+    /// 16-bit PCM, converted per read. Half the memory of `F32` for the
+    /// decoded-and-resident case.
+    I16(Arc<Vec<i16>>),
+    /// **Streamed**: the sample stays compressed in its mapped pack; a head
+    /// is resident and the rest is decoded a chunk at a time as the voice
+    /// plays it. See [`super::stream`].
+    Streamed(Arc<super::stream::StreamedSample>),
+    /// **Direct from disk**: a window into a memory-mapped file. Nothing is
+    /// decoded and nothing is allocated; reads touch page-cache pages.
+    Mapped {
+        map: Arc<memmap2::Mmap>,
+        /// Byte offset of the first sample within the mapping.
+        offset: usize,
+        /// Number of PCM samples (not frames, not bytes).
+        samples: usize,
+        fmt: PcmFmt,
+    },
+}
+
+/// Sample formats readable straight out of a mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PcmFmt {
+    /// 16-bit little-endian.
+    I16,
+    /// 24-bit little-endian, 3 bytes per sample, packed.
+    I24,
+    /// 32-bit float little-endian.
+    F32,
+}
+
+impl PcmFmt {
+    /// Bytes per sample on disk.
+    pub const fn width(self) -> usize {
+        match self {
+            Self::I16 => 2,
+            Self::I24 => 3,
+            Self::F32 => 4,
+        }
+    }
+}
+
+/// Frames of a mapped sample the preloader faults in eagerly — half a second
+/// at 48 kHz, comfortably more than any note's attack.
+const WARM_HEAD_FRAMES: usize = 24_000;
+
+const I16_SCALE: f32 = 1.0 / 32768.0;
+const I24_SCALE: f32 = 1.0 / 8_388_608.0;
+
+impl Pcm {
+    /// Number of PCM samples held (frames × channels).
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::F32(v) => v.len(),
+            Self::I16(v) => v.len(),
+            Self::Streamed(s) => s.num_frames * s.channels.max(1) as usize,
+            Self::Mapped { samples, .. } => *samples,
+        }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// One sample, converted to float. The audio thread's inner read.
+    #[inline]
+    pub fn sample(&self, index: usize) -> f32 {
+        match self {
+            Self::F32(v) => v.get(index).copied().unwrap_or(0.0),
+            Self::I16(v) => v.get(index).map(|s| *s as f32 * I16_SCALE).unwrap_or(0.0),
+            Self::Streamed(s) => s.sample(index),
+            Self::Mapped { map, offset, samples, fmt } => {
+                if index >= *samples {
+                    return 0.0;
+                }
+                let at = offset + index * fmt.width();
+                let bytes = map.as_ref();
+                match fmt {
+                    PcmFmt::I16 => {
+                        let Some(b) = bytes.get(at..at + 2) else { return 0.0 };
+                        i16::from_le_bytes([b[0], b[1]]) as f32 * I16_SCALE
+                    }
+                    PcmFmt::I24 => {
+                        let Some(b) = bytes.get(at..at + 3) else { return 0.0 };
+                        // Sign-extend 24 → 32 by landing the bytes in the top
+                        // three octets and shifting back down.
+                        let v = i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8;
+                        v as f32 * I24_SCALE
+                    }
+                    PcmFmt::F32 => {
+                        let Some(b) = bytes.get(at..at + 4) else { return 0.0 };
+                        f32::from_le_bytes([b[0], b[1], b[2], b[3]])
+                    }
+                }
+            }
+        }
+    }
+
+    /// Anonymous (non-evictable) bytes this store costs the process. Mapped
+    /// PCM costs nothing: it is file-backed page cache.
+    pub fn resident_bytes(&self) -> usize {
+        match self {
+            Self::F32(v) => v.len() * std::mem::size_of::<f32>(),
+            Self::I16(v) => v.len() * std::mem::size_of::<i16>(),
+            // Head plus whatever chunks are under playheads right now.
+            Self::Streamed(s) => s.resident_bytes(),
+            Self::Mapped { .. } => 0,
+        }
+    }
+
+    /// The samples as floats, copying only when they are not already floats.
+    pub fn to_f32(&self) -> std::borrow::Cow<'_, [f32]> {
+        match self {
+            Self::F32(v) => std::borrow::Cow::Borrowed(v.as_slice()),
+            _ => std::borrow::Cow::Owned((0..self.len()).map(|i| self.sample(i)).collect()),
+        }
+    }
+
+    /// The float slice, when the store already is one.
+    pub fn as_f32(&self) -> Option<&[f32]> {
+        match self {
+            Self::F32(v) => Some(v.as_slice()),
+            _ => None,
+        }
+    }
+}
+
+/// A loaded sample: its PCM (wherever that lives) and its format.
 #[derive(Debug, Clone)]
 pub struct SampleData {
-    /// PCM data — f32, normalised to [-1.0, 1.0].
-    /// For stereo: interleaved L/R pairs. For mono: plain samples.
-    pub frames: Arc<Vec<f32>>,
+    /// PCM, normalised to [-1.0, 1.0] on read. Stereo is interleaved L/R.
+    pub pcm: Pcm,
     pub channels: u16,
     pub sample_rate: u32,
     /// Total number of sample frames (frames = samples / channels).
@@ -74,25 +217,125 @@ pub struct SampleData {
 }
 
 impl SampleData {
+    /// Decoded float PCM — the classic path.
+    pub fn from_f32(frames: Vec<f32>, channels: u16, sample_rate: u32, num_frames: usize) -> Self {
+        Self { pcm: Pcm::F32(Arc::new(frames)), channels, sample_rate, num_frames }
+    }
+
+    /// A window into a memory-mapped pack — nothing decoded, nothing
+    /// allocated.
+    pub fn mapped(
+        map: Arc<memmap2::Mmap>,
+        offset: usize,
+        samples: usize,
+        fmt: PcmFmt,
+        channels: u16,
+        sample_rate: u32,
+        num_frames: usize,
+    ) -> Self {
+        Self { pcm: Pcm::Mapped { map, offset, samples, fmt }, channels, sample_rate, num_frames }
+    }
+
+    /// A sample that stays compressed in its pack and streams as it plays.
+    pub fn streamed(sample: Arc<super::stream::StreamedSample>) -> Self {
+        let (channels, sample_rate, num_frames) =
+            (sample.channels, sample.sample_rate, sample.num_frames);
+        Self { pcm: Pcm::Streamed(sample), channels, sample_rate, num_frames }
+    }
+
+    /// Anonymous bytes this sample costs; see [`Pcm::resident_bytes`].
     pub fn decoded_bytes(&self) -> usize {
-        self.frames.len() * std::mem::size_of::<f32>()
+        self.pcm.resident_bytes()
+    }
+
+    /// Number of PCM samples (frames × channels).
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.pcm.len()
+    }
+
+    /// Keep `from..to` resident while the returned pin lives. `None` unless
+    /// the sample is streamed — a resident sample is already all there.
+    pub fn pin_region(
+        &self,
+        from_frame: usize,
+        to_frame: usize,
+    ) -> Option<super::stream::LoopPin> {
+        match &self.pcm {
+            Pcm::Streamed(s) => Some(s.pin(from_frame, to_frame)),
+            _ => None,
+        }
+    }
+
+    /// Warm the region a voice is about to read. No-op unless streamed.
+    pub fn prefetch_at(&self, frame: usize) {
+        if let Pcm::Streamed(s) = &self.pcm {
+            s.prefetch_at(frame);
+        }
+    }
+
+    /// Whether this sample is streamed from its pack rather than resident.
+    pub fn is_streamed(&self) -> bool {
+        matches!(self.pcm, Pcm::Streamed(_))
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.pcm.is_empty()
+    }
+
+    /// The samples as floats — borrowed when they already are.
+    pub fn to_f32(&self) -> std::borrow::Cow<'_, [f32]> {
+        self.pcm.to_f32()
+    }
+
+
+    /// Fault in the sample's pages so the audio thread never takes a disk
+    /// read inside the callback.
+    ///
+    /// Mapped PCM is free to *hold* but not free to *touch*: a cold page is a
+    /// blocking read, and in a realtime callback that is a dropout. So the
+    /// preloader does what Kontakt's does — it makes the head resident (the
+    /// attack, which plays immediately) and asks the kernel to read the tail
+    /// ahead in the background. The pages stay file-backed and evictable, so
+    /// this costs the process nothing it can be blamed for.
+    pub fn warm(&self, head_frames: usize) {
+        let Pcm::Mapped { map, offset, samples, fmt } = &self.pcm else { return };
+        let len = samples * fmt.width();
+        // Read-ahead for the whole sample, asynchronously.
+        let _ = map.advise_range(memmap2::Advice::WillNeed, *offset, len);
+        // …and synchronously touch the head, one byte per page.
+        let head = (head_frames * self.channels.max(1) as usize * fmt.width()).min(len);
+        let page = 4096;
+        let bytes = map.as_ref();
+        let mut acc = 0u8;
+        let mut at = *offset;
+        while at < offset + head {
+            if let Some(b) = bytes.get(at) {
+                acc = acc.wrapping_add(*b);
+            }
+            at += page;
+        }
+        // Keep the reads from being optimised away.
+        std::hint::black_box(acc);
     }
 
     /// Read one stereo frame (or duplicate mono → stereo). Returns (L, R).
     #[inline]
     pub fn frame(&self, frame_idx: usize) -> (f32, f32) {
+        let n = self.pcm.len();
         let base = frame_idx * self.channels as usize;
-        if base >= self.frames.len() {
+        if base >= n {
             return (0.0, 0.0);
         }
         match self.channels {
             1 => {
-                let s = self.frames[base];
+                let s = self.pcm.sample(base);
                 (s, s)
             }
             _ => {
-                let l = self.frames[base];
-                let r = self.frames[(base + 1).min(self.frames.len() - 1)];
+                let l = self.pcm.sample(base);
+                let r = self.pcm.sample((base + 1).min(n - 1));
                 (l, r)
             }
         }
@@ -128,6 +371,19 @@ struct CacheInner {
     pcm_pack: Option<SignalPcmPack>,
 }
 
+impl Drop for CacheInner {
+    fn drop(&mut self) {
+        let bytes: usize = self
+            .loaded
+            .read()
+            .map(|l| l.values().map(|d| d.decoded_bytes()).sum())
+            .unwrap_or(0);
+        if bytes > 0 {
+            super::budget::release(bytes);
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct PreparedEntry {
     pcm_file: PathBuf,
@@ -161,6 +417,10 @@ pub struct SignalPcmPack {
 
 #[derive(Debug, Clone)]
 pub struct PackEntry {
+    /// The pack kind this entry came from (5 FLAC, 6 Ogg, 7 PCM i16, 8 PCM
+    /// i24) — carried per entry so a reader can decide how to read it
+    /// without the pack, and so mixed-codec packs stay possible.
+    kind: u32,
     offset: u64,
     bytes: u64,
     channels: u16,
@@ -170,6 +430,18 @@ pub struct PackEntry {
 }
 
 impl PackEntry {
+    pub fn kind(&self) -> u32 {
+        self.kind
+    }
+    /// Raw PCM entries are read straight out of the mapping — no decode, no
+    /// allocation. `None` for the compressed kinds.
+    pub fn mapped_fmt(&self) -> Option<PcmFmt> {
+        match self.kind {
+            SIGNAL_PACK_KIND_PCM_I16 => Some(PcmFmt::I16),
+            SIGNAL_PACK_KIND_PCM_I24 => Some(PcmFmt::I24),
+            _ => None,
+        }
+    }
     pub fn offset(&self) -> u64 {
         self.offset
     }
@@ -194,6 +466,12 @@ const SIGNAL_PACK_MAGIC: &[u8; 8] = b"SIGPACK\0";
 const SIGNAL_PACK_VERSION: u32 = 1;
 const SIGNAL_PACK_HEADER_LEN: usize = 64;
 const SIGNAL_PACK_KIND_FLAC_I24: u32 = 5;
+/// Raw PCM packs: entries are interleaved little-endian samples with no
+/// container and no codec, so a voice can read them directly out of the
+/// mapping (see [`Pcm::Mapped`]).
+const SIGNAL_PACK_KIND_PCM_I16: u32 = 7;
+const SIGNAL_PACK_KIND_PCM_I24: u32 = 8;
+
 /// Lossy proxy pack: entries are Ogg Vorbis streams instead of FLAC.
 /// Same header/index/spec layout; index `num_frames`/`samples` still carry
 /// the SOURCE PCM truth, so frame-indexed zone metadata (loop points,
@@ -208,6 +486,15 @@ pub enum PackCodec {
     /// Lossy Ogg Vorbis proxy at the given quality (-0.2..=1.0 — libvorbis
     /// scale, i.e. oggenc `-q -2..10` divided by 10; 0.8 ≈ q8 ≈ ~256 kbps).
     OggVorbis { quality: f32 },
+    /// **Raw 16-bit PCM**, interleaved little-endian. Bigger on disk than
+    /// FLAC and *free* in memory: voices read it straight out of the
+    /// memory-mapped pack, so residency is page cache the OS can evict —
+    /// this is the format that makes a piano playable without a piano's
+    /// worth of RAM.
+    PcmI16,
+    /// Raw 24-bit PCM, 3 bytes per sample. Same deal, lossless, 1.5× the
+    /// size of `PcmI16`.
+    PcmI24,
 }
 
 impl PackCodec {
@@ -218,6 +505,25 @@ impl PackCodec {
         match self {
             PackCodec::FlacI24 => SIGNAL_PACK_KIND_FLAC_I24,
             PackCodec::OggVorbis { .. } => SIGNAL_PACK_KIND_OGG_VORBIS,
+            PackCodec::PcmI16 => SIGNAL_PACK_KIND_PCM_I16,
+            PackCodec::PcmI24 => SIGNAL_PACK_KIND_PCM_I24,
+        }
+    }
+
+    /// Parse a codec name: `flac`, `ogg[:quality]`, `pcm16`, `pcm24`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let name = name.trim().to_ascii_lowercase();
+        match name.split_once(':') {
+            Some(("ogg" | "vorbis", q)) => {
+                q.parse().ok().map(|quality| PackCodec::OggVorbis { quality })
+            }
+            _ => match name.as_str() {
+                "flac" | "flac-i24" => Some(PackCodec::FlacI24),
+                "ogg" | "vorbis" => Some(PackCodec::OGG_VORBIS_Q8),
+                "pcm16" | "pcm-i16" | "i16" => Some(PackCodec::PcmI16),
+                "pcm24" | "pcm-i24" | "i24" => Some(PackCodec::PcmI24),
+                _ => None,
+            },
         }
     }
 }
@@ -299,6 +605,35 @@ impl SampleCache {
                 pcm_pack,
             }),
         }
+    }
+
+    /// Load `path` in the background if it isn't cached yet.
+    ///
+    /// The audio thread drops a voice whose sample isn't resident — it can't
+    /// decode, and it won't block. Without this that note stays silent
+    /// forever; with it, the miss warms the sample and the next hit plays.
+    /// Preloading is still what makes the *first* hit sound.
+    pub fn warm_async(&self, path: &Path) {
+        if self.inner.loaded_snapshot.load().contains_key(path) {
+            return;
+        }
+        warm_queue().send(self.clone_handle(), path.to_owned());
+    }
+
+    /// Whether this cache's samples stream (a FLAC pack) or must be decoded
+    /// whole. Streaming changes what a preload *costs*: a head instead of the
+    /// entire sample, so every zone can be warmed instead of a capped subset.
+    pub fn is_streamable(&self) -> bool {
+        self.inner
+            .pcm_pack
+            .as_ref()
+            .map(|pack| {
+                pack.entries_iter()
+                    .next()
+                    .map(|(_, e)| e.mapped_fmt().is_none() && should_stream(e))
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
     }
 
     /// Cheap clone of the cache handle — shares the underlying storage.
@@ -388,10 +723,28 @@ impl SampleCache {
         let loaded_n = AtomicUsize::new(0);
         let failed_n = AtomicUsize::new(0);
         let bytes_n = AtomicUsize::new(0);
+        let skipped_n = AtomicUsize::new(0);
 
         paths
             .par_iter()
             .for_each(|(path, prepared, prepared_dir, packed)| {
+                // The budget is the engine's hard RAM ceiling: past it, the
+                // rest of this preload streams from disk instead. Reserve the
+                // estimated size FIRST — decodes run in parallel, and charging
+                // afterwards lets a poolful of them overshoot together.
+                // Materialised by an earlier run? Map it and skip the decode.
+                if let Some(mapped) = mapped_from_stream_cache(&self.inner, path, packed.as_ref()) {
+                    mapped.warm(WARM_HEAD_FRAMES);
+                    self.insert_loaded(path.clone(), Arc::new(mapped), false);
+                    loaded_n.fetch_add(1, Ordering::Relaxed);
+                    completed.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+                let reserved = estimated_decoded_bytes(&self.inner, path, packed.as_ref());
+                if !super::budget::try_reserve(reserved) {
+                    skipped_n.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
                 let result = match packed {
                     Some((pack_mmap, entry)) => load_pack_sample(pack_mmap, entry),
                     None => match prepared {
@@ -401,8 +754,13 @@ impl SampleCache {
                         None => load_sample(path),
                     },
                 };
+                // The real size is charged by `insert_loaded`, so the
+                // estimate goes back either way.
+                super::budget::release(reserved);
+                let result = result.map(|data| stream_cached(path, data));
                 match result {
                     Ok(data) => {
+                        data.warm(WARM_HEAD_FRAMES);
                         let bytes = data.decoded_bytes();
                         // Brief write lock per sample — readers (audio thread)
                         // see the new entry as soon as the lock releases. Audio
@@ -426,10 +784,15 @@ impl SampleCache {
                 }
             });
 
+        // Always publish at the end: samples that took the stream-cache fast
+        // path skip the in-loop cadence, and a snapshot nobody published is a
+        // cache the audio thread cannot see.
+        self.publish_loaded_snapshot();
         PreloadStats {
             loaded: loaded_n.load(Ordering::Relaxed),
             failed: failed_n.load(Ordering::Relaxed),
             bytes: bytes_n.load(Ordering::Relaxed),
+            skipped: skipped_n.load(Ordering::Relaxed),
         }
     }
 
@@ -464,17 +827,33 @@ impl SampleCache {
         let loaded_n = AtomicUsize::new(0);
         let failed_n = AtomicUsize::new(0);
         let bytes_n = AtomicUsize::new(0);
+        let skipped_n = AtomicUsize::new(0);
 
         work.par_iter().for_each(|(path, packed)| {
             if should_cancel() {
+                return;
+            }
+            if let Some(mapped) = mapped_from_stream_cache(&self.inner, path, packed.as_ref()) {
+                mapped.warm(WARM_HEAD_FRAMES);
+                self.insert_loaded(path.clone(), Arc::new(mapped), false);
+                loaded_n.fetch_add(1, Ordering::Relaxed);
+                completed.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+            let reserved = estimated_decoded_bytes(&self.inner, path, packed.as_ref());
+            if !super::budget::try_reserve(reserved) {
+                skipped_n.fetch_add(1, Ordering::Relaxed);
                 return;
             }
             let result = match packed {
                 Some((pack_mmap, entry)) => load_pack_sample(pack_mmap, entry),
                 None => decode_path(&self.inner, path),
             };
+            super::budget::release(reserved);
+            let result = result.map(|data| stream_cached(path, data));
             match result {
                 Ok(data) => {
+                    data.warm(WARM_HEAD_FRAMES);
                     let bytes = data.decoded_bytes();
                     self.insert_loaded(path.clone(), Arc::new(data), false);
                     loaded_n.fetch_add(1, Ordering::Relaxed);
@@ -497,6 +876,7 @@ impl SampleCache {
             loaded: loaded_n.load(Ordering::Relaxed),
             failed: failed_n.load(Ordering::Relaxed),
             bytes: bytes_n.load(Ordering::Relaxed),
+            skipped: skipped_n.load(Ordering::Relaxed),
         }
     }
 
@@ -554,6 +934,7 @@ impl SampleCache {
                 if loaded.remove(&path).is_some() {
                     evicted += 1;
                     bytes_after = bytes_after.saturating_sub(bytes);
+                    super::budget::release(bytes);
                 }
             }
 
@@ -588,8 +969,15 @@ impl SampleCache {
 
     fn insert_loaded(&self, path: PathBuf, data: Arc<SampleData>, publish: bool) {
         {
+            let bytes = data.decoded_bytes();
             let mut loaded = self.inner.loaded.write().unwrap_or_else(|e| e.into_inner());
-            loaded.insert(path, data);
+            let replaced = loaded.insert(path, data);
+            // The process-wide preload budget is charged here because this is
+            // the one door every decoded sample comes through.
+            if let Some(old) = replaced {
+                super::budget::release(old.decoded_bytes());
+            }
+            super::budget::charge(bytes);
         }
         if publish {
             self.publish_loaded_snapshot();
@@ -603,16 +991,86 @@ impl SampleCache {
     }
 }
 
+/// What a sample will cost once decoded, in bytes, without decoding it.
+///
+/// Packs and prepared caches declare their frame count, so the estimate is
+/// exact (f32 per sample). A bare file on disk has no index — 2 MiB is the
+/// house guess, which the real size replaces the moment it lands.
+fn estimated_decoded_bytes(
+    inner: &CacheInner,
+    path: &Path,
+    packed: Option<&PackedSampleRef>,
+) -> usize {
+    const F32: usize = std::mem::size_of::<f32>();
+    const UNKNOWN: usize = 2 * 1024 * 1024;
+    // Raw-PCM entries are mapped, not decoded: they cost no anonymous memory,
+    // so they never spend budget and never stop a preload.
+    if let Some((_, entry)) = packed {
+        return if entry.mapped_fmt().is_some() { 0 } else { entry.samples() * F32 };
+    }
+    if let Some(pack) = inner.pcm_pack.as_ref() {
+        if let Some(entry) = pack.entry_for_path(path) {
+            return if entry.mapped_fmt().is_some() { 0 } else { entry.samples() * F32 };
+        }
+    }
+    if let Some(entry) = inner.prepared.get(path) {
+        return entry.samples * F32;
+    }
+    UNKNOWN
+}
+
+/// A sample that has already been through the stream cache, mapped back in
+/// without decoding anything. Needs the shape up front, which pack and
+/// prepared entries carry and a bare file on disk does not.
+fn mapped_from_stream_cache(
+    inner: &CacheInner,
+    path: &Path,
+    packed: Option<&PackedSampleRef>,
+) -> Option<SampleData> {
+    super::stream_cache::dir()?;
+    let (channels, sample_rate, num_frames) = if let Some((_, entry)) = packed {
+        if entry.mapped_fmt().is_some() {
+            return None; // already mapped straight out of the pack
+        }
+        (entry.channels(), entry.sample_rate(), entry.num_frames())
+    } else if let Some(entry) = inner.pcm_pack.as_ref().and_then(|p| p.entry_for_path(path)) {
+        if entry.mapped_fmt().is_some() {
+            return None;
+        }
+        (entry.channels(), entry.sample_rate(), entry.num_frames())
+    } else if let Some(entry) = inner.prepared.get(path) {
+        (entry.channels, entry.sample_rate, entry.num_frames)
+    } else {
+        return None;
+    };
+    super::stream_cache::lookup(path, channels, sample_rate, num_frames)
+}
+
 fn decode_path(inner: &CacheInner, path: &Path) -> Result<SampleData, SamplerError> {
     if let Some(pack) = inner.pcm_pack.as_ref() {
         if let Some(entry) = pack.entry_for_path(path) {
-            return load_pack_sample(&pack.mmap, entry);
+            // Raw PCM maps directly; compressed entries can still come back
+            // mapped if this sample has been through the stream cache.
+            if let Some(mapped) = mapped_from_stream_cache(inner, path, None) {
+                return Ok(mapped);
+            }
+            let decoded = load_pack_sample(&pack.mmap, entry)?;
+            return Ok(stream_cached(path, decoded));
         }
     }
     if let Some(entry) = inner.prepared.get(path) {
         return load_prepared_sample(&inner.prepared_dir, entry);
     }
-    load_sample(path)
+    Ok(stream_cached(path, load_sample(path)?))
+}
+
+/// Hand a freshly decoded sample to the stream cache; play the mapping it
+/// gives back, or the decoded audio when the cache is off.
+fn stream_cached(path: &Path, data: SampleData) -> SampleData {
+    if matches!(data.pcm, Pcm::Mapped { .. }) || super::stream_cache::dir().is_none() {
+        return data;
+    }
+    super::stream_cache::materialize(path, &data).unwrap_or(data)
 }
 
 fn load_prepared_index(
@@ -783,12 +1241,7 @@ fn load_aiff(path: &Path) -> Result<SampleData, SamplerError> {
     } else {
         frames.len() / channels as usize
     };
-    Ok(SampleData {
-        frames: Arc::new(frames),
-        channels,
-        sample_rate,
-        num_frames,
-    })
+    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
 }
 
 fn parse_extended80(b: &[u8]) -> f64 {
@@ -841,12 +1294,7 @@ fn load_wav(path: &Path) -> Result<SampleData, SamplerError> {
     };
 
     let num_frames = frames.len() / channels as usize;
-    Ok(SampleData {
-        frames: Arc::new(frames),
-        channels,
-        sample_rate,
-        num_frames,
-    })
+    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
 }
 
 fn load_prepared_sample(
@@ -865,12 +1313,7 @@ fn load_prepared_sample(
         frames.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
     }
 
-    Ok(SampleData {
-        frames: Arc::new(frames),
-        channels: entry.channels,
-        sample_rate: entry.sample_rate,
-        num_frames: entry.num_frames,
-    })
+    Ok(SampleData::from_f32(frames, entry.channels, entry.sample_rate, entry.num_frames))
 }
 
 impl SignalPcmPack {
@@ -890,9 +1333,15 @@ impl SignalPcmPack {
             )));
         }
         let kind = read_u32(&header, 12)?;
-        if kind != SIGNAL_PACK_KIND_FLAC_I24 && kind != SIGNAL_PACK_KIND_OGG_VORBIS {
+        if !matches!(
+            kind,
+            SIGNAL_PACK_KIND_FLAC_I24
+                | SIGNAL_PACK_KIND_OGG_VORBIS
+                | SIGNAL_PACK_KIND_PCM_I16
+                | SIGNAL_PACK_KIND_PCM_I24
+        ) {
             return Err(invalid_data(format!(
-                "signal pack kind {kind} is not a FLAC i24 or Ogg Vorbis pack"
+                "signal pack kind {kind} is not a known pack format"
             )));
         }
         let index_offset = read_u64(&header, 24)?;
@@ -941,6 +1390,7 @@ impl SignalPcmPack {
             entries.insert(
                 PathBuf::from(source),
                 PackEntry {
+                    kind,
                     offset,
                     bytes,
                     channels,
@@ -997,6 +1447,8 @@ impl SignalPcmPack {
         match self.kind {
             SIGNAL_PACK_KIND_FLAC_I24 => "flac-i24",
             SIGNAL_PACK_KIND_OGG_VORBIS => "ogg-vorbis",
+            SIGNAL_PACK_KIND_PCM_I16 => "pcm-i16",
+            SIGNAL_PACK_KIND_PCM_I24 => "pcm-i24",
             _ => "unknown",
         }
     }
@@ -1004,6 +1456,11 @@ impl SignalPcmPack {
     /// Iterate (source-path, entry) pairs for debug inspection.
     pub fn entries_iter(&self) -> impl Iterator<Item = (&PathBuf, &PackEntry)> {
         self.entries.iter()
+    }
+
+    /// The pack's mapping, for readers that stream out of it.
+    pub fn mmap_handle(&self) -> Arc<memmap2::Mmap> {
+        Arc::clone(&self.mmap)
     }
 
     /// Pack file path.
@@ -1051,7 +1508,125 @@ fn path_suffixes(path: &Path) -> Vec<PathBuf> {
     suffixes
 }
 
-fn load_pack_sample(pack_data: &[u8], entry: &PackEntry) -> Result<SampleData, SamplerError> {
+
+
+/// Background loader for cache misses. One thread, deduplicated, so a held
+/// chord of unloaded notes queues each sample once.
+struct WarmQueue {
+    queue: std::sync::Mutex<(Vec<(SampleCache, PathBuf)>, std::collections::HashSet<PathBuf>)>,
+    wake: std::sync::Condvar,
+}
+
+impl WarmQueue {
+    fn send(&self, cache: SampleCache, path: PathBuf) {
+        if let Ok(mut q) = self.queue.lock() {
+            if q.1.insert(path.clone()) {
+                q.0.push((cache, path));
+                self.wake.notify_one();
+            }
+        }
+    }
+
+    fn run(&self) {
+        loop {
+            let batch = {
+                let Ok(mut q) = self.queue.lock() else { return };
+                while q.0.is_empty() {
+                    let Ok(next) = self.wake.wait(q) else { return };
+                    q = next;
+                }
+                let taken = std::mem::take(&mut q.0);
+                q.1.clear();
+                taken
+            };
+            for (cache, path) in batch {
+                let _ = cache.get(&path);
+            }
+        }
+    }
+}
+
+fn warm_queue() -> &'static WarmQueue {
+    static QUEUE: std::sync::OnceLock<WarmQueue> = std::sync::OnceLock::new();
+    QUEUE.get_or_init(|| {
+        let q = WarmQueue {
+            queue: std::sync::Mutex::new((Vec::new(), std::collections::HashSet::new())),
+            wake: std::sync::Condvar::new(),
+        };
+        let _ = std::thread::Builder::new()
+            .name("signal-warm".into())
+            .spawn(|| warm_queue().run());
+        q
+    })
+}
+
+/// Whether a pack entry should stream rather than decode whole.
+///
+/// Streaming costs a little CPU per chunk and a background thread, which is
+/// not worth it for a short one-shot: below the threshold a sample is smaller
+/// decoded than the machinery around it. `FTS_STREAM=off` decodes everything
+/// (offline renders, analysis tools); `FTS_STREAM=on` streams everything it
+/// can.
+fn should_stream(entry: &PackEntry) -> bool {
+    if entry.mapped_fmt().is_some() {
+        return false; // raw PCM already reads from the mapping
+    }
+    match std::env::var("FTS_STREAM").ok().as_deref() {
+        Some("off" | "0" | "false") => return false,
+        Some("on" | "1" | "true") => return true,
+        _ => {}
+    }
+    // Only worth it when the sample outlives its own head: anything shorter
+    // is already fully covered by the head, so streaming it would add a
+    // decoder and save nothing.
+    let head = super::stream::HEAD_FRAMES as usize * entry.channels.max(1) as usize;
+    entry.samples >= head * 2
+}
+
+/// Read a pack entry.
+///
+/// Raw-PCM entries are **mapped, not decoded**: the returned `SampleData`
+/// points into the pack's mapping, costs no anonymous memory, and pages in as
+/// the voice plays it — the OS is the streaming engine. Compressed entries
+/// decode to float as before.
+fn load_pack_sample(
+    map: &Arc<memmap2::Mmap>,
+    entry: &PackEntry,
+) -> Result<SampleData, SamplerError> {
+    if let Some(fmt) = entry.mapped_fmt() {
+        let start = entry.offset as usize;
+        let end = start
+            .checked_add(entry.samples * fmt.width())
+            .filter(|&e| e <= map.len())
+            .ok_or_else(|| invalid_data("signal pack PCM entry out of bounds"))?;
+        let _ = end;
+        return Ok(SampleData::mapped(
+            Arc::clone(map),
+            start,
+            entry.samples,
+            fmt,
+            entry.channels,
+            entry.sample_rate,
+            entry.num_frames,
+        ));
+    }
+    // FLAC entries big enough to be worth it are STREAMED: head resident,
+    // the rest decoded a chunk at a time straight out of the pack. This is
+    // the Kontakt/Omnisphere model — the library stays compressed on disk and
+    // never lands in the heap.
+    if should_stream(entry) {
+        if let Some(streamed) = super::stream::StreamedSample::open(
+            Arc::clone(map),
+            entry.offset as usize,
+            entry.bytes as usize,
+            entry.channels,
+            entry.sample_rate,
+            entry.num_frames,
+        ) {
+            return Ok(SampleData::streamed(streamed));
+        }
+    }
+    let pack_data: &[u8] = map;
     let start = entry.offset as usize;
     let end = start
         .checked_add(entry.bytes as usize)
@@ -1067,7 +1642,7 @@ fn load_pack_sample(pack_data: &[u8], entry: &PackEntry) -> Result<SampleData, S
         // flacenc pads the final block with silence (see `encode_flac_i24`),
         // so decode may run LONG; that trims below. Decoding SHORT of the
         // index is real corruption.
-        if data.num_frames < entry.num_frames || data.frames.len() < entry.samples {
+        if data.num_frames < entry.num_frames || data.len() < entry.samples {
             return Err(invalid_data(
                 "signal pack FLAC decoded short of index metadata",
             ));
@@ -1088,17 +1663,12 @@ fn load_pack_sample(pack_data: &[u8], entry: &PackEntry) -> Result<SampleData, S
 /// Trim or silence-pad decoded audio to the index's authoritative
 /// `num_frames`/`samples`. No-op when they already match.
 fn coerce_to_index_len(data: SampleData, entry: &PackEntry) -> SampleData {
-    if data.num_frames == entry.num_frames && data.frames.len() == entry.samples {
+    if data.num_frames == entry.num_frames && data.len() == entry.samples {
         return data;
     }
-    let mut frames = data.frames.as_ref().clone();
+    let mut frames = data.to_f32().into_owned();
     frames.resize(entry.samples, 0.0);
-    SampleData {
-        frames: Arc::new(frames),
-        channels: data.channels,
-        sample_rate: data.sample_rate,
-        num_frames: entry.num_frames,
-    }
+    SampleData::from_f32(frames, data.channels, data.sample_rate, entry.num_frames)
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1286,19 +1856,21 @@ pub fn transcode_signal_pack(
                 let data = load_pack_sample(&pack.mmap, entry)?;
                 let payload = match codec {
                     PackCodec::OggVorbis { quality } => encode_ogg_vorbis(
-                        &data.frames,
+                        &data.to_f32(),
                         data.channels,
                         data.sample_rate,
                         quality,
                     )?,
                     PackCodec::FlacI24 => {
                         let samples = data
-                            .frames
+                            .to_f32()
                             .iter()
                             .map(|s| f32_to_i24_i32(*s))
                             .collect::<Vec<_>>();
                         encode_flac_i24(&samples, data.channels, data.sample_rate)?
                     }
+                    PackCodec::PcmI16 => encode_pcm_i16(&data.to_f32()),
+                    PackCodec::PcmI24 => encode_pcm_i24(&data.to_f32()),
                 };
                 Ok(PackIndexRow {
                     source: source.clone(),
@@ -1439,7 +2011,13 @@ pub fn extract_signal_pack(
         )));
     }
     let kind = read_u32(&header, 12)?;
-    if kind != SIGNAL_PACK_KIND_FLAC_I24 && kind != SIGNAL_PACK_KIND_OGG_VORBIS {
+    if !matches!(
+        kind,
+        SIGNAL_PACK_KIND_FLAC_I24
+            | SIGNAL_PACK_KIND_OGG_VORBIS
+            | SIGNAL_PACK_KIND_PCM_I16
+            | SIGNAL_PACK_KIND_PCM_I24
+    ) {
         return Err(invalid_data(format!(
             "signal pack kind {kind} is not an exportable pack"
         )));
@@ -1503,7 +2081,8 @@ pub fn extract_signal_pack(
         })?;
         // Encoder pads to a multiple of FLAC block size; trim trailing
         // silence using the index's authoritative sample count.
-        let frames = data.frames.as_slice();
+        let decoded = data.to_f32();
+        let frames = decoded.as_ref();
         let frames = if frames.len() > samples {
             &frames[..samples]
         } else {
@@ -1538,12 +2117,33 @@ struct PackIndexRow {
     payload: Vec<u8>,
 }
 
+/// f32 → interleaved little-endian 16-bit PCM.
+fn encode_pcm_i16(samples: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len() * 2);
+    for s in samples {
+        let v = (s.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+/// f32 → interleaved little-endian 24-bit PCM (3 bytes per sample).
+fn encode_pcm_i24(samples: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len() * 3);
+    for s in samples {
+        let v = f32_to_i24_i32(*s);
+        let b = v.to_le_bytes();
+        out.extend_from_slice(&b[..3]);
+    }
+    out
+}
+
 fn pack_one_sample(path: &Path, codec: PackCodec) -> Result<PackIndexRow, (PathBuf, SamplerError)> {
     let data = load_sample(path).map_err(|err| (path.to_owned(), err))?;
-    let uncompressed_bytes = data.frames.len() * 3;
+    let uncompressed_bytes = data.len() * 3;
     let payload = match codec {
         PackCodec::OggVorbis { quality } => {
-            encode_ogg_vorbis(&data.frames, data.channels, data.sample_rate, quality)
+            encode_ogg_vorbis(&data.to_f32(), data.channels, data.sample_rate, quality)
                 .map_err(|err| (path.to_owned(), err))?
         }
         PackCodec::FlacI24 => {
@@ -1555,7 +2155,7 @@ fn pack_one_sample(path: &Path, codec: PackCodec) -> Result<PackIndexRow, (PathB
                 std::fs::read(path).map_err(|err| (path.to_owned(), SamplerError::Io(err)))?
             } else {
                 let samples = data
-                    .frames
+                    .to_f32()
                     .iter()
                     .map(|sample| f32_to_i24_i32(*sample))
                     .collect::<Vec<_>>();
@@ -1563,6 +2163,8 @@ fn pack_one_sample(path: &Path, codec: PackCodec) -> Result<PackIndexRow, (PathB
                     .map_err(|err| (path.to_owned(), err))?
             }
         }
+        PackCodec::PcmI16 => encode_pcm_i16(&data.to_f32()),
+        PackCodec::PcmI24 => encode_pcm_i24(&data.to_f32()),
     };
 
     Ok(PackIndexRow {
@@ -1573,7 +2175,7 @@ fn pack_one_sample(path: &Path, codec: PackCodec) -> Result<PackIndexRow, (PathB
         channels: data.channels,
         sample_rate: data.sample_rate,
         num_frames: data.num_frames,
-        samples: data.frames.len(),
+        samples: data.len(),
         payload,
     })
 }
@@ -1588,7 +2190,7 @@ fn prepare_one_sample(
     let mut pcm = BufWriter::new(
         File::create(cache_dir.join(&pcm_file)).map_err(|err| (path.to_owned(), err.into()))?,
     );
-    for sample in data.frames.iter() {
+    for sample in data.to_f32().iter() {
         pcm.write_all(&sample.to_le_bytes())
             .map_err(|err| (path.to_owned(), err.into()))?;
     }
@@ -1600,7 +2202,7 @@ fn prepare_one_sample(
         channels: data.channels,
         sample_rate: data.sample_rate,
         num_frames: data.num_frames,
-        samples: data.frames.len(),
+        samples: data.len(),
     })
 }
 
@@ -1705,6 +2307,15 @@ fn encode_flac_via_cli(samples_i16: &[i16], channels: u16, sample_rate: u32) -> 
         return None;
     }
     Some(out)
+}
+
+#[cfg(test)]
+pub(crate) fn encode_flac_i24_for_test(
+    samples: &[i32],
+    channels: u16,
+    sample_rate: u32,
+) -> Result<Vec<u8>, SamplerError> {
+    encode_flac_i24(samples, channels, sample_rate)
 }
 
 fn encode_flac_i24(
@@ -1874,12 +2485,7 @@ fn decode_flac_symphonia(bytes: &[u8]) -> Result<SampleData, SamplerError> {
     }
     let channels = channels.max(1);
     let num_frames = frames.len() / channels as usize;
-    Ok(SampleData {
-        frames: Arc::new(frames),
-        channels,
-        sample_rate,
-        num_frames,
-    })
+    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
 }
 
 /// Decode an in-pack Ogg Vorbis sample (lossy proxy packs) to interleaved
@@ -1953,12 +2559,7 @@ fn load_ogg_vorbis_bytes(bytes: &[u8]) -> Result<SampleData, SamplerError> {
     }
     let channels = channels.max(1);
     let num_frames = frames.len() / channels as usize;
-    Ok(SampleData {
-        frames: Arc::new(frames),
-        channels,
-        sample_rate,
-        num_frames,
-    })
+    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
 }
 
 /// Encode interleaved f32 PCM to an Ogg Vorbis stream (builder-side only —
@@ -2064,12 +2665,7 @@ fn load_flac_reader<R: Read>(
         .collect::<Result<Vec<_>, _>>()?;
 
     let num_frames = frames.len() / channels as usize;
-    Ok(SampleData {
-        frames: Arc::new(frames),
-        channels,
-        sample_rate,
-        num_frames,
-    })
+    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
 }
 
 #[cfg(test)]
@@ -2077,12 +2673,80 @@ mod tests {
     use super::*;
 
     fn sample(frames: usize) -> Arc<SampleData> {
-        Arc::new(SampleData {
-            frames: Arc::new(vec![0.0; frames]),
-            channels: 1,
-            sample_rate: 48_000,
-            num_frames: frames,
-        })
+        Arc::new(SampleData::from_f32(vec![0.0; frames], 1, 48_000, frames))
+    }
+
+    /// A raw-PCM pack is read straight out of its mapping: the samples come
+    /// back correct and cost the process **nothing** in anonymous memory.
+    /// This is the property the whole DFD path rests on.
+    #[test]
+    fn pcm_pack_reads_from_the_mapping_without_allocating() {
+        let dir = std::env::temp_dir().join(format!("fts-pcm-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("tmp dir");
+
+        // A short stereo ramp, written as a wav the packer can read.
+        let (sr, n_frames) = (48_000u32, 1_024usize);
+        let src: Vec<f32> = (0..n_frames)
+            .flat_map(|i| {
+                let v = (i as f32 / n_frames as f32) * 2.0 - 1.0;
+                [v, -v]
+            })
+            .collect();
+        let wav = dir.join("ramp.wav");
+        {
+            let spec = hound::WavSpec {
+                channels: 2,
+                sample_rate: sr,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            };
+            let mut w = hound::WavWriter::create(&wav, spec).expect("wav");
+            for s in &src {
+                w.write_sample(*s).expect("write");
+            }
+            w.finalize().expect("finalize");
+        }
+        std::fs::write(dir.join("library.styx"), "instrument \"test\"\n").expect("spec");
+
+        for (codec, fmt, tol) in [
+            (PackCodec::PcmI16, PcmFmt::I16, 1.0 / 32_000.0),
+            (PackCodec::PcmI24, PcmFmt::I24, 1.0 / 8_000_000.0),
+        ] {
+            let pack_path = dir.join(format!("{}.signalpack", fmt.width()));
+            create_signal_pack_with(
+                &pack_path,
+                PackSpecSource::Path(&dir.join("library.styx")),
+                &dir,
+                [wav.as_path()].into_iter(),
+                codec,
+            )
+            .expect("build pack");
+
+            let pack = SignalPcmPack::open(&pack_path).expect("open pack");
+            let entry = pack.entry_for_path(&wav).expect("entry").clone();
+            assert_eq!(entry.mapped_fmt(), Some(fmt));
+
+            let data = load_pack_sample(&pack.mmap, &entry).expect("read");
+            assert!(matches!(data.pcm, Pcm::Mapped { .. }), "must be mapped, not decoded");
+            assert_eq!(data.decoded_bytes(), 0, "mapped PCM costs no anonymous memory");
+            assert_eq!(data.channels, 2);
+            assert_eq!(data.sample_rate, sr);
+            assert_eq!(data.num_frames, n_frames);
+
+            // Values survive the round trip within the format's quantisation.
+            for (i, want) in src.iter().enumerate() {
+                let got = data.pcm.sample(i);
+                assert!(
+                    (got - want).abs() <= tol,
+                    "sample {i}: got {got}, want {want} ({fmt:?})"
+                );
+            }
+            // …and the stereo frame accessor still pairs them correctly.
+            let (l, r) = data.frame(10);
+            assert!((l - src[20]).abs() <= tol && (r - src[21]).abs() <= tol);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2107,11 +2771,11 @@ mod tests {
         assert_eq!(sym.channels, cla.channels, "channel mismatch");
         assert_eq!(sym.sample_rate, cla.sample_rate, "sample-rate mismatch");
         assert_eq!(sym.num_frames, cla.num_frames, "frame-count mismatch");
-        assert_eq!(sym.frames.len(), cla.frames.len(), "sample-count mismatch");
-        let max_diff = sym
-            .frames
+        assert_eq!(sym.len(), cla.len(), "sample-count mismatch");
+        let (sym_pcm, cla_pcm) = (sym.to_f32(), cla.to_f32());
+        let max_diff = sym_pcm
             .iter()
-            .zip(cla.frames.iter())
+            .zip(cla_pcm.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
         assert!(
@@ -2146,6 +2810,7 @@ mod tests {
         // Raw decode may drift by a partial tail block; the pack-entry path
         // coerces to the index's authoritative length.
         let entry = PackEntry {
+            kind: SIGNAL_PACK_KIND_OGG_VORBIS,
             offset: 0,
             bytes: ogg.len() as u64,
             channels,
@@ -2155,17 +2820,17 @@ mod tests {
         };
         let coerced = coerce_to_index_len(decoded, &entry);
         assert_eq!(coerced.num_frames, n_frames);
-        assert_eq!(coerced.frames.len(), n_frames * 2);
+        assert_eq!(coerced.len(), n_frames * 2);
+        let coerced_pcm = coerced.to_f32();
 
         // Content sanity: same tone, so correlation with the source should be
         // high (lossy — not bit-exact).
-        let dot: f64 = coerced
-            .frames
+        let dot: f64 = coerced_pcm
             .iter()
             .zip(frames.iter())
             .map(|(a, b)| (*a as f64) * (*b as f64))
             .sum();
-        let norm_a: f64 = coerced.frames.iter().map(|a| (*a as f64).powi(2)).sum();
+        let norm_a: f64 = coerced_pcm.iter().map(|a| (*a as f64).powi(2)).sum();
         let norm_b: f64 = frames.iter().map(|b| (*b as f64).powi(2)).sum();
         let corr = dot / (norm_a.sqrt() * norm_b.sqrt()).max(f64::EPSILON);
         assert!(corr > 0.98, "decoded audio should correlate with source, got {corr}");

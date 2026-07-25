@@ -14,6 +14,35 @@
 //!               → SamplerRig  (daw-backed: SamplerBank on daw's AudioEngine)
 //! ```
 //!
+//! # Memory model
+//!
+//! A sampled piano is tens of gigabytes; keeping it playable is a question of
+//! never holding it. Four mechanisms, in the order they save you:
+//!
+//! 0. **Streaming** ([`engine::stream`]) is the default for FLAC pack
+//!    entries: a 0.25 s head stays resident as 16-bit PCM and the rest is
+//!    decoded a chunk at a time, straight out of the mapped pack, by a
+//!    background thread. The library stays compressed on disk — no
+//!    conversion, no second copy — and a whole Keyscape instrument costs
+//!    ~17 MB instead of 744 MB. `FTS_STREAM=off` decodes whole instead
+//!    (offline renders, analysis).
+//! 1. **Raw-PCM packs** (`.signalpack` kinds `pcm-i16` / `pcm-i24`) are read
+//!    straight out of the file mapping — no decode, no allocation, and
+//!    residency is page cache the kernel evicts under pressure. Build one
+//!    with `fts signal pack transcode <in> <out> --codec pcm16`. A full
+//!    Keyscape instrument costs ~1 MB of process memory this way, against
+//!    ~750 MB decoded.
+//! 2. **The stream cache** does the same for FLAC/Ogg packs: the first load
+//!    writes the decoded audio out as raw i16 and maps it back, and every
+//!    load after that (this run and later runs) skips the decoder entirely.
+//!    Opt in with `FTS_STREAM_CACHE_DIR=<dir>` — see [`engine::stream_cache`].
+//! 3. **The preload budget** ([`engine::budget`]) is the backstop: one
+//!    process-wide ceiling on decoded bytes, past which preloads stop and
+//!    samples stream on demand. Default 15% of RAM, capped at 4 GB.
+//!
+//! Mapped samples are warmed on preload — head faulted in, tail read ahead —
+//! so the audio thread never takes a disk read inside the callback.
+//!
 //! # Library specs
 //!
 //! A library spec is a `.styx` file that describes:
@@ -529,6 +558,47 @@ impl PlayerPatch {
                 .collect();
             indexed.sort_by_key(|(d, _)| *d);
             out.extend(indexed.into_iter().map(|(_, p)| p));
+        }
+        out.extend(self.groove_paths.iter().cloned());
+        out.extend(self.wavetable_paths.iter().cloned());
+        out
+    }
+
+    /// Sample paths ordered **coverage-first**: one sample for every note
+    /// (nearest `center` first), then each note's second, and so on.
+    ///
+    /// This is the order a *bounded* preload wants.
+    /// [`sample_paths_centered`](Self::sample_paths_centered) sorts purely by
+    /// distance from the centre, so truncating it loads every dynamic of a
+    /// narrow band of keys and leaves the rest of the keyboard with no body
+    /// voice at all. Round-robining across notes spends the same budget on a
+    /// playable instrument: every key sounds, dense velocity layers fill in
+    /// as the budget allows.
+    pub fn sample_paths_playable(&self, center: u8) -> Vec<std::path::PathBuf> {
+        use std::collections::BTreeMap;
+        let center = center as i32;
+        // note → its samples, in declaration order.
+        let mut by_note: BTreeMap<i32, Vec<std::path::PathBuf>> = BTreeMap::new();
+        if self.is_zoned() {
+            for (z, p) in self.spec.zones.iter().zip(self.zone_paths.iter()) {
+                by_note.entry(z.root_key as i32).or_default().push(p.clone());
+            }
+        } else {
+            for (k, p) in self.map.iter() {
+                by_note.entry(k.note as i32).or_default().push(p.clone());
+            }
+        }
+        // Notes nearest the centre get their samples first within each round.
+        let mut notes: Vec<i32> = by_note.keys().copied().collect();
+        notes.sort_by_key(|n| (n - center).abs());
+        let depth = by_note.values().map(|v| v.len()).max().unwrap_or(0);
+        let mut out = Vec::new();
+        for round in 0..depth {
+            for note in &notes {
+                if let Some(p) = by_note.get(note).and_then(|v| v.get(round)) {
+                    out.push(p.clone());
+                }
+            }
         }
         out.extend(self.groove_paths.iter().cloned());
         out.extend(self.wavetable_paths.iter().cloned());

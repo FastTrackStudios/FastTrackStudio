@@ -9259,6 +9259,7 @@ dependencies = [
  "eyre",
  "facet 0.50.0-rc.5",
  "facet-json",
+ "fts-chrome",
  "futures-channel",
  "futures-util",
  "getrandom 0.3.4",
@@ -9896,6 +9897,13 @@ dependencies = [
 [[package]]
 name = "fts-audio-proto"
 version = "0.1.0"
+
+[[package]]
+name = "fts-chrome"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+]
 
 [[package]]
 name = "fts-clap-host"
@@ -23151,6 +23159,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "dioxus",
+ "fts-chrome",
  "midicore-proto",
  "midicore-ui",
  "signal-bass-proto",
@@ -23381,11 +23390,14 @@ dependencies = [
  "daw",
  "daw-audio-io",
  "eyre",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
  "libc",
  "midicore",
  "ratatui",
  "signal-keys-proto",
  "signal-plugin-host",
+ "signal-proto",
  "signal-sampler",
  "signal-synth",
  "tokio",
@@ -23409,6 +23421,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "dioxus",
+ "fts-chrome",
  "midicore-proto",
  "midicore-ui",
  "signal-keys-proto",
@@ -23676,6 +23689,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "dioxus",
+ "fts-chrome",
  "midicore-proto",
  "midicore-ui",
  "signal-proto",

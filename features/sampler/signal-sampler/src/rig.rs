@@ -1023,13 +1023,26 @@ pub(crate) fn build_sample_source(
     // the eager set (phones: a full piano decoded is more RAM than the
     // device has); everything past the cap decodes on first note-on.
     let cache = engine.cache_handle();
-    let mut paths = engine.sample_paths_centered(60);
-    if let Some(cap) = std::env::var("FTS_PRELOAD_PROFILE")
-        .ok()
-        .and_then(|s| crate::bank::PreloadProfile::from_name(&s))
-        .and_then(|p| p.preload_cap())
-    {
-        paths.truncate(cap);
+    let mut paths = engine.sample_paths_playable(60);
+    // A STREAMING pack preloads every zone, because a preload is now a head
+    // (~48 KB) and an index, not a decoded sample. That is the whole point of
+    // Kontakt's preload buffers: every zone is ready, nothing is resident.
+    // Capping a streaming pack is how you get a piano where only the middle
+    // two octaves sound — a cache miss does not decode, it drops the voice.
+    //
+    // Everything else stays bounded by `FTS_PRELOAD_PROFILE` (default
+    // FastAudition): decoding a whole multi-GB library as f32 is not an
+    // option, and the coverage-first order buys a playable keyboard rather
+    // than every velocity layer of a handful of keys.
+    if !cache.is_streamable() {
+        if let Some(cap) = std::env::var("FTS_PRELOAD_PROFILE")
+            .ok()
+            .and_then(|s| crate::bank::PreloadProfile::from_name(&s))
+            .unwrap_or_default()
+            .preload_cap()
+        {
+            paths.truncate(cap);
+        }
     }
     let label = name.clone();
     if let Err(err) = std::thread::Builder::new()
@@ -1040,6 +1053,10 @@ pub(crate) fn build_sample_source(
                 library = %label,
                 loaded = stats.loaded,
                 failed = stats.failed,
+                // Left on disk because the process hit its RAM ceiling —
+                // those notes stream when played. See `engine::budget`.
+                skipped = stats.skipped,
+                resident_mb = crate::engine::budget::used_bytes() / (1024 * 1024),
                 "sample block preload complete"
             );
         })

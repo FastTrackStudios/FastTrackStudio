@@ -192,11 +192,17 @@ required-features = ["signal-guitar"]
 name = "iroh_echo"
 required-features = ["signal-guitar"]
 
+# KeysRig service probe (the browser remote's establish, verbosely).
+[[example]]
+name = "keys_probe"
+required-features = ["signal"]
+
 [dependencies]
 tracing.workspace = true
 
 # Signal domain (the rig)
 signal-guitar-proto = { workspace = true, optional = true }
+fts-chrome.workspace = true
 signal-guitar-ui = { workspace = true, optional = true }
 signal-bass-proto = { workspace = true, optional = true }
 signal-bass-ui = { workspace = true, optional = true }

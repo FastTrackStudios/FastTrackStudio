@@ -37,7 +37,7 @@ use signal_proto::block::BlockType;
 use signal_sampler::rig_node::Container;
 
 /// Send target for every layer's aux route (the Part's 4-slot Aux rack).
-const AUX_RACK: &str = "Aux Rack";
+use crate::engine::AUX_RACK;
 
 // ── Layers ───────────────────────────────────────────────────────────────────
 
@@ -45,51 +45,13 @@ const AUX_RACK: &str = "Aux Rack";
 /// `soundsource` = a library spec path realizing the Sample-mode source;
 /// `None` keeps a placeholder Soundsource block (structure only).
 fn layer(name: &str, soundsource: Option<String>) -> Container {
-    // Oscillator module — Sample or Synth (wavetable) mode source, then the
-    // Oscillator-Zoom sub-modules, all pre-filter (manual UI tab order).
-    let mut osc = Container::module("Oscillator");
-    osc = match soundsource {
-        Some(spec) => osc.sample_block("Soundsource", spec),
-        None => osc.block(BlockType::Sampler, "Soundsource"),
-    };
-    let osc = osc
-        .block(BlockType::Wavetable, "Synth Osc") // Synth mode alternative (638 wavetables)
-        .block(BlockType::Unison, "Unison") // ≤8 voices
-        .block(BlockType::Harmonic, "Harmonia") // 4 extra oscillators
-        .block(BlockType::FmOperator, "FM")
-        .block(BlockType::RingModulator, "Ring Mod")
-        .block(BlockType::Dfs, "Dual Freq Shifter") // NEW v3 (serial/parallel pair)
-        .block(BlockType::Waveshaper, "Waveshaper")
-        .block(BlockType::Granular, "Granular"); // ≤8 grain voices, WILD mode
-
-    Container::layer(name)
-        .param("layer_level", "0")
-        .param("filter_routing", "Series") // Series | Parallel
-        .add(osc)
-        .add(
-            Container::module("Filters")
-                .block(BlockType::Filter, "Filter 1") // 70 types each (v3)
-                .block(BlockType::Filter, "Filter 2"),
-        )
-        .add(Container::module("Amp").block(BlockType::Amp, "Amp"))
-        .add(fx_rack("Layer FX")) // Independent mode: one 4-slot rack per layer
-        .send(AUX_RACK, "To Aux")
-        // Per-layer share of the Part's 12 envelopes (4 Amp + 4 Filter + 4 Mod,
-        // ADSR or Complex MSEG).
-        .modulator(BlockType::Envelope, "Amp Env")
-        .modulator(BlockType::Envelope, "Filter Env")
-        .modulator(BlockType::MultisegEnvelope, "Mod Env")
+    // Omnisphere's "layer" is what this engine calls a MODULE: one Source
+    // Block into filters → amp → FX. Four of them make the Quadzone, which is
+    // exactly one `crate::engine::signal_layer`.
+    crate::engine::signal_module(name, crate::engine::Source::sample(soundsource))
 }
 
-/// A 4-slot FX rack — every Omnisphere rack (Layer / Common / Aux / Master)
-/// is exactly 4 slots; each slot picks from the 93 internal FX units.
-fn fx_rack(name: &str) -> Container {
-    let mut rack = Container::module(name);
-    for slot in 1..=4 {
-        rack = rack.block(BlockType::Custom, format!("{name} Slot {slot}"));
-    }
-    rack
-}
+use crate::engine::fx_rack;
 
 // ── The Part ─────────────────────────────────────────────────────────────────
 
@@ -165,26 +127,14 @@ mod tests {
     use signal_sampler::rig_node::Role;
 
     #[test]
-    fn part_has_four_layers_with_the_full_oscillator_stack() {
+    fn part_has_four_modules_each_with_one_source() {
         let p = omnisphere_preset();
-        assert_eq!(p.of_role(Role::Layer).len(), 4, "Quadzone holds 4 layers");
         for l in ["Layer A", "Layer B", "Layer C", "Layer D"] {
             let layer = p.find(l).expect(l);
-            let osc = layer.find("Oscillator").expect("oscillator module");
-            let names: Vec<_> = osc.blocks().iter().map(|b| b.display_name()).collect();
-            for sub in [
-                "Soundsource",
-                "Synth Osc",
-                "Unison",
-                "Harmonia",
-                "FM",
-                "Ring Mod",
-                "Dual Freq Shifter",
-                "Waveshaper",
-                "Granular",
-            ] {
-                assert!(names.iter().any(|n| n == sub), "{l} osc stack has {sub}");
-            }
+            let osc = layer.find("Source").expect("source module");
+            // ONE generator per module — a second would overwrite the first.
+            assert_eq!(osc.blocks().len(), 1, "{l} has a single Source Block");
+            assert_eq!(osc.blocks()[0].display_name(), "Soundsource");
             let filters = layer.find("Filters").expect("filters module");
             assert_eq!(filters.blocks().len(), 2, "dual filters");
         }
@@ -222,13 +172,13 @@ mod tests {
                 .iter()
                 .any(|m| m.block_type == BlockType::Arpeggiator)
         );
-        // 12 envelopes: 3 per layer × 4 layers (4 Amp + 4 Filter + 4 Mod).
-        let envs: usize = p
-            .of_role(Role::Layer)
+        // 12 envelopes: 3 per module × the Part's 4 modules.
+        let envs: usize = ["Layer A", "Layer B", "Layer C", "Layer D"]
             .iter()
-            .map(|l| l.modulators.len())
+            .filter_map(|n| p.find(n))
+            .map(|m| m.modulators.len())
             .sum();
-        assert_eq!(envs, 12, "12 envelopes across the 4 layers");
+        assert_eq!(envs, 12, "12 envelopes across the 4 modules");
     }
 
     /// The placeholder Part renders silence-safely (native Filter/Amp are
@@ -238,9 +188,9 @@ mod tests {
         let p = omnisphere_preset();
         let mut rn = signal_sampler::node_render::RenderNode::compile(&p, 48_000);
         rn.prepare(48_000.0, 256);
-        // 4 layers × (2 filters + amp + wavetable + waveshaper + dfs +
-        // harmonia/modal) = 28 live native leaves; the rest are placeholders.
-        assert_eq!(rn.live_leaves(), 28);
+        // 4 modules × (2 filters + amp) = 12 live native leaves; the source
+        // blocks are placeholders here and everything else passes through.
+        assert_eq!(rn.live_leaves(), 12);
     }
 
     /// Machine-local: the realized Part plays a real Omnisphere soundsource.
