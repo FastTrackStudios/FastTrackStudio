@@ -141,7 +141,11 @@ mod tests {
 
     #[test]
     fn schedule_hint_flags_what_the_backend_would_reject() {
-        assert!(schedule_hint("soonish").expect("hint").contains("unrecognized"));
+        assert!(
+            schedule_hint("soonish")
+                .expect("hint")
+                .contains("unrecognized")
+        );
         assert!(
             schedule_hint("every fortnight")
                 .expect("hint")
@@ -158,7 +162,10 @@ mod tests {
         let ago_12m = (now - chrono::Duration::minutes(12)).to_rfc3339();
         assert_eq!(relative_when(&in_4h, now).as_deref(), Some("in 4h"));
         assert_eq!(relative_when(&ago_12m, now).as_deref(), Some("12m ago"));
-        assert_eq!(relative_when(&now.to_rfc3339(), now).as_deref(), Some("now"));
+        assert_eq!(
+            relative_when(&now.to_rfc3339(), now).as_deref(),
+            Some("now")
+        );
     }
 
     #[test]
