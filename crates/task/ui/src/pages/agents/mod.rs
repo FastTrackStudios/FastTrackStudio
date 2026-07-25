@@ -216,7 +216,7 @@ pub fn AgentsView(session: String) -> Element {
                     Some((_, s)) if s.id == id
                 );
                 if touched_open {
-                    if let Ok(s) = crate::feeds::fetch_agent_sessions(&[slug.clone()]).await {
+                    if let Ok(s) = crate::feeds::fetch_agent_sessions(std::slice::from_ref(&slug)).await {
                         match s.into_iter().find(|(_, s)| s.id == id) {
                             Some(row) => selected.set(Some(row)),
                             None => {

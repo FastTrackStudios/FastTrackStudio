@@ -342,7 +342,7 @@ pub fn referenced_paths(text: &str) -> Vec<String> {
         // (foo.md), foo.md. — strip the decoration, keep the path.
         let candidate = raw.trim_matches(|c: char| matches!(c, '`' | '\'' | '[' | ']' | '*' | '_'));
         let candidate =
-            candidate.trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?'));
+            candidate.trim_end_matches(['.', ',', ';', ':', '!', '?']);
         if !candidate.ends_with(".md") || candidate.len() <= 3 {
             continue;
         }
