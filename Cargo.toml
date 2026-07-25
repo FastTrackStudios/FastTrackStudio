@@ -506,7 +506,11 @@ engraver-proto = { path = "features/engraver/proto", default-features = false }
 signal = { path = "crates/signal/signal" }
 signal-proto = { path = "crates/signal/proto" }
 signal-ui = { path = "crates/signal/ui", default-features = false }
-signal-browser = { path = "crates/signal/browser" }
+# `default-features = false` must be declared here, not just at the use
+# site: cargo ignores a member's `default-features = false` on a
+# workspace dependency unless the workspace entry sets it too. Consumers
+# that need the filesystem scanner opt in with `features = ["native"]`.
+signal-browser = { path = "crates/signal/browser", default-features = false }
 signal-grid = { path = "crates/signal/grid" }
 signal-grid-ui = { path = "crates/signal/grid-ui" }
 signal-controller = { path = "crates/signal/controller" }
