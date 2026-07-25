@@ -36,7 +36,7 @@ use agent_proto::question::QuestionRequest;
 use agent_proto::service::discovery::{CapabilityFlag, ModelInfo, SkillInfo};
 use agent_proto::session::{Session, SessionStatus};
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Archive, Bot, Copy, FileText, Info, Pin, Trash2};
+use fts_ui::lucide_dioxus::{Archive, Bot, ChevronLeft, Copy, FileText, Info, Pin, Trash2};
 use fts_ui::prelude::*;
 
 use logic::{
@@ -142,7 +142,10 @@ pub fn AgentsView(session: String) -> Element {
     let cap_list = capabilities.read().clone().unwrap_or_default();
 
     let mut selected = use_signal(|| None::<(String, Session)>);
-    let mut show_inspector = use_signal(|| true);
+    // Touch devices open the inspector on demand — as a sheet it
+    // covers the conversation, so it must not be the landing state.
+    let touch = use_hook(editor::editor_view::coarse_pointer);
+    let mut show_inspector = use_signal(move || !touch);
     let mut create_error = use_signal(String::new);
 
     // Resolve the routed session id against the fetched sessions —
@@ -181,6 +184,15 @@ pub fn AgentsView(session: String) -> Element {
         Some(Err(e)) => e.clone(),
         _ => String::new(),
     };
+    let mut session_rows: Vec<(String, Session)> = match &*sessions.read_unchecked() {
+        Some(Ok(rows)) => rows.iter().filter(|(_, s)| !s.archived).cloned().collect(),
+        _ => Vec::new(),
+    };
+    session_rows.sort_by(|(_, a), (_, b)| {
+        let ka = a.last_message_at.unwrap_or(a.created_at);
+        let kb = b.last_message_at.unwrap_or(b.created_at);
+        kb.cmp(&ka)
+    });
 
     let mutate = use_callback(move |(slug, id, action): (String, String, SessionAction)| {
         spawn(async move {
@@ -240,7 +252,53 @@ pub fn AgentsView(session: String) -> Element {
                     on_activity: move |()| sessions.restart(),
                 }
             } else {
-                div { class: "flex flex-1 flex-col items-center justify-center gap-3 text-center",
+                // Mobile has no agent sidebar, so the conversation list
+                // is the page until you pick one (master/detail).
+                div { class: "flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3 md:hidden",
+                    for (slug , s) in session_rows.iter() {
+                        {
+                            let target = s.id.clone();
+                            let title = if s.title.trim().is_empty() {
+                                "(untitled)".to_string()
+                            } else {
+                                s.title.clone()
+                            };
+                            let when = relative_time(s.last_message_at.unwrap_or(s.created_at));
+                            let pill = status_pill(s.status);
+                            let row = (slug.clone(), s.clone());
+                            rsx! {
+                                button {
+                                    key: "m-{s.id}",
+                                    r#type: "button",
+                                    class: "flex min-h-11 w-full items-center gap-2 rounded-lg border border-border/60 bg-card/30 px-3 py-2 text-left active:bg-accent/40",
+                                    onclick: move |_| {
+                                        selected.set(Some(row.clone()));
+                                        nav.push(crate::routes::Route::AgentsRoute {
+                                            session: target.clone(),
+                                        });
+                                    },
+                                    span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{title}" }
+                                    if let Some(p) = &pill {
+                                        span { class: "h-2 w-2 shrink-0 rounded-full {p.dot}", title: "{p.label}" }
+                                    }
+                                    span { class: "shrink-0 {style::MICRO} tabular-nums text-muted-foreground", "{when}" }
+                                }
+                            }
+                        }
+                    }
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        disabled: active().is_none(),
+                        on_click: on_new_chat,
+                        "New chat"
+                    }
+                    if !fetch_err.is_empty() {
+                        div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs leading-relaxed",
+                            "Can't reach the agent service. {fetch_err}"
+                        }
+                    }
+                }
+                div { class: "hidden flex-1 flex-col items-center justify-center gap-3 text-center md:flex",
                     Bot { size: 32 }
                     Heading { level: HeadingLevel::H3, "Chat with your agents" }
                     Text { variant: TextVariant::Muted, class: "max-w-sm text-sm leading-relaxed",
@@ -266,15 +324,33 @@ pub fn AgentsView(session: String) -> Element {
             }
 
             // ── Inspector ──
+            // Desktop: a column beside the chat. Mobile: the same
+            // content in a bottom sheet — a 288px column on a 390px
+            // phone left the conversation with nothing to live in.
             if show_inspector() {
                 if let Some((slug, session)) = selected.read().clone() {
-                    Inspector {
-                        key: "insp-{session.id}",
-                        slug,
-                        session,
-                        skills: skill_list.clone(),
-                        capabilities: cap_list.clone(),
-                        mutate,
+                    div { class: "hidden md:flex md:min-h-0",
+                        Inspector {
+                            key: "insp-{session.id}",
+                            slug: slug.clone(),
+                            session: session.clone(),
+                            skills: skill_list.clone(),
+                            capabilities: cap_list.clone(),
+                            mutate,
+                        }
+                    }
+                    crate::shell::mobile::BottomSheet {
+                        open: true,
+                        title: "Session".to_string(),
+                        on_close: move |()| show_inspector.set(false),
+                        Inspector {
+                            key: "insp-sheet-{session.id}",
+                            slug,
+                            session,
+                            skills: skill_list.clone(),
+                            capabilities: cap_list.clone(),
+                            mutate,
+                        }
                     }
                 }
             }
@@ -419,7 +495,7 @@ fn ModelPicker(
         div { class: "relative",
             button {
                 r#type: "button",
-                class: "flex items-center gap-1 rounded-md border border-border/60 bg-card/30 px-2 py-0.5 text-xs text-foreground hover:border-primary/60",
+                class: "flex min-h-8 items-center gap-1 rounded-md border border-border/60 bg-card/30 px-2 py-1 text-xs text-foreground hover:border-primary/60 md:min-h-0 md:py-0.5 {style::FOCUS}",
                 onclick: move |_| {
                     let v = *open.peek();
                     open.set(!v);
@@ -431,9 +507,9 @@ fn ModelPicker(
                 span { class: "text-muted-foreground", "▾" }
             }
             if open() {
-                div { class: "absolute bottom-full left-0 z-40 mb-1 flex h-80 w-[34rem] max-w-[90vw] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg",
+                div { class: "absolute bottom-full left-0 z-40 mb-1 flex h-[70vh] w-[min(34rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg md:h-80",
                     input {
-                        class: "m-2 rounded-md border border-border/60 bg-card/30 px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60",
+                        class: "m-2 rounded-md border border-border/60 bg-card/30 px-2 py-2 text-base text-foreground outline-none focus:border-primary/60 md:py-1 md:text-xs",
                         placeholder: "Search models…",
                         autofocus: true,
                         value: "{search}",
@@ -444,15 +520,16 @@ fn ModelPicker(
                             }
                         },
                     }
-                    div { class: "flex min-h-0 flex-1",
-                        // Provider rail.
-                        div { class: "flex w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/60 p-1",
+                    div { class: "flex min-h-0 flex-1 flex-col md:flex-row",
+                        // Provider rail — a row of chips on mobile, a
+                        // column beside the list on desktop.
+                        div { class: "flex shrink-0 gap-0.5 overflow-x-auto border-b border-border/60 p-1 md:w-40 md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r",
                             button {
                                 r#type: "button",
                                 class: if provider.read().is_none() {
-                                    "flex items-center justify-between rounded-md bg-accent px-2 py-1 text-left text-xs"
+                                    "flex shrink-0 items-center justify-between gap-1 rounded-md bg-accent px-2 py-1.5 text-left text-xs md:py-1"
                                 } else {
-                                    "flex items-center justify-between rounded-md px-2 py-1 text-left text-xs hover:bg-accent/50"
+                                    "flex shrink-0 items-center justify-between gap-1 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent/50 md:py-1"
                                 },
                                 onclick: move |_| provider.set(None),
                                 span { "All models" }
@@ -467,9 +544,9 @@ fn ModelPicker(
                                             key: "{pid}",
                                             r#type: "button",
                                             class: if is_sel {
-                                                "flex items-center justify-between rounded-md bg-accent px-2 py-1 text-left text-xs"
+                                                "flex shrink-0 items-center justify-between gap-1 rounded-md bg-accent px-2 py-1.5 text-left text-xs md:py-1"
                                             } else {
-                                                "flex items-center justify-between rounded-md px-2 py-1 text-left text-xs hover:bg-accent/50"
+                                                "flex shrink-0 items-center justify-between gap-1 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent/50 md:py-1"
                                             },
                                             onclick: move |_| {
                                                 // Toggle back to All on re-click.
@@ -504,9 +581,9 @@ fn ModelPicker(
                                             key: "{m.id}",
                                             r#type: "button",
                                             class: if is_active {
-                                                "flex w-full flex-col rounded-md bg-accent px-2 py-1 text-left"
+                                                "flex w-full flex-col rounded-md bg-accent px-2 py-2 text-left md:py-1"
                                             } else {
-                                                "flex w-full flex-col rounded-md px-2 py-1 text-left hover:bg-accent/50"
+                                                "flex w-full flex-col rounded-md px-2 py-2 text-left hover:bg-accent/50 md:py-1"
                                             },
                                             onclick: move |_| {
                                                 on_pick.call(picked.clone());
@@ -646,6 +723,9 @@ pub(crate) fn ChatPane(
     on_activity: EventHandler<()>,
 ) -> Element {
     let session_id = session.id.clone();
+    // Touch changes real behaviour here, not just sizing — see the
+    // composer's Enter handling and the 16px input rule below.
+    let touch = use_hook(editor::editor_view::coarse_pointer);
     let mut messages = use_signal(Vec::<Message>::new);
     let mut streaming = use_signal(|| None::<(String, String)>);
     let mut reasoning = use_signal(String::new);
@@ -1185,8 +1265,14 @@ pub(crate) fn ChatPane(
         // scroll.
         div { class: "flex min-h-0 min-w-0 flex-1 flex-col",
             // Header.
-            div { class: "flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4",
+            div { class: "flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-2 md:h-11 md:px-4",
                 div { class: "flex min-w-0 items-center gap-2",
+                    Link {
+                        to: crate::routes::Route::AgentsRoute { session: String::new() },
+                        class: "-ml-1 flex h-11 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground active:bg-accent/40 md:hidden",
+                        aria_label: "Back to conversations",
+                        ChevronLeft { size: 18 }
+                    }
                     span { class: "truncate text-sm font-medium text-foreground", title: "{title}", "{title}" }
                     span { class: backend_chip_cls(&session.backend_id), "{session.backend_id}" }
                     match &stream {
@@ -1233,11 +1319,11 @@ pub(crate) fn ChatPane(
                     button {
                         r#type: "button",
                         class: if inspector_open {
-                            "rounded-md bg-accent p-1 text-foreground"
+                            "flex h-11 w-11 items-center justify-center rounded-md bg-accent text-foreground md:h-7 md:w-7 {style::FOCUS}"
                         } else {
-                            "rounded-md p-1 text-muted-foreground hover:text-foreground"
+                            "flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground md:h-7 md:w-7 {style::FOCUS}"
                         },
-                        title: "Toggle inspector",
+                        title: "Session details",
                         onclick: move |_| on_toggle_inspector.call(()),
                         Info { size: 14 }
                     }
@@ -1249,7 +1335,7 @@ pub(crate) fn ChatPane(
             // both be mounted at once.
             div {
                 id: "{transcript_id}",
-                class: "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4",
+                class: "flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden px-3 py-4 md:px-4",
                 onscroll: move |e| {
                     let d = e.data();
                     scroll.set(scroll_mode(
@@ -1335,7 +1421,7 @@ pub(crate) fn ChatPane(
                     div { class: "pointer-events-auto absolute bottom-1 flex w-full justify-center",
                         button {
                             r#type: "button",
-                            class: "rounded-full border border-border/60 bg-popover/95 px-3 py-1 text-xs text-foreground shadow-lg hover:border-primary/60",
+                            class: "flex min-h-9 items-center rounded-full border border-border/60 bg-popover/95 px-4 text-xs text-foreground shadow-lg hover:border-primary/60 md:min-h-0 md:px-3 md:py-1",
                             onclick: {
                                 let id = transcript_id.clone();
                                 move |_| {
@@ -1377,9 +1463,11 @@ pub(crate) fn ChatPane(
             }
 
             // Composer + chip row.
-            div { class: "relative border-t border-border/60 px-4 py-3",
+            div {
+                class: "relative border-t border-border/60 px-3 py-2 md:px-4 md:py-3",
+                style: "padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));",
                 if completion_open {
-                    div { class: "absolute bottom-full left-4 z-30 mb-1 max-h-64 w-[26rem] max-w-[85%] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg",
+                    div { class: "absolute bottom-full left-3 z-30 mb-1 max-h-64 w-[min(26rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg md:left-4",
                         for (i , row) in completion_rows.iter().enumerate() {
                             {
                                 let insert = row.insert.clone();
@@ -1388,9 +1476,9 @@ pub(crate) fn ChatPane(
                                         key: "{row.insert}",
                                         role: "button",
                                         class: if i == sel {
-                                            "flex cursor-pointer items-baseline gap-2 rounded-md bg-accent px-2 py-1"
+                                            "flex min-h-9 cursor-pointer items-baseline gap-2 rounded-md bg-accent px-2 py-2 md:min-h-0 md:py-1"
                                         } else {
-                                            "flex cursor-pointer items-baseline gap-2 rounded-md px-2 py-1 hover:bg-accent/50"
+                                            "flex min-h-9 cursor-pointer items-baseline gap-2 rounded-md px-2 py-2 hover:bg-accent/50 md:min-h-0 md:py-1"
                                         },
                                         onmousedown: move |e| {
                                             e.prevent_default();
@@ -1402,15 +1490,21 @@ pub(crate) fn ChatPane(
                                 }
                             }
                         }
-                        div { class: "mt-0.5 border-t border-border/60 px-2 pt-1 text-[11px] text-muted-foreground/70",
-                            "↑↓ navigate · Tab/Enter accept · Esc dismiss"
+                        if !touch {
+                            div { class: "mt-0.5 border-t border-border/60 px-2 pt-1 text-[11px] text-muted-foreground/70",
+                                "↑↓ navigate · Tab/Enter accept · Esc dismiss"
+                            }
                         }
                     }
                 }
                 div { class: "flex flex-col rounded-xl border border-border/60 bg-card/30 transition-colors focus-within:border-primary/60",
                     textarea {
-                        class: "max-h-40 min-h-[2.75rem] w-full resize-y border-0 bg-transparent px-3 pb-1 pt-2.5 {style::BODY} text-foreground outline-none placeholder:text-muted-foreground/60",
-                        placeholder: "Message the agent — / for commands, $ for skills",
+                        class: "max-h-40 min-h-[2.75rem] w-full resize-y border-0 bg-transparent px-3 pb-1 pt-2.5 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 md:text-sm",
+                        placeholder: if touch {
+                            "Message the agent"
+                        } else {
+                            "Message the agent — / for commands, $ for skills"
+                        },
                         value: "{composer}",
                         oninput: move |e| {
                             composer.set(e.value());
@@ -1471,7 +1565,10 @@ pub(crate) fn ChatPane(
                                         return;
                                     }
                                 }
-                                if e.key() == Key::Enter && !e.modifiers().shift() {
+                                // On a touch keyboard Return is the only
+                                // way to get a newline, so it must not
+                                // send. The Send button is the commit.
+                                if e.key() == Key::Enter && !e.modifiers().shift() && !touch {
                                     e.prevent_default();
                                     send(());
                                 }
@@ -1533,6 +1630,7 @@ pub(crate) fn ChatPane(
                     Button {
                         variant: ButtonVariant::Primary,
                         size: ButtonSize::Small,
+                        class: "min-h-9 px-4 md:min-h-0 md:px-3",
                         disabled: composer.read().trim().is_empty(),
                         on_click: move |_| send(()),
                         if busy() { "Queue" } else { "Send" }
@@ -1712,7 +1810,7 @@ fn Inspector(
     let sslug = slug.clone();
 
     rsx! {
-        div { class: "flex w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l border-border/60 px-4 py-4",
+        div { class: "flex w-full flex-col gap-5 overflow-y-auto px-0 py-1 md:w-72 md:shrink-0 md:border-l md:border-border/60 md:px-4 md:py-4",
             div { class: "flex flex-col gap-2",
                 span { class: "{style::EYEBROW}",
                     "Session"
@@ -2032,7 +2130,7 @@ fn message_view(m: &Message) -> Element {
             // have to go find (CodexMonitor's message file links).
             let refs = referenced_paths(&text);
             rsx! {
-                div { key: "{m.id}", class: "group relative max-w-none",
+                div { key: "{m.id}", class: "group relative min-w-0 max-w-none break-words",
                     task_ui::Markdown { source: text }
                     if !refs.is_empty() {
                         div { class: "mt-2 flex flex-wrap items-center gap-1",

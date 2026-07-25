@@ -164,7 +164,7 @@ pub fn AgentPanel() -> Element {
                         rsx! {
                             button {
                                 r#type: "button",
-                                class: "rounded p-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                                class: "flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-accent/40 hover:text-foreground md:h-7 md:w-7",
                                 title: "Open full agent view",
                                 onclick: move |_| {
                                     nav.push(Route::AgentsRoute { session: sid.clone() });
@@ -176,7 +176,7 @@ pub fn AgentPanel() -> Element {
                 }
                 button {
                     r#type: "button",
-                    class: "rounded p-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                    class: "flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-accent/40 hover:text-foreground md:h-7 md:w-7",
                     title: "New agent chat",
                     onclick: new_chat,
                     Plus { size: 13 }

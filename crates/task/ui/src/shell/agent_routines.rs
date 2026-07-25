@@ -119,7 +119,7 @@ pub fn RoutinesPanel(slug: String) -> Element {
             }
             button {
                 r#type: "button",
-                class: "rounded p-1 text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                class: "flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:bg-accent/40 hover:text-foreground md:h-7 md:w-7",
                 title: "Schedule a routine",
                 onclick: move |_| {
                     let v = *composing.peek();
@@ -144,13 +144,13 @@ pub fn RoutinesPanel(slug: String) -> Element {
             if composing() {
                 div { class: "flex flex-col gap-2 rounded-lg border border-border/60 bg-card/40 p-2.5",
                     input {
-                        class: "rounded-md border border-border/60 bg-card/30 px-2 py-1 text-xs outline-none focus:border-primary/60",
+                        class: "rounded-md border border-border/60 bg-card/30 px-2 py-2 text-base outline-none focus:border-primary/60 md:py-1 md:text-xs",
                         placeholder: "Name (optional)",
                         value: "{draft_name}",
                         oninput: move |e| draft_name.set(e.value()),
                     }
                     input {
-                        class: "rounded-md border border-border/60 bg-card/30 px-2 py-1 font-mono text-xs outline-none focus:border-primary/60",
+                        class: "rounded-md border border-border/60 bg-card/30 px-2 py-2 font-mono text-base outline-none focus:border-primary/60 md:py-1 md:text-xs",
                         placeholder: "Schedule — every 2h · 0 8 * * * · 30m",
                         value: "{draft_schedule}",
                         oninput: move |e| draft_schedule.set(e.value()),
@@ -161,7 +161,7 @@ pub fn RoutinesPanel(slug: String) -> Element {
                         span { class: "px-0.5 text-[11px] text-muted-foreground", "{hint}" }
                     }
                     textarea {
-                        class: "min-h-16 resize-y rounded-md border border-border/60 bg-card/30 px-2 py-1 text-xs leading-relaxed outline-none focus:border-primary/60",
+                        class: "min-h-16 resize-y rounded-md border border-border/60 bg-card/30 px-2 py-2 text-base leading-relaxed outline-none focus:border-primary/60 md:py-1 md:text-xs",
                         placeholder: "What should the agent do each time? Write it as a standalone instruction — nobody's in the chair to clarify.",
                         value: "{draft_prompt}",
                         oninput: move |e| draft_prompt.set(e.value()),
@@ -258,7 +258,7 @@ fn routine_row(r: &Routine, busy: bool, act: Callback<(String, RowAction)>) -> E
             div { class: "-mx-1 flex items-center gap-0.5 border-t border-border/60 pt-1.5",
                 button {
                     r#type: "button",
-                    class: "rounded p-1 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                    class: "flex h-9 w-9 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:h-7 md:w-7",
                     disabled: busy,
                     title: if paused { "Resume" } else { "Pause" },
                     onclick: {
@@ -273,7 +273,7 @@ fn routine_row(r: &Routine, busy: bool, act: Callback<(String, RowAction)>) -> E
                 }
                 button {
                     r#type: "button",
-                    class: "rounded px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                    class: "flex h-9 items-center rounded px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:h-7",
                     disabled: busy,
                     title: "Run once now, without disturbing the schedule",
                     onclick: {
@@ -284,7 +284,7 @@ fn routine_row(r: &Routine, busy: bool, act: Callback<(String, RowAction)>) -> E
                 }
                 button {
                     r#type: "button",
-                    class: "ml-auto rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                    class: "ml-auto flex h-9 w-9 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:h-7 md:w-7",
                     disabled: busy,
                     title: "Delete routine",
                     onclick: {
