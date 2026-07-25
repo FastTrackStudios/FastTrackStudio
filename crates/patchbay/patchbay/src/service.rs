@@ -508,97 +508,6 @@ fn auto_import_chanmap(
     }
 }
 
-#[cfg(test)]
-mod route_tests {
-    use super::*;
-    use patchbay_proto::{MediaKind, NodeState, PwNode, PwPort};
-
-    fn node(id: u32, name: &str) -> PwNode {
-        PwNode {
-            id,
-            name: name.into(),
-            label: name.into(),
-            media_class: String::new(),
-            media_kind: MediaKind::Audio,
-            app_name: String::new(),
-            latency: String::new(),
-            icon_name: String::new(),
-            group: String::new(),
-            virtual_sink: false,
-            state: NodeState::Running,
-        }
-    }
-    fn port(id: u32, node_id: u32, name: &str, dir: PortDirection) -> PwPort {
-        PwPort {
-            id,
-            node_id,
-            name: name.into(),
-            direction: dir,
-            media_kind: MediaKind::Audio,
-        }
-    }
-
-    #[test]
-    fn normalization_strips_prefix_and_dsp_but_keeps_lr() {
-        assert_eq!(norm_route_name("81 - Engineer Vocal [DSP]"), "engineer vocal");
-        assert_eq!(norm_route_name("42 - Engineer Vocal"), "engineer vocal");
-        assert_eq!(norm_route_name("Engineer Vocal"), "engineer vocal");
-        // L/R must stay distinct — stereo halves are different channels.
-        assert_ne!(norm_route_name("Vocal 1 Mix L"), norm_route_name("Vocal 1 Mix R"));
-    }
-
-    #[test]
-    fn resolves_by_alias_across_channel_numbers() {
-        // Inferno source outputs capture_96 (aliased with the [DSP] name
-        // and a different channel number than REAPER's input).
-        let mut store = GraphStore::default();
-        store.nodes.insert(1, node(1, "Inferno source"));
-        store.nodes.insert(2, node(2, "REAPER"));
-        store.ports.insert(100, port(100, 1, "capture_96", PortDirection::Output));
-        store.ports.insert(200, port(200, 2, "in5", PortDirection::Input));
-
-        let mut aliases = HashMap::new();
-        aliases.insert("Inferno source:capture_96".into(), "96 - Engineer Vocal [DSP]".into());
-        aliases.insert("REAPER:in5".into(), "5 - Engineer Vocal".into());
-
-        let from = RouteEndpoint { node: "Inferno source".into(), port: "Engineer Vocal".into() };
-        let to = RouteEndpoint { node: "REAPER".into(), port: "Engineer Vocal".into() };
-
-        assert_eq!(
-            resolve_route_endpoint(&store, &aliases, &from, PortDirection::Output),
-            Some(100)
-        );
-        assert_eq!(
-            resolve_route_endpoint(&store, &aliases, &to, PortDirection::Input),
-            Some(200)
-        );
-        // Direction matters: the output-side spec must not match the input port.
-        assert_eq!(
-            resolve_route_endpoint(&store, &aliases, &from, PortDirection::Input),
-            None
-        );
-    }
-
-    #[test]
-    fn node_filter_disambiguates_same_alias() {
-        // Two output ports share the normalized name; the node filter picks one.
-        let mut store = GraphStore::default();
-        store.nodes.insert(1, node(1, "Inferno source"));
-        store.nodes.insert(2, node(2, "Other Card"));
-        store.ports.insert(100, port(100, 1, "capture_1", PortDirection::Output));
-        store.ports.insert(101, port(101, 2, "out_1", PortDirection::Output));
-        let mut aliases = HashMap::new();
-        aliases.insert("Inferno source:capture_1".into(), "Talkback".into());
-        aliases.insert("Other Card:out_1".into(), "Talkback".into());
-
-        let ep = RouteEndpoint { node: "Other Card".into(), port: "Talkback".into() };
-        assert_eq!(
-            resolve_route_endpoint(&store, &aliases, &ep, PortDirection::Output),
-            Some(101)
-        );
-    }
-}
-
 impl PatchbayServiceStreamSource for PatchbayBackend {
     fn graph_events_hub(&self) -> &architect::PubSub<GraphEvent> {
         &self.inner.events_hub
@@ -1199,5 +1108,96 @@ impl PatchbayService for PatchbayBackend {
             }
         }
         Ok(applied)
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+    use patchbay_proto::{MediaKind, NodeState, PwNode, PwPort};
+
+    fn node(id: u32, name: &str) -> PwNode {
+        PwNode {
+            id,
+            name: name.into(),
+            label: name.into(),
+            media_class: String::new(),
+            media_kind: MediaKind::Audio,
+            app_name: String::new(),
+            latency: String::new(),
+            icon_name: String::new(),
+            group: String::new(),
+            virtual_sink: false,
+            state: NodeState::Running,
+        }
+    }
+    fn port(id: u32, node_id: u32, name: &str, dir: PortDirection) -> PwPort {
+        PwPort {
+            id,
+            node_id,
+            name: name.into(),
+            direction: dir,
+            media_kind: MediaKind::Audio,
+        }
+    }
+
+    #[test]
+    fn normalization_strips_prefix_and_dsp_but_keeps_lr() {
+        assert_eq!(norm_route_name("81 - Engineer Vocal [DSP]"), "engineer vocal");
+        assert_eq!(norm_route_name("42 - Engineer Vocal"), "engineer vocal");
+        assert_eq!(norm_route_name("Engineer Vocal"), "engineer vocal");
+        // L/R must stay distinct — stereo halves are different channels.
+        assert_ne!(norm_route_name("Vocal 1 Mix L"), norm_route_name("Vocal 1 Mix R"));
+    }
+
+    #[test]
+    fn resolves_by_alias_across_channel_numbers() {
+        // Inferno source outputs capture_96 (aliased with the [DSP] name
+        // and a different channel number than REAPER's input).
+        let mut store = GraphStore::default();
+        store.nodes.insert(1, node(1, "Inferno source"));
+        store.nodes.insert(2, node(2, "REAPER"));
+        store.ports.insert(100, port(100, 1, "capture_96", PortDirection::Output));
+        store.ports.insert(200, port(200, 2, "in5", PortDirection::Input));
+
+        let mut aliases = HashMap::new();
+        aliases.insert("Inferno source:capture_96".into(), "96 - Engineer Vocal [DSP]".into());
+        aliases.insert("REAPER:in5".into(), "5 - Engineer Vocal".into());
+
+        let from = RouteEndpoint { node: "Inferno source".into(), port: "Engineer Vocal".into() };
+        let to = RouteEndpoint { node: "REAPER".into(), port: "Engineer Vocal".into() };
+
+        assert_eq!(
+            resolve_route_endpoint(&store, &aliases, &from, PortDirection::Output),
+            Some(100)
+        );
+        assert_eq!(
+            resolve_route_endpoint(&store, &aliases, &to, PortDirection::Input),
+            Some(200)
+        );
+        // Direction matters: the output-side spec must not match the input port.
+        assert_eq!(
+            resolve_route_endpoint(&store, &aliases, &from, PortDirection::Input),
+            None
+        );
+    }
+
+    #[test]
+    fn node_filter_disambiguates_same_alias() {
+        // Two output ports share the normalized name; the node filter picks one.
+        let mut store = GraphStore::default();
+        store.nodes.insert(1, node(1, "Inferno source"));
+        store.nodes.insert(2, node(2, "Other Card"));
+        store.ports.insert(100, port(100, 1, "capture_1", PortDirection::Output));
+        store.ports.insert(101, port(101, 2, "out_1", PortDirection::Output));
+        let mut aliases = HashMap::new();
+        aliases.insert("Inferno source:capture_1".into(), "Talkback".into());
+        aliases.insert("Other Card:out_1".into(), "Talkback".into());
+
+        let ep = RouteEndpoint { node: "Other Card".into(), port: "Talkback".into() };
+        assert_eq!(
+            resolve_route_endpoint(&store, &aliases, &ep, PortDirection::Output),
+            Some(101)
+        );
     }
 }

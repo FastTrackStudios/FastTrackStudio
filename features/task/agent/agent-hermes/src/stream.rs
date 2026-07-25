@@ -159,7 +159,9 @@ pub(crate) async fn run_turn(
     cancel: &Cancel,
 ) -> Result<TurnOutcome, String> {
     let mut chain = previous_response_id;
-    while !legacy_transport.load(Ordering::Relaxed) {
+    // Two attempts at the rich transport: the second only happens when
+    // the gateway lost our chain and we replay the transcript.
+    if !legacy_transport.load(Ordering::Relaxed) {
         for attempt in 0..2 {
             match run_turn_responses(
                 http,
@@ -210,7 +212,6 @@ pub(crate) async fn run_turn(
                 Err(TurnError::Failed(e)) => return Err(e),
             }
         }
-        break;
     }
     run_turn_chat(
         http,
