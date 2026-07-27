@@ -3,22 +3,12 @@
 //! skipped silently; parse failures are logged + skipped.
 
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::Locations;
 use crate::model::Location;
-use crate::parse::{looks_like_location, parse_page};
 
 #[must_use]
 pub fn scan_vault(vault: &Vault) -> Vec<Location> {
-    vault
-        .pages
-        .iter()
-        .filter(|p| looks_like_location(p))
-        .filter_map(|p| match parse_page(p) {
-            Ok(loc) => Some(loc),
-            Err(e) => {
-                tracing::warn!(path = %p.rel_path, ?e, "location parse failed");
-                None
-            }
-        })
-        .collect()
+    VaultEntityStore::<Locations>::scan(vault)
 }

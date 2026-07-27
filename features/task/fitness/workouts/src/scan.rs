@@ -3,38 +3,19 @@
 use chrono::NaiveDate;
 use uuid::Uuid;
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::{Routines, Sessions};
 use crate::model::{Routine, WorkoutSession};
-use crate::parse::{looks_like_routine, looks_like_session, parse_routine, parse_session};
 
+/// Every routine page, parse failures logged and skipped.
 pub fn scan_routines(vault: &Vault) -> Vec<Routine> {
-    vault
-        .pages
-        .iter()
-        .filter(|p| looks_like_routine(p))
-        .filter_map(|p| match parse_routine(p) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                tracing::warn!(path = %p.rel_path, ?e, "routine parse failed");
-                None
-            }
-        })
-        .collect()
+    VaultEntityStore::<Routines>::scan(vault)
 }
 
+/// Every workout-session page, parse failures logged and skipped.
 pub fn scan_sessions(vault: &Vault) -> Vec<WorkoutSession> {
-    vault
-        .pages
-        .iter()
-        .filter(|p| looks_like_session(p))
-        .filter_map(|p| match parse_session(p) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                tracing::warn!(path = %p.rel_path, ?e, "session parse failed");
-                None
-            }
-        })
-        .collect()
+    VaultEntityStore::<Sessions>::scan(vault)
 }
 
 /// Sessions in `[start, end)`. Useful for weekly volume

@@ -2,23 +2,14 @@
 
 use chrono::NaiveDate;
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::IntakeLogs;
 use crate::model::IntakeLog;
-use crate::parse::{looks_like_intake, parse_page};
 
+/// Every intake-log page, parse failures logged and skipped.
 pub fn scan_vault(vault: &Vault) -> Vec<IntakeLog> {
-    vault
-        .pages
-        .iter()
-        .filter(|p| looks_like_intake(p))
-        .filter_map(|p| match parse_page(p) {
-            Ok(l) => Some(l),
-            Err(e) => {
-                tracing::warn!(path = %p.rel_path, ?e, "intake parse failed");
-                None
-            }
-        })
-        .collect()
+    VaultEntityStore::<IntakeLogs>::scan(vault)
 }
 
 /// Convenience: log on a specific day. First match wins

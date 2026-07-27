@@ -1,64 +1,28 @@
 //! Serializers + path helpers for routines + sessions.
+//!
+//! Serialization lives in [`crate::entity`]; this module keeps the
+//! historical `workouts::write::*` paths working and adds the one
+//! thing the shared store doesn't cover — writing a page straight to a
+//! vault root on disk, without an in-memory `Vault`.
 
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use thiserror::Error;
+use vault_entity::store::VaultEntity;
 
+pub use vault_entity::WriteError;
+
+use crate::entity::{Routines, Sessions};
 use crate::model::{Routine, WorkoutSession};
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml: {0}")]
-    Yaml(String),
-    #[error("io: {0}")]
-    Io(String),
-    #[error("file exists at {0}; refusing to overwrite (pass overwrite=true)")]
-    Exists(String),
-    #[error("bad path: {0}")]
-    BadPath(String),
-}
-
+/// Render a routine as a full markdown page.
 pub fn serialize_routine(r: &Routine) -> Result<String, WriteError> {
-    let mut wrapper = serde_yaml::Mapping::new();
-    wrapper.insert("type".into(), "routine".into());
-    let body = serde_yaml::to_value(r).map_err(|e| WriteError::Yaml(e.to_string()))?;
-    if let serde_yaml::Value::Mapping(m) = body {
-        for (k, v) in m {
-            wrapper.insert(k, v);
-        }
-    }
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(wrapper))
-        .map_err(|e| WriteError::Yaml(e.to_string()))?;
-    let body = if r.details.is_empty() {
-        String::new()
-    } else if r.details.starts_with('\n') {
-        r.details.clone()
-    } else {
-        format!("\n{}", r.details)
-    };
-    Ok(format!("---\n{yaml}---\n{body}"))
+    Routines::to_markdown(r)
 }
 
+/// Render a session as a full markdown page.
 pub fn serialize_session(s: &WorkoutSession) -> Result<String, WriteError> {
-    let mut wrapper = serde_yaml::Mapping::new();
-    wrapper.insert("type".into(), "workout".into());
-    let body = serde_yaml::to_value(s).map_err(|e| WriteError::Yaml(e.to_string()))?;
-    if let serde_yaml::Value::Mapping(m) = body {
-        for (k, v) in m {
-            wrapper.insert(k, v);
-        }
-    }
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(wrapper))
-        .map_err(|e| WriteError::Yaml(e.to_string()))?;
-    let body = if s.details.is_empty() {
-        String::new()
-    } else if s.details.starts_with('\n') {
-        s.details.clone()
-    } else {
-        format!("\n{}", s.details)
-    };
-    Ok(format!("---\n{yaml}---\n{body}"))
+    Sessions::to_markdown(s)
 }
 
 pub fn write_routine(
@@ -122,43 +86,20 @@ fn write_page(
 
 /// Default layout: `routines/<slug>.md`.
 pub fn default_routine_path(name: &str, folder: Option<&str>) -> String {
-    let slug = slugify(name);
-    match folder {
-        Some(f) => format!("{}/{slug}.md", f.trim_end_matches('/')),
-        None => format!("routines/{slug}.md"),
-    }
+    Routines::default_path(name, folder)
 }
 
 /// Default layout: `workouts/<YYYY-MM-DD>-<slug>.md`. Date
 /// goes first so directory listings sort chronologically.
+///
+/// The date prefix means this can't go through
+/// [`VaultEntity::default_path`] — [`crate::store::Store`] applies it
+/// before handing the session to the shared store.
 pub fn default_session_path(date: chrono::NaiveDate, name: &str, folder: Option<&str>) -> String {
-    let slug = slugify(name);
+    let slug = vault_entity::slugify(name, Sessions::SLUG_FALLBACK);
     let date_str = date.format("%Y-%m-%d");
-    match folder {
-        Some(f) => format!("{}/{date_str}-{slug}.md", f.trim_end_matches('/')),
-        None => format!("workouts/{date_str}-{slug}.md"),
-    }
-}
-
-pub(crate) fn slugify(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_dash = false;
-    for ch in s.chars() {
-        if ch.is_alphanumeric() {
-            for lc in ch.to_lowercase() {
-                out.push(lc);
-            }
-            prev_dash = false;
-        } else if !prev_dash && !out.is_empty() {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        out.push_str("workout");
-    }
-    out
+    let dir = folder
+        .unwrap_or(Sessions::DEFAULT_FOLDER)
+        .trim_end_matches('/');
+    format!("{dir}/{date_str}-{slug}.md")
 }

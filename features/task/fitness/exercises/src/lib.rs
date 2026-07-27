@@ -25,6 +25,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod entity;
 pub mod model;
 pub mod parse;
 pub mod scan;
@@ -32,6 +33,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
+pub use entity::Exercises;
 pub use model::{Category, Equipment, Exercise, Force, Mechanics};
 pub use parse::{ParseError, looks_like_exercise, parse_page};
 pub use scan::{by_category, by_equipment, scan_vault};
