@@ -23137,6 +23137,7 @@ dependencies = [
  "midicore",
  "signal-bass-proto",
  "signal-proto",
+ "signal-rig-host",
  "signal-sampler",
  "tracing",
  "tracing-subscriber",
@@ -23306,6 +23307,7 @@ dependencies = [
  "signal-fx",
  "signal-guitar-proto",
  "signal-proto",
+ "signal-rig-host",
  "signal-sampler",
  "tokio",
  "tracing",
@@ -23565,6 +23567,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-rig-host"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-audio-io",
+ "eyre",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+ "tracing",
+]
+
+[[package]]
 name = "signal-sampler"
 version = "0.1.0"
 dependencies = [
@@ -23597,6 +23611,7 @@ dependencies = [
  "signal-fx",
  "signal-plugin-host",
  "signal-proto",
+ "signal-rig-host",
  "symphonia",
  "symphonia-bundle-flac",
  "symphonia-codec-vorbis",
