@@ -149,7 +149,7 @@ enum RouteCmd {
         disabled: bool,
     },
     /// Bank route: wire a whole output node to a whole input node 1:1
-    /// by channel number (out<N>/capture_N → in<N>/playback_N), and keep
+    /// by channel number (`out<N>`/`capture_N` → `in<N>`/`playback_N`), and keep
     /// it wired. `<name> <output-node> <input-node>` (node name or alias).
     /// E.g. `route bank inferno-to-reaper "Inferno source" REAPER`.
     Bank {

@@ -20,7 +20,7 @@
 //!   `tags: [task]`) page from a `vault::Vault`.
 //! - [`capture`] — minimal natural-language capture: parse
 //!   `"Buy milk tomorrow #errands @shopping"` into a
-//!   `TaskInfo`. Date keywords: today / tomorrow / next-<day>.
+//!   `TaskInfo`. Date keywords: today / tomorrow / `next-<day>`.
 //!
 //! Higher-level views (kanban, calendar) ride on `vault-live`'s
 //! `.base` query DSL via formulas + filters; they live in

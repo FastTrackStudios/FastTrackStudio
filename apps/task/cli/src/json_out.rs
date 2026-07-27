@@ -166,7 +166,7 @@ pub enum MatchFailure {
 }
 
 impl MatchFailure {
-    /// Tag onto the error taxonomy as a "resolve <noun>" failure.
+    /// Tag onto the error taxonomy as a `resolve <noun>` failure.
     pub fn into_report(self, noun: &str, target: &str) -> eyre::Report {
         match self {
             MatchFailure::NotFound(msg) => errors::not_found(format!("resolve {noun}"), target)

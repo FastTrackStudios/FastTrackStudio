@@ -1425,8 +1425,9 @@ enum IssueCmd {
     },
 
     /// Add a typed relation between two issues:
-    /// `task issue relate <a> <kind> <b>` records "<a> <kind>s
-    /// <b>" (kind ∈ blocks | duplicate | implements | relates).
+    /// `task issue relate <a> <kind> <b>` records
+    /// "`<a>` `<kind>`s `<b>`" (kind ∈ blocks | duplicate | implements
+    /// | relates).
     /// Stored in `<a>`'s `workflow.relations`; the legacy
     /// blockers / relates_to lists keep working alongside.
     Relate {
@@ -2870,7 +2871,7 @@ enum WikiArchiveImportCmd {
     /// includeContent=true. The JSON export is lossy (drops
     /// crawled htmlContent) — the API is the real source.
     Karakeep {
-        /// Instance base URL, e.g. https://keep.example.com
+        /// Instance base URL, e.g. <https://keep.example.com>
         #[arg(long, env = "KARAKEEP_ENDPOINT")]
         endpoint: String,
         /// API key (ak2_… — Settings → API Keys).
@@ -3480,9 +3481,9 @@ enum GoalLoopCmd {
     /// Manage the active session's subgoals — extra acceptance
     /// criteria the worker sees and the judge must also satisfy.
     ///
-    ///   goal subgoal "<text>"   append a criterion
+    ///   goal subgoal `"<text>"`   append a criterion
     ///   goal subgoal            list them (alias: `goal subgoal list`)
-    ///   goal subgoal remove <N> drop the Nth (1-based)
+    ///   goal subgoal remove `<N>` drop the Nth (1-based)
     ///   goal subgoal clear      drop all
     ///
     /// A running loop in another process folds the current set into

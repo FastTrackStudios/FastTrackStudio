@@ -66,7 +66,7 @@ pub enum PropertyType {
         options: Vec<EnumOption>,
     },
     /// Nested structured object. The named fields are themselves
-    /// `PropertyDef`s. List<Struct> is expressed via the outer
+    /// `PropertyDef`s. List`<Struct>` is expressed via the outer
     /// container.
     Struct {
         fields: Vec<PropertyDef>,

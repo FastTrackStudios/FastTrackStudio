@@ -260,19 +260,23 @@ pub enum Segment {
 }
 
 /// Split a note body into markdown runs and screencast blocks. A
-/// ```gif fence becomes a [`Segment::Cast`]:
+/// `` ```gif `` fence becomes a [`Segment::Cast`]:
 ///
-/// ```text
+/// The example is fenced with four backticks so the three-backtick
+/// fence inside it doesn't close it early.
+///
+/// ````text
 /// ```gif
 /// transport-play                 ← media name (future filename stem)
 /// Space plays and stops.         ← caption / notes column (markdown:
 /// - Cursor returns to the start    bullets, **bold**, [[links]], and
 /// - Great for repeated takes       `kbd:@` refs all render)
 /// ```
-/// ```
+/// ````
 ///
-/// The info string picks the side: ```gif (or ```gif left) puts the
-/// media on the left, ```gif right puts it on the right (text left).
+/// The info string picks the side: `` ```gif `` (or `` ```gif left ``)
+/// puts the media on the left, `` ```gif right `` puts it on the right
+/// (text left).
 /// The first non-empty body line is the media NAME; everything after is
 /// the side-column markdown. Keeping the source as a fence — not a raw
 /// `![[…]]` — is deliberate: the vault's `[[wikilink]]` resolver and

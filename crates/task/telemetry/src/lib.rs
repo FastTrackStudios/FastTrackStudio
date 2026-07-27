@@ -41,7 +41,7 @@ mod native {
 
     /// The tracing layer that forwards `error!`/`warn!` events (and spans
     /// as breadcrumbs) to Sentry. Compose into a
-    /// [`tracing_subscriber::registry`].
+    /// [`fn@tracing_subscriber::registry`].
     pub fn tracing_layer<S>() -> sentry_tracing::SentryLayer<S>
     where
         S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
