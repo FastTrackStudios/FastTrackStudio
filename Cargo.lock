@@ -23401,6 +23401,7 @@ dependencies = [
  "signal-keys-proto",
  "signal-plugin-host",
  "signal-proto",
+ "signal-rig-host",
  "signal-sampler",
  "signal-synth",
  "tokio",
