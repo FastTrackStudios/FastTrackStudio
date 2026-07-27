@@ -23338,6 +23338,7 @@ dependencies = [
  "signal-grid-ui",
  "signal-guitar-proto",
  "signal-proto",
+ "signal-widgets",
  "uuid 1.23.4",
 ]
 
@@ -23431,6 +23432,7 @@ dependencies = [
  "signal-browser",
  "signal-keys-proto",
  "signal-ui",
+ "signal-widgets",
 ]
 
 [[package]]
@@ -23714,6 +23716,7 @@ dependencies = [
  "signal-proto",
  "signal-synth-proto",
  "signal-ui",
+ "signal-widgets",
 ]
 
 [[package]]
@@ -23739,9 +23742,17 @@ dependencies = [
  "signal-guitar-proto",
  "signal-guitar-ui",
  "signal-proto",
+ "signal-widgets",
  "tokio",
  "tracing",
  "uuid 1.23.4",
+]
+
+[[package]]
+name = "signal-widgets"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
 ]
 
 [[package]]

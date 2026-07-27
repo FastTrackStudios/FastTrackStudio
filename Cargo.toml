@@ -187,6 +187,7 @@ members = [
     "crates/signal/grid-ui",
     "crates/signal/daw-bridge",
     "crates/signal/rig-host",
+    "crates/signal/widgets",
     # ── features/fx — built-in FX (wave 4; vendored from FTS plugin repos)
     # Facade crates (eq / comp / reverb / delay / …) are the public deps;
     # the -dsp crates are internal (like signal-proto under the facade).
@@ -520,6 +521,7 @@ signal-storage = { path = "crates/signal/storage" }
 signal-import = { path = "crates/signal/import" }
 signal-daw-bridge = { path = "crates/signal/daw-bridge" }
 signal-rig-host = { path = "crates/signal/rig-host" }
+signal-widgets = { path = "crates/signal/widgets" }
 signal-nam = { path = "features/nam" }
 signal-extension = { path = "features/reaper/signal-extension" }
 signal-macromod = { path = "features/fx/macromod" }
