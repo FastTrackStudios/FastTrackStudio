@@ -838,6 +838,7 @@ ui = { path = "crates/task/ui" }
 store-proto = { path = "crates/task/store-proto", default-features = false }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
+vault-entity = { path = "features/task/vault/vault-entity" }
 vault-proto = { path = "features/task/vault/vault-proto", default-features = false }
 vault-live = { path = "features/task/vault/vault-live" }
 vault-obsidian = { path = "features/task/vault/vault-obsidian" }
