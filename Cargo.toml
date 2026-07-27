@@ -312,9 +312,6 @@ exclude = [
     # as crate manifests.
     "features/task/email/examples",
     "features/task/email/plans",
-    # Parked legacy shells (knowledge-ui, project-ui, publish-core,
-    # editor-outliner) — kept readable, not workspace members.
-    "crates/task/legacy",
     # Quarantined pdf renderer (fulgur/stylo trips a rustc trait-solver
     # recursion limit inside the big workspace graph); it keeps its own
     # [workspace]. `task-pdf-render` is the stdin/stdout interop point.
@@ -838,7 +835,6 @@ libc = "0.2"
 # crates/task/
 task-telemetry = { path = "crates/task/telemetry" }
 ui = { path = "crates/task/ui" }
-vim = { path = "crates/task/vim" }
 store-proto = { path = "crates/task/store-proto", default-features = false }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
@@ -888,7 +884,6 @@ identity = { path = "features/task/identity/identity" }
 finance-proto = { path = "features/task/finance/finance-proto", default-features = false }
 finance-db = { path = "features/task/finance/finance-db" }
 finance = { path = "features/task/finance/finance" }
-finance-ui = { path = "features/task/finance/finance-ui" }
 mount-proto = { path = "features/task/mount/mount-proto" }
 mount = { path = "features/task/mount/mount" }
 goal = { path = "features/task/goal/goal" }
@@ -903,7 +898,6 @@ email-imap = { path = "features/task/email/email-imap" }
 email-smtp = { path = "features/task/email/email-smtp" }
 email-jmap = { path = "features/task/email/email-jmap" }
 email-maildir = { path = "features/task/email/email-maildir" }
-email-nextcloud = { path = "features/task/email/email-nextcloud" }
 email-store = { path = "features/task/email/email-store" }
 email-secret = { path = "features/task/email/email-secret" }
 email-config = { path = "features/task/email/email-config" }
