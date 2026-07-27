@@ -27125,7 +27125,6 @@ name = "trigger"
 version = "0.1.0"
 dependencies = [
  "trigger-dsp",
- "trigger-profiles",
 ]
 
 [[package]]
@@ -27147,13 +27146,6 @@ dependencies = [
  "nice-plug-dioxus",
  "trigger",
  "trigger-ui",
-]
-
-[[package]]
-name = "trigger-profiles"
-version = "0.1.0"
-dependencies = [
- "trigger-dsp",
 ]
 
 [[package]]

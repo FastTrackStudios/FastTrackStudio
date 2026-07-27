@@ -195,7 +195,6 @@ members = [
     "features/fx/saturate/saturate-dsp",
     "features/fx/trigger/trigger",
     "features/fx/trigger/trigger-dsp",
-    "features/fx/trigger/trigger-profiles",
     "features/fx/trigger/trigger-ui",
     "features/fx/eq/eq",
     "features/fx/eq/eq-dsp",
@@ -206,6 +205,7 @@ members = [
     "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp",
     "features/fx/comp/comp",
     "features/fx/comp/comp-dsp",
+    "features/fx/comp/comp-profiles",
     "features/fx/comp/comp-ui",
     "features/fx/reverb/reverb",
     "features/fx/reverb/reverb-dsp",
@@ -550,7 +550,6 @@ saturate = { path = "features/fx/saturate/saturate" }
 saturate-dsp = { path = "features/fx/saturate/saturate-dsp" }
 trigger = { path = "features/fx/trigger/trigger" }
 trigger-dsp = { path = "features/fx/trigger/trigger-dsp" }
-trigger-profiles = { path = "features/fx/trigger/trigger-profiles" }
 # The trigger plugin editor. Core (waveform/threshold SVG math) is portable;
 # the nice-plug/Blitz editor is behind its `native` feature.
 trigger-ui = { path = "features/fx/trigger/trigger-ui", default-features = false }
