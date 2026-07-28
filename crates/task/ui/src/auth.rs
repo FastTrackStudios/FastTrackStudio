@@ -32,13 +32,18 @@ use crate::orgs::{OrgMeta, home_slug};
 use crate::presence::{ManualStatus, PresenceLocal, PresenceStatus};
 use crate::vox_clients::establish_for;
 
-// ── dev accounts (DEV-ONLY SECTION) ─────────────────────────────────
+// ── dev accounts (DEBUG BUILDS ONLY) ────────────────────────────────
 //
 // The switcher performs the REAL sign-in flow — real session tokens
-// issued by the org's auth engine — it just has these dev credentials
-// pre-filled so switching is one click. Production replaces the
-// account picker with a login form; everything else (token cache,
-// whoami validation, context, presence/claims integration) stays.
+// issued by the org's auth engine — it just has these credentials
+// pre-filled so switching is one click.
+//
+// The whole section is `#[cfg(debug_assertions)]`, so the passwords are
+// not merely hidden in a release build: they are not compiled into the
+// binary at all. Release takes the path this module always planned for
+// — [`LoginForm`], which is already the sign-in surface — and keeps
+// everything else (token cache, whoami validation, context,
+// presence/claims integration) unchanged.
 
 /// One pre-seeded dev account in the home org's auth DB.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,7 +54,15 @@ pub struct DevAccount {
     pub username: &'static str,
 }
 
+/// The dev roster — **empty in release**, so no password string is
+/// compiled into a shipped binary. Every consumer iterates or takes
+/// `.len()`, so both builds work without a `cfg` at each use site: the
+/// pickers simply render nothing and the dropdown index offsets are 0.
+#[cfg(not(debug_assertions))]
+pub const DEV_ACCOUNTS: [DevAccount; 0] = [];
+
 /// The four dev accounts seeded into the home org's `auth.sqlite`.
+#[cfg(debug_assertions)]
 pub const DEV_ACCOUNTS: [DevAccount; 4] = [
     DevAccount {
         email: "cody@fasttrackstudios.com",
@@ -445,7 +458,12 @@ async fn run_sign_out(mut st: AuthState) {
             let _ = client.sign_out(account.token.clone()).await;
         }
     }
-    run_switch(st, GUEST_EMAIL).await;
+    // Debug lands back on Guest; release has no password to do that
+    // with, so signing out leaves no active account and `LoginForm`
+    // takes over — which is what signing out should mean.
+    if cfg!(debug_assertions) {
+        run_switch(st, GUEST_EMAIL).await;
+    }
 }
 
 /// Provide the auth contexts and kick off boot restore. Call once at
@@ -516,7 +534,15 @@ pub fn provide_auth() -> AuthCtx {
             return;
         }
         booted.set(true);
-        ctx.switch_account(load_active_email().unwrap_or_else(|| GUEST_EMAIL.to_owned()));
+        // A stored account is restored from its cached token on any
+        // build. With nothing stored, only a debug build can auto-land
+        // on Guest — that needs a compiled-in password. Release shows
+        // `LoginForm` instead of failing a sign-in nobody asked for.
+        match load_active_email() {
+            Some(email) => ctx.switch_account(email),
+            None if cfg!(debug_assertions) => ctx.switch_account(GUEST_EMAIL.to_owned()),
+            None => {}
+        }
     });
     ctx
 }
@@ -533,11 +559,14 @@ async fn resolve_session(slug: &str, email: &str) -> Result<ActiveAccount, Strin
         }
     }
 
-    // 2. Real sign-in with the pre-filled dev credentials.
-    let dev = DEV_ACCOUNTS
-        .iter()
-        .find(|a| a.email == email)
-        .ok_or_else(|| format!("no credentials on file for {email}"))?;
+    // 2. No usable cached token. A debug build has a password on file
+    //    for the dev roster, so the switch completes in one click. In
+    //    release the roster is empty, there is nothing to sign in with,
+    //    and the user goes through `LoginForm` — which is already on
+    //    screen — hence the message rather than a failed sign-in.
+    let Some(dev) = DEV_ACCOUNTS.iter().find(|a| a.email == email) else {
+        return Err(format!("sign in as {email} to continue"));
+    };
     let bundle = client
         .sign_in_email_password(SignInEmailPassword {
             email: email.to_owned(),
