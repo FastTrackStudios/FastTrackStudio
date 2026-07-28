@@ -88,6 +88,11 @@ incl. melonix deep-dive.
   −0.467 st came out 469 Hz — wrong direction; ±2 st off by ~10–30
   cents). Granular is also inaccurate (−2 st → 367 Hz vs 402.7).
   **WSOLA is cents-accurate at all tested shifts** and is now
-  NativeTune's engine. TODO: fix PsolaShifter's synthesis epoch
-  spacing (integer-period rounding suspected) and switch the shipped
-  apps/plugins/tune off PSOLA too — it has this bug in production.
+  NativeTune's engine. **FIXED (same day)**: the grain-boundary jump
+  now recenters by whole pitch periods with fresh-phase tail
+  alignment — PSOLA measures +0.1/+1.3/+2.2 cents at −0.47/−2/+2 st
+  (equal or better than WSOLA) and NativeTune switched back to it
+  (pitch-synchronous = right for voice). The shipped plugin's
+  block-rate retune-slew bug is also fixed (settles by real block
+  duration). The old octave-down test's CMND measure was being fooled
+  by grain-rate AM into a 5x subharmonic — now zero-crossing based.
