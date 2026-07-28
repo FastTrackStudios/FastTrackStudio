@@ -39,7 +39,6 @@ pub mod routes;
 pub mod server_registry;
 pub mod shell;
 pub mod shortcuts;
-pub mod states;
 pub mod stores;
 pub mod tabs;
 pub mod tag_icon;
@@ -51,7 +50,7 @@ pub mod vox_clients;
 // Re-exported from `task-ui-core` at their historical paths — see the
 // module docs above. `crate::format::money`, `crate::vox_session::vox_url`
 // and friends resolve exactly as before.
-pub use task_ui_core::{format, vox_session};
+pub use task_ui_core::{format, states, vox_session};
 
 pub use app::App;
 pub use routes::Route;

@@ -88,16 +88,17 @@ cookbook-proto = { workspace = true, features = ["vox", "atom"] }
 pantry-proto = { workspace = true, features = ["vox", "atom"] }
 mealplan-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
-# Cyclic life-calendar — Goals view uses the pure-function
-# generator to resolve `cycle_id` references to displayable
-# year/quarter/ordinal labels.
-cycle = { workspace = true, default-features = false }
+# Extracted feature pages — the shell routes to them, they own their
+# own protos and RPC calls. See crates/task/ui/ARCHITECTURE.md.
+links-ui.workspace = true
+email-ui.workspace = true
+goal-ui.workspace = true
+scripture-ui.workspace = true
 # Architect-generated vox clients for project + goal. The
 # workspace pins vox to `default-features = false,
 # features = ["runtime"]` which is wasm-clean (no tcp /
 # tokio[net]). Pattern lifted from `vox/rust/wasm-browser-tests`.
 project = { workspace = true, features = ["vox"] }
-goal = { workspace = true, features = ["vox"] }
 task = { workspace = true, features = ["vox"] }
 # Timer service client for the `/timer` time-tracking page.
 timer-proto = { workspace = true, features = ["vox"] }
@@ -115,10 +116,6 @@ vault-proto = { workspace = true, features = ["vox"] }
 # (archived articles + ^t-anchored video transcripts). `vox`
 # feature only, wasm-clean like the other proto clients.
 wiki-proto = { workspace = true, features = ["vox"] }
-# Email wire surface — the `EmailSync` client for the `/email`
-# page (account list + recent envelopes). `vox` feature only, so
-# it stays wasm-clean like the other proto clients above.
-email-proto = { workspace = true, features = ["vox"] }
 # Forge wire surface — `RepoCatalog` / `IssueTracker` clients the
 # `/repos` page binds to list repos + their issues for the
 # selected org. `vox` feature only, wasm-clean like the others.

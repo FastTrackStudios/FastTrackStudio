@@ -10,135 +10,15 @@
 
 use project::ProjectInfo;
 use task::TaskInfo as DbTask;
-
-// ─────────────────────────────────────────────────────────────────────
-// The shape
-// ─────────────────────────────────────────────────────────────────────
-//
-// Almost every entry in this module was the same six lines: establish
-// one org's service client, call one method, and normalize the failure
-// to `"{slug}: <what>: {e:?}"`. That is what [`feeds!`] declares —
-// grouped by the service client so the client type is named once per
-// service instead of once per call.
-//
-// ```ignore
-// feeds! {
-//     inbox_proto::InboxClient {
-//         /// Doc comment lands on the generated function.
-//         fetch_inbox() -> Vec<inbox_proto::InboxItem>
-//             = list_inbox() as "list inbox";
-//
-//         /// Extra parameters follow `slug: &str`; the argument list is
-//         /// the RPC's, so it can use them.
-//         delete_inbox_item(id: &str) -> ()
-//             = delete_inbox_item(id.to_string()) as "delete inbox item";
-//     }
-// }
-// ```
-//
-// Two optional pieces:
-//
-// - `map <expr>,` before `as` inserts a `.map(<expr>)` between the call
-//   and the error mapping — for RPCs that return `()` where the caller
-//   wants the value it sent back.
-// - `as` takes any `Display` expression, so a message that needs an
-//   argument is `as format!("day plan {date}")`.
-//
-// Anything that does more than this — multi-org fan-out, building a
-// request struct, post-processing rows — stays a hand-written `pub
-// async fn` below, in place.
-
-/// Declare per-org feed calls. See the module-level shape notes above.
-macro_rules! feeds {
-    ($(
-        $client:ty {
-            $(
-                $(#[$meta:meta])*
-                $name:ident($($arg:ident: $aty:ty),* $(,)?) -> $ret:ty
-                    = $method:ident($($marg:expr),* $(,)?)
-                    $(map $map:expr,)?
-                    as $what:expr;
-            )*
-        }
-    )*) => {
-        $($(
-            $(#[$meta])*
-            pub async fn $name(slug: &str $(, $arg: $aty)*) -> Result<$ret, String> {
-                let client = crate::vox_clients::establish_for::<$client>(slug).await?;
-                client
-                    .$method($($marg),*)
-                    .await
-                    $(.map($map))?
-                    .map_err(|e| format!("{}: {}: {:?}", slug, $what, e))
-            }
-        )*)*
-    };
-}
-
-/// Fan one org-scoped list call out across `slugs`, concatenating the
-/// rows. Per-org failures are tolerated (a down or empty org doesn't
-/// blank the whole view); an error surfaces only if *nothing* came back.
-async fn fan_out<C, T, E, F, Fut>(slugs: &[String], what: &str, call: F) -> Result<Vec<T>, String>
-where
-    C: vox_core::FromVoxLane + Clone + 'static,
-    F: Fn(C) -> Fut,
-    Fut: std::future::Future<Output = Result<Vec<T>, E>>,
-    E: std::fmt::Debug,
-{
-    let futs = slugs.iter().map(|slug| {
-        let call = &call;
-        async move {
-            match crate::vox_clients::establish_for::<C>(slug).await {
-                Ok(client) => call(client)
-                    .await
-                    .map_err(|e| format!("{slug}: {what}: {e:?}")),
-                Err(e) => Err(format!("{slug}: {e}")),
-            }
-        }
-    });
-    collect(futures_util::future::join_all(futs).await)
-}
-
-/// [`fan_out`], pairing every row with the slug of the org it came from
-/// — so mutations and detail pages can route back to the owning org.
-async fn fan_out_tagged<C, T, E, F, Fut>(
-    slugs: &[String],
-    what: &str,
-    call: F,
-) -> Result<Vec<(String, T)>, String>
-where
-    C: vox_core::FromVoxLane + Clone + 'static,
-    F: Fn(C) -> Fut,
-    Fut: std::future::Future<Output = Result<Vec<T>, E>>,
-    E: std::fmt::Debug,
-{
-    let futs = slugs.iter().map(|slug| {
-        let call = &call;
-        async move {
-            match crate::vox_clients::establish_for::<C>(slug).await {
-                Ok(client) => call(client)
-                    .await
-                    .map(|rows| {
-                        rows.into_iter()
-                            .map(|r| (slug.clone(), r))
-                            .collect::<Vec<_>>()
-                    })
-                    .map_err(|e| format!("{slug}: {what}: {e:?}")),
-                Err(e) => Err(format!("{slug}: {e}")),
-            }
-        }
-    });
-    collect(futures_util::future::join_all(futs).await)
-}
+// The `feeds!` declaration macro and the multi-org fan-out helpers live
+// in `task-ui-core`, so feature UI crates declare their own calls the
+// same way — see that module's docs for the shape.
+use task_ui_core::feeds;
+use task_ui_core::feeds::{collect, fan_out, fan_out_tagged};
 
 /// Active projects across the selected orgs (concurrent fan-out).
 pub async fn fetch_projects(slugs: &[String]) -> Result<Vec<ProjectInfo>, String> {
     fan_out(slugs, "list", |c: project::ProjectServiceClient| async move { c.list().await }).await
-}
-
-/// Goals across the selected orgs (concurrent fan-out).
-pub async fn fetch_goals(slugs: &[String]) -> Result<Vec<goal::Goal>, String> {
-    fan_out(slugs, "list", |c: goal::GoalServiceClient| async move { c.list().await }).await
 }
 
 /// Tasks across the selected orgs (concurrent fan-out).
@@ -506,70 +386,6 @@ feeds! {
 }
 
 // ── Scripture ───────────────────────────────────────────────────────
-
-feeds! {
-    scripture_proto::ScriptureServiceClient {
-        /// Installed Bible translations for the org (bundled editions first).
-        fetch_translations() -> Vec<scripture_proto::TranslationInfo>
-            = translations() as "translations";
-    }
-}
-
-/// One chapter of one translation. `book` accepts any spelling.
-pub async fn fetch_chapter(
-    slug: &str,
-    translation: &str,
-    book: &str,
-    chapter: u16,
-) -> Result<scripture_proto::ChapterView, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    // The generated vox client takes owned `String` args.
-    client
-        .chapter(translation.to_owned(), book.to_owned(), chapter)
-        .await
-        .map_err(|e| format!("{slug}: chapter {book} {chapter}: {e:?}"))
-}
-
-feeds! {
-    scripture_proto::ScriptureServiceClient {
-        /// Compare a verse/range across translations (empty list ⇒ all).
-        fetch_comparison(reference: &str, translations: Vec<String>) -> scripture_proto::ComparisonView
-            = compare(reference.to_owned(), translations) as format!("compare {reference}");
-
-        /// Per-verse backlinks for a chapter — vault notes that link each verse.
-        fetch_chapter_backlinks(book: &str, chapter: u16) -> Vec<scripture_proto::VerseBacklinks>
-            = chapter_backlinks(book.to_owned(), chapter) as format!("backlinks {book} {chapter}");
-
-        /// Installed original-language editions (TAGNT / TAHOT / SBLGNT / OSHB).
-        fetch_original_editions() -> Vec<scripture_proto::OrigEditionInfo>
-            = original_editions() as "original editions";
-
-        /// Word-by-word interlinear of a verse in an original-language edition.
-        fetch_interlinear(edition: &str, reference: &str) -> Vec<scripture_proto::InterlinearWord>
-            = interlinear(edition.to_owned(), reference.to_owned()) as format!("interlinear {edition} {reference}");
-
-        /// Strong's-tagged breakdown of a verse in an English translation.
-        fetch_word_tokens(translation: &str, reference: &str) -> Vec<scripture_proto::WordToken>
-            = word_study(translation.to_owned(), reference.to_owned()) as format!("word tokens {reference}");
-
-        /// Full word study for a Strong's code: lexicon entry + concordance.
-        fetch_word_study(strongs: &str, limit: u32) -> scripture_proto::WordStudyReport
-            = study(strongs.to_owned(), limit) as format!("word study {strongs}");
-
-        /// Cross-references from a verse (votes-desc, `min_votes` filters noise).
-        fetch_cross_refs(reference: &str, min_votes: i32) -> Vec<scripture_proto::WeightedRef>
-            = cross_refs(reference.to_owned(), min_votes) as format!("cross refs {reference}");
-
-        /// Topics a verse is tagged with (votes-desc).
-        fetch_topics_of(reference: &str) -> Vec<scripture_proto::TopicTag>
-            = topics_of(reference.to_owned()) as format!("topics {reference}");
-
-        /// Verses about a topic (votes-desc, capped at `limit`; 0 ⇒ default).
-        fetch_verses_for_topic(topic: &str, limit: u32) -> Vec<scripture_proto::WeightedRef>
-            = verses_for_topic(topic.to_owned(), limit) as format!("topic verses {topic}");
-    }
-}
 
 // ── Inventory ───────────────────────────────────────────────────────
 
@@ -1182,11 +998,6 @@ feeds! {
         create_link(link: links_proto::TypedLink) -> links_proto::TypedLink
             = create(link) as "create link";
 
-        /// Every typed link in an org's graph — the verse↔song↔sermon↔topic web
-        /// for the `/connections` page. Fetches at the lowest confidence and
-        /// includes private links; the page filters client-side.
-        fetch_link_graph() -> Vec<links_proto::TypedLink>
-            = graph(links_proto::Confidence::Speculative, true) as "link graph";
     }
 }
 
@@ -1355,24 +1166,6 @@ pub async fn find_project(id: &str, slugs: &[String]) -> Result<(ProjectInfo, St
     Err(last_err.unwrap_or_else(|| "project not found in any hosted org".to_owned()))
 }
 
-/// Flatten per-org results: concat the successes; surface an error only
-/// if every org failed *and* nothing came back.
-fn collect<T>(results: Vec<Result<Vec<T>, String>>) -> Result<Vec<T>, String> {
-    let mut out = Vec::new();
-    let mut last_err = None;
-    for r in results {
-        match r {
-            Ok(rows) => out.extend(rows),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    if out.is_empty() {
-        if let Some(e) = last_err {
-            return Err(e);
-        }
-    }
-    Ok(out)
-}
 
 // ── Fitness (native stubs) ──────────────────────────────────────────
 
@@ -1537,41 +1330,6 @@ feeds! {
 }
 
 // ── Email ───────────────────────────────────────────────────────────
-
-feeds! {
-    email_proto::EmailSyncClient {
-        /// Every mail account the org's `EmailSync` backend serves. An org
-        /// with no configured mailbox returns an empty list (operational but
-        /// unconfigured) — the `/email` page renders that as an empty state
-        /// rather than an error.
-        fetch_email_accounts() -> Vec<email_proto::Account>
-            = accounts() as "list accounts";
-    }
-}
-
-/// Recent envelopes (header summaries) for one account's `INBOX`,
-/// newest first. `count` caps the slice. Returns an empty list for an
-/// empty mailbox; surfaces backend errors verbatim so the page can show
-/// them inline.
-pub async fn fetch_email_envelopes(
-    slug: &str,
-    account: &str,
-    count: u32,
-) -> Result<Vec<email_proto::Envelope>, String> {
-    let client = crate::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
-    let mut envelopes = client
-        .fetch_envelopes(
-            account.to_owned(),
-            "INBOX".to_owned(),
-            email_proto::SeqRange::Recent(count),
-        )
-        .await
-        .map_err(|e| format!("{slug}: fetch envelopes: {e:?}"))?;
-    // Newest first — the backend's `Recent` ordering isn't guaranteed
-    // across implementations, so sort defensively on the date.
-    envelopes.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
-    Ok(envelopes)
-}
 
 // ── Git / forge ─────────────────────────────────────────────────────
 

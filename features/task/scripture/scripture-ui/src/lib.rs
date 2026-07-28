@@ -25,8 +25,9 @@ use scripture_proto::{
     Book, ChapterView, ComparisonView, ScriptureRef, VerseBacklinks, WordStudyReport,
 };
 
-use crate::orgs::{OrgMeta, OrgSelection};
-use crate::routes::Route;
+use task_ui_core::feeds;
+use task_ui_core::nav::use_note_href;
+use task_ui_core::orgs::{OrgMeta, OrgSelection};
 
 const CTRL_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
      focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
@@ -61,10 +62,13 @@ struct SelectedVerse {
 
 #[component]
 pub fn ScriptureView(reference: String) -> Element {
+    // Backlinks link out to the vault note. The shell owns the router,
+    // so it hands the href builder down (see `task_ui_core::nav`).
+    let note_href = use_note_href();
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let slug = use_memo(move || {
-        crate::orgs::selected_slugs(&selection.read(), &org_list.read())
+        task_ui_core::orgs::selected_slugs(&selection.read(), &org_list.read())
             .into_iter()
             .next()
     });
@@ -111,7 +115,7 @@ pub fn ScriptureView(reference: String) -> Element {
     // Installed translations for the picker.
     let translations = use_resource(move || async move {
         match slug() {
-            Some(s) => crate::feeds::fetch_translations(&s)
+            Some(s) => fetch_translations(&s)
                 .await
                 .unwrap_or_default(),
             None => Vec::new(),
@@ -122,7 +126,7 @@ pub fn ScriptureView(reference: String) -> Element {
     // The current chapter — re-fetches whenever a picker changes.
     let view = use_resource(move || async move {
         let s = slug()?;
-        crate::feeds::fetch_chapter(&s, &translation(), &book(), chapter())
+        fetch_chapter(&s, &translation(), &book(), chapter())
             .await
             .ok()
     });
@@ -151,7 +155,7 @@ pub fn ScriptureView(reference: String) -> Element {
     // of translation, so it doesn't re-fetch when the edition changes.
     let backlinks = use_resource(move || async move {
         let s = slug()?;
-        crate::feeds::fetch_chapter_backlinks(&s, &book(), chapter())
+        fetch_chapter_backlinks(&s, &book(), chapter())
             .await
             .ok()
     });
@@ -167,7 +171,7 @@ pub fn ScriptureView(reference: String) -> Element {
     // ── Study panel resources (all keyed on the selected verse) ──
     let orig_editions = use_resource(move || async move {
         let s = slug()?;
-        crate::feeds::fetch_original_editions(&s).await.ok()
+        fetch_original_editions(&s).await.ok()
     });
     let editions = orig_editions.read().clone().flatten().unwrap_or_default();
     let mut edition = use_signal(String::new);
@@ -191,7 +195,7 @@ pub fn ScriptureView(reference: String) -> Element {
         if ed.is_empty() {
             return None;
         }
-        Some(crate::feeds::fetch_interlinear(&s, &ed, &sel.osis).await)
+        Some(fetch_interlinear(&s, &ed, &sel.osis).await)
     });
 
     let word_tokens = use_resource(move || async move {
@@ -200,7 +204,7 @@ pub fn ScriptureView(reference: String) -> Element {
         }
         let s = slug()?;
         let sel = selected()?;
-        Some(crate::feeds::fetch_word_tokens(&s, &translation(), &sel.osis).await)
+        Some(fetch_word_tokens(&s, &translation(), &sel.osis).await)
     });
 
     let cross_refs = use_resource(move || async move {
@@ -209,7 +213,7 @@ pub fn ScriptureView(reference: String) -> Element {
         }
         let s = slug()?;
         let sel = selected()?;
-        Some(crate::feeds::fetch_cross_refs(&s, &sel.osis, 1).await)
+        Some(fetch_cross_refs(&s, &sel.osis, 1).await)
     });
 
     let topics = use_resource(move || async move {
@@ -218,20 +222,20 @@ pub fn ScriptureView(reference: String) -> Element {
         }
         let s = slug()?;
         let sel = selected()?;
-        Some(crate::feeds::fetch_topics_of(&s, &sel.osis).await)
+        Some(fetch_topics_of(&s, &sel.osis).await)
     });
 
     let topic_verses = use_resource(move || async move {
         let s = slug()?;
         let topic = topic_sel()?;
-        Some(crate::feeds::fetch_verses_for_topic(&s, &topic, 40).await)
+        Some(fetch_verses_for_topic(&s, &topic, 40).await)
     });
 
     // The word-study drill-down (lexicon + concordance).
     let word_study = use_resource(move || async move {
         let s = slug()?;
         let code = strongs_sel()?;
-        Some(crate::feeds::fetch_word_study(&s, &code, 60).await)
+        Some(fetch_word_study(&s, &code, 60).await)
     });
 
     // Jump to a display reference (`John 3:16` / OSIS / range start),
@@ -254,7 +258,7 @@ pub fn ScriptureView(reference: String) -> Element {
     let comparison = use_resource(move || async move {
         let (reference, txs) = compare_query()?;
         let s = slug()?;
-        crate::feeds::fetch_comparison(&s, &reference, txs)
+        fetch_comparison(&s, &reference, txs)
             .await
             .ok()
     });
@@ -319,7 +323,7 @@ pub fn ScriptureView(reference: String) -> Element {
                 // ── Reading pane ──
                 div { class: "min-w-0 flex-1",
                     if pending {
-                        crate::states::LoadingState {}
+                        task_ui_core::states::LoadingState {}
                     } else if let Some(c) = chapter_view {
                         div { class: "flex flex-col gap-1",
                             div { class: "flex items-baseline justify-between gap-3",
@@ -374,7 +378,7 @@ pub fn ScriptureView(reference: String) -> Element {
                                                         for n in bl.notes.iter() {
                                                             Link {
                                                                 key: "{n.note_path}",
-                                                                to: Route::VaultRoute { path: n.note_path.clone(), org: String::new() },
+                                                                to: note_href(n.note_path.clone()),
                                                                 class: "text-xs text-muted-foreground hover:text-foreground",
                                                                 title: "{n.excerpt}",
                                                                 "↳ {n.note_title}"
@@ -389,7 +393,7 @@ pub fn ScriptureView(reference: String) -> Element {
                             }
                         }
                     } else {
-                        crate::states::EmptyState {
+                        task_ui_core::states::EmptyState {
                             title: "Nothing to show",
                             hint: "Pick a translation and book — install a corpus into the org's resource library if the list is empty.",
                         }
@@ -438,7 +442,7 @@ pub fn ScriptureView(reference: String) -> Element {
                                     }
                                 }
                                 match study_report {
-                                    None => rsx! { crate::states::LoadingState {} },
+                                    None => rsx! { task_ui_core::states::LoadingState {} },
                                     Some(Err(ref e)) => rsx! {
                                         Text { variant: TextVariant::Muted, class: "text-xs", "{e}" }
                                     },
@@ -502,7 +506,7 @@ pub fn ScriptureView(reference: String) -> Element {
                                             }
                                         }
                                         match interlinear.read().clone().flatten() {
-                                            None => rsx! { crate::states::LoadingState {} },
+                                            None => rsx! { task_ui_core::states::LoadingState {} },
                                             Some(Err(e)) => rsx! {
                                                 Text { variant: TextVariant::Muted, class: "text-xs", "{e}" }
                                             },
@@ -540,7 +544,7 @@ pub fn ScriptureView(reference: String) -> Element {
                                 },
                                 StudyTab::Words => rsx! {
                                     match word_tokens.read().clone().flatten() {
-                                        None => rsx! { crate::states::LoadingState {} },
+                                        None => rsx! { task_ui_core::states::LoadingState {} },
                                         Some(Err(e)) => rsx! {
                                             Text { variant: TextVariant::Muted, class: "text-xs", "{e}" }
                                         },
@@ -573,7 +577,7 @@ pub fn ScriptureView(reference: String) -> Element {
                                 },
                                 StudyTab::CrossRefs => rsx! {
                                     match cross_refs.read().clone().flatten() {
-                                        None => rsx! { crate::states::LoadingState {} },
+                                        None => rsx! { task_ui_core::states::LoadingState {} },
                                         Some(Err(e)) => rsx! {
                                             Text { variant: TextVariant::Muted, class: "text-xs", "{e}" }
                                         },
@@ -602,7 +606,7 @@ pub fn ScriptureView(reference: String) -> Element {
                                 },
                                 StudyTab::Topics => rsx! {
                                     match topics.read().clone().flatten() {
-                                        None => rsx! { crate::states::LoadingState {} },
+                                        None => rsx! { task_ui_core::states::LoadingState {} },
                                         Some(Err(e)) => rsx! {
                                             Text { variant: TextVariant::Muted, class: "text-xs", "{e}" }
                                         },
@@ -633,7 +637,7 @@ pub fn ScriptureView(reference: String) -> Element {
                                     }
                                     if topic_sel.read().is_some() {
                                         match topic_verses.read().clone().flatten() {
-                                            None => rsx! { crate::states::LoadingState {} },
+                                            None => rsx! { task_ui_core::states::LoadingState {} },
                                             Some(Err(e)) => rsx! {
                                                 Text { variant: TextVariant::Muted, class: "text-xs", "{e}" }
                                             },
@@ -734,5 +738,76 @@ pub fn ScriptureView(reference: String) -> Element {
                 }
             }
         }
+    }
+}
+
+// ── data ────────────────────────────────────────────────────────────
+//
+// This slice's RPCs live with the page that calls them, not in the
+// shell's `feeds` module — that is the point of the split. `feeds!` and
+// the fan-out helpers come from `task-ui-core`; see its `feeds` module
+// for the shape.
+
+feeds! {
+    scripture_proto::ScriptureServiceClient {
+        /// Installed Bible translations for the org (bundled editions first).
+        fetch_translations() -> Vec<scripture_proto::TranslationInfo>
+            = translations() as "translations";
+    }
+}
+
+/// One chapter of one translation. `book` accepts any spelling.
+pub async fn fetch_chapter(
+    slug: &str,
+    translation: &str,
+    book: &str,
+    chapter: u16,
+) -> Result<scripture_proto::ChapterView, String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
+    // The generated vox client takes owned `String` args.
+    client
+        .chapter(translation.to_owned(), book.to_owned(), chapter)
+        .await
+        .map_err(|e| format!("{slug}: chapter {book} {chapter}: {e:?}"))
+}
+
+feeds! {
+    scripture_proto::ScriptureServiceClient {
+        /// Compare a verse/range across translations (empty list ⇒ all).
+        fetch_comparison(reference: &str, translations: Vec<String>) -> scripture_proto::ComparisonView
+            = compare(reference.to_owned(), translations) as format!("compare {reference}");
+
+        /// Per-verse backlinks for a chapter — vault notes that link each verse.
+        fetch_chapter_backlinks(book: &str, chapter: u16) -> Vec<scripture_proto::VerseBacklinks>
+            = chapter_backlinks(book.to_owned(), chapter) as format!("backlinks {book} {chapter}");
+
+        /// Installed original-language editions (TAGNT / TAHOT / SBLGNT / OSHB).
+        fetch_original_editions() -> Vec<scripture_proto::OrigEditionInfo>
+            = original_editions() as "original editions";
+
+        /// Word-by-word interlinear of a verse in an original-language edition.
+        fetch_interlinear(edition: &str, reference: &str) -> Vec<scripture_proto::InterlinearWord>
+            = interlinear(edition.to_owned(), reference.to_owned()) as format!("interlinear {edition} {reference}");
+
+        /// Strong's-tagged breakdown of a verse in an English translation.
+        fetch_word_tokens(translation: &str, reference: &str) -> Vec<scripture_proto::WordToken>
+            = word_study(translation.to_owned(), reference.to_owned()) as format!("word tokens {reference}");
+
+        /// Full word study for a Strong's code: lexicon entry + concordance.
+        fetch_word_study(strongs: &str, limit: u32) -> scripture_proto::WordStudyReport
+            = study(strongs.to_owned(), limit) as format!("word study {strongs}");
+
+        /// Cross-references from a verse (votes-desc, `min_votes` filters noise).
+        fetch_cross_refs(reference: &str, min_votes: i32) -> Vec<scripture_proto::WeightedRef>
+            = cross_refs(reference.to_owned(), min_votes) as format!("cross refs {reference}");
+
+        /// Topics a verse is tagged with (votes-desc).
+        fetch_topics_of(reference: &str) -> Vec<scripture_proto::TopicTag>
+            = topics_of(reference.to_owned()) as format!("topics {reference}");
+
+        /// Verses about a topic (votes-desc, capped at `limit`; 0 ⇒ default).
+        fetch_verses_for_topic(topic: &str, limit: u32) -> Vec<scripture_proto::WeightedRef>
+            = verses_for_topic(topic.to_owned(), limit) as format!("topic verses {topic}");
     }
 }

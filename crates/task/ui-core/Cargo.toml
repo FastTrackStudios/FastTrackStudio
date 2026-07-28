@@ -9,8 +9,13 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# Badge variant mapping for the shared status ladder (`format::status_variant`).
+# The shared phase components (`states`) and the badge-variant mapping
+# for the status ladder (`format::status_variant`).
+dioxus.workspace = true
 fts-ui.workspace = true
+
+# `OrgMeta::id` — the org's stable UUID from the well-known endpoint.
+uuid = { workspace = true, features = ["v4", "js", "serde"] }
 
 # Vox runtime + the WebSocket transport the per-org connection root dials.
 vox-core.workspace = true
@@ -18,6 +23,8 @@ vox-websocket.workspace = true
 
 tracing.workspace = true
 futures-channel.workspace = true
+# `join_all` for the multi-org fan-out (`feeds::fan_out`).
+futures-util.workspace = true
 
 wasm-bindgen.workspace = true
 web-sys = { workspace = true, features = [

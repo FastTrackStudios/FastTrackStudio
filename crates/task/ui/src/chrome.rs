@@ -92,6 +92,14 @@ pub fn provide_chrome_contexts() {
     use_context_provider(|| NoteViewMode(Signal::new(ViewMode::Edit)));
     // Player contexts (SongPlayRequest / NowPlaying / NowPlayingCtl).
     task_player_ui::provide_player_contexts();
+    // How an extracted feature page links to a vault note. The router
+    // is the shell's, so the shell renders the typed route to a URL and
+    // hands the builder down (see `task_ui_core::nav`).
+    use_context_provider(|| {
+        task_ui_core::nav::NoteHref(Callback::new(|path: String| {
+            crate::routes::Route::VaultRoute { path, org: String::new() }.to_string()
+        }))
+    });
     use_context_provider(|| TimerResumeHint(Signal::new(None)));
 }
 
