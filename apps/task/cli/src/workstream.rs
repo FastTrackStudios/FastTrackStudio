@@ -259,10 +259,10 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
             let url = ws_url(org, server)?;
             let pc = crate::project::connect_project_client(&url).await?;
             let project_id = json_out::resolve_project_flexible(&pc, &project).await?.id;
-            let lead = lead.as_deref().map(crate::parse_agent_ref).transpose()?;
+            let lead = lead.as_deref().map(crate::issue::parse_agent_ref).transpose()?;
             let members: Vec<_> = members
                 .iter()
-                .map(|m| crate::parse_agent_ref(m))
+                .map(|m| crate::issue::parse_agent_ref(m))
                 .collect::<eyre::Result<_>>()?;
             let status = match status.as_deref() {
                 None => workstream::Status::Backlog.as_str().to_string(),
@@ -321,7 +321,7 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
             let new_lead = if matches!(lead.as_str(), "none" | "null" | "") {
                 None
             } else {
-                Some(crate::parse_agent_ref(&lead)?)
+                Some(crate::issue::parse_agent_ref(&lead)?)
             };
             mutate(target, org, server, json, |w| w.lead = new_lead).await?;
         }
@@ -332,7 +332,7 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
             server,
             json,
         } => {
-            let m = crate::parse_agent_ref(&member)?;
+            let m = crate::issue::parse_agent_ref(&member)?;
             mutate(target, org, server, json, move |w| {
                 if !w.members.iter().any(|x| x == &m) {
                     w.members.0.push(m);
@@ -347,7 +347,7 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
             server,
             json,
         } => {
-            let m = crate::parse_agent_ref(&member)?;
+            let m = crate::issue::parse_agent_ref(&member)?;
             mutate(target, org, server, json, move |w| {
                 w.members.0.retain(|x| x != &m);
             })

@@ -4,17 +4,17 @@
 
 use clap::Subcommand;
 
-use crate::ClaimOutcome;
+use crate::issue::ClaimOutcome;
 use crate::establish_for_url;
 use crate::goal::mutate_goal;
-use crate::parse_agent_ref;
+use crate::issue::parse_agent_ref;
 use crate::resolve_active_org;
-use crate::resolve_issue_id;
+use crate::issue::resolve_issue_id;
 use crate::resolve_org_vox_url;
 use crate::run;
 use crate::shared::short_uuid;
 use crate::task_cmd::connect_task_client;
-use crate::try_claim;
+use crate::issue::try_claim;
 
 #[derive(Subcommand)]
 pub(crate) enum AgentQueueCmd {
