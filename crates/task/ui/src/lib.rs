@@ -4,6 +4,18 @@
 //! page. Feature crates (under `features/*/x-ui`) provide
 //! reusable components; this crate composes them into the
 //! product surface.
+//!
+//! Two seams keep this crate from being *everything*:
+//!
+//! - [`task_ui_core`] holds what every Task UI crate needs (vox
+//!   endpoint + connection root, display formatting, frontmatter
+//!   reads). It is re-exported here as [`format`] / [`vox_session`] so
+//!   existing `crate::…` paths still resolve.
+//! - [`task_player_ui`] owns the browser session player (audio, charts,
+//!   Now Playing) — the only reason this crate ever depended on `daw`,
+//!   `daw-standalone`, `session` or the keyflow engraver.
+//!
+//! See `ARCHITECTURE.md` for the recipe for extracting the next slice.
 
 pub mod actions;
 pub mod app;
@@ -15,7 +27,6 @@ pub mod collab;
 pub mod document_session;
 pub mod feeds;
 pub mod forge_views;
-pub mod format;
 pub mod fuzzy;
 pub mod gantt_adapt;
 pub mod nav;
@@ -26,11 +37,6 @@ pub mod prefs;
 pub mod presence;
 pub mod routes;
 pub mod server_registry;
-// Stage 4a in-browser session engine (wasm-only): builds a headless
-// daw-standalone setlist player in the tab via architect's in-process
-// LocalServer. Parked at boot; the UI bridge is dormant (STAGE_4B).
-#[cfg(target_arch = "wasm32")]
-pub mod session_engine;
 pub mod shell;
 pub mod shortcuts;
 pub mod states;
@@ -41,7 +47,11 @@ pub mod task_sort;
 pub mod theming;
 pub mod vault_lookup;
 pub mod vox_clients;
-pub mod vox_session;
+
+// Re-exported from `task-ui-core` at their historical paths — see the
+// module docs above. `crate::format::money`, `crate::vox_session::vox_url`
+// and friends resolve exactly as before.
+pub use task_ui_core::{format, vox_session};
 
 pub use app::App;
 pub use routes::Route;

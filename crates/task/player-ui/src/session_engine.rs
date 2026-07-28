@@ -56,7 +56,7 @@ use session::{
     setlist_service_service_descriptor,
 };
 
-use crate::pages::song_session::imp as media;
+use crate::song_session::imp as media;
 
 /// STAGE 4b master switch — Stage 4b-1 flips this ON. The setlist page now
 /// drives [`build_for_setlist`], which installs the session-ui `Session`

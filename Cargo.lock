@@ -25688,6 +25688,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "task-player-ui"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "attachments-proto",
+ "daw",
+ "daw-proto",
+ "daw-standalone",
+ "dioxus",
+ "editor",
+ "editor-keyflow",
+ "editor-keyflow-lang",
+ "eyre",
+ "fts-ui",
+ "gloo-timers",
+ "js-sys",
+ "keyflow",
+ "media-proto",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "session",
+ "session-proto",
+ "session-ui",
+ "task-ui-core",
+ "tracing",
+ "vox",
+ "vox-core",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "task-server"
 version = "0.1.0"
 dependencies = [
@@ -25815,6 +25849,19 @@ dependencies = [
  "task",
  "uuid 1.23.4",
  "workflows-proto",
+]
+
+[[package]]
+name = "task-ui-core"
+version = "0.1.0"
+dependencies = [
+ "fts-ui",
+ "futures-channel",
+ "tracing",
+ "vox-core",
+ "vox-websocket",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -27573,25 +27620,18 @@ dependencies = [
  "agent-proto",
  "architect",
  "architect-auth",
- "attachments-proto",
  "auth-proto",
  "chrono",
  "contacts-proto",
  "cookbook-proto",
  "crdt",
  "cycle",
- "daw",
- "daw-proto",
- "daw-standalone",
  "dioxus",
  "dioxus-icons",
  "dioxus-router",
  "editor",
  "editor-crdt",
- "editor-keyflow",
- "editor-keyflow-lang",
  "email-proto",
- "eyre",
  "fake",
  "finance-proto",
  "fitness-proto",
@@ -27606,11 +27646,9 @@ dependencies = [
  "input",
  "inventory-proto",
  "js-sys",
- "keyflow",
  "links-proto",
  "locations-proto",
  "mealplan-proto",
- "media-proto",
  "milestone-proto",
  "nucleo-matcher",
  "pantry-proto",
@@ -27625,15 +27663,13 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
- "serde_yaml",
- "session",
- "session-proto",
- "session-ui",
  "share-proto",
  "spaced-repetition",
  "tag-proto",
  "task",
+ "task-player-ui",
  "task-ui",
+ "task-ui-core",
  "threads",
  "timer-proto",
  "tokio-tungstenite",
@@ -27645,7 +27681,6 @@ dependencies = [
  "view-knowledge-graph",
  "vox",
  "vox-core",
- "vox-websocket",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

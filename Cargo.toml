@@ -834,6 +834,8 @@ libc = "0.2"
 # into `vox`/`server`/`native`), mirroring Task's original table.
 # crates/task/
 task-telemetry = { path = "crates/task/telemetry" }
+task-ui-core = { path = "crates/task/ui-core" }
+task-player-ui = { path = "crates/task/player-ui" }
 ui = { path = "crates/task/ui" }
 store-proto = { path = "crates/task/store-proto", default-features = false }
 # features/task/vault — file-backed vault layer + CRDT reconciliation

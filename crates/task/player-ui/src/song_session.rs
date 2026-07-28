@@ -64,7 +64,7 @@ pub(crate) mod imp {
         TransportState, apply_active_indices,
     };
 
-    use crate::pages::session_chart_pane::SessionChartPane;
+    use crate::session_chart_pane::SessionChartPane;
 
     /// Drift tolerance (seconds) before a stem is snapped back to the master.
     const DRIFT_TOLERANCE: f64 = 0.05;
@@ -562,12 +562,12 @@ pub(crate) mod imp {
     pub(crate) async fn resolve_front(
         org: &str,
         title: &str,
-        front: &crate::pages::vault::SongFront,
+        front: &task_ui_core::frontmatter::SongFront,
     ) -> Result<(Manifest, Vec<StemSource>), String> {
         use attachments_proto::ContentHashArg;
-        use crate::pages::vox_media_source::mse_supported;
+        use crate::vox_media_source::mse_supported;
 
-        let media = crate::vox_clients::media_client(org).await.ok();
+        let media = crate::media_client(org).await.ok();
         let mut sources = Vec::with_capacity(front.stems.len());
         for stem in &front.stems {
             // Vox-MSE path: browser speaks webm/opus MSE AND the blob
@@ -586,7 +586,7 @@ pub(crate) mod imp {
                 }
             }
             // Fallback: signed HTTP URL (ogg-opus + older ingests).
-            let client = crate::vox_clients::attachments_client(org).await?;
+            let client = crate::attachments_client(org).await?;
             let signed = client
                 .get_download_url(ContentHashArg {
                     content_hash: stem.content_hash.clone(),
@@ -649,7 +649,7 @@ pub(crate) mod imp {
                 StemSource::Url(url) => HtmlAudioElement::new_with_src(url)
                     .map_err(|e| format!("audio element: {e:?}"))?,
                 StemSource::Vox { org, hash } => {
-                    crate::pages::vox_media_source::audio_element_over_vox(
+                    crate::vox_media_source::audio_element_over_vox(
                         org.clone(),
                         hash.clone(),
                     )?
@@ -948,7 +948,7 @@ pub(crate) mod imp {
         slug: String,
         org: String,
         title: String,
-        front: crate::pages::vault::SongFront,
+        front: task_ui_core::frontmatter::SongFront,
     ) -> Element {
         // Probe whether the song is media-served (the common, migrated case).
         // Cheap: one HEAD-ish GET, browser-cached and re-used by SetlistPlayer.
@@ -972,7 +972,7 @@ pub(crate) mod imp {
             },
             // Media-served → the one-song setlist session player (embedded).
             Some(true) => rsx! {
-                crate::pages::setlist_session::SetlistPlayer {
+                crate::setlist_session::SetlistPlayer {
                     songs: vec![slug.clone()],
                     org: org.clone(),
                     fullscreen: false,
@@ -1000,7 +1000,7 @@ pub(crate) mod imp {
         slug: String,
         org: String,
         title: String,
-        front: crate::pages::vault::SongFront,
+        front: task_ui_core::frontmatter::SongFront,
     ) -> Element {
         let mut playing = use_signal(|| false);
         let mut position = use_signal(|| 0.0_f64);
@@ -1642,7 +1642,7 @@ mod stub {
         slug: String,
         org: String,
         title: String,
-        front: crate::pages::vault::SongFront,
+        front: task_ui_core::frontmatter::SongFront,
     ) -> Element {
         let _ = (&slug, &org, &title, &front);
         rsx! {
