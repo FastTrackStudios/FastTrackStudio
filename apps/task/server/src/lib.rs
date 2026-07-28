@@ -1983,6 +1983,9 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
             inbox_proto::service::inbox::serve(org.inbox.clone()),
         )
+        // Live inbox changes — `Inbox`'s `#[subscribe]` stream
+        // sibling, served from the hub on the `VaultInbox` above.
+        .merge(inbox_proto::inbox_stream_layer(org.inbox.clone()))
         .with(
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             recall_proto::service::recall::serve(org.recall.clone()),

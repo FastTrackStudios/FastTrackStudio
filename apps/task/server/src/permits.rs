@@ -279,6 +279,7 @@ table!(INBOX, "inbox", "inbox/**", [
     rd "list_inbox", rd "review_queue", rd "get_inbox_item",
     wr "upsert_inbox_item", wa "delete_inbox_item",
 ]);
+table!(INBOX_STREAM, "inbox-stream", "inbox/**", [rd "events"]);
 table!(RECALL, "recall", "recall/**", [
     rd "list_cards", rd "review_queue", wr "upsert_card", wa "delete_card",
 ]);
@@ -548,6 +549,7 @@ pub fn mounts() -> Vec<Mount> {
         ),
         // Knowledge
         m(inbox_proto::service::inbox::inbox_rpc_service_descriptor(), INBOX),
+        m(inbox_proto::inbox_stream_descriptor(), INBOX_STREAM),
         m(
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             RECALL,
