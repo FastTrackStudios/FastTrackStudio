@@ -6,6 +6,13 @@
 //! makes the rot a build failure: mount a service without adding its
 //! permit table and the counts diverge here.
 //!
+//! Since the plugin toggle, both sides are functions of the org's
+//! `PluginSet`: the router takes its per-plugin branches from
+//! `OrgAppState::plugins` and the registry filters via
+//! `permits::mounts_for`. Two orgs are booted — one plain (everything
+//! on: the default MUST equal the pre-plugin router) and one with a
+//! deny-list — and each org's router must match its filtered registry.
+//!
 //! It boots a real `AppState` (against a throwaway data root) because the
 //! router can only be built from a live org state.
 
@@ -24,30 +31,68 @@ async fn every_mounted_service_has_a_permit_table() {
     unsafe {
         std::env::set_var("TASK_DATA_ROOT", tmp.path());
     }
-    // An empty data root hosts no orgs (bootstrap mode), so scaffold one.
+    // An empty data root hosts no orgs (bootstrap mode), so scaffold two:
+    // one plain, one with a plugin deny-list in its manifest.
     let data_root = org_proto::DataRoot::from_env().expect("data root");
     data_root
         .init_org("permits-test", "Permits Test", true)
         .expect("scaffold org");
+    let denied = data_root
+        .init_org("no-mealplan", "No Mealplan", false)
+        .expect("scaffold deny-list org");
+    let mut manifest = denied.manifest().expect("deny-list org manifest");
+    manifest.disabled_plugins = vec!["mealplan".to_owned(), "fitness".to_owned()].into();
+    manifest
+        .write_to_dir(denied.path())
+        .expect("write deny-list manifest");
     let state = AppState::new(None).await.expect("boot AppState");
     drop(guard);
 
-    let slug = state
-        .org_slugs()
-        .into_iter()
-        .next()
-        .expect("the org scaffolded above");
-    let org = state.org(&slug).expect("the org it just listed");
+    // ── Plain org: default = everything, exactly the full registry ──
+    let org = state.org("permits-test").expect("plain org hosted");
     let router = org_layer_router(&org);
-
     assert_eq!(
         router.len(),
         permits::mounts().len(),
         "org_layer_router mounts {} services but permits::mounts() lists {} — \
-         add the new service (and its permit table) to `permits::mounts`",
+         add the new service (and its permit table + plugin id) to \
+         `permits::mounts`",
         router.len(),
         permits::mounts().len(),
     );
+    assert_eq!(
+        permits::mounts_for(&org.plugins).len(),
+        permits::mounts().len(),
+        "no deny-list must resolve to the full registry",
+    );
+
+    // ── Deny-list org: the router drops exactly the denied plugins ──
+    let org = state.org("no-mealplan").expect("deny-list org hosted");
+    assert!(!org.plugins.contains("mealplan"));
+    assert!(!org.plugins.contains("fitness"));
+    let filtered = permits::mounts_for(&org.plugins);
+    let router = org_layer_router(&org);
+    assert_eq!(
+        router.len(),
+        filtered.len(),
+        "org_layer_router's plugin branches disagree with \
+         permits::mounts_for for the same PluginSet",
+    );
+    // Only mealplan + fitness mounts are gone; everything else intact.
+    let dropped: Vec<&str> = permits::mounts()
+        .iter()
+        .filter(|m| m.plugin == "mealplan" || m.plugin == "fitness")
+        .map(|m| m.descriptor.service_name)
+        .collect();
+    assert!(!dropped.is_empty(), "the denied plugins own mounts");
+    assert_eq!(router.len(), permits::mounts().len() - dropped.len());
+    for m in &filtered {
+        assert!(
+            !dropped.contains(&m.descriptor.service_name),
+            "{} belongs to a denied plugin but survived the filter",
+            m.descriptor.service_name,
+        );
+    }
 
     // And the tables themselves are whole: no untabled service, no method
     // missing a permit (which would be fail-closed under enforcement), no
@@ -58,5 +103,5 @@ async fn every_mounted_service_has_a_permit_table() {
         "permit coverage is incomplete:\n{}",
         permits::coverage_summary(),
     );
-    assert_eq!(coverage.services, router.len());
+    assert_eq!(coverage.services, permits::mounts().len());
 }

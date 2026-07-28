@@ -93,6 +93,13 @@ pub struct OrgAppState {
     /// Org's slug — matches the `<data_root>/orgs/<slug>/`
     /// dir and the URL prefix the vox handler routes from.
     pub slug: String,
+    /// The org's effective enabled-plugin set, resolved from
+    /// `OrgManifest.disabled_plugins` at boot. [`org_layer_router`]
+    /// consults it before mounting a plugin's services, the permit gate
+    /// installs tables only for what mounts, and `/org/{slug}/api`
+    /// reports it. No deny-list = everything on (the pre-plugin
+    /// behaviour).
+    pub plugins: task_plugin::PluginSet,
     /// Org-scoped architect-auth instance opened against
     /// this org's `auth.sqlite`.
     pub auth: AuthState,
@@ -611,6 +618,19 @@ pub(crate) async fn build_org_state(
     scope: &std::sync::Arc<architect::Scope>,
 ) -> eyre::Result<OrgAppState> {
     {
+        // The org's effective plugin set, resolved once from the
+        // manifest's deny-list. A missing/unreadable manifest resolves
+        // to "everything on" — the safe default and the pre-plugin
+        // behaviour (`PluginSet::resolve(None)`); unknown ids in the
+        // deny-list are warned about and ignored by `resolve`.
+        let plugins = task_plugin::PluginSet::resolve(
+            org_root
+                .manifest()
+                .ok()
+                .map(|m| task_plugin::PluginChoice::Disabled(m.disabled_plugins.0.clone()))
+                .as_ref(),
+        );
+
         // Attachments — local blob store under the standard XDG
         // path; the keypair signs upload/download URLs.
         let blob_root =
@@ -1069,7 +1089,7 @@ pub(crate) async fn build_org_state(
             sqlite_conns.push(store.conn().clone());
         }
 
-        let permissions = Arc::new(build_org_permissions_gate(&auth));
+        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins));
         // Coverage + dry-run, once per org at boot: how many mounted
         // services carry a permit table, which do not, and what a
         // signed-in member would be denied if enforcement were on. The
@@ -1079,6 +1099,7 @@ pub(crate) async fn build_org_state(
 
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
+            plugins,
             auth,
             permissions,
             shares,
@@ -1818,7 +1839,9 @@ pub fn org_permission_engine() -> Arc<dyn architect_permissions::PermissionEngin
 
 /// Build the org lane's permission gate: session-validating identity over
 /// THIS org's auth store, the [`org_permission_engine`], and a permit
-/// table for EVERY service [`org_layer_router`] mounts (see [`permits`]).
+/// table for EVERY service [`org_layer_router`] mounts for this org's
+/// plugin set (see [`permits`] — disabled plugins' services are neither
+/// mounted nor tabled).
 ///
 /// **Runtime defaults are unchanged**: `UnlistedPolicy::Allow` and
 /// `observe_only(!enforce)` with `enforce` false unless
@@ -1827,7 +1850,10 @@ pub fn org_permission_engine() -> Arc<dyn architect_permissions::PermissionEngin
 /// observe-only mode — [`architect::permissions_gate::PermissionedRouter`]
 /// dispatches to the inner router on every outcome when `observe_only` is
 /// set.
-fn build_org_permissions_gate(auth: &AuthState) -> architect::permissions_gate::PermissionsGate {
+fn build_org_permissions_gate(
+    auth: &AuthState,
+    plugins: &task_plugin::PluginSet,
+) -> architect::permissions_gate::PermissionsGate {
     use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
     let identity = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
     let enforce = enforce_permissions();
@@ -1836,7 +1862,7 @@ fn build_org_permissions_gate(auth: &AuthState) -> architect::permissions_gate::
         .with_audit(Arc::new(audit))
         .unlisted(UnlistedPolicy::Allow)
         .observe_only(!enforce);
-    permits::install(gate)
+    permits::install_for(gate, plugins)
 }
 
 /// Schema stamps for every vox service [`org_layer_router`]
@@ -1864,6 +1890,15 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
 
 pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     use architect::LayerRouter;
+
+    // Per-org plugin gate: a disabled plugin's services are simply not
+    // mounted, so a wire call fails at dispatch with unknown-service —
+    // the same failure an old client gets from a server that never had
+    // the feature. Grouping mirrors `permits::mounts()` (the `plugin`
+    // field there is the single source of truth; `permits_cover_router`
+    // asserts the two views agree for any set). No deny-list = every
+    // branch taken = exactly the pre-plugin router.
+    let on = |id: &str| org.plugins.contains(id);
 
     let mut router = LayerRouter::new()
         // Auth — wrapped with the server middleware that validates
@@ -1918,51 +1953,56 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.slug.clone(),
                 share_public_base(),
             )),
-        )
-        // Agent-task queue — slim domain trait (claim / complete / set-status).
-        .with(
-            agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
-            agent_proto::service::tasks::serve(org.agent_tasks.clone()),
-        )
-        // Agent sessions — conversation lifecycle (list / read /
-        // create / rename / pin / archive). Backs the `/agents`
-        // sidebar listing. Served by the in-process Codex backend.
-        .with(
-            agent_proto::service::sessions::sessions_rpc_service_descriptor(),
-            agent_proto::service::sessions::serve(org.agent_router.clone()),
-        )
-        // Agent turn dispatch — kick off / cancel / resume a turn
-        // on a session. Served by the same Codex backend.
-        .with(
-            agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
-            agent_proto::service::turn_dispatch::serve(org.agent_router.clone()),
-        )
-        // Agent threads — conversation threading within a session.
-        // Served by the same Codex backend (impls Threads).
-        .with(
-            agent_proto::service::threads::threads_rpc_service_descriptor(),
-            agent_proto::service::threads::serve(org.agent_router.clone()),
-        )
-        // Agent subscriptions — live AgentEvent streams per session;
-        // what the chat UI renders deltas from.
-        // Live agent events — the `#[subscribe]` stream over the hub
-        // both agent backends publish into. One subscription per
-        // client; the envelope's `session_id` is the filter.
-        .merge(agent_proto::service::subscriptions::stream_layer(
-            org.agent_router.clone(),
-        ))
-        // Agent discovery — live model/skill/capability lists for the
-        // chat UI's pickers and inspector panel.
-        .with(
-            agent_proto::service::discovery::discovery_rpc_service_descriptor(),
-            agent_proto::service::discovery::serve(org.agent_router.clone()),
-        )
-        // Agent routines — the gateway's scheduled runs, surfaced as
-        // a first-class Task feature.
-        .with(
-            agent_proto::service::routines::routines_rpc_service_descriptor(),
-            agent_proto::service::routines::serve(org.agent_router.clone()),
-        )
+        );
+
+    // ── Agent plugin ─────────────────────────────────────────────
+    if on("agent") {
+        router = router
+            // Agent-task queue — slim domain trait (claim / complete / set-status).
+            .with(
+                agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
+                agent_proto::service::tasks::serve(org.agent_tasks.clone()),
+            )
+            // Agent sessions — conversation lifecycle (list / read /
+            // create / rename / pin / archive). Backs the `/agents`
+            // sidebar listing. Served by the in-process Codex backend.
+            .with(
+                agent_proto::service::sessions::sessions_rpc_service_descriptor(),
+                agent_proto::service::sessions::serve(org.agent_router.clone()),
+            )
+            // Agent turn dispatch — kick off / cancel / resume a turn
+            // on a session. Served by the same Codex backend.
+            .with(
+                agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
+                agent_proto::service::turn_dispatch::serve(org.agent_router.clone()),
+            )
+            // Agent threads — conversation threading within a session.
+            // Served by the same Codex backend (impls Threads).
+            .with(
+                agent_proto::service::threads::threads_rpc_service_descriptor(),
+                agent_proto::service::threads::serve(org.agent_router.clone()),
+            )
+            // Live agent events — the `#[subscribe]` stream over the hub
+            // both agent backends publish into. One subscription per
+            // client; the envelope's `session_id` is the filter.
+            .merge(agent_proto::service::subscriptions::stream_layer(
+                org.agent_router.clone(),
+            ))
+            // Agent discovery — live model/skill/capability lists for the
+            // chat UI's pickers and inspector panel.
+            .with(
+                agent_proto::service::discovery::discovery_rpc_service_descriptor(),
+                agent_proto::service::discovery::serve(org.agent_router.clone()),
+            )
+            // Agent routines — the gateway's scheduled runs, surfaced as
+            // a first-class Task feature.
+            .with(
+                agent_proto::service::routines::routines_rpc_service_descriptor(),
+                agent_proto::service::routines::serve(org.agent_router.clone()),
+            );
+    }
+
+    router = router
         // Timer — billable time tracking.
         .with(
             timer_proto::service::timer_service_rpc_service_descriptor(),
@@ -1980,135 +2020,160 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             prefs_proto::service::prefs_service_rpc_service_descriptor(),
             prefs_proto::service::serve(org.prefs.clone()),
-        )
-        // Scheduling — day templates (drives the calendar overlay)
-        // + per-date day plans (the day-by-day editor).
-        .with(
-            scheduling_proto::service::day_templates::day_templates_rpc_service_descriptor(),
-            scheduling_proto::service::day_templates::serve(org.scheduling.clone()),
-        )
-        .with(
-            scheduling_proto::service::day_plans::day_plans_rpc_service_descriptor(),
-            scheduling_proto::service::day_plans::serve(org.scheduling.clone()),
-        )
-        .with(
-            scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
-            scheduling_proto::service::calendar_events::serve(org.scheduling.clone()),
-        )
-        // Scheduling — booking half (Cal.com-style): event types,
-        // availability schedules, open-slot listing, and bookings.
-        // All four are served by the same `VaultScheduler`.
-        .with(
-            scheduling_proto::service::event_types::event_types_rpc_service_descriptor(),
-            scheduling_proto::service::event_types::serve(org.scheduling.clone()),
-        )
-        .with(
-            scheduling_proto::service::schedules::schedules_rpc_service_descriptor(),
-            scheduling_proto::service::schedules::serve(org.scheduling.clone()),
-        )
-        .with(
-            scheduling_proto::service::slots::slots_rpc_service_descriptor(),
-            scheduling_proto::service::slots::serve(org.scheduling.clone()),
-        )
-        .with(
-            scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
-            scheduling_proto::service::bookings::serve(org.scheduling.clone()),
-        )
-        // Live scheduling changes — the slice's ONE `#[subscribe]`
-        // stream (day templates / day plans / calendar events /
-        // event types / schedules / bookings), served from the hub
-        // on the `VaultScheduler` above. The event names which
-        // sub-resource changed; subscribers filter client-side.
-        .merge(scheduling_proto::scheduling_events_stream_layer(
-            org.scheduling.clone(),
-        ))
+        );
+
+    // ── Scheduling plugin ────────────────────────────────────────
+    if on("scheduling") {
+        router = router
+            // Scheduling — day templates (drives the calendar overlay)
+            // + per-date day plans (the day-by-day editor).
+            .with(
+                scheduling_proto::service::day_templates::day_templates_rpc_service_descriptor(),
+                scheduling_proto::service::day_templates::serve(org.scheduling.clone()),
+            )
+            .with(
+                scheduling_proto::service::day_plans::day_plans_rpc_service_descriptor(),
+                scheduling_proto::service::day_plans::serve(org.scheduling.clone()),
+            )
+            .with(
+                scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
+                scheduling_proto::service::calendar_events::serve(org.scheduling.clone()),
+            )
+            // Scheduling — booking half (Cal.com-style): event types,
+            // availability schedules, open-slot listing, and bookings.
+            // All four are served by the same `VaultScheduler`.
+            .with(
+                scheduling_proto::service::event_types::event_types_rpc_service_descriptor(),
+                scheduling_proto::service::event_types::serve(org.scheduling.clone()),
+            )
+            .with(
+                scheduling_proto::service::schedules::schedules_rpc_service_descriptor(),
+                scheduling_proto::service::schedules::serve(org.scheduling.clone()),
+            )
+            .with(
+                scheduling_proto::service::slots::slots_rpc_service_descriptor(),
+                scheduling_proto::service::slots::serve(org.scheduling.clone()),
+            )
+            .with(
+                scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
+                scheduling_proto::service::bookings::serve(org.scheduling.clone()),
+            )
+            // Live scheduling changes — the slice's ONE `#[subscribe]`
+            // stream (day templates / day plans / calendar events /
+            // event types / schedules / bookings), served from the hub
+            // on the `VaultScheduler` above. The event names which
+            // sub-resource changed; subscribers filter client-side.
+            .merge(scheduling_proto::scheduling_events_stream_layer(
+                org.scheduling.clone(),
+            ));
+    }
+
+    router = router
         .with(
             inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
             inbox_proto::service::inbox::serve(org.inbox.clone()),
         )
         // Live inbox changes — `Inbox`'s `#[subscribe]` stream
         // sibling, served from the hub on the `VaultInbox` above.
-        .merge(inbox_proto::inbox_stream_layer(org.inbox.clone()))
-        .with(
-            recall_proto::service::recall::recall_rpc_service_descriptor(),
-            recall_proto::service::recall::serve(org.recall.clone()),
-        )
-        // Live deck changes — `Recall`'s `#[subscribe]` stream
-        // sibling, served from the hub on the `VaultRecall` above.
-        .merge(recall_proto::recall_stream_layer(org.recall.clone()))
-        .with(
-            contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
-            contacts_proto::service::contacts::serve(org.contacts.clone()),
-        )
-        // Live directory changes — `Contacts`' `#[subscribe]` stream
-        // sibling, served from the hub on the `VaultContacts` above
-        // (contacts only; account edits don't stream).
-        .merge(contacts_proto::contacts_stream_layer(org.contacts.clone()))
-        .with(
-            tag_proto::service::tags::tag_service_rpc_service_descriptor(),
-            tag_proto::service::tags::serve(org.tags.clone()),
-        )
-        .with(
-            finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
-            finance_proto::service::invoicing::serve(org.finance_backend.clone()),
-        )
-        .with(
-            finance_proto::service::ledger::ledger_rpc_service_descriptor(),
-            finance_proto::service::ledger::serve(org.ledger_backend.clone()),
-        );
+        .merge(inbox_proto::inbox_stream_layer(org.inbox.clone()));
 
-    // Wiki feature — 11 per-capability traits, one descriptor each.
-    let wiki = org.wiki.clone();
-    router = router
-        .with(
-            wiki_proto::service::schema::schema_rpc_service_descriptor(),
-            wiki_proto::service::schema::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::catalog::catalog_rpc_service_descriptor(),
-            wiki_proto::service::catalog::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor(),
-            wiki_proto::service::raw_layer::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::graph::graph_rpc_service_descriptor(),
-            wiki_proto::service::graph::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::pages::pages_rpc_service_descriptor(),
-            wiki_proto::service::pages::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
-            wiki_proto::service::ingest::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::lint::lint_rpc_service_descriptor(),
-            wiki_proto::service::lint::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::search::search_rpc_service_descriptor(),
-            wiki_proto::service::search::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::watcher::watcher_rpc_service_descriptor(),
-            wiki_proto::service::watcher::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::multimodal::multimodal_rpc_service_descriptor(),
-            wiki_proto::service::multimodal::serve(wiki.clone()),
-        )
-        .with(
-            wiki_proto::service::review::review_rpc_service_descriptor(),
-            wiki_proto::service::review::serve(wiki.clone()),
-        )
-        // Live wiki changes — the `Events` `#[subscribe]` stream.
-        // The hub lives on the `WikiBackend`, so every committed
-        // page write / ingest enqueue / review enqueue publishes
-        // into it.
-        .merge(wiki_proto::service::events::stream_layer(wiki.clone()));
+    // ── Recall plugin ────────────────────────────────────────────
+    if on("recall") {
+        router = router
+            .with(
+                recall_proto::service::recall::recall_rpc_service_descriptor(),
+                recall_proto::service::recall::serve(org.recall.clone()),
+            )
+            // Live deck changes — `Recall`'s `#[subscribe]` stream
+            // sibling, served from the hub on the `VaultRecall` above.
+            .merge(recall_proto::recall_stream_layer(org.recall.clone()));
+    }
+
+    // ── Contacts plugin ──────────────────────────────────────────
+    if on("contacts") {
+        router = router
+            .with(
+                contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
+                contacts_proto::service::contacts::serve(org.contacts.clone()),
+            )
+            // Live directory changes — `Contacts`' `#[subscribe]` stream
+            // sibling, served from the hub on the `VaultContacts` above
+            // (contacts only; account edits don't stream).
+            .merge(contacts_proto::contacts_stream_layer(org.contacts.clone()));
+    }
+
+    router = router.with(
+        tag_proto::service::tags::tag_service_rpc_service_descriptor(),
+        tag_proto::service::tags::serve(org.tags.clone()),
+    );
+
+    // ── Finance plugin ───────────────────────────────────────────
+    if on("finance") {
+        router = router
+            .with(
+                finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
+                finance_proto::service::invoicing::serve(org.finance_backend.clone()),
+            )
+            .with(
+                finance_proto::service::ledger::ledger_rpc_service_descriptor(),
+                finance_proto::service::ledger::serve(org.ledger_backend.clone()),
+            );
+    }
+
+    // ── Wiki plugin — 11 per-capability traits, one descriptor each.
+    if on("wiki") {
+        let wiki = org.wiki.clone();
+        router = router
+            .with(
+                wiki_proto::service::schema::schema_rpc_service_descriptor(),
+                wiki_proto::service::schema::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::catalog::catalog_rpc_service_descriptor(),
+                wiki_proto::service::catalog::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor(),
+                wiki_proto::service::raw_layer::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::graph::graph_rpc_service_descriptor(),
+                wiki_proto::service::graph::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::pages::pages_rpc_service_descriptor(),
+                wiki_proto::service::pages::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
+                wiki_proto::service::ingest::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::lint::lint_rpc_service_descriptor(),
+                wiki_proto::service::lint::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::search::search_rpc_service_descriptor(),
+                wiki_proto::service::search::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::watcher::watcher_rpc_service_descriptor(),
+                wiki_proto::service::watcher::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::multimodal::multimodal_rpc_service_descriptor(),
+                wiki_proto::service::multimodal::serve(wiki.clone()),
+            )
+            .with(
+                wiki_proto::service::review::review_rpc_service_descriptor(),
+                wiki_proto::service::review::serve(wiki.clone()),
+            )
+            // Live wiki changes — the `Events` `#[subscribe]` stream.
+            // The hub lives on the `WikiBackend`, so every committed
+            // page write / ingest enqueue / review enqueue publishes
+            // into it.
+            .merge(wiki_proto::service::events::stream_layer(wiki.clone()));
+    }
 
     // Project / Goal / Milestone / Task readers (vault-backed).
     router = router
@@ -2166,113 +2231,141 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             org.workstreams.clone(),
         ));
 
-    // Entity-CRUD services: locations + the mealplan trio.
-    router = router
-        .with(
-            locations::locations_service_descriptor(),
-            locations::serve_locations_service(org.locations.clone()),
-        )
-        .with(
-            inventory::inventory_service_descriptor(),
-            inventory::serve_inventory_service(org.inventory.clone()),
-        )
-        .with(
+    // ── Home-ops plugin — locations + physical inventory.
+    if on("home") {
+        router = router
+            .with(
+                locations::locations_service_descriptor(),
+                locations::serve_locations_service(org.locations.clone()),
+            )
+            .with(
+                inventory::inventory_service_descriptor(),
+                inventory::serve_inventory_service(org.inventory.clone()),
+            );
+    }
+
+    // ── Scripture plugin ─────────────────────────────────────────
+    if on("scripture") {
+        router = router.with(
             scripture::scripture_service_descriptor(),
             scripture::serve_scripture_service(org.scripture.clone()),
-        )
+        );
+    }
+
+    router = router
         .with(
             links::links_service_descriptor(),
             links::serve_links_service(org.links.clone()),
         )
-        // Ordered collections — Library / Setlist / Show / Playlist.
-        .with(
-            collection::collection_service_descriptor(),
-            collection::serve_collection_service(org.collections.clone()),
-        )
         .with(
             resources_proto::resources_service_rpc_service_descriptor(),
             resources_proto::serve(org.resources.clone()),
-        )
-        .with(
-            cookbook::cookbook_service_descriptor(),
-            cookbook::serve_cookbook_service(org.cookbook.clone()),
-        )
-        .with(
-            mealplan::mealplan_service_descriptor(),
-            mealplan::serve_mealplan_service(org.mealplan.clone()),
-        )
-        .with(
-            pantry::pantry_service_descriptor(),
-            pantry::serve_pantry_service(org.pantry.clone()),
-        )
-        .with(
-            mealplan::shopping::shopping_service_rpc_service_descriptor(),
-            mealplan::shopping::serve(org.shopping.clone()),
-        )
-        .with(
-            mealplan::substitutions::substitution_service_rpc_service_descriptor(),
-            mealplan::substitutions::serve(org.substitutions.clone()),
         );
 
-    // Fitness suite — body / exercises / workouts / intake.
-    router = router
-        .with(
-            body::body_service_descriptor(),
-            body::serve_body_service(org.body.clone()),
-        )
-        .with(
-            exercises::exercises_service_descriptor(),
-            exercises::serve_exercises_service(org.exercises.clone()),
-        )
-        .with(
-            workouts::workouts_service_descriptor(),
-            workouts::serve_workouts_service(org.workouts.clone()),
-        )
-        .with(
-            intake::intake_service_descriptor(),
-            intake::serve_intake_service(org.intake.clone()),
+    // ── FastTrackStudio plugin — ordered collections (Library /
+    // Setlist / Show / Playlist) backing the song/setlist surfaces.
+    if on("fasttrackstudio") {
+        router = router.with(
+            collection::collection_service_descriptor(),
+            collection::serve_collection_service(org.collections.clone()),
         );
+    }
 
-    // Email — `EmailSync` (accounts / folders / envelopes /
+    // ── Mealplan plugin — cookbook / plan / pantry / shopping /
+    // substitutions.
+    if on("mealplan") {
+        router = router
+            .with(
+                cookbook::cookbook_service_descriptor(),
+                cookbook::serve_cookbook_service(org.cookbook.clone()),
+            )
+            .with(
+                mealplan::mealplan_service_descriptor(),
+                mealplan::serve_mealplan_service(org.mealplan.clone()),
+            )
+            .with(
+                pantry::pantry_service_descriptor(),
+                pantry::serve_pantry_service(org.pantry.clone()),
+            )
+            .with(
+                mealplan::shopping::shopping_service_rpc_service_descriptor(),
+                mealplan::shopping::serve(org.shopping.clone()),
+            )
+            .with(
+                mealplan::substitutions::substitution_service_rpc_service_descriptor(),
+                mealplan::substitutions::serve(org.substitutions.clone()),
+            );
+    }
+
+    // ── Fitness plugin — body / exercises / workouts / intake.
+    if on("fitness") {
+        router = router
+            .with(
+                body::body_service_descriptor(),
+                body::serve_body_service(org.body.clone()),
+            )
+            .with(
+                exercises::exercises_service_descriptor(),
+                exercises::serve_exercises_service(org.exercises.clone()),
+            )
+            .with(
+                workouts::workouts_service_descriptor(),
+                workouts::serve_workouts_service(org.workouts.clone()),
+            )
+            .with(
+                intake::intake_service_descriptor(),
+                intake::serve_intake_service(org.intake.clone()),
+            );
+    }
+
+    // ── Email plugin — `EmailSync` (accounts / folders / envelopes /
     // fetch / send / flag / subscribe), served by the per-org
     // Maildir backend.
-    // Forge — RepoCatalog + IssueTracker + ReviewSurface, all
+    if on("email") {
+        router = router
+            .with(
+                email_proto::descriptor(),
+                email_proto::serve(org.email.clone()),
+            )
+            // Live mailbox changes — `EmailSync`'s `#[subscribe]`
+            // stream sibling, served from the backend's hub.
+            .merge(email_proto::stream_layer(org.email.clone()));
+    }
+
+    // ── Forge plugin — RepoCatalog + IssueTracker + ReviewSurface, all
     // served by the org's single Forgejo `Backend`. The /repos UI
     // binds RepoCatalog (list repos) + IssueTracker (list issues
     // per repo); ReviewSurface rounds out the surface so PR views
     // can bind without another mount pass.
+    if on("forge") {
+        router = router
+            .with(
+                git_proto::repo::repo_catalog_rpc_service_descriptor(),
+                git_proto::repo::serve(org.forge.clone()),
+            )
+            .with(
+                git_proto::issues::issue_tracker_rpc_service_descriptor(),
+                git_proto::issues::serve(org.forge.clone()),
+            )
+            .with(
+                git_proto::reviews::review_surface_rpc_service_descriptor(),
+                git_proto::reviews::serve(org.forge.clone()),
+            )
+            // Live forge changes — the `#[subscribe]` stream siblings of
+            // `IssueTracker` / `ReviewSurface`. The hubs live on the
+            // forge backend, so every issue / PR write this server
+            // commits publishes into them.
+            .merge(git_proto::issues::stream_layer(org.forge.clone()))
+            .merge(git_proto::reviews::stream_layer(org.forge.clone()))
+            .with(
+                git_proto::connections::repo_connections_rpc_service_descriptor(),
+                git_proto::connections::serve(connections::ConnectionsBackend::new(
+                    org.issue_links_path.clone(),
+                )),
+            );
+    }
+
     router
-        .with(
-            email_proto::descriptor(),
-            email_proto::serve(org.email.clone()),
-        )
-        // Live mailbox changes — `EmailSync`'s `#[subscribe]`
-        // stream sibling, served from the backend's hub.
-        .merge(email_proto::stream_layer(org.email.clone()))
-        .with(
-            git_proto::repo::repo_catalog_rpc_service_descriptor(),
-            git_proto::repo::serve(org.forge.clone()),
-        )
-        .with(
-            git_proto::issues::issue_tracker_rpc_service_descriptor(),
-            git_proto::issues::serve(org.forge.clone()),
-        )
-        .with(
-            git_proto::reviews::review_surface_rpc_service_descriptor(),
-            git_proto::reviews::serve(org.forge.clone()),
-        )
-        // Live forge changes — the `#[subscribe]` stream siblings of
-        // `IssueTracker` / `ReviewSurface`. The hubs live on the
-        // forge backend, so every issue / PR write this server
-        // commits publishes into them.
-        .merge(git_proto::issues::stream_layer(org.forge.clone()))
-        .merge(git_proto::reviews::stream_layer(org.forge.clone()))
-        .with(
-            git_proto::connections::repo_connections_rpc_service_descriptor(),
-            git_proto::connections::serve(connections::ConnectionsBackend::new(
-                org.issue_links_path.clone(),
-            )),
-        )
         // Per-file collaborative editing — the `DocSync` service over
         // the vault-collab `DocRegistry`: one mounted dispatcher
         // serves every vault-file doc (admission: ids registered via
