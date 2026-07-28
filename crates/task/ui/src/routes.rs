@@ -194,7 +194,16 @@ fn ProjectDetailRoute(id: String) -> Element {
 
 #[component]
 fn GoalsRoute() -> Element {
-    rsx! { goal_ui::GoalsView {} }
+    // Store-driven: the shared goal store is hydrated by
+    // `use_goal_list` and kept live by the app-root `GoalService`
+    // stream subscription (see `stores!`), so edits made anywhere
+    // land on this page without a refetch.
+    let goals = crate::stores::use_goal_list();
+    let rows: Option<Vec<goal::Goal>> = goals
+        .value()
+        .map(|rows| rows.iter().map(|(_, r)| r.goal.clone()).collect());
+    let error = goals.error().cloned();
+    rsx! { goal_ui::GoalsScreen { rows, error } }
 }
 
 #[component]

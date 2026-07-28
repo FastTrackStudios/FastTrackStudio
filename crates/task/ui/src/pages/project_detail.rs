@@ -142,51 +142,12 @@ pub fn ProjectDetailView(id: String) -> Element {
         }
     });
 
-    // ── Live task fold ──────────────────────────────────────────────
-    // Fetch-once-then-fold (the TaskService subscriber contract): the
-    // task store hydrated once; from here on every change arrives as a
-    // [`task_proto::TaskEvent`] and folds into the **shared store** — no
-    // refetch, and `belongs()` filters at render time, so an Upserted
-    // task that newly matches the project joins the list and one that
-    // stops matching drops out, for free.
-    //
-    // The subscribe future reads `pkey_memo`, so when an org switch
-    // resolves the page to a different slug the hook re-runs and
-    // re-subscribes against the new org's stream (and the initial
-    // unresolved run returns `false`, retried once the key lands).
-    architect::use_stream(
-        move |tx| {
-            let slug = pkey_memo.read().as_ref().map(|(s, _)| s.clone());
-            async move {
-                let Some(slug) = slug else {
-                    return false;
-                };
-                let Ok(client) =
-                    crate::vox_clients::establish_for::<task_proto::TaskServiceStreamClient>(&slug).await
-                else {
-                    return false;
-                };
-                client.events(tx).await.is_ok()
-            }
-        },
-        move |ev: task_proto::TaskEvent| {
-            match ev {
-                task_proto::TaskEvent::Upserted(t) => {
-                    let slug = pkey_memo
-                        .peek()
-                        .as_ref()
-                        .map(|(s, _)| s.clone())
-                        .unwrap_or_default();
-                    // Server-pushed upsert: fold the authoritative row
-                    // in (keeps the slug from the event's org stream).
-                    task_store.put(stores::OrgTask { slug, task: t });
-                }
-                task_proto::TaskEvent::Deleted(id) => {
-                    task_store.remove_real(&id);
-                }
-            }
-        },
-    );
+    // Live task fold: handled by the store layer — the app-root task
+    // store subscription (see `stores!`'s `stream:` line) folds every
+    // `TaskEvent` from every selected org into the shared store, and
+    // `belongs()` filters at render time, so an Upserted task that
+    // newly matches the project joins the board and one that stops
+    // matching drops out, without this page wiring anything.
 
     let body = match (project_res.value(), project_res.error()) {
         (Some(op), _) => {

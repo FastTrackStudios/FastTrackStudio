@@ -27766,6 +27766,7 @@ dependencies = [
  "futures-util",
  "git-proto",
  "gloo-timers",
+ "goal",
  "goal-ui",
  "identity-proto",
  "inbox-proto",
