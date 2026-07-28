@@ -216,6 +216,7 @@ table!(AGENT_ROUTINES, "agent-routines", "agent/routines/**", [
 table!(PROJECT, "project", "projects/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "rename", wa "delete",
 ]);
+table!(PROJECT_STREAM, "project-stream", "projects/**", [rd "events"]);
 table!(GOAL, "goal", "goals/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "rename", wa "delete",
 ]);
@@ -496,6 +497,7 @@ pub fn mounts() -> Vec<Mount> {
         ),
         // Work
         m(project::project_service_descriptor(), PROJECT),
+        m(project::project_stream_descriptor(), PROJECT_STREAM),
         m(goal::goal_service_descriptor(), GOAL),
         m(milestone::milestone_service_descriptor(), MILESTONE),
         m(workstream::workstream_service_descriptor(), WORKSTREAM),

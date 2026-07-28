@@ -2063,6 +2063,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             project::project_service_descriptor(),
             project::serve_project_service(org.projects.clone()),
         )
+        // Live project changes — `ProjectService`'s `#[subscribe]`
+        // stream sibling. The hub lives on the `ProjectBackend`
+        // above; every CRUD path publishes into it.
+        .merge(project::project_service_stream_layer(org.projects.clone()))
         .with(
             goal::goal_service_descriptor(),
             goal::serve_goal_service(org.goals.clone()),

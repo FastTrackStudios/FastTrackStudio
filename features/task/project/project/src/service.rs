@@ -6,10 +6,16 @@
 //! serve) are surfaced at the crate root via [`crate`]'s
 //! re-exports.
 
-pub use project_proto::service::{ProjectError, ProjectService, ProjectServiceRpc};
+pub use project_proto::service::{ProjectError, ProjectEvent, ProjectService, ProjectServiceRpc};
 
 #[cfg(feature = "vox")]
 pub use project_proto::service::{
     ProjectServiceClient, ProjectServiceRpcDispatcher, Service, layer,
     project_service_rpc_service_descriptor, serve,
+};
+
+#[cfg(feature = "vox")]
+pub use project_proto::service::{
+    ProjectServiceStream, ProjectServiceStreamClient, ProjectServiceStreamSource,
+    project_service_stream_service_descriptor, stream_layer, stream_serve,
 };
