@@ -162,6 +162,91 @@ pub fn VaultView(
     });
     let mut focused = use_signal(|| 0usize);
     let focus_tick = use_signal(|| 0u64);
+    // Bumped by the live-change stream below (someone *else's* write).
+    // Separate from `focus_tick`, which NoteView drives off our own
+    // save count — sharing one signal would let the two clobber each
+    // other. Panels that want "refresh on any commit" read the sum.
+    let mut vault_tick = use_signal(|| 0u64);
+    let refresh_key = use_memo(move || *focus_tick.read() + *vault_tick.read());
+
+    // ── Live vault changes ────────────────────────────────────
+    // The `VaultSync` `#[subscribe]` stream: every committed write
+    // (ours, another client's, or an external edit the server's
+    // filesystem watcher picked up) arrives as a `VaultChange`.
+    //
+    // The folder tree is a *derived* view — `PageMeta.title` /
+    // `.folder` come from parsed frontmatter the event doesn't
+    // carry — so a change can't be folded into it; it re-pulls
+    // `folder_index` instead. The event is the trigger, the rpc
+    // stays the source of truth. Same for the backlinks / links /
+    // verses panels, which ride `refresh_key`.
+    //
+    // The subscribe future reads `active`, so switching orgs
+    // re-runs the hook and re-subscribes against the new org's
+    // stream. Every *re*-subscribe also restarts the tree, which is
+    // the recovery path for events published while we were detached
+    // (the hub is a sliding mailbox — nothing is replayed).
+    let mut subscribed_once = use_signal(|| false);
+    architect::use_stream(
+        move |tx| {
+            // Signals are `Copy`; the hook takes `Fn`, so take
+            // fresh mutable handles per call rather than capturing
+            // by mutable reference.
+            let (mut files, mut vault_tick, mut subscribed_once) =
+                (files, vault_tick, subscribed_once);
+            let slug = active();
+            if *subscribed_once.peek() {
+                files.restart();
+                vault_tick += 1;
+            }
+            subscribed_once.set(true);
+            async move {
+                if slug.is_empty() {
+                    return false;
+                }
+                let Ok(client) = crate::vox_clients::establish_for::<
+                    vault_proto::VaultSyncStreamClient,
+                >(&slug)
+                .await
+                else {
+                    return false;
+                };
+                client.changes(tx).await.is_ok()
+            }
+        },
+        move |change: vault_proto::VaultChange| {
+            let (mut files, mut vault_tick) = (files, vault_tick);
+            // The stream is unfiltered — one backend can serve
+            // several vault ids. Keep the one this page browses.
+            if change.vault_id != crate::document_session::VAULT_ID {
+                return;
+            }
+            let path = match &change.event {
+                vault_proto::VaultEvent::Put { path, .. }
+                | vault_proto::VaultEvent::Delete { path } => path.as_str(),
+                // Explicit server "you missed something" hint.
+                vault_proto::VaultEvent::Resync => {
+                    files.restart();
+                    vault_tick += 1;
+                    return;
+                }
+            };
+            let ext = std::path::Path::new(path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default();
+            // The tree holds notes + base views only; attachments and
+            // sidecars churn without changing it.
+            if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("base") {
+                files.restart();
+            }
+            // A note's body edit can add or drop wikilinks + tags, so
+            // the link panels of whatever is focused may be stale.
+            if ext.eq_ignore_ascii_case("md") {
+                vault_tick += 1;
+            }
+        },
+    );
 
     // The focused note's live editor doc, published by its `NoteView`
     // and consumed by the right-sidebar Properties tab.
@@ -314,7 +399,7 @@ pub fn VaultView(
     let mut tag_rows = use_signal(Vec::<TagCount>::new);
     use_effect(move || {
         let slug = active();
-        let _refresh = *focus_tick.read();
+        let _refresh = refresh_key();
         spawn(async move {
             if let Ok(tags) = vault_lookup::tag_candidates(slug).await {
                 tag_rows.set(tags);
@@ -414,7 +499,7 @@ pub fn VaultView(
     let backlinks = use_resource(move || {
         let slug = active();
         let path = selected();
-        let _refresh = *focus_tick.read();
+        let _refresh = refresh_key();
         async move {
             match path {
                 Some(p) => fetch_backlinks(slug, p).await,
@@ -427,7 +512,7 @@ pub fn VaultView(
     let outlinks = use_resource(move || {
         let slug = active();
         let path = selected();
-        let _refresh = *focus_tick.read();
+        let _refresh = refresh_key();
         async move {
             match path {
                 Some(p) => fetch_links(slug, p).await,
@@ -441,7 +526,7 @@ pub fn VaultView(
     let verses = use_resource(move || {
         let slug = active();
         let path = selected();
-        let _refresh = *focus_tick.read();
+        let _refresh = refresh_key();
         async move {
             let Some(p) = path else { return Vec::new() };
             let links = crate::feeds::fetch_links_for(&slug, &format!("note:{p}"))
@@ -1317,199 +1402,17 @@ fn setlist_songs_from_frontmatter(text: &str) -> Vec<String> {
     out
 }
 
-// ── song-note frontmatter (stems as attachments) ────────────────────────────
+// ── shared frontmatter readers ───────────────────────────────
 
-/// One stem parsed from a song note's frontmatter `stems:` block. The
-/// audio lives in the org's content-addressed blob store; `content_hash`
-/// is resolved to a signed `/blobs/download` URL at play time.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct FrontStem {
-    pub name: String,
-    pub group: Option<String>,
-    pub default_muted: bool,
-    pub content_hash: String,
-}
-
-/// One section parsed from the frontmatter `sections:` block (song-local
-/// seconds, 0-based).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct FrontSection {
-    pub name: String,
-    pub start_sec: f64,
-    pub end_sec: f64,
-}
-
-/// Song metadata + stems parsed from a `type: song` note's frontmatter.
-/// When `stems` is non-empty the player streams from the attachment
-/// blob store instead of `/media/songs/{slug}/…`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct SongFront {
-    pub artist: Option<String>,
-    pub key: Option<String>,
-    pub bpm: Option<f64>,
-    pub time_signature: Option<String>,
-    pub duration_sec: Option<f64>,
-    pub sections: Vec<FrontSection>,
-    pub stems: Vec<FrontStem>,
-}
-
-/// Parse the song frontmatter (scalars + the `stems:` / `sections:`
-/// block lists) from a note's text.
-pub(crate) fn song_front_from(text: &str) -> SongFront {
-    let fv = |k: &str| {
-        frontmatter_value(text, k)
-            .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
-            .filter(|v| !v.is_empty())
-    };
-    let num = |k: &str| fv(k).and_then(|v| v.parse::<f64>().ok());
-
-    let stems = front_block_maps(text, "stems")
-        .into_iter()
-        .filter_map(|pairs| {
-            let get = |k: &str| {
-                pairs
-                    .iter()
-                    .find(|(pk, _)| pk == k)
-                    .map(|(_, v)| v.clone())
-                    .filter(|v| !v.is_empty())
-            };
-            let hash = get("content_hash")?;
-            Some(FrontStem {
-                name: get("name")?,
-                group: get("group"),
-                default_muted: get("default_muted").is_some_and(|v| v == "true"),
-                content_hash: hash,
-            })
-        })
-        .collect();
-
-    let sections = front_block_maps(text, "sections")
-        .into_iter()
-        .filter_map(|pairs| {
-            let get = |k: &str| {
-                pairs
-                    .iter()
-                    .find(|(pk, _)| pk == k)
-                    .map(|(_, v)| v.clone())
-            };
-            Some(FrontSection {
-                name: get("name")?,
-                start_sec: get("start_sec")?.parse().ok()?,
-                end_sec: get("end_sec")?.parse().ok()?,
-            })
-        })
-        .collect();
-
-    SongFront {
-        artist: fv("artist"),
-        key: fv("key"),
-        bpm: num("bpm"),
-        time_signature: fv("time_signature"),
-        duration_sec: num("duration_sec"),
-        sections,
-        stems,
-    }
-}
-
-/// Parse a frontmatter block list of maps under `key:`:
-///
-/// ```yaml
-/// key:
-///   - name: Click
-///     group: Guide
-/// ```
-///
-/// Each `-` starts a new entry; indented `k: v` lines extend the current
-/// one. Values are trimmed of quotes/whitespace. Stops at the next
-/// top-level (unindented) key.
-fn front_block_maps(text: &str, key: &str) -> Vec<Vec<(String, String)>> {
-    let Some(rest) = text.strip_prefix("---") else {
-        return Vec::new();
-    };
-    let Some((front, _)) = rest.split_once("\n---") else {
-        return Vec::new();
-    };
-    let clean = |s: &str| s.trim().trim_matches(['"', '\'']).trim().to_owned();
-    let lines: Vec<&str> = front.lines().collect();
-
-    let mut i = 0;
-    while i < lines.len() {
-        let line = lines[i];
-        i += 1;
-        // The opening `key:` line, top-level (unindented) with no value.
-        let is_open = line
-            .strip_prefix(key)
-            .and_then(|r| r.strip_prefix(':'))
-            .is_some_and(|r| r.trim().is_empty());
-        if !is_open {
-            continue;
-        }
-        let mut out = Vec::new();
-        let mut cur: Vec<(String, String)> = Vec::new();
-        while i < lines.len() {
-            let raw = lines[i];
-            let t = raw.trim_start();
-            if t.is_empty() {
-                i += 1;
-                continue;
-            }
-            if !raw.starts_with(' ') && !raw.starts_with('\t') {
-                break; // next top-level key
-            }
-            if let Some(after_dash) = t.strip_prefix('-') {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                }
-                if let Some((k, v)) = after_dash.trim_start().split_once(':') {
-                    cur.push((k.trim().to_owned(), clean(v)));
-                }
-            } else if let Some((k, v)) = t.split_once(':') {
-                cur.push((k.trim().to_owned(), clean(v)));
-            }
-            i += 1;
-        }
-        if !cur.is_empty() {
-            out.push(cur);
-        }
-        return out;
-    }
-    Vec::new()
-}
-
-/// Read a scalar `key: value` from the note's leading `---` frontmatter block.
-pub(crate) fn frontmatter_value(text: &str, key: &str) -> Option<String> {
-    let rest = text.strip_prefix("---")?;
-    let (front, _) = rest.split_once("\n---")?;
-    for line in front.lines() {
-        if let Some((k, v)) = line.split_once(':') {
-            if k.trim() == key {
-                return Some(v.to_owned());
-            }
-        }
-    }
-    None
-}
-
-/// Lowercase, spaces/underscores → hyphens, drop other punctuation.
-pub(crate) fn slugify(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_dash = false;
-    for c in s.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_lowercase());
-            prev_dash = false;
-        } else if c == ' ' || c == '_' || c == '-' {
-            if !prev_dash && !out.is_empty() {
-                out.push('-');
-                prev_dash = true;
-            }
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    out
-}
+// The frontmatter readers (`frontmatter_value`, `front_block_maps`,
+// `slugify`) and the `type: song` shape (`SongFront` + friends) live in
+// `task-ui-core` so the extracted player crate can parse the same notes
+// without depending on this shell. Re-exported at the old paths —
+// `crate::pages::vault::SongFront` still resolves.
+pub use task_ui_core::frontmatter::{
+    FrontSection, FrontStem, SongFront, front_block_maps, frontmatter_value, slugify,
+    song_front_from,
+};
 
 /// Starter scaffold for a freshly-created note: an empty-but-present
 /// frontmatter block so the Properties panel has something to show

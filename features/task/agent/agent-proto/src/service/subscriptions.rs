@@ -1,22 +1,26 @@
-//! Live event subscriptions. Async because the underlying
-//! transport is streaming.
+//! Live event subscription — one `#[subscribe]` stream served
+//! from the backend's `architect::PubSub` hub.
+//!
+//! This replaced three Tx-parameter subscriptions
+//! (`subscribe_session` / `subscribe_board` / `subscribe_global`).
+//! Only the session-scoped one was ever implemented — board and
+//! global closed the channel on sight in every backend — and its
+//! server-side `session_id` filter is now the `session_id` on
+//! [`AgentEventEnvelope`], applied client-side. The firehose the
+//! dead `subscribe_global` wanted is what the one stream already
+//! is.
 
-use crate::event::AgentEvent;
-use vox::Tx;
+use crate::event::AgentEventEnvelope;
 
 #[architect::rpc]
 pub trait Subscriptions {
-    /// Subscribe to live events scoped to one session.
-    /// The server keeps sending until the caller drops
-    /// `tx`. On broadcast lag the server sends
-    /// `AgentEvent::Resync` — clients re-pull state.
-    async fn subscribe_session(&self, session_id: String, tx: Tx<AgentEvent>);
-
-    /// Subscribe to board-scoped events.
-    async fn subscribe_board(&self, board_id: String, tx: Tx<AgentEvent>);
-
-    /// Cross-session firehose — list-changed events,
-    /// session created / archived / pinned. Used by
-    /// sidebar UIs that need to stay live.
-    async fn subscribe_global(&self, tx: Tx<AgentEvent>);
+    /// Every agent event this backend produces, as it happens —
+    /// turn lifecycle, message + reasoning deltas, tool calls,
+    /// approvals, questions, metering. Unfiltered across sessions;
+    /// each envelope carries its `session_id` so a chat view keeps
+    /// its own and a sidebar keeps them all. See
+    /// [`AgentEventEnvelope`] for the fetch-once-then-fold
+    /// subscriber contract.
+    #[subscribe]
+    fn events(&self) -> AgentEventEnvelope;
 }

@@ -3,8 +3,8 @@
 //! against a live `task-server`. Boots `AppState` on an
 //! ephemeral TCP port (with `TASK_SERVER_VAULT_ROOT` pointed at
 //! a temp dir), connects a `VaultSyncClient`, and exercises
-//! PUT → manifest → GET, the subscribe stream observing PUT +
-//! DELETE, and a conflict round-trip.
+//! PUT → manifest → GET, the `#[subscribe] changes` stream
+//! observing PUT + DELETE, and a conflict round-trip.
 //!
 //! The server registers exactly one vault per org under the id
 //! `"default"` (`vault::Backend::single` — commit 03d6a09 moved
@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 use task_server::{AppState, router};
-use vault_proto::{IfMatch, VaultEvent, VaultSyncClient, VaultSyncError};
+use vault_proto::{IfMatch, VaultChange, VaultEvent, VaultSyncClient, VaultSyncError};
 use vox::VoxError;
 
 /// Serializes env-var twiddling. `cargo test` runs tests on a
@@ -87,12 +87,15 @@ async fn put_manifest_get_round_trip() {
 #[tokio::test(flavor = "multi_thread")]
 async fn subscribe_receives_put_and_delete() {
     let (url, _tmp) = boot_server().await.unwrap();
-    let client = connect(&url).await.unwrap();
+    let client: vault_proto::VaultSyncStreamClient = vox::connect_lane(&url)
+        .establish()
+        .await
+        .expect("vault-sync stream connect");
     let writer = connect(&url).await.unwrap();
 
-    let (tx, mut rx) = vox::channel::<VaultEvent>();
+    let (tx, mut rx) = vox::channel::<VaultChange>();
     let _sub = tokio::spawn(async move {
-        let _ = client.subscribe("default".to_string(), tx).await;
+        let _ = client.changes(tx).await;
     });
 
     // Tiny delay so the subscribe handler is fully attached
@@ -114,7 +117,9 @@ async fn subscribe_receives_put_and_delete() {
         .expect("event timeout")
         .expect("rx error")
         .expect("rx closed");
-    match msg.get() {
+    let change = msg.get();
+    assert_eq!(change.vault_id, "default", "event carries its vault id");
+    match &change.event {
         VaultEvent::Put { path, size, .. } => {
             assert_eq!(path, "a.md");
             assert_eq!(*size, 1);
@@ -131,7 +136,7 @@ async fn subscribe_receives_put_and_delete() {
         .expect("event timeout")
         .expect("rx error")
         .expect("rx closed");
-    match msg.get() {
+    match &msg.get().event {
         VaultEvent::Delete { path } => assert_eq!(path, "a.md"),
         other => panic!("expected Delete, got {other:?}"),
     }

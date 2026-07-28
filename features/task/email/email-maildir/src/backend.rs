@@ -29,6 +29,14 @@ pub struct Backend {
     /// `subscribe`. Same shape + capacity as
     /// `vault::sync::Backend`.
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<EmailEvent>>>>,
+    /// Fan-out hub behind the `#[subscribe] fn changes` stream.
+    /// Every event that goes onto a per-account broadcast channel
+    /// is published here too, wrapped with its `account` so
+    /// subscribers — who see every account this backend serves —
+    /// can filter. Sliding mailbox: a slow subscriber loses its
+    /// oldest queued events and re-pulls on reconnect, which is
+    /// what `EmailEvent::Resync` asks for anyway.
+    changes: architect::PubSub<email_proto::EmailChange>,
 }
 
 struct AccountState {
@@ -73,6 +81,7 @@ impl Backend {
         Ok(Self {
             accounts: Arc::new(accounts),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            changes: architect::PubSub::sliding(256),
         })
     }
 
@@ -97,6 +106,7 @@ impl Backend {
         Self {
             accounts: Arc::new(accounts),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            changes: architect::PubSub::sliding(256),
         }
     }
 
@@ -118,6 +128,18 @@ impl Backend {
         let (tx, _rx) = broadcast::channel::<EmailEvent>(256);
         chans.insert(account.to_string(), tx.clone());
         tx
+    }
+
+    /// Announce a committed change on both paths: `account`'s
+    /// in-process broadcast channel and the wire hub. Call only
+    /// after the mailbox actually changed — subscribers re-read on
+    /// the event.
+    pub async fn emit(&self, account: &str, event: EmailEvent) {
+        let _ = self.channel(account).await.send(event.clone());
+        self.changes.publish(email_proto::EmailChange {
+            account: account.to_string(),
+            event,
+        });
     }
 }
 
@@ -361,29 +383,20 @@ impl EmailSync for Backend {
             "maildir: send lives in `email-smtp`".into(),
         ))
     }
+}
 
-    async fn subscribe(&self, account: String, tx: vox::Tx<EmailEvent>) {
-        if self.state(&account).is_err() {
-            let _ = tx.close(vox::Metadata::default()).await;
-            return;
-        }
-        let sender = self.channel(&account).await;
-        let mut rx = sender.subscribe();
-        loop {
-            match rx.recv().await {
-                Ok(evt) => {
-                    if tx.send(evt).await.is_err() {
-                        return;
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => return,
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    if tx.send(EmailEvent::Resync).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
+/// The `#[subscribe]` backend contract: the hub the stream host
+/// attaches subscriber sinks to. Publishing happens in
+/// [`Backend::emit`].
+///
+/// Nothing publishes yet on this backend: every maildir mutation
+/// (`set_flags` / `move_message` / `delete_message`) is still
+/// `Unsupported`, and there is no filesystem watcher on the mail
+/// root — so the stream is correct and silent until one of those
+/// lands. `email-imap` already publishes from its IDLE loop.
+impl email_proto::EmailSyncStreamSource for Backend {
+    fn changes_hub(&self) -> &architect::PubSub<email_proto::EmailChange> {
+        &self.changes
     }
 }
 

@@ -6,7 +6,6 @@ use crate::{
 };
 use facet::Facet;
 use serde::{Deserialize, Serialize};
-use vox::Tx;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(u8)]
@@ -96,7 +95,14 @@ pub trait ReviewSurface {
         method: MergeMethod,
     ) -> Result<Option<String>, GitError>;
 
-    async fn subscribe(&self, repo: RepoId, tx: Tx<GitEvent>);
+    /// Every pull-request change this backend commits, as it
+    /// happens — open / update / review / merge. Unfiltered across
+    /// repos; each [`GitEvent`] names its `repo`. Same
+    /// changes-only, re-read-what-it-touches contract as
+    /// `IssueTracker`'s stream (issue and PR feeds are separate
+    /// hubs, so a reviews subscriber doesn't pay for issue churn).
+    #[subscribe]
+    fn review_events(&self) -> GitEvent;
 }
 
 #[cfg(feature = "vox")]

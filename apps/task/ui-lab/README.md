@@ -74,12 +74,19 @@ Type caveats (current codegen):
 
 ## Theme parity
 
-`src/styles/fts-theme.css` is a copy (with a SYNC NOTE header) of the
-sheet the Dioxus app imports cross-repo
-(`FastTrackStudio/fts-ui/crates/showcase/assets/fts-theme.css`):
-shadcn-shaped CSS variables + the Tailwind v4 `@theme inline` mapping.
-`src/styles/index.css` mirrors `apps/web/tailwind.css` (tailwind →
-theme sheet → Inter / dark color-scheme base). The shadcn/ui primitives
+The lab no longer vendors `src/styles/fts-theme.css`. That copy had
+gone stale: it still carried the pre-2026-07-03 shadcn dark palette, so
+it never picked up the Obsidian dark colours the Dioxus app switched
+to — and `src/styles/index.css` had already stopped importing it ("the
+signal-* tokens it defined aren't needed in the lab"). It was dead,
+drifted weight, so it has been deleted.
+
+The lab now takes its CSS variables from the `:root` / `.dark` blocks
+`shadcn apply` writes into `src/styles/index.css` directly. The Dioxus
+app's tokens live at `libs/fts-ui/fts-ui/assets/fts-theme.css` (the one
+canonical sheet in the tree) with Task's palette overrides layered on
+top in `apps/task/fts-theme.css`; if you want the lab to track the app
+exactly, `@import` those rather than re-copying them. The shadcn/ui primitives
 in `src/components/ui/` (button, card, badge, skeleton, tabs) are
 styled entirely by those tokens, so the lab and the Dioxus app render
 from the same palette. `components.json` is set up for

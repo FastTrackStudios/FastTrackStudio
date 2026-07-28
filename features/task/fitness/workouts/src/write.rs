@@ -30,15 +30,7 @@ pub fn write_routine(
     r: &mut Routine,
     overwrite: bool,
 ) -> Result<PathBuf, WriteError> {
-    let body = serialize_routine(r)?;
-    write_page(
-        vault_root,
-        &mut r.path,
-        &mut r.date_created,
-        &mut r.date_modified,
-        overwrite,
-        &body,
-    )
+    write_page::<Routines>(vault_root, r, overwrite)
 }
 
 pub fn write_session(
@@ -46,29 +38,26 @@ pub fn write_session(
     s: &mut WorkoutSession,
     overwrite: bool,
 ) -> Result<PathBuf, WriteError> {
-    let body = serialize_session(s)?;
-    write_page(
-        vault_root,
-        &mut s.path,
-        &mut s.date_created,
-        &mut s.date_modified,
-        overwrite,
-        &body,
-    )
+    write_page::<Sessions>(vault_root, s, overwrite)
 }
 
-fn write_page(
+/// Write `model` to `<vault_root>/<model.path>`, creating parent
+/// directories.
+///
+/// The timestamps are stamped *before* the page is serialized. They used
+/// to be stamped after, against an already-rendered body — so the file on
+/// disk kept the previous `dateCreated`/`dateModified` (usually absent on
+/// a first write) while the caller's struct came back carrying the new
+/// ones. Every other slice stamps first; these two were the outliers.
+fn write_page<E: VaultEntity>(
     vault_root: &Path,
-    path: &mut String,
-    created: &mut Option<chrono::DateTime<chrono::Utc>>,
-    modified: &mut Option<chrono::DateTime<chrono::Utc>>,
+    model: &mut E::Model,
     overwrite: bool,
-    body: &str,
 ) -> Result<PathBuf, WriteError> {
-    if path.is_empty() {
+    if E::path(model).is_empty() {
         return Err(WriteError::BadPath("path is empty".into()));
     }
-    let abs = vault_root.join(&*path);
+    let abs = vault_root.join(E::path(model));
     if !overwrite && abs.exists() {
         return Err(WriteError::Exists(abs.display().to_string()));
     }
@@ -76,10 +65,9 @@ fn write_page(
         std::fs::create_dir_all(parent).map_err(|e| WriteError::Io(e.to_string()))?;
     }
     let now = Utc::now();
-    if created.is_none() {
-        *created = Some(now);
-    }
-    *modified = Some(now);
+    E::on_create(model, now);
+    E::on_update(model, now);
+    let body = E::to_markdown(model)?;
     std::fs::write(&abs, body).map_err(|e| WriteError::Io(e.to_string()))?;
     Ok(abs)
 }
@@ -102,4 +90,73 @@ pub fn default_session_path(date: chrono::NaiveDate, name: &str, folder: Option<
         .unwrap_or(Sessions::DEFAULT_FOLDER)
         .trim_end_matches('/');
     format!("{dir}/{date_str}-{slug}.md")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn routine() -> Routine {
+        Routine {
+            path: "routines/push-pull-legs.md".into(),
+            id: uuid::Uuid::new_v4(),
+            name: "Push Pull Legs".into(),
+            description: None,
+            days: Vec::new().into(),
+            tags: Vec::new().into(),
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+        }
+    }
+
+    /// Read a timestamp key back out of a written page. Compares parsed
+    /// instants rather than text — serde_yaml emits the `Z` spelling of
+    /// RFC-3339 and `to_rfc3339` emits `+00:00`.
+    fn stamp_on_disk(page: &str, key: &str) -> chrono::DateTime<Utc> {
+        let (map, _) = vault_entity::frontmatter::mapping(page)
+            .unwrap_or_else(|| panic!("page has no frontmatter mapping:\n{page}"));
+        vault_entity::yaml::timestamp_at(&map, key)
+            .unwrap_or_else(|| panic!("`{key}` missing from the written page:\n{page}"))
+    }
+
+    /// The timestamps the caller gets back must be the ones on disk.
+    /// They used to diverge: the page was serialized before the stamps
+    /// were applied, so a first write produced a file with no
+    /// `dateCreated` at all while the struct came back carrying one.
+    #[test]
+    fn first_write_persists_the_stamps_it_returns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut r = routine();
+        let abs = write_routine(tmp.path(), &mut r, false).unwrap();
+
+        let created = r.date_created.expect("dateCreated stamped on the struct");
+        let modified = r.date_modified.expect("dateModified stamped on the struct");
+
+        let page = std::fs::read_to_string(&abs).unwrap();
+        assert_eq!(stamp_on_disk(&page, "dateCreated"), created);
+        assert_eq!(stamp_on_disk(&page, "dateModified"), modified);
+    }
+
+    /// A rewrite keeps the original creation time and advances the
+    /// modification time, on disk as well as in the struct.
+    #[test]
+    fn rewrite_keeps_created_and_advances_modified() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut r = routine();
+        write_routine(tmp.path(), &mut r, false).unwrap();
+        let first_created = r.date_created.unwrap();
+        let first_modified = r.date_modified.unwrap();
+
+        let abs = write_routine(tmp.path(), &mut r, true).unwrap();
+        assert_eq!(r.date_created, Some(first_created), "creation time moved");
+        assert!(r.date_modified.unwrap() >= first_modified);
+
+        let page = std::fs::read_to_string(&abs).unwrap();
+        assert_eq!(stamp_on_disk(&page, "dateCreated"), first_created);
+        assert_eq!(
+            stamp_on_disk(&page, "dateModified"),
+            r.date_modified.unwrap()
+        );
+    }
 }

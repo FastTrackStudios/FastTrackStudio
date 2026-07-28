@@ -8,35 +8,17 @@
 //! doesn't blank the whole view); an error only surfaces if *nothing*
 //! came back.
 
-use project::ProjectInfo;
-use task::TaskInfo as DbTask;
+use project_proto::ProjectInfo;
+use task_proto::TaskInfo as DbTask;
+// The `feeds!` declaration macro and the multi-org fan-out helpers live
+// in `task-ui-core`, so feature UI crates declare their own calls the
+// same way — see that module's docs for the shape.
+use task_ui_core::feeds;
+use task_ui_core::feeds::{collect, fan_out, fan_out_tagged};
 
 /// Active projects across the selected orgs (concurrent fan-out).
 pub async fn fetch_projects(slugs: &[String]) -> Result<Vec<ProjectInfo>, String> {
-    let futs = slugs.iter().map(|slug| async move {
-        match crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await {
-            Ok(client) => client
-                .list()
-                .await
-                .map_err(|e| format!("{slug}: list: {e:?}")),
-            Err(e) => Err(format!("{slug}: {e}")),
-        }
-    });
-    collect(futures_util::future::join_all(futs).await)
-}
-
-/// Goals across the selected orgs (concurrent fan-out).
-pub async fn fetch_goals(slugs: &[String]) -> Result<Vec<goal::Goal>, String> {
-    let futs = slugs.iter().map(|slug| async move {
-        match crate::vox_clients::establish_for::<goal::GoalServiceClient>(slug).await {
-            Ok(client) => client
-                .list()
-                .await
-                .map_err(|e| format!("{slug}: list: {e:?}")),
-            Err(e) => Err(format!("{slug}: {e}")),
-        }
-    });
-    collect(futures_util::future::join_all(futs).await)
+    fan_out(slugs, "list", |c: project_proto::ProjectServiceClient| async move { c.list().await }).await
 }
 
 /// Tasks across the selected orgs (concurrent fan-out).
@@ -52,169 +34,82 @@ pub async fn fetch_tasks(slugs: &[String]) -> Result<Vec<DbTask>, String> {
 /// org it came from — feeds the shared project store so mutations and
 /// the detail page can route back to the owning org.
 pub async fn fetch_projects_tagged(slugs: &[String]) -> Result<Vec<(String, ProjectInfo)>, String> {
-    let futs = slugs.iter().map(|slug| async move {
-        match crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await {
-            Ok(client) => client
-                .list()
-                .await
-                .map(|rows| {
-                    rows.into_iter()
-                        .map(|p| (slug.clone(), p))
-                        .collect::<Vec<_>>()
-                })
-                .map_err(|e| format!("{slug}: list: {e:?}")),
-            Err(e) => Err(format!("{slug}: {e}")),
-        }
-    });
-    collect(futures_util::future::join_all(futs).await)
+    fan_out_tagged(slugs, "list", |c: project_proto::ProjectServiceClient| async move {
+        c.list().await
+    })
+    .await
 }
 
 /// Tasks across the selected orgs, each paired with the slug of the org
 /// it came from — so mutations can be routed back to the right org's
 /// `TaskService` when viewing "All".
 pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)>, String> {
-    let futs = slugs.iter().map(|slug| async move {
-        match crate::vox_clients::establish_for::<task::TaskServiceClient>(slug).await {
-            Ok(client) => client
-                .list()
-                .await
-                .map(|rows| {
-                    rows.into_iter()
-                        .map(|t| (slug.clone(), t))
-                        .collect::<Vec<_>>()
-                })
-                .map_err(|e| format!("{slug}: list: {e:?}")),
-            Err(e) => Err(format!("{slug}: {e}")),
-        }
-    });
-    collect(futures_util::future::join_all(futs).await)
+    fan_out_tagged(slugs, "list", |c: task_proto::TaskServiceClient| async move { c.list().await }).await
 }
 
-/// Fetch one org's day-plan templates (drives the calendar schedule
-/// overlay), in the order the backend lists them.
-pub async fn fetch_day_templates(slug: &str) -> Result<Vec<scheduling_proto::DayTemplate>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::DayTemplatesClient>(slug).await?;
-    client
-        .list_day_templates()
-        .await
-        .map_err(|e| format!("{slug}: day templates: {e:?}"))
-}
+feeds! {
+    scheduling_proto::DayTemplatesClient {
+        /// Fetch one org's day-plan templates (drives the calendar schedule
+        /// overlay), in the order the backend lists them.
+        fetch_day_templates() -> Vec<scheduling_proto::DayTemplate>
+            = list_day_templates() as "day templates";
+    }
 
-/// The saved per-date plan for `date` (ISO `YYYY-MM-DD`), or `None`
-/// when the date hasn't been edited (caller materializes a default).
-pub async fn fetch_day_plan(
-    slug: &str,
-    date: &str,
-) -> Result<Option<scheduling_proto::DayPlan>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::DayPlansClient>(slug).await?;
-    client
-        .get_day_plan(date.to_string())
-        .await
-        .map_err(|e| format!("{slug}: day plan {date}: {e:?}"))
-}
+    scheduling_proto::DayPlansClient {
+        /// The saved per-date plan for `date` (ISO `YYYY-MM-DD`), or `None`
+        /// when the date hasn't been edited (caller materializes a default).
+        fetch_day_plan(date: &str) -> Option<scheduling_proto::DayPlan>
+            = get_day_plan(date.to_string()) as format!("day plan {date}");
 
-/// Save (replacing) a per-date plan.
-pub async fn save_day_plan(slug: &str, plan: scheduling_proto::DayPlan) -> Result<(), String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::DayPlansClient>(slug).await?;
-    client
-        .upsert_day_plan(plan)
-        .await
-        .map_err(|e| format!("{slug}: save day plan: {e:?}"))
-}
+        /// Save (replacing) a per-date plan.
+        save_day_plan(plan: scheduling_proto::DayPlan) -> ()
+            = upsert_day_plan(plan) as "save day plan";
 
-/// Delete a per-date plan, reverting that date to the template.
-pub async fn delete_day_plan(slug: &str, date: &str) -> Result<(), String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::DayPlansClient>(slug).await?;
-    client
-        .delete_day_plan(date.to_string())
-        .await
-        .map_err(|e| format!("{slug}: delete day plan {date}: {e:?}"))
-}
+        /// Delete a per-date plan, reverting that date to the template.
+        delete_day_plan(date: &str) -> ()
+            = delete_day_plan(date.to_string()) as format!("delete day plan {date}");
+    }
 
-/// All persisted calendar events for the org.
-pub async fn list_events(slug: &str) -> Result<Vec<scheduling_proto::CalEvent>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
-    client
-        .list_events()
-        .await
-        .map_err(|e| format!("{slug}: list events: {e:?}"))
-}
+    scheduling_proto::CalendarEventsClient {
+        /// All persisted calendar events for the org.
+        list_events() -> Vec<scheduling_proto::CalEvent>
+            = list_events() as "list events";
 
-/// Save (replacing) one calendar event.
-pub async fn upsert_event(slug: &str, event: scheduling_proto::CalEvent) -> Result<(), String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
-    client
-        .upsert_event(event)
-        .await
-        .map_err(|e| format!("{slug}: save event: {e:?}"))
-}
+        /// Save (replacing) one calendar event.
+        upsert_event(event: scheduling_proto::CalEvent) -> ()
+            = upsert_event(event) as "save event";
 
-/// Delete one calendar event.
-pub async fn delete_event(slug: &str, id: &str) -> Result<(), String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
-    client
-        .delete_event(id.to_string())
-        .await
-        .map_err(|e| format!("{slug}: delete event: {e:?}"))
+        /// Delete one calendar event.
+        delete_event(id: &str) -> ()
+            = delete_event(id.to_string()) as "delete event";
+    }
 }
 
 // ── Bookings (Cal.com-style booking half) ───────────────────────────
 
-/// All bookable event types for the org (30-min consults, etc.).
-pub async fn fetch_event_types(slug: &str) -> Result<Vec<scheduling_proto::EventType>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::EventTypesClient>(slug).await?;
-    client
-        .list_event_types()
-        .await
-        .map_err(|e| format!("{slug}: list event types: {e:?}"))
-}
+feeds! {
+    scheduling_proto::EventTypesClient {
+        /// All bookable event types for the org (30-min consults, etc.).
+        fetch_event_types() -> Vec<scheduling_proto::EventType>
+            = list_event_types() as "list event types";
 
-/// Create (upsert) a bookable event type, returning the persisted draft
-/// so optimistic stores can reconcile against it. The backend derives
-/// the vault `path` from the slug/id; the caller builds the entity (see
-/// `stores::draft_event_type`).
-pub async fn create_event_type(
-    slug: &str,
-    event_type: scheduling_proto::EventType,
-) -> Result<scheduling_proto::EventType, String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::EventTypesClient>(slug).await?;
-    client
-        .upsert_event_type(event_type.clone())
-        .await
-        .map(|()| event_type)
-        .map_err(|e| format!("{slug}: create event type: {e:?}"))
-}
+        /// Create (upsert) a bookable event type, returning the persisted draft
+        /// so optimistic stores can reconcile against it. The backend derives
+        /// the vault `path` from the slug/id; the caller builds the entity (see
+        /// `stores::draft_event_type`).
+        create_event_type(event_type: scheduling_proto::EventType) -> scheduling_proto::EventType
+            = upsert_event_type(event_type.clone()) map |()| event_type, as "create event type";
+    }
 
-/// All bookings for the org (every status), oldest start first.
-pub async fn fetch_bookings(slug: &str) -> Result<Vec<scheduling_proto::Booking>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::BookingsClient>(slug).await?;
-    client
-        .list_bookings()
-        .await
-        .map_err(|e| format!("{slug}: list bookings: {e:?}"))
-}
+    scheduling_proto::BookingsClient {
+        /// All bookings for the org (every status), oldest start first.
+        fetch_bookings() -> Vec<scheduling_proto::Booking>
+            = list_bookings() as "list bookings";
 
-/// Cancel a booking by id (sets status to `Cancelled`).
-pub async fn cancel_booking(slug: &str, id: &str) -> Result<(), String> {
-    let client =
-        crate::vox_clients::establish_for::<scheduling_proto::BookingsClient>(slug).await?;
-    client
-        .update_booking_status(
-            scheduling_proto::BookingId(id.to_owned()),
-            scheduling_proto::BookingStatus::Cancelled,
-        )
-        .await
-        .map_err(|e| format!("{slug}: cancel booking: {e:?}"))
+        /// Cancel a booking by id (sets status to `Cancelled`).
+        cancel_booking(id: &str) -> ()
+            = update_booking_status(scheduling_proto::BookingId(id.to_owned()), scheduling_proto::BookingStatus::Cancelled) as "cancel booking";
+    }
 }
 
 /// Lowercase, hyphenate, strip non-url-safe chars for an event-type slug.
@@ -233,67 +128,42 @@ pub fn slugify(s: &str) -> String {
     out.trim_matches('-').to_owned()
 }
 
-/// Every inbox item (open + processed + archived), oldest first.
-/// Consumers filter by `status` / `resurface_on` for the daily queue.
-pub async fn fetch_inbox(slug: &str) -> Result<Vec<inbox_proto::InboxItem>, String> {
-    let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
-    client
-        .list_inbox()
-        .await
-        .map_err(|e| format!("{slug}: list inbox: {e:?}"))
-}
+feeds! {
+    inbox_proto::InboxClient {
+        /// Every inbox item (open + processed + archived), oldest first.
+        /// Consumers filter by `status` / `resurface_on` for the daily queue.
+        fetch_inbox() -> Vec<inbox_proto::InboxItem>
+            = list_inbox() as "list inbox";
 
-/// Capture or update one inbox item (keyed by id). Capture, snooze,
-/// process, and archive all flow through here.
-pub async fn upsert_inbox_item(slug: &str, item: inbox_proto::InboxItem) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
-    client
-        .upsert_inbox_item(item)
-        .await
-        .map_err(|e| format!("{slug}: save inbox item: {e:?}"))
-}
+        /// Capture or update one inbox item (keyed by id). Capture, snooze,
+        /// process, and archive all flow through here.
+        upsert_inbox_item(item: inbox_proto::InboxItem) -> ()
+            = upsert_inbox_item(item) as "save inbox item";
 
-/// Delete one inbox item.
-pub async fn delete_inbox_item(slug: &str, id: &str) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<inbox_proto::InboxClient>(slug).await?;
-    client
-        .delete_inbox_item(id.to_string())
-        .await
-        .map_err(|e| format!("{slug}: delete inbox item: {e:?}"))
+        /// Delete one inbox item.
+        delete_inbox_item(id: &str) -> ()
+            = delete_inbox_item(id.to_string()) as "delete inbox item";
+    }
 }
 
 // ── Recall (spaced-repetition learning deck) ─────────────────────────
 
-/// Every recall card (all decks, archived + active), oldest first.
-/// Consumers filter by `project` / `archived` / due-date client-side.
-pub async fn fetch_recall_cards(slug: &str) -> Result<Vec<recall_proto::RecallCard>, String> {
-    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
-    client
-        .list_cards()
-        .await
-        .map_err(|e| format!("{slug}: list recall cards: {e:?}"))
-}
+feeds! {
+    recall_proto::RecallClient {
+        /// Every recall card (all decks, archived + active), oldest first.
+        /// Consumers filter by `project` / `archived` / due-date client-side.
+        fetch_recall_cards() -> Vec<recall_proto::RecallCard>
+            = list_cards() as "list recall cards";
 
-/// The due, non-archived review queue for `today` (ISO `YYYY-MM-DD`).
-pub async fn fetch_recall_due(
-    slug: &str,
-    today: &str,
-) -> Result<Vec<recall_proto::RecallCard>, String> {
-    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
-    client
-        .review_queue(today.to_string())
-        .await
-        .map_err(|e| format!("{slug}: recall review queue: {e:?}"))
-}
+        /// The due, non-archived review queue for `today` (ISO `YYYY-MM-DD`).
+        fetch_recall_due(today: &str) -> Vec<recall_proto::RecallCard>
+            = review_queue(today.to_string()) as "recall review queue";
 
-/// Create or update one card (keyed by id). Authoring, edits, and
-/// review-reschedules all flow through here.
-pub async fn upsert_recall_card(slug: &str, card: recall_proto::RecallCard) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
-    client
-        .upsert_card(card)
-        .await
-        .map_err(|e| format!("{slug}: save recall card: {e:?}"))
+        /// Create or update one card (keyed by id). Authoring, edits, and
+        /// review-reschedules all flow through here.
+        upsert_recall_card(card: recall_proto::RecallCard) -> ()
+            = upsert_card(card) as "save recall card";
+    }
 }
 
 /// Read one vault note's text (UTF-8, lossy) — backs the recall
@@ -307,97 +177,52 @@ pub async fn fetch_note_text(slug: &str, path: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes.0).into_owned())
 }
 
-/// Delete one card.
-pub async fn delete_recall_card(slug: &str, id: &str) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<recall_proto::RecallClient>(slug).await?;
-    client
-        .delete_card(id.to_string())
-        .await
-        .map_err(|e| format!("{slug}: delete recall card: {e:?}"))
+feeds! {
+    recall_proto::RecallClient {
+        /// Delete one card.
+        delete_recall_card(id: &str) -> ()
+            = delete_card(id.to_string()) as "delete recall card";
+    }
 }
 
 // ── Contacts (vault-backed people directory) ─────────────────────────
 
-/// Every contact in the directory (archived + active). Consumers filter
-/// by group / archived / source client-side.
-pub async fn fetch_contacts(slug: &str) -> Result<Vec<contacts_proto::Contact>, String> {
-    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
-    client
-        .list_contacts()
-        .await
-        .map_err(|e| format!("{slug}: list contacts: {e:?}"))
-}
+feeds! {
+    contacts_proto::ContactsClient {
+        /// Every contact in the directory (archived + active). Consumers filter
+        /// by group / archived / source client-side.
+        fetch_contacts() -> Vec<contacts_proto::Contact>
+            = list_contacts() as "list contacts";
 
-/// One contact by id, or `None` if the file is gone.
-pub async fn get_contact(slug: &str, id: &str) -> Result<Option<contacts_proto::Contact>, String> {
-    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
-    client
-        .get_contact(id.to_string())
-        .await
-        .map_err(|e| format!("{slug}: get contact: {e:?}"))
-}
+        /// One contact by id, or `None` if the file is gone.
+        get_contact(id: &str) -> Option<contacts_proto::Contact>
+            = get_contact(id.to_string()) as "get contact";
 
-/// Create or update one contact (keyed by id). Author, edit, link, and
-/// archive all flow through here.
-pub async fn upsert_contact(slug: &str, contact: contacts_proto::Contact) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
-    client
-        .upsert_contact(contact)
-        .await
-        .map_err(|e| format!("{slug}: save contact: {e:?}"))
-}
+        /// Create or update one contact (keyed by id). Author, edit, link, and
+        /// archive all flow through here.
+        upsert_contact(contact: contacts_proto::Contact) -> ()
+            = upsert_contact(contact) as "save contact";
 
-/// Permanently remove a contact from the vault.
-pub async fn delete_contact(slug: &str, id: &str) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
-    client
-        .delete_contact(id.to_string())
-        .await
-        .map_err(|e| format!("{slug}: delete contact: {e:?}"))
-}
+        /// Permanently remove a contact from the vault.
+        delete_contact(id: &str) -> ()
+            = delete_contact(id.to_string()) as "delete contact";
 
-/// Every configured CardDAV sync account (passwords blanked).
-pub async fn fetch_carddav_accounts(
-    slug: &str,
-) -> Result<Vec<contacts_proto::CardDavAccount>, String> {
-    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
-    client
-        .list_accounts()
-        .await
-        .map_err(|e| format!("{slug}: list carddav accounts: {e:?}"))
-}
+        /// Every configured CardDAV sync account (passwords blanked).
+        fetch_carddav_accounts() -> Vec<contacts_proto::CardDavAccount>
+            = list_accounts() as "list carddav accounts";
 
-/// Create or update one CardDAV sync account (keyed by id).
-pub async fn upsert_carddav_account(
-    slug: &str,
-    account: contacts_proto::CardDavAccount,
-) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
-    client
-        .upsert_account(account)
-        .await
-        .map_err(|e| format!("{slug}: save carddav account: {e:?}"))
-}
+        /// Create or update one CardDAV sync account (keyed by id).
+        upsert_carddav_account(account: contacts_proto::CardDavAccount) -> ()
+            = upsert_account(account) as "save carddav account";
 
-/// Remove a CardDAV sync account (its imported contacts stay).
-pub async fn delete_carddav_account(slug: &str, id: &str) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
-    client
-        .delete_account(id.to_string())
-        .await
-        .map_err(|e| format!("{slug}: delete carddav account: {e:?}"))
-}
+        /// Remove a CardDAV sync account (its imported contacts stay).
+        delete_carddav_account(id: &str) -> ()
+            = delete_account(id.to_string()) as "delete carddav account";
 
-/// Run a one-way pull for one account, returning its [`SyncReport`].
-pub async fn sync_carddav_account(
-    slug: &str,
-    id: &str,
-) -> Result<contacts_proto::SyncReport, String> {
-    let client = crate::vox_clients::establish_for::<contacts_proto::ContactsClient>(slug).await?;
-    client
-        .sync_account(id.to_string())
-        .await
-        .map_err(|e| format!("{slug}: sync carddav account: {e:?}"))
+        /// Run a one-way pull for one account, returning its [`SyncReport`].
+        sync_carddav_account(id: &str) -> contacts_proto::SyncReport
+            = sync_account(id.to_string()) as "sync carddav account";
+    }
 }
 
 // ── Threads (conversations on tasks/projects) ────────────────────────
@@ -406,161 +231,67 @@ pub async fn sync_carddav_account(
 // is one API, established via `vox_clients::establish_for` (which already
 // compiles for both wasm + native). No per-target duplication.
 
-/// Threads anchored to `(entity_type, entity_id)`, newest first.
-pub async fn fetch_threads(
-    slug: &str,
-    entity_type: &str,
-    entity_id: uuid::Uuid,
-) -> Result<Vec<threads::Thread>, String> {
-    let client = crate::vox_clients::establish_for::<threads::ThreadsServiceClient>(slug).await?;
-    client
-        .list_threads(entity_type.to_string(), entity_id)
-        .await
-        .map_err(|e| format!("{slug}: list threads: {e:?}"))
-}
+feeds! {
+    threads::ThreadsServiceClient {
+        /// Threads anchored to `(entity_type, entity_id)`, newest first.
+        fetch_threads(entity_type: &str, entity_id: uuid::Uuid) -> Vec<threads::Thread>
+            = list_threads(entity_type.to_string(), entity_id) as "list threads";
 
-/// Messages of one thread, oldest first.
-pub async fn fetch_thread_messages(
-    slug: &str,
-    thread_id: uuid::Uuid,
-) -> Result<Vec<threads::Message>, String> {
-    let client = crate::vox_clients::establish_for::<threads::ThreadsServiceClient>(slug).await?;
-    client
-        .list_messages(thread_id)
-        .await
-        .map_err(|e| format!("{slug}: list messages: {e:?}"))
-}
+        /// Messages of one thread, oldest first.
+        fetch_thread_messages(thread_id: uuid::Uuid) -> Vec<threads::Message>
+            = list_messages(thread_id) as "list messages";
 
-/// Open a new thread.
-pub async fn create_thread(
-    slug: &str,
-    req: threads::CreateThreadRequest,
-) -> Result<threads::Thread, String> {
-    let client = crate::vox_clients::establish_for::<threads::ThreadsServiceClient>(slug).await?;
-    client
-        .create_thread(req)
-        .await
-        .map_err(|e| format!("{slug}: create thread: {e:?}"))
-}
+        /// Open a new thread.
+        create_thread(req: threads::CreateThreadRequest) -> threads::Thread
+            = create_thread(req) as "create thread";
 
-/// Post a message to a thread.
-pub async fn post_thread_message(
-    slug: &str,
-    req: threads::PostMessageRequest,
-) -> Result<threads::Message, String> {
-    let client = crate::vox_clients::establish_for::<threads::ThreadsServiceClient>(slug).await?;
-    client
-        .post_message(req)
-        .await
-        .map_err(|e| format!("{slug}: post message: {e:?}"))
-}
+        /// Post a message to a thread.
+        post_thread_message(req: threads::PostMessageRequest) -> threads::Message
+            = post_message(req) as "post message";
+    }
 
-/// Repos *connected* (project-bound) in this org — the `/repos`
-/// "connected" view, distinct from the raw forge catalog.
-pub async fn fetch_connected_repos(slug: &str) -> Result<Vec<git_proto::RepoId>, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::connections::RepoConnectionsClient>(slug)
-            .await?;
-    client
-        .list_connected_repos()
-        .await
-        .map_err(|e| format!("{slug}: list connected repos: {e:?}"))
-}
+    git_proto::connections::RepoConnectionsClient {
+        /// Repos *connected* (project-bound) in this org — the `/repos`
+        /// "connected" view, distinct from the raw forge catalog.
+        fetch_connected_repos() -> Vec<git_proto::RepoId>
+            = list_connected_repos() as "list connected repos";
 
-/// Comments on a forge issue — the issue's conversation, rendered under
-/// it in the `/repos` view. Works for PRs too (Gitea shares the index).
-pub async fn fetch_issue_comments(
-    slug: &str,
-    repo: git_proto::RepoId,
-    number: u64,
-) -> Result<Vec<git_proto::Comment>, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::issues::IssueTrackerClient>(slug).await?;
-    client
-        .list_comments(repo, git_proto::IssueId(number))
-        .await
-        .map_err(|e| format!("{slug}: list comments #{number}: {e:?}"))
-}
+        /// Repos bound to a specific project (its connected repos).
+        fetch_repos_for_project(project_id: uuid::Uuid) -> Vec<git_proto::RepoId>
+            = repos_for_project(project_id.to_string()) as "repos for project";
+    }
 
-/// Repos bound to a specific project (its connected repos).
-pub async fn fetch_repos_for_project(
-    slug: &str,
-    project_id: uuid::Uuid,
-) -> Result<Vec<git_proto::RepoId>, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::connections::RepoConnectionsClient>(slug)
-            .await?;
-    client
-        .repos_for_project(project_id.to_string())
-        .await
-        .map_err(|e| format!("{slug}: repos for project: {e:?}"))
-}
+    git_proto::issues::IssueTrackerClient {
+        /// Comments on a forge issue — the issue's conversation, rendered under
+        /// it in the `/repos` view. Works for PRs too (Gitea shares the index).
+        fetch_issue_comments(repo: git_proto::RepoId, number: u64) -> Vec<git_proto::Comment>
+            = list_comments(repo, git_proto::IssueId(number)) as format!("list comments #{number}");
 
-/// Update a project (write-through to its markdown). Used to change the
-/// project type from the detail page.
-pub async fn create_project(
-    slug: &str,
-    project: project::ProjectInfo,
-) -> Result<project::ProjectInfo, String> {
-    let client = crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await?;
-    client
-        .create(project)
-        .await
-        .map_err(|e| format!("{slug}: create project: {e:?}"))
-}
+        /// Post a comment to an issue or PR conversation (PRs share the issue
+        /// index). Authored as the server's configured forge identity.
+        post_issue_comment(repo: git_proto::RepoId, number: u64, body: String) -> git_proto::Comment
+            = add_comment(repo, git_proto::IssueId(number), body) as format!("add comment #{number}");
+    }
 
-pub async fn update_project(
-    slug: &str,
-    project: project::ProjectInfo,
-) -> Result<project::ProjectInfo, String> {
-    let client = crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await?;
-    client
-        .update(project)
-        .await
-        .map_err(|e| format!("{slug}: update project: {e:?}"))
-}
+    project_proto::ProjectServiceClient {
+        /// Update a project (write-through to its markdown). Used to change the
+        /// project type from the detail page.
+        create_project(project: project_proto::ProjectInfo) -> project_proto::ProjectInfo
+            = create(project) as "create project";
 
-/// Pull requests on a connected repo.
-pub async fn fetch_pull_requests(
-    slug: &str,
-    repo: git_proto::RepoId,
-) -> Result<Vec<git_proto::PullRequest>, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::reviews::ReviewSurfaceClient>(slug).await?;
-    client
-        .list_pull_requests(repo)
-        .await
-        .map_err(|e| format!("{slug}: list pull requests: {e:?}"))
-}
+        update_project(project: project_proto::ProjectInfo) -> project_proto::ProjectInfo
+            = update(project) as "update project";
+    }
 
-/// Reviews on a PR (summary state + body per reviewer).
-pub async fn fetch_pr_reviews(
-    slug: &str,
-    repo: git_proto::RepoId,
-    pr: u64,
-) -> Result<Vec<git_proto::Review>, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::reviews::ReviewSurfaceClient>(slug).await?;
-    client
-        .list_reviews(repo, git_proto::PullRequestId(pr))
-        .await
-        .map_err(|e| format!("{slug}: list reviews #{pr}: {e:?}"))
-}
+    git_proto::reviews::ReviewSurfaceClient {
+        /// Pull requests on a connected repo.
+        fetch_pull_requests(repo: git_proto::RepoId) -> Vec<git_proto::PullRequest>
+            = list_pull_requests(repo) as "list pull requests";
 
-/// Post a comment to an issue or PR conversation (PRs share the issue
-/// index). Authored as the server's configured forge identity.
-pub async fn post_issue_comment(
-    slug: &str,
-    repo: git_proto::RepoId,
-    number: u64,
-    body: String,
-) -> Result<git_proto::Comment, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::issues::IssueTrackerClient>(slug).await?;
-    client
-        .add_comment(repo, git_proto::IssueId(number), body)
-        .await
-        .map_err(|e| format!("{slug}: add comment #{number}: {e:?}"))
+        /// Reviews on a PR (summary state + body per reviewer).
+        fetch_pr_reviews(repo: git_proto::RepoId, pr: u64) -> Vec<git_proto::Review>
+            = list_reviews(repo, git_proto::PullRequestId(pr)) as format!("list reviews #{pr}");
+    }
 }
 
 /// Open or close an issue (state-only update).
@@ -582,27 +313,20 @@ pub async fn set_issue_state(
         .map_err(|e| format!("{slug}: set state #{number}: {e:?}"))
 }
 
-/// Merge a pull request.
-pub async fn merge_pull_request(
-    slug: &str,
-    repo: git_proto::RepoId,
-    number: u64,
-    method: git_proto::MergeMethod,
-) -> Result<Option<String>, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::reviews::ReviewSurfaceClient>(slug).await?;
-    client
-        .merge_pull_request(repo, git_proto::PullRequestId(number), method)
-        .await
-        .map_err(|e| format!("{slug}: merge PR #{number}: {e:?}"))
+feeds! {
+    git_proto::reviews::ReviewSurfaceClient {
+        /// Merge a pull request.
+        merge_pull_request(repo: git_proto::RepoId, number: u64, method: git_proto::MergeMethod) -> Option<String>
+            = merge_pull_request(repo, git_proto::PullRequestId(number), method) as format!("merge PR #{number}");
+    }
 }
 
 /// Promote an inbox item into a Task — `title` is the headline, `details`
 /// the markdown body. Returns the created task (its `path` is the
 /// provenance back-link to store in `processed_into`).
-pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task::TaskInfo, String> {
-    let client = crate::vox_clients::establish_for::<task::TaskServiceClient>(slug).await?;
-    let t = task::TaskInfo {
+pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task_proto::TaskInfo, String> {
+    let client = crate::vox_clients::establish_for::<task_proto::TaskServiceClient>(slug).await?;
+    let t = task_proto::TaskInfo {
         id: uuid::Uuid::nil(),
         path: String::new(),
         title: title.to_owned(),
@@ -610,19 +334,19 @@ pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task:
         priority: "normal".into(),
         due: None,
         scheduled: None,
-        tags: task::model::StringList(vec!["task".into()]),
-        contexts: task::model::StringList::default(),
-        projects: task::model::StringList::default(),
+        tags: task_proto::model::StringList(vec!["task".into()]),
+        contexts: task_proto::model::StringList::default(),
+        projects: task_proto::model::StringList::default(),
         project_id: None,
         milestone_id: None,
         time_estimate: None,
-        time_entries: task::model::TimeEntries::default(),
+        time_entries: task_proto::model::TimeEntries::default(),
         recurrence: None,
         recurrence_anchor: None,
-        complete_instances: task::model::StringList::default(),
+        complete_instances: task_proto::model::StringList::default(),
         completed_date: None,
         agent_profile: String::new(),
-        dispatched_agent_tasks: task::model::StringList::default(),
+        dispatched_agent_tasks: task_proto::model::StringList::default(),
         date_created: None,
         date_modified: None,
         details: details.to_owned(),
@@ -634,305 +358,91 @@ pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task:
         .map_err(|e| format!("{slug}: create task: {e:?}"))
 }
 
-/// Promote an inbox item into an atomic note: write `markdown` to
-/// `path` (vault-relative, e.g. `Wiki/Atomic/<slug>.md`) in the org's
-/// `"default"` vault. `CreateOnly` so a re-promote doesn't clobber.
-pub async fn create_wiki_note(slug: &str, path: &str, markdown: &str) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
-    client
-        .put_file(
-            "default".to_owned(),
-            path.to_owned(),
-            markdown.as_bytes().to_vec(),
-            vault_proto::IfMatch::CreateOnly,
-        )
-        .await
-        .map(|_| ())
-        .map_err(|e| format!("{slug}: write note: {e:?}"))
+feeds! {
+    vault_proto::VaultSyncClient {
+        /// Promote an inbox item into an atomic note: write `markdown` to
+        /// `path` (vault-relative, e.g. `Wiki/Atomic/<slug>.md`) in the org's
+        /// `"default"` vault. `CreateOnly` so a re-promote doesn't clobber.
+        create_wiki_note(path: &str, markdown: &str) -> ()
+            = put_file("default".to_owned(), path.to_owned(), markdown.as_bytes().to_vec(), vault_proto::IfMatch::CreateOnly) map |_| (), as "write note";
+    }
 }
 
 // ── Locations ───────────────────────────────────────────────────────
 
-/// Every location in the org's vault (studios / rooms / storage /
-/// venues / homes), in the order the backend lists them.
-pub async fn fetch_locations(slug: &str) -> Result<Vec<locations_proto::Location>, String> {
-    let client =
-        crate::vox_clients::establish_for::<locations_proto::LocationsServiceClient>(slug).await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list locations: {e:?}"))
-}
+feeds! {
+    locations_proto::LocationsServiceClient {
+        /// Every location in the org's vault (studios / rooms / storage /
+        /// venues / homes), in the order the backend lists them.
+        fetch_locations() -> Vec<locations_proto::Location>
+            = list() as "list locations";
 
-/// Create one location from a caller-built draft (see
-/// `stores::draft_location` — the backend assigns the real `id` and
-/// vault `path`). Returns the persisted location.
-pub async fn create_location(
-    slug: &str,
-    loc: locations_proto::Location,
-) -> Result<locations_proto::Location, String> {
-    let client =
-        crate::vox_clients::establish_for::<locations_proto::LocationsServiceClient>(slug).await?;
-    client
-        .create(loc)
-        .await
-        .map_err(|e| format!("{slug}: create location: {e:?}"))
+        /// Create one location from a caller-built draft (see
+        /// `stores::draft_location` — the backend assigns the real `id` and
+        /// vault `path`). Returns the persisted location.
+        create_location(loc: locations_proto::Location) -> locations_proto::Location
+            = create(loc) as "create location";
+    }
 }
 
 // ── Scripture ───────────────────────────────────────────────────────
 
-/// Installed Bible translations for the org (bundled editions first).
-pub async fn fetch_translations(
-    slug: &str,
-) -> Result<Vec<scripture_proto::TranslationInfo>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .translations()
-        .await
-        .map_err(|e| format!("{slug}: translations: {e:?}"))
-}
-
-/// One chapter of one translation. `book` accepts any spelling.
-pub async fn fetch_chapter(
-    slug: &str,
-    translation: &str,
-    book: &str,
-    chapter: u16,
-) -> Result<scripture_proto::ChapterView, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    // The generated vox client takes owned `String` args.
-    client
-        .chapter(translation.to_owned(), book.to_owned(), chapter)
-        .await
-        .map_err(|e| format!("{slug}: chapter {book} {chapter}: {e:?}"))
-}
-
-/// Compare a verse/range across translations (empty list ⇒ all).
-pub async fn fetch_comparison(
-    slug: &str,
-    reference: &str,
-    translations: Vec<String>,
-) -> Result<scripture_proto::ComparisonView, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .compare(reference.to_owned(), translations)
-        .await
-        .map_err(|e| format!("{slug}: compare {reference}: {e:?}"))
-}
-
-/// Per-verse backlinks for a chapter — vault notes that link each verse.
-pub async fn fetch_chapter_backlinks(
-    slug: &str,
-    book: &str,
-    chapter: u16,
-) -> Result<Vec<scripture_proto::VerseBacklinks>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .chapter_backlinks(book.to_owned(), chapter)
-        .await
-        .map_err(|e| format!("{slug}: backlinks {book} {chapter}: {e:?}"))
-}
-
-/// Installed original-language editions (TAGNT / TAHOT / SBLGNT / OSHB).
-pub async fn fetch_original_editions(
-    slug: &str,
-) -> Result<Vec<scripture_proto::OrigEditionInfo>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .original_editions()
-        .await
-        .map_err(|e| format!("{slug}: original editions: {e:?}"))
-}
-
-/// Word-by-word interlinear of a verse in an original-language edition.
-pub async fn fetch_interlinear(
-    slug: &str,
-    edition: &str,
-    reference: &str,
-) -> Result<Vec<scripture_proto::InterlinearWord>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .interlinear(edition.to_owned(), reference.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: interlinear {edition} {reference}: {e:?}"))
-}
-
-/// Strong's-tagged breakdown of a verse in an English translation.
-pub async fn fetch_word_tokens(
-    slug: &str,
-    translation: &str,
-    reference: &str,
-) -> Result<Vec<scripture_proto::WordToken>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .word_study(translation.to_owned(), reference.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: word tokens {reference}: {e:?}"))
-}
-
-/// Full word study for a Strong's code: lexicon entry + concordance.
-pub async fn fetch_word_study(
-    slug: &str,
-    strongs: &str,
-    limit: u32,
-) -> Result<scripture_proto::WordStudyReport, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .study(strongs.to_owned(), limit)
-        .await
-        .map_err(|e| format!("{slug}: word study {strongs}: {e:?}"))
-}
-
-/// Cross-references from a verse (votes-desc, `min_votes` filters noise).
-pub async fn fetch_cross_refs(
-    slug: &str,
-    reference: &str,
-    min_votes: i32,
-) -> Result<Vec<scripture_proto::WeightedRef>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .cross_refs(reference.to_owned(), min_votes)
-        .await
-        .map_err(|e| format!("{slug}: cross refs {reference}: {e:?}"))
-}
-
-/// Topics a verse is tagged with (votes-desc).
-pub async fn fetch_topics_of(
-    slug: &str,
-    reference: &str,
-) -> Result<Vec<scripture_proto::TopicTag>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .topics_of(reference.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: topics {reference}: {e:?}"))
-}
-
-/// Verses about a topic (votes-desc, capped at `limit`; 0 ⇒ default).
-pub async fn fetch_verses_for_topic(
-    slug: &str,
-    topic: &str,
-    limit: u32,
-) -> Result<Vec<scripture_proto::WeightedRef>, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .verses_for_topic(topic.to_owned(), limit)
-        .await
-        .map_err(|e| format!("{slug}: topic verses {topic}: {e:?}"))
-}
-
 // ── Inventory ───────────────────────────────────────────────────────
 
-/// Every inventory item in the org's vault (`type: item` gear /
-/// equipment pages), in the order the backend lists them.
-pub async fn fetch_inventory(slug: &str) -> Result<Vec<inventory_proto::Item>, String> {
-    let client =
-        crate::vox_clients::establish_for::<inventory_proto::InventoryServiceClient>(slug).await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list inventory: {e:?}"))
-}
+feeds! {
+    inventory_proto::InventoryServiceClient {
+        /// Every inventory item in the org's vault (`type: item` gear /
+        /// equipment pages), in the order the backend lists them.
+        fetch_inventory() -> Vec<inventory_proto::Item>
+            = list() as "list inventory";
 
-/// Create one inventory item from a caller-built draft (see
-/// `stores::draft_item` — the backend assigns the real `id` and vault
-/// `path`). Returns the persisted item.
-pub async fn create_item(
-    slug: &str,
-    item: inventory_proto::Item,
-) -> Result<inventory_proto::Item, String> {
-    let client =
-        crate::vox_clients::establish_for::<inventory_proto::InventoryServiceClient>(slug).await?;
-    client
-        .create(item)
-        .await
-        .map_err(|e| format!("{slug}: create item: {e:?}"))
-}
+        /// Create one inventory item from a caller-built draft (see
+        /// `stores::draft_item` — the backend assigns the real `id` and vault
+        /// `path`). Returns the persisted item.
+        create_item(item: inventory_proto::Item) -> inventory_proto::Item
+            = create(item) as "create item";
 
-/// Move an item along its lifecycle (in-use / stored / loaned /
-/// in-repair / missing / retired). Returns the updated item.
-pub async fn set_item_status(
-    slug: &str,
-    id: &str,
-    status: &str,
-) -> Result<inventory_proto::Item, String> {
-    let client =
-        crate::vox_clients::establish_for::<inventory_proto::InventoryServiceClient>(slug).await?;
-    client
-        .set_status(id.to_owned(), status.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: set item status: {e:?}"))
+        /// Move an item along its lifecycle (in-use / stored / loaned /
+        /// in-repair / missing / retired). Returns the updated item.
+        set_item_status(id: &str, status: &str) -> inventory_proto::Item
+            = set_status(id.to_owned(), status.to_owned()) as "set item status";
+    }
 }
 
 // ── Milestones ──────────────────────────────────────────────────────
 
-/// Every milestone in the org's vault (project-scoped checkpoints),
-/// in the order the backend lists them. Filter client-side by
-/// `project_id` / `status` as needed.
-pub async fn fetch_milestones(slug: &str) -> Result<Vec<milestone_proto::Milestone>, String> {
-    let client =
-        crate::vox_clients::establish_for::<milestone_proto::MilestoneServiceClient>(slug).await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list milestones: {e:?}"))
-}
+feeds! {
+    milestone_proto::MilestoneServiceClient {
+        /// Every milestone in the org's vault (project-scoped checkpoints),
+        /// in the order the backend lists them. Filter client-side by
+        /// `project_id` / `status` as needed.
+        fetch_milestones() -> Vec<milestone_proto::Milestone>
+            = list() as "list milestones";
 
-/// Create one milestone from a caller-built draft (see
-/// `stores::draft_milestone` — the backend derives the vault `path` and
-/// assigns the real `id`). Returns the persisted milestone.
-pub async fn create_milestone(
-    slug: &str,
-    ms: milestone_proto::Milestone,
-) -> Result<milestone_proto::Milestone, String> {
-    let client =
-        crate::vox_clients::establish_for::<milestone_proto::MilestoneServiceClient>(slug).await?;
-    client
-        .create(ms)
-        .await
-        .map_err(|e| format!("{slug}: create milestone: {e:?}"))
+        /// Create one milestone from a caller-built draft (see
+        /// `stores::draft_milestone` — the backend derives the vault `path` and
+        /// assigns the real `id`). Returns the persisted milestone.
+        create_milestone(ms: milestone_proto::Milestone) -> milestone_proto::Milestone
+            = create(ms) as "create milestone";
+    }
 }
 
 // ── Fitness ─────────────────────────────────────────────────────────
 
-/// Every tracked body metric (weight / body-fat / measurements)
-/// in the org's vault, in the order the backend lists them. Each
-/// carries its full entry time series inline.
-pub async fn fetch_body_metrics(
-    slug: &str,
-) -> Result<Vec<fitness_proto::body::BodyMetric>, String> {
-    let client =
-        crate::vox_clients::establish_for::<fitness_proto::body::BodyServiceClient>(slug).await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list body metrics: {e:?}"))
-}
+feeds! {
+    fitness_proto::body::BodyServiceClient {
+        /// Every tracked body metric (weight / body-fat / measurements)
+        /// in the org's vault, in the order the backend lists them. Each
+        /// carries its full entry time series inline.
+        fetch_body_metrics() -> Vec<fitness_proto::body::BodyMetric>
+            = list() as "list body metrics";
 
-/// Create one body metric from a caller-built draft (see
-/// `stores::draft_body_metric` — the backend assigns the real `id` and
-/// vault `path`). Returns the persisted metric.
-pub async fn create_body_metric(
-    slug: &str,
-    metric: fitness_proto::body::BodyMetric,
-) -> Result<fitness_proto::body::BodyMetric, String> {
-    let client =
-        crate::vox_clients::establish_for::<fitness_proto::body::BodyServiceClient>(slug).await?;
-    client
-        .create(metric)
-        .await
-        .map_err(|e| format!("{slug}: create body metric: {e:?}"))
+        /// Create one body metric from a caller-built draft (see
+        /// `stores::draft_body_metric` — the backend assigns the real `id` and
+        /// vault `path`). Returns the persisted metric.
+        create_body_metric(metric: fitness_proto::body::BodyMetric) -> fitness_proto::body::BodyMetric
+            = create(metric) as "create body metric";
+    }
 }
 
 /// Log a single reading against an existing metric. `value` is
@@ -959,201 +469,107 @@ pub async fn log_body_entry(
         .map_err(|e| format!("{slug}: log body entry: {e:?}"))
 }
 
-/// Every exercise in the org's catalog, in the order the
-/// backend lists them.
-pub async fn fetch_exercises(
-    slug: &str,
-) -> Result<Vec<fitness_proto::exercises::Exercise>, String> {
-    let client =
-        crate::vox_clients::establish_for::<fitness_proto::exercises::ExercisesServiceClient>(slug)
-            .await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list exercises: {e:?}"))
-}
+feeds! {
+    fitness_proto::exercises::ExercisesServiceClient {
+        /// Every exercise in the org's catalog, in the order the
+        /// backend lists them.
+        fetch_exercises() -> Vec<fitness_proto::exercises::Exercise>
+            = list() as "list exercises";
 
-/// Add one exercise to the catalog from a caller-built draft (see
-/// `stores::draft_exercise` — the backend assigns the real `id` and
-/// vault `path`). Returns the persisted exercise.
-pub async fn create_exercise(
-    slug: &str,
-    exercise: fitness_proto::exercises::Exercise,
-) -> Result<fitness_proto::exercises::Exercise, String> {
-    let client =
-        crate::vox_clients::establish_for::<fitness_proto::exercises::ExercisesServiceClient>(slug)
-            .await?;
-    client
-        .create(exercise)
-        .await
-        .map_err(|e| format!("{slug}: create exercise: {e:?}"))
-}
+        /// Add one exercise to the catalog from a caller-built draft (see
+        /// `stores::draft_exercise` — the backend assigns the real `id` and
+        /// vault `path`). Returns the persisted exercise.
+        create_exercise(exercise: fitness_proto::exercises::Exercise) -> fitness_proto::exercises::Exercise
+            = create(exercise) as "create exercise";
+    }
 
-/// Every logged workout session in the org's vault, in the order
-/// the backend lists them.
-pub async fn fetch_workouts(
-    slug: &str,
-) -> Result<Vec<fitness_proto::workouts::WorkoutSession>, String> {
-    let client =
-        crate::vox_clients::establish_for::<fitness_proto::workouts::WorkoutsServiceClient>(slug)
-            .await?;
-    client
-        .list_sessions()
-        .await
-        .map_err(|e| format!("{slug}: list workout sessions: {e:?}"))
-}
+    fitness_proto::workouts::WorkoutsServiceClient {
+        /// Every logged workout session in the org's vault, in the order
+        /// the backend lists them.
+        fetch_workouts() -> Vec<fitness_proto::workouts::WorkoutSession>
+            = list_sessions() as "list workout sessions";
+    }
 
-/// Every daily intake log in the org's vault, in the order the
-/// backend lists them. Each carries its consumed entries inline.
-pub async fn fetch_intake(slug: &str) -> Result<Vec<fitness_proto::intake::IntakeLog>, String> {
-    let client =
-        crate::vox_clients::establish_for::<fitness_proto::intake::IntakeServiceClient>(slug)
-            .await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list intake logs: {e:?}"))
+    fitness_proto::intake::IntakeServiceClient {
+        /// Every daily intake log in the org's vault, in the order the
+        /// backend lists them. Each carries its consumed entries inline.
+        fetch_intake() -> Vec<fitness_proto::intake::IntakeLog>
+            = list() as "list intake logs";
+    }
 }
 
 // ── Mealplan ────────────────────────────────────────────────────────
 
-/// Every recipe in the org's cookbook (`<wiki>/Cookbook/*.cook`),
-/// in the order the backend lists them.
-pub async fn fetch_recipes(slug: &str) -> Result<Vec<cookbook_proto::Recipe>, String> {
-    let client =
-        crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list recipes: {e:?}"))
-}
+feeds! {
+    cookbook_proto::CookbookServiceClient {
+        /// Every recipe in the org's cookbook (`<wiki>/Cookbook/*.cook`),
+        /// in the order the backend lists them.
+        fetch_recipes() -> Vec<cookbook_proto::Recipe>
+            = list() as "list recipes";
 
-/// Create one recipe from a caller-built draft (see
-/// `stores::draft_recipe` — identity is the vault-relative `path`; the
-/// backend parses the cooklang `source`). Returns the persisted recipe.
-pub async fn create_recipe(
-    slug: &str,
-    recipe: cookbook_proto::Recipe,
-) -> Result<cookbook_proto::Recipe, String> {
-    let client =
-        crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
-    client
-        .create(recipe)
-        .await
-        .map_err(|e| format!("{slug}: create recipe: {e:?}"))
-}
+        /// Create one recipe from a caller-built draft (see
+        /// `stores::draft_recipe` — identity is the vault-relative `path`; the
+        /// backend parses the cooklang `source`). Returns the persisted recipe.
+        create_recipe(recipe: cookbook_proto::Recipe) -> cookbook_proto::Recipe
+            = create(recipe) as "create recipe";
 
-/// Import a recipe from a web URL — the server fetches the page,
-/// extracts the recipe, and synthesizes a cooklang `.cook` draft (not
-/// yet saved). Returns the parsed draft for review.
-pub async fn import_recipe(slug: &str, url: String) -> Result<cookbook_proto::Recipe, String> {
-    let client =
-        crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
-    client
-        .import(url)
-        .await
-        .map_err(|e| format!("{slug}: import recipe: {e:?}"))
-}
+        /// Import a recipe from a web URL — the server fetches the page,
+        /// extracts the recipe, and synthesizes a cooklang `.cook` draft (not
+        /// yet saved). Returns the parsed draft for review.
+        import_recipe(url: String) -> cookbook_proto::Recipe
+            = import(url) as "import recipe";
 
-/// Save edits to a recipe's `.cook` source. The server writes the
-/// source verbatim then re-parses, so the returned recipe carries fresh
-/// structured steps / ingredients / timers.
-pub async fn update_recipe(
-    slug: &str,
-    recipe: cookbook_proto::Recipe,
-) -> Result<cookbook_proto::Recipe, String> {
-    let client =
-        crate::vox_clients::establish_for::<cookbook_proto::CookbookServiceClient>(slug).await?;
-    client
-        .update(recipe)
-        .await
-        .map_err(|e| format!("{slug}: update recipe: {e:?}"))
-}
+        /// Save edits to a recipe's `.cook` source. The server writes the
+        /// source verbatim then re-parses, so the returned recipe carries fresh
+        /// structured steps / ingredients / timers.
+        update_recipe(recipe: cookbook_proto::Recipe) -> cookbook_proto::Recipe
+            = update(recipe) as "update recipe";
+    }
 
-/// Every pantry item in the org's vault (food-on-hand pages), in
-/// the order the backend lists them.
-pub async fn fetch_pantry(slug: &str) -> Result<Vec<pantry_proto::PantryItem>, String> {
-    let client =
-        crate::vox_clients::establish_for::<pantry_proto::PantryServiceClient>(slug).await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list pantry: {e:?}"))
-}
+    pantry_proto::PantryServiceClient {
+        /// Every pantry item in the org's vault (food-on-hand pages), in
+        /// the order the backend lists them.
+        fetch_pantry() -> Vec<pantry_proto::PantryItem>
+            = list() as "list pantry";
 
-/// Create one pantry item from a caller-built draft (see
-/// `stores::draft_pantry_item` — the backend assigns the real `id` and
-/// vault `path`). Returns the persisted item.
-pub async fn create_pantry_item(
-    slug: &str,
-    item: pantry_proto::PantryItem,
-) -> Result<pantry_proto::PantryItem, String> {
-    let client =
-        crate::vox_clients::establish_for::<pantry_proto::PantryServiceClient>(slug).await?;
-    client
-        .create(item)
-        .await
-        .map_err(|e| format!("{slug}: create pantry item: {e:?}"))
-}
+        /// Create one pantry item from a caller-built draft (see
+        /// `stores::draft_pantry_item` — the backend assigns the real `id` and
+        /// vault `path`). Returns the persisted item.
+        create_pantry_item(item: pantry_proto::PantryItem) -> pantry_proto::PantryItem
+            = create(item) as "create pantry item";
+    }
 
-/// Cook a recipe directly: the server computes the pantry deductions
-/// for `servings` and consumes them from stock, returning a receipt of
-/// what was deducted (matched + convertible + in-stock ingredients) and
-/// what was skipped (with the reason).
-pub async fn cook_recipe(
-    slug: &str,
-    recipe_path: String,
-    servings: u32,
-) -> Result<mealplan_proto::CookReceipt, String> {
-    let client =
-        crate::vox_clients::establish_for::<mealplan_proto::MealplanServiceClient>(slug).await?;
-    client
-        .cook_recipe(recipe_path, servings)
-        .await
-        .map_err(|e| format!("{slug}: cook recipe: {e:?}"))
-}
+    mealplan_proto::MealplanServiceClient {
+        /// Cook a recipe directly: the server computes the pantry deductions
+        /// for `servings` and consumes them from stock, returning a receipt of
+        /// what was deducted (matched + convertible + in-stock ingredients) and
+        /// what was skipped (with the reason).
+        cook_recipe(recipe_path: String, servings: u32) -> mealplan_proto::CookReceipt
+            = cook_recipe(recipe_path, servings) as "cook recipe";
 
-/// "Can I cook this right now?" — the server checks the recipe (and any
-/// nested recipes) against current pantry stock for `servings` and
-/// returns the full `Fulfillment`: whether it's cookable, the
-/// have/need partition, and the per-shortage substitution suggestions.
-/// All derivation is server-side — this is a thin client call.
-pub async fn can_cook(
-    slug: &str,
-    recipe_path: String,
-    servings: u32,
-) -> Result<mealplan_proto::Fulfillment, String> {
-    let client =
-        crate::vox_clients::establish_for::<mealplan_proto::MealplanServiceClient>(slug).await?;
-    client
-        .can_cook(recipe_path, servings)
-        .await
-        .map_err(|e| format!("{slug}: can cook: {e:?}"))
-}
+        /// "Can I cook this right now?" — the server checks the recipe (and any
+        /// nested recipes) against current pantry stock for `servings` and
+        /// returns the full `Fulfillment`: whether it's cookable, the
+        /// have/need partition, and the per-shortage substitution suggestions.
+        /// All derivation is server-side — this is a thin client call.
+        can_cook(recipe_path: String, servings: u32) -> mealplan_proto::Fulfillment
+            = can_cook(recipe_path, servings) as "can cook";
 
-/// Every planned meal in the org's vault, in the order the
-/// backend lists them.
-pub async fn fetch_meal_plans(slug: &str) -> Result<Vec<mealplan_proto::Meal>, String> {
-    let client =
-        crate::vox_clients::establish_for::<mealplan_proto::MealplanServiceClient>(slug).await?;
-    client
-        .list()
-        .await
-        .map_err(|e| format!("{slug}: list meal plans: {e:?}"))
+        /// Every planned meal in the org's vault, in the order the
+        /// backend lists them.
+        fetch_meal_plans() -> Vec<mealplan_proto::Meal>
+            = list() as "list meal plans";
+    }
 }
 
 // ── Timer ─────────────────────────────────────────────────────────
 
-/// The currently-running session for `user_id` in this org, if any.
-pub async fn fetch_active_timer(
-    slug: &str,
-    user_id: uuid::Uuid,
-) -> Result<Option<timer_proto::WorkSession>, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .active_timer(user_id)
-        .await
-        .map_err(|e| format!("{slug}: active timer: {e:?}"))
+feeds! {
+    timer_proto::TimerServiceClient {
+        /// The currently-running session for `user_id` in this org, if any.
+        fetch_active_timer(user_id: uuid::Uuid) -> Option<timer_proto::WorkSession>
+            = active_timer(user_id) as "active timer";
+    }
 }
 
 /// Recent sessions for `user_id`, newest first.
@@ -1223,149 +639,68 @@ pub async fn fetch_project_sessions(
     Ok(sessions)
 }
 
-/// Start a timer; returns the new open session.
-pub async fn start_timer(
-    slug: &str,
-    req: timer_proto::StartTimerRequest,
-) -> Result<timer_proto::WorkSession, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .start_timer(req)
-        .await
-        .map_err(|e| format!("{slug}: start timer: {e:?}"))
-}
+feeds! {
+    timer_proto::TimerServiceClient {
+        /// Start a timer; returns the new open session.
+        start_timer(req: timer_proto::StartTimerRequest) -> timer_proto::WorkSession
+            = start_timer(req) as "start timer";
 
-/// Stop `user_id`'s running timer; returns the closed session.
-pub async fn stop_timer(
-    slug: &str,
-    user_id: uuid::Uuid,
-) -> Result<timer_proto::WorkSession, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .stop_timer(user_id)
-        .await
-        .map_err(|e| format!("{slug}: stop timer: {e:?}"))
-}
+        /// Stop `user_id`'s running timer; returns the closed session.
+        stop_timer(user_id: uuid::Uuid) -> timer_proto::WorkSession
+            = stop_timer(user_id) as "stop timer";
 
-/// Atomically stop the caller's running timer (if any) and start a new
-/// one — "switch the timer to a different task" in one transaction, so
-/// the UI never briefly shows two open sessions (or none). Returns the
-/// newly-started session; the closed one settles on the next refetch.
-pub async fn switch_timer(
-    slug: &str,
-    req: timer_proto::StartTimerRequest,
-) -> Result<timer_proto::WorkSession, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .switch_timer(req)
-        .await
-        .map(|(_closed, started)| started)
-        .map_err(|e| format!("{slug}: switch timer: {e:?}"))
-}
+        /// Atomically stop the caller's running timer (if any) and start a new
+        /// one — "switch the timer to a different task" in one transaction, so
+        /// the UI never briefly shows two open sessions (or none). Returns the
+        /// newly-started session; the closed one settles on the next refetch.
+        switch_timer(req: timer_proto::StartTimerRequest) -> timer_proto::WorkSession
+            = switch_timer(req) map |(_closed, started)| started, as "switch timer";
 
-/// Retro-log a completed session (start + end in the past) — the "I
-/// forgot to start the timer" / manual-entry path. Skips the
-/// active-timer invariant, so it never disturbs a running timer.
-pub async fn log_session(
-    slug: &str,
-    req: timer_proto::LogSessionRequest,
-) -> Result<timer_proto::WorkSession, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .log_session(req)
-        .await
-        .map_err(|e| format!("{slug}: log session: {e:?}"))
-}
+        /// Retro-log a completed session (start + end in the past) — the "I
+        /// forgot to start the timer" / manual-entry path. Skips the
+        /// active-timer invariant, so it never disturbs a running timer.
+        log_session(req: timer_proto::LogSessionRequest) -> timer_proto::WorkSession
+            = log_session(req) as "log session";
 
-/// Edit an existing session — only the `Some(_)` fields change. The
-/// backend re-snapshots the rate afterward.
-pub async fn update_session(
-    slug: &str,
-    req: timer_proto::service::UpdateSessionRequest,
-) -> Result<timer_proto::WorkSession, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .update_session(req)
-        .await
-        .map_err(|e| format!("{slug}: update session: {e:?}"))
-}
+        /// Edit an existing session — only the `Some(_)` fields change. The
+        /// backend re-snapshots the rate afterward.
+        update_session(req: timer_proto::service::UpdateSessionRequest) -> timer_proto::WorkSession
+            = update_session(req) as "update session";
 
-/// Permanently delete a session.
-pub async fn delete_session(slug: &str, id: uuid::Uuid) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .delete_session(id)
-        .await
-        .map_err(|e| format!("{slug}: delete session: {e:?}"))
+        /// Permanently delete a session.
+        delete_session(id: uuid::Uuid) -> ()
+            = delete_session(id) as "delete session";
+    }
 }
 
 // ── member rates ────────────────────────────────────────────────────
 
-/// Upsert an org-level member rate; returns the stored row.
-pub async fn set_org_member_rate(
-    slug: &str,
-    org_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-    hourly_cents: i64,
-    currency: String,
-) -> Result<timer_proto::OrgMemberRate, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .set_org_member_rate(org_id, user_id, hourly_cents, currency)
-        .await
-        .map_err(|e| format!("{slug}: set org rate: {e:?}"))
-}
+feeds! {
+    timer_proto::TimerServiceClient {
+        /// Upsert an org-level member rate; returns the stored row.
+        set_org_member_rate(org_id: uuid::Uuid, user_id: uuid::Uuid, hourly_cents: i64, currency: String) -> timer_proto::OrgMemberRate
+            = set_org_member_rate(org_id, user_id, hourly_cents, currency) as "set org rate";
 
-/// Upsert a per-project member rate (lets members bill one project at
-/// different rates); returns the stored row.
-pub async fn set_project_member_rate(
-    slug: &str,
-    project_id: uuid::Uuid,
-    user_id: uuid::Uuid,
-    hourly_cents: i64,
-) -> Result<timer_proto::ProjectMemberRate, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .set_project_member_rate(project_id, user_id, hourly_cents)
-        .await
-        .map_err(|e| format!("{slug}: set project rate: {e:?}"))
-}
+        /// Upsert a per-project member rate (lets members bill one project at
+        /// different rates); returns the stored row.
+        set_project_member_rate(project_id: uuid::Uuid, user_id: uuid::Uuid, hourly_cents: i64) -> timer_proto::ProjectMemberRate
+            = set_project_member_rate(project_id, user_id, hourly_cents) as "set project rate";
 
-/// Every org-level member rate configured for `org_id`.
-pub async fn fetch_org_member_rates(
-    slug: &str,
-    org_id: uuid::Uuid,
-) -> Result<Vec<timer_proto::OrgMemberRate>, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .list_org_member_rates(org_id)
-        .await
-        .map_err(|e| format!("{slug}: list org rates: {e:?}"))
-}
+        /// Every org-level member rate configured for `org_id`.
+        fetch_org_member_rates(org_id: uuid::Uuid) -> Vec<timer_proto::OrgMemberRate>
+            = list_org_member_rates(org_id) as "list org rates";
 
-/// Every per-member rate set on `project_id`.
-pub async fn fetch_project_member_rates(
-    slug: &str,
-    project_id: uuid::Uuid,
-) -> Result<Vec<timer_proto::ProjectMemberRate>, String> {
-    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
-    client
-        .list_project_member_rates(project_id)
-        .await
-        .map_err(|e| format!("{slug}: list project rates: {e:?}"))
-}
+        /// Every per-member rate set on `project_id`.
+        fetch_project_member_rates(project_id: uuid::Uuid) -> Vec<timer_proto::ProjectMemberRate>
+            = list_project_member_rates(project_id) as "list project rates";
+    }
 
-/// The org's members (name / email / role), for the current session's
-/// org. Requires a valid session `token` — the org is derived from it.
-pub async fn fetch_org_members(
-    slug: &str,
-    token: String,
-) -> Result<Vec<auth_proto::OrgMember>, String> {
-    let client = crate::vox_clients::establish_for::<auth_proto::AuthServiceClient>(slug).await?;
-    client
-        .list_org_members(token)
-        .await
-        .map_err(|e| format!("{slug}: list members: {e:?}"))
+    auth_proto::AuthServiceClient {
+        /// The org's members (name / email / role), for the current session's
+        /// org. Requires a valid session `token` — the org is derived from it.
+        fetch_org_members(token: String) -> Vec<auth_proto::OrgMember>
+            = list_org_members(token) as "list members";
+    }
 }
 
 // ── finance / invoicing ─────────────────────────────────────────────
@@ -1601,20 +936,13 @@ pub async fn fetch_links_for(
         .map_err(|e| format!("{slug}: links_for: {e:?}"))
 }
 
-/// One verse's text (`translation` defaults handled by the caller).
-/// `reference` is a human/OSIS-ish ref like `John 3:16` or `1John 3:16`.
-pub async fn fetch_verse_text(
-    slug: &str,
-    translation: &str,
-    reference: &str,
-) -> Result<String, String> {
-    let client =
-        crate::vox_clients::establish_for::<scripture_proto::ScriptureServiceClient>(slug).await?;
-    client
-        .verse(translation.to_owned(), reference.to_owned())
-        .await
-        .map(|v| v.text)
-        .map_err(|e| format!("{slug}: verse {reference}: {e:?}"))
+feeds! {
+    scripture_proto::ScriptureServiceClient {
+        /// One verse's text (`translation` defaults handled by the caller).
+        /// `reference` is a human/OSIS-ish ref like `John 3:16` or `1John 3:16`.
+        fetch_verse_text(translation: &str, reference: &str) -> String
+            = verse(translation.to_owned(), reference.to_owned()) map |v| v.text, as format!("verse {reference}");
+    }
 }
 
 /// A resource's transcript cues (`resources/<rel_path>`), for the watch
@@ -1664,27 +992,13 @@ pub async fn save_video_note(
         .map_err(|e| format!("{slug}: save video: {e:?}"))
 }
 
-/// Persist one typed link (the watch view's "add note at current time").
-pub async fn create_link(
-    slug: &str,
-    link: links_proto::TypedLink,
-) -> Result<links_proto::TypedLink, String> {
-    let client = crate::vox_clients::establish_for::<links_proto::LinksServiceClient>(slug).await?;
-    client
-        .create(link)
-        .await
-        .map_err(|e| format!("{slug}: create link: {e:?}"))
-}
+feeds! {
+    links_proto::LinksServiceClient {
+        /// Persist one typed link (the watch view's "add note at current time").
+        create_link(link: links_proto::TypedLink) -> links_proto::TypedLink
+            = create(link) as "create link";
 
-/// Every typed link in an org's graph — the verse↔song↔sermon↔topic web
-/// for the `/connections` page. Fetches at the lowest confidence and
-/// includes private links; the page filters client-side.
-pub async fn fetch_link_graph(slug: &str) -> Result<Vec<links_proto::TypedLink>, String> {
-    let client = crate::vox_clients::establish_for::<links_proto::LinksServiceClient>(slug).await?;
-    client
-        .graph(links_proto::Confidence::Speculative, true)
-        .await
-        .map_err(|e| format!("{slug}: link graph: {e:?}"))
+    }
 }
 
 pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
@@ -1729,16 +1043,14 @@ pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::Wi
         .collect())
 }
 
-/// Catalog of the org's curated wiki pages (`<org>/wiki/Knowledge/`)
-/// via the `wiki_proto` Pages service — drives the explorer's Wiki
-/// tree. Path-sorted; carries the `ai_generated` provenance flag.
-pub async fn fetch_wiki_pages(slug: &str) -> Result<Vec<wiki_proto::pages::PageInfo>, String> {
-    let client =
-        crate::vox_clients::establish_for::<wiki_proto::service::pages::PagesClient>(slug).await?;
-    client
-        .list_pages("default".to_owned())
-        .await
-        .map_err(|e| format!("{slug}: wiki pages: {e:?}"))
+feeds! {
+    wiki_proto::service::pages::PagesClient {
+        /// Catalog of the org's curated wiki pages (`<org>/wiki/Knowledge/`)
+        /// via the `wiki_proto` Pages service — drives the explorer's Wiki
+        /// tree. Path-sorted; carries the `ai_generated` provenance flag.
+        fetch_wiki_pages() -> Vec<wiki_proto::pages::PageInfo>
+            = list_pages("default".to_owned()) as "wiki pages";
+    }
 }
 
 /// Fetch the **curated wiki** graph for one org — the server-built
@@ -1843,7 +1155,7 @@ pub async fn find_project(id: &str, slugs: &[String]) -> Result<(ProjectInfo, St
     let uuid = uuid::Uuid::parse_str(id).map_err(|_| "invalid project id".to_owned())?;
     let mut last_err = None;
     for slug in slugs {
-        match crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await {
+        match crate::vox_clients::establish_for::<project_proto::ProjectServiceClient>(slug).await {
             Ok(client) => match client.get(uuid).await {
                 Ok(p) => return Ok((p, slug.clone())),
                 Err(e) => last_err = Some(format!("{slug}: {e:?}")),
@@ -1854,24 +1166,6 @@ pub async fn find_project(id: &str, slugs: &[String]) -> Result<(ProjectInfo, St
     Err(last_err.unwrap_or_else(|| "project not found in any hosted org".to_owned()))
 }
 
-/// Flatten per-org results: concat the successes; surface an error only
-/// if every org failed *and* nothing came back.
-fn collect<T>(results: Vec<Result<Vec<T>, String>>) -> Result<Vec<T>, String> {
-    let mut out = Vec::new();
-    let mut last_err = None;
-    for r in results {
-        match r {
-            Ok(rows) => out.extend(rows),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    if out.is_empty() {
-        if let Some(e) = last_err {
-            return Err(e);
-        }
-    }
-    Ok(out)
-}
 
 // ── Fitness (native stubs) ──────────────────────────────────────────
 
@@ -1942,340 +1236,110 @@ pub async fn fetch_project_agent_sessions(
     Ok(page.sessions)
 }
 
-/// Create a new agent chat session. `backend_id` picks the backend
-/// (`"hermes"`, `"codex"`); empty = the server default (Hermes when
-/// a gateway is configured).
-pub async fn create_agent_session(
-    slug: &str,
-    backend_id: &str,
-    title: &str,
-) -> Result<agent_proto::session::Session, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
-            .await?;
-    client
-        .create_session(agent_proto::service::sessions::CreateSession {
-            project_id: String::new(),
-            profile_id: String::new(),
-            backend_id: backend_id.to_owned(),
-            title: title.to_owned(),
-            workspace_path: String::new(),
-            subagent_nickname: String::new(),
-        })
-        .await
-        .map_err(|e| format!("{slug}: create agent session: {e:?}"))
-}
+feeds! {
+    agent_proto::service::sessions::SessionsClient {
+        /// Create a new agent chat session. `backend_id` picks the backend
+        /// (`"hermes"`, `"codex"`); empty = the server default (Hermes when
+        /// a gateway is configured).
+        create_agent_session(backend_id: &str, title: &str) -> agent_proto::session::Session
+            = create_session(agent_proto::service::sessions::CreateSession { project_id: String::new(), profile_id: String::new(), backend_id: backend_id.to_owned(), title: title.to_owned(), workspace_path: String::new(), subagent_nickname: String::new(), }) as "create agent session";
 
-/// Kick off one turn — the user message goes to the session's
-/// backend; events stream over `subscribe_agent_session`.
-pub async fn dispatch_agent_turn(
-    slug: &str,
-    session_id: &str,
-    text: &str,
-    model_override: &str,
-) -> Result<agent_proto::service::turn_dispatch::DispatchAck, String> {
-    let client = crate::vox_clients::establish_for::<
-        agent_proto::service::turn_dispatch::TurnDispatchClient,
-    >(slug)
-    .await?;
-    client
-        .dispatch_turn(agent_proto::service::turn_dispatch::DispatchTurn {
-            session_id: session_id.to_owned(),
-            text: text.to_owned(),
-            attachments: Vec::new(),
-            profile_override_id: String::new(),
-            personality_override_id: String::new(),
-            model_override: model_override.to_owned(),
-        })
-        .await
-        .map_err(|e| format!("{slug}: dispatch turn: {e:?}"))
-}
+        /// Session mutations for the rail/inspector: rename, pin, archive,
+        /// delete. Each returns the updated session (delete returns unit).
+        rename_agent_session(session_id: &str, title: &str) -> agent_proto::session::Session
+            = rename_session(session_id.to_owned(), title.to_owned()) as "rename session";
 
-/// Cancel the in-flight turn on a session.
-pub async fn cancel_agent_turn(slug: &str, session_id: &str) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<
-        agent_proto::service::turn_dispatch::TurnDispatchClient,
-    >(slug)
-    .await?;
-    client
-        .cancel_turn(session_id.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: cancel turn: {e:?}"))
-}
+        pin_agent_session(session_id: &str, pinned: bool) -> agent_proto::session::Session
+            = pin_session(session_id.to_owned(), pinned) as "pin session";
 
-/// Full transcript for a session (backend returns newest-first;
-/// callers reverse for display).
-pub async fn fetch_agent_messages(
-    slug: &str,
-    session_id: &str,
-) -> Result<Vec<agent_proto::message::Message>, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::threads::ThreadsClient>(slug)
-            .await?;
-    client
-        .list_messages(session_id.to_owned(), 0, String::new())
-        .await
-        .map_err(|e| format!("{slug}: list messages: {e:?}"))
-}
+        archive_agent_session(session_id: &str, archived: bool) -> agent_proto::session::Session
+            = archive_session(session_id.to_owned(), archived) as "archive session";
 
-/// Live model list across the org's agent backends (Hermes gateway
-/// models + Codex's static set) — feeds the composer's model chip.
-pub async fn fetch_agent_models(
-    slug: &str,
-) -> Result<Vec<agent_proto::service::discovery::ModelInfo>, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::discovery::DiscoveryClient>(slug)
-            .await?;
-    client
-        .list_models(String::new())
-        .await
-        .map_err(|e| format!("{slug}: agent models: {e:?}"))
-}
+        delete_agent_session(session_id: &str) -> ()
+            = delete_session(session_id.to_owned()) as "delete session";
+    }
 
-/// Agent skills (Hermes's self-improving skill library).
-pub async fn fetch_agent_skills(
-    slug: &str,
-) -> Result<Vec<agent_proto::service::discovery::SkillInfo>, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::discovery::DiscoveryClient>(slug)
-            .await?;
-    client
-        .list_skills(String::new())
-        .await
-        .map_err(|e| format!("{slug}: agent skills: {e:?}"))
-}
+    agent_proto::service::turn_dispatch::TurnDispatchClient {
+        /// Kick off one turn — the user message goes to the session's
+        /// backend; the reply arrives on the `Subscriptions` events
+        /// stream the chat view holds open.
+        dispatch_agent_turn(session_id: &str, text: &str, model_override: &str) -> agent_proto::service::turn_dispatch::DispatchAck
+            = dispatch_turn(agent_proto::service::turn_dispatch::DispatchTurn { session_id: session_id.to_owned(), text: text.to_owned(), attachments: Vec::new(), profile_override_id: String::new(), personality_override_id: String::new(), model_override: model_override.to_owned(), }) as "dispatch turn";
 
-/// Backend capability flags, for the inspector panel.
-pub async fn fetch_agent_capabilities(
-    slug: &str,
-) -> Result<Vec<agent_proto::service::discovery::CapabilityFlag>, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::discovery::DiscoveryClient>(slug)
-            .await?;
-    client
-        .list_capabilities(String::new())
-        .await
-        .map_err(|e| format!("{slug}: agent capabilities: {e:?}"))
-}
+        /// Cancel the in-flight turn on a session.
+        cancel_agent_turn(session_id: &str) -> ()
+            = cancel_turn(session_id.to_owned()) as "cancel turn";
+    }
 
-/// Live per-backend health — gateway state, connected platforms,
-/// in-flight agents, probe latency. Polled by the chat header's
-/// status chip so an unreachable gateway says so instead of
-/// silently swallowing turns.
-pub async fn fetch_agent_health(
-    slug: &str,
-) -> Result<Vec<agent_proto::backend::BackendHealth>, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::discovery::DiscoveryClient>(slug)
-            .await?;
-    client
-        .backend_health(String::new())
-        .await
-        .map_err(|e| format!("{slug}: agent health: {e:?}"))
-}
+    agent_proto::service::threads::ThreadsClient {
+        /// Full transcript for a session (backend returns newest-first;
+        /// callers reverse for display).
+        fetch_agent_messages(session_id: &str) -> Vec<agent_proto::message::Message>
+            = list_messages(session_id.to_owned(), 0, String::new()) as "list messages";
+    }
 
-/// Scheduled agent routines (the Hermes gateway's cron jobs).
-/// Includes paused ones — the panel shows them greyed rather than
-/// hiding them, so a paused routine isn't mistaken for a deleted one.
-pub async fn fetch_agent_routines(
-    slug: &str,
-) -> Result<Vec<agent_proto::service::routines::Routine>, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
-            .await?;
-    client
-        .list_routines(String::new(), true)
-        .await
-        .map_err(|e| format!("{slug}: agent routines: {e:?}"))
-}
+    agent_proto::service::discovery::DiscoveryClient {
+        /// Live model list across the org's agent backends (Hermes gateway
+        /// models + Codex's static set) — feeds the composer's model chip.
+        fetch_agent_models() -> Vec<agent_proto::service::discovery::ModelInfo>
+            = list_models(String::new()) as "agent models";
 
-pub async fn create_agent_routine(
-    slug: &str,
-    routine: agent_proto::service::routines::NewRoutine,
-) -> Result<agent_proto::service::routines::Routine, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
-            .await?;
-    client
-        .create_routine(routine)
-        .await
-        .map_err(|e| format!("{slug}: create routine: {e:?}"))
-}
+        /// Agent skills (Hermes's self-improving skill library).
+        fetch_agent_skills() -> Vec<agent_proto::service::discovery::SkillInfo>
+            = list_skills(String::new()) as "agent skills";
 
-pub async fn set_agent_routine_paused(
-    slug: &str,
-    id: &str,
-    paused: bool,
-) -> Result<agent_proto::service::routines::Routine, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
-            .await?;
-    client
-        .set_routine_paused(String::new(), id.to_owned(), paused)
-        .await
-        .map_err(|e| format!("{slug}: pause routine: {e:?}"))
-}
+        /// Backend capability flags, for the inspector panel.
+        fetch_agent_capabilities() -> Vec<agent_proto::service::discovery::CapabilityFlag>
+            = list_capabilities(String::new()) as "agent capabilities";
 
-pub async fn run_agent_routine(
-    slug: &str,
-    id: &str,
-) -> Result<agent_proto::service::routines::Routine, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
-            .await?;
-    client
-        .run_routine(String::new(), id.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: run routine: {e:?}"))
-}
+        /// Live per-backend health — gateway state, connected platforms,
+        /// in-flight agents, probe latency. Polled by the chat header's
+        /// status chip so an unreachable gateway says so instead of
+        /// silently swallowing turns.
+        fetch_agent_health() -> Vec<agent_proto::backend::BackendHealth>
+            = backend_health(String::new()) as "agent health";
+    }
 
-pub async fn delete_agent_routine(slug: &str, id: &str) -> Result<(), String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::routines::RoutinesClient>(slug)
-            .await?;
-    client
-        .delete_routine(String::new(), id.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: delete routine: {e:?}"))
-}
+    agent_proto::service::routines::RoutinesClient {
+        /// Scheduled agent routines (the Hermes gateway's cron jobs).
+        /// Includes paused ones — the panel shows them greyed rather than
+        /// hiding them, so a paused routine isn't mistaken for a deleted one.
+        fetch_agent_routines() -> Vec<agent_proto::service::routines::Routine>
+            = list_routines(String::new(), true) as "agent routines";
 
-/// Session mutations for the rail/inspector: rename, pin, archive,
-/// delete. Each returns the updated session (delete returns unit).
-pub async fn rename_agent_session(
-    slug: &str,
-    session_id: &str,
-    title: &str,
-) -> Result<agent_proto::session::Session, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
-            .await?;
-    client
-        .rename_session(session_id.to_owned(), title.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: rename session: {e:?}"))
-}
+        create_agent_routine(routine: agent_proto::service::routines::NewRoutine) -> agent_proto::service::routines::Routine
+            = create_routine(routine) as "create routine";
 
-pub async fn pin_agent_session(
-    slug: &str,
-    session_id: &str,
-    pinned: bool,
-) -> Result<agent_proto::session::Session, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
-            .await?;
-    client
-        .pin_session(session_id.to_owned(), pinned)
-        .await
-        .map_err(|e| format!("{slug}: pin session: {e:?}"))
-}
+        set_agent_routine_paused(id: &str, paused: bool) -> agent_proto::service::routines::Routine
+            = set_routine_paused(String::new(), id.to_owned(), paused) as "pause routine";
 
-pub async fn archive_agent_session(
-    slug: &str,
-    session_id: &str,
-    archived: bool,
-) -> Result<agent_proto::session::Session, String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
-            .await?;
-    client
-        .archive_session(session_id.to_owned(), archived)
-        .await
-        .map_err(|e| format!("{slug}: archive session: {e:?}"))
-}
+        run_agent_routine(id: &str) -> agent_proto::service::routines::Routine
+            = run_routine(String::new(), id.to_owned()) as "run routine";
 
-pub async fn delete_agent_session(slug: &str, session_id: &str) -> Result<(), String> {
-    let client =
-        crate::vox_clients::establish_for::<agent_proto::service::sessions::SessionsClient>(slug)
-            .await?;
-    client
-        .delete_session(session_id.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: delete session: {e:?}"))
-}
-
-/// Open the live event stream for a session. Returns after handing
-/// the `tx` to the server — pump the paired `rx` for
-/// [`agent_proto::event::AgentEvent`]s; the call ends when the
-/// server drops the lane or the receiver is dropped.
-pub async fn subscribe_agent_session(
-    slug: &str,
-    session_id: &str,
-    tx: vox::Tx<agent_proto::event::AgentEvent>,
-) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<
-        agent_proto::service::subscriptions::SubscriptionsClient,
-    >(slug)
-    .await?;
-    client
-        .subscribe_session(session_id.to_owned(), tx)
-        .await
-        .map_err(|e| format!("{slug}: subscribe session: {e:?}"))
+        delete_agent_routine(id: &str) -> ()
+            = delete_routine(String::new(), id.to_owned()) as "delete routine";
+    }
 }
 
 // ── Email ───────────────────────────────────────────────────────────
 
-/// Every mail account the org's `EmailSync` backend serves. An org
-/// with no configured mailbox returns an empty list (operational but
-/// unconfigured) — the `/email` page renders that as an empty state
-/// rather than an error.
-pub async fn fetch_email_accounts(slug: &str) -> Result<Vec<email_proto::Account>, String> {
-    let client = crate::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
-    client
-        .accounts()
-        .await
-        .map_err(|e| format!("{slug}: list accounts: {e:?}"))
-}
-
-/// Recent envelopes (header summaries) for one account's `INBOX`,
-/// newest first. `count` caps the slice. Returns an empty list for an
-/// empty mailbox; surfaces backend errors verbatim so the page can show
-/// them inline.
-pub async fn fetch_email_envelopes(
-    slug: &str,
-    account: &str,
-    count: u32,
-) -> Result<Vec<email_proto::Envelope>, String> {
-    let client = crate::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
-    let mut envelopes = client
-        .fetch_envelopes(
-            account.to_owned(),
-            "INBOX".to_owned(),
-            email_proto::SeqRange::Recent(count),
-        )
-        .await
-        .map_err(|e| format!("{slug}: fetch envelopes: {e:?}"))?;
-    // Newest first — the backend's `Recent` ordering isn't guaranteed
-    // across implementations, so sort defensively on the date.
-    envelopes.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
-    Ok(envelopes)
-}
-
 // ── Git / forge ─────────────────────────────────────────────────────
 
-/// Every repo the org's forge backend can address, in the order the
-/// catalog lists them. Backed by `RepoCatalog::list_repos`; when the
-/// forge is unconfigured (no token) the backend returns an
-/// auth/forge error the caller renders as an empty list.
-pub async fn fetch_repos(slug: &str) -> Result<Vec<git_proto::Repo>, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::repo::RepoCatalogClient>(slug).await?;
-    client
-        .list_repos()
-        .await
-        .map_err(|e| format!("{slug}: list repos: {e:?}"))
-}
+feeds! {
+    git_proto::repo::RepoCatalogClient {
+        /// Every repo the org's forge backend can address, in the order the
+        /// catalog lists them. Backed by `RepoCatalog::list_repos`; when the
+        /// forge is unconfigured (no token) the backend returns an
+        /// auth/forge error the caller renders as an empty list.
+        fetch_repos() -> Vec<git_proto::Repo>
+            = list_repos() as "list repos";
+    }
 
-/// Issues for one repo (all states), via `IssueTracker::list_issues`
-/// with a default (unfiltered) filter. The `/repos` page calls this
-/// per repo to show each repo's open work inline.
-pub async fn fetch_issues(
-    slug: &str,
-    repo: git_proto::RepoId,
-) -> Result<Vec<git_proto::issues::Issue>, String> {
-    let client =
-        crate::vox_clients::establish_for::<git_proto::issues::IssueTrackerClient>(slug).await?;
-    client
-        .list_issues(repo, git_proto::issues::IssueFilter::default())
-        .await
-        .map_err(|e| format!("{slug}: list issues: {e:?}"))
+    git_proto::issues::IssueTrackerClient {
+        /// Issues for one repo (all states), via `IssueTracker::list_issues`
+        /// with a default (unfiltered) filter. The `/repos` page calls this
+        /// per repo to show each repo's open work inline.
+        fetch_issues(repo: git_proto::RepoId) -> Vec<git_proto::issues::Issue>
+            = list_issues(repo, git_proto::issues::IssueFilter::default()) as "list issues";
+    }
 }

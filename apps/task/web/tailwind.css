@@ -1,46 +1,11 @@
-@import "tailwindcss";
-/* Vendored FTS design tokens — see apps/web/fts-theme.css header. The
- * canonical sheet lives in the (workspace-sibling) fts-ui repo, but a
- * relative @import that climbs out of the Task repo breaks the pure-Nix
- * image build (which sees only the Task repo), so it is vendored
- * in-tree — the same workaround ui-lab already uses. */
-@import "./fts-theme.css";
-
-/* Paths track the monorepo dissolve (c1c5754ce): the Task crates now
- * live at <root>/crates/task/* and <root>/features/task/*. */
-@source "./src/**/*.{rs,html,css}";
-@source "../../../crates/task/ui/src/**/*.rs";
-@source "../../../features/task/*/*-ui/src/**/*.rs";
-@source "../../../features/task/view/view-*/src/**/*.rs";
-/* fts-ui primitives (Button/Sheet/Badge/…) — their variant classes
- * must exist in the compiled sheet too. In-tree since the monorepo
- * merge, so the pure-Nix image build sees it as well. */
-@source "../../../libs/fts-ui/fts-ui/src/**/*.rs";
-/* session-ui (mixer / transport / progress bars) + dock classes used by the
- * `type: song` session player embedded in the vault page — keep their
- * utility classes from being purged (the "unstyled player" bug). */
-@source "../../../crates/session/ui/src/**/*.rs";
-@source "../../../libs/dock/*/src/**/*.rs";
-
-@theme {
-    --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-@layer base {
-    html { color-scheme: dark; }
-
-    /* Thin, theme-tinted scrollbars everywhere — the default fat
-     * gutters fight the shell. Track is invisible; the thumb is the
-     * border token, brightening on hover. */
-    * {
-        scrollbar-width: thin;
-        scrollbar-color: color-mix(in oklch, var(--border) 85%, transparent) transparent;
-    }
-    *::-webkit-scrollbar { width: 7px; height: 7px; }
-    *::-webkit-scrollbar-track { background: transparent; }
-    *::-webkit-scrollbar-thumb {
-        background: color-mix(in oklch, var(--border) 85%, transparent);
-        border-radius: 9999px;
-    }
-    *::-webkit-scrollbar-thumb:hover { background: var(--border); }
-}
+/* dx auto-detects a `tailwind.css` at the crate root and runs the
+ * Tailwind watcher itself (Dioxus 0.7), compiling it to
+ * `assets/tailwind.css` — the path `asset!()` resolves.
+ *
+ * The real input is one file shared by all three Task front-ends. This
+ * shim exists only so dx finds it: `asset!()` cannot reach outside the
+ * crate root, and neither can dx's detection.
+ *
+ * `@source` paths inside the shared file resolve relative to THAT file
+ * (apps/task/), not to this one. */
+@import "../tailwind.css";

@@ -21,7 +21,7 @@ use fts_ui::lucide_dioxus::{
     CalendarDays, Flag, FolderKanban, Layers, LayoutGrid, LayoutList, Plus, User,
 };
 use fts_ui::prelude::*;
-use project::ProjectInfo;
+use project_proto::ProjectInfo;
 
 use crate::routes::Route;
 use crate::shell::mobile::{BottomSheet, MobileActionBar};

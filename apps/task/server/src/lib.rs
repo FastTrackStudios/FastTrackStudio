@@ -26,6 +26,7 @@ pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
 pub mod media;
+pub mod permits;
 pub mod presence;
 pub mod server_mgmt;
 pub mod share;
@@ -286,6 +287,18 @@ pub struct AppState {
     /// the server-management `create_org` RPC. `RwLock` so
     /// reads on the request hot path stay parallel; writes
     /// happen only when an admin scaffolds a new org.
+    ///
+    /// **Deliberately `std::sync`, not `tokio::sync`.** Every
+    /// accessor below is a *sync* fn that clones what it needs and
+    /// drops the guard before returning, so no guard ever spans an
+    /// `.await` — the case where a blocking lock is correct (and the
+    /// compiler enforces it: `RwLockReadGuard` is `!Send`, so a guard
+    /// held across an await in any handler or spawned task would fail
+    /// to satisfy axum's / tokio's `Send` bound). A `tokio::RwLock`
+    /// here would only make these accessors async and infect the sync
+    /// `#[architect::rpc]` backends that call them. Callers must keep
+    /// it that way: clone the `OrgAppState` (see [`AppState::org`])
+    /// rather than working under the guard.
     pub orgs: Arc<std::sync::RwLock<std::collections::HashMap<String, OrgAppState>>>,
     /// Source data root. Held for `.well-known/task-server.json`
     /// discovery, manifest re-scans, and the keypair path.
@@ -307,6 +320,11 @@ pub struct AppState {
     /// Last (or in-flight) async snapshot's status — polled via
     /// `GET /server/snapshot/status` after a `POST /server/snapshot?wait=0`
     /// kick-off. The synchronous trigger doesn't touch it.
+    ///
+    /// `std::sync` for the same reason as [`Self::orgs`]: every use
+    /// is a read-clone or a field assignment inside its own block,
+    /// never across an `.await` (the cycle is awaited *before* the
+    /// guard is taken).
     pub snapshot_status: Arc<std::sync::RwLock<snapshot::SnapshotStatus>>,
 }
 
@@ -387,13 +405,16 @@ impl AppState {
     /// can mint new federated orgs.
     #[must_use]
     pub fn home_slug(&self) -> Option<String> {
-        let guard = self.orgs.read().ok()?;
-        for slug in guard.keys() {
+        // Snapshot the slugs and drop the guard before touching the
+        // disk — the manifest reads below must not run under the
+        // registry lock.
+        let slugs = self.org_slugs();
+        for slug in slugs {
             // `is_home` lives in the manifest, not the runtime
             // state — re-read from disk.
             if let Ok(manifest) = self.data_root.org(slug.as_str()).manifest() {
                 if manifest.is_home {
-                    return Some(slug.clone());
+                    return Some(slug);
                 }
             }
         }
@@ -672,16 +693,22 @@ pub(crate) async fn build_org_state(
         // Codex agent backend. In-process, in-memory session
         // registry + turn dispatch — hosts the `Sessions` +
         // `TurnDispatch` vox services behind the `/agents` UI.
-        let agent_codex = agent_codex::CodexBackend::new();
+        // One event hub across both agent backends: `Subscriptions`
+        // is a single `#[subscribe]` stream served from one
+        // `PubSub`, so Codex and Hermes publish into the same hub
+        // and a client's one subscription covers sessions on either.
+        let agent_events = architect::PubSub::sliding(512);
+        let agent_codex = agent_codex::CodexBackend::with_events(agent_events.clone());
         // Hermes gateway backend — enabled when TASK_HERMES_URL is
         // set (see agent_hermes::HermesConfig::from_env). When
         // present it becomes the DEFAULT chat backend: sessions
         // created without an explicit backend_id land on Hermes.
-        let agent_hermes = agent_hermes::HermesBackend::from_env();
+        let agent_hermes = agent_hermes::HermesBackend::from_env_with_events(agent_events.clone());
         if let Some(h) = &agent_hermes {
             tracing::info!(url = %h.config().base_url, model = %h.config().model, "hermes agent gateway configured");
         }
-        let agent_router = agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes);
+        let agent_router =
+            agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes, agent_events);
 
         // Timer store. SQLite at
         // `<data_root>/orgs/<slug>/timer.sqlite`
@@ -741,15 +768,12 @@ pub(crate) async fn build_org_state(
         };
 
         // Scheduling backend rooted at the same vault. Day templates
-        // live under `Projects/Scheduling/templates/`; the kv/log
-        // stores back bookings + slot caches we don't surface yet, so
-        // an in-memory pair suffices for the mounted `DayTemplates`.
-        let scheduling = scheduling::VaultScheduler::new(
-            vault_root.clone(),
-            Box::new(store_proto::mem::MemStore::new()),
-            Box::new(store_proto::mem::MemStore::new()),
-        )
-        .map_err(|e| eyre::eyre!("scheduling backend: {e}"))?;
+        // live under `Projects/Scheduling/templates/`, bookings under
+        // `Records/bookings/`, and the booking audit trail under
+        // `Records/audit/` — every byte it owns is on disk, so a
+        // restart loses nothing.
+        let scheduling = scheduling::VaultScheduler::new(vault_root.clone())
+            .map_err(|e| eyre::eyre!("scheduling backend: {e}"))?;
 
         // Inbox backend rooted at the same vault — captured items
         // live under `Records/inbox/`.
@@ -1045,6 +1069,11 @@ pub(crate) async fn build_org_state(
         }
 
         let permissions = Arc::new(build_org_permissions_gate(&auth));
+        // Coverage + dry-run, once per org at boot: how many mounted
+        // services carry a permit table, which do not, and what a
+        // signed-in member would be denied if enforcement were on. The
+        // gap used to be silent — that is how it sat at 2/71.
+        permits::log_coverage(org_root.slug(), &permissions, enforce_permissions());
         let shares = Arc::new(share::ShareStore::open(org_root.path()));
 
         Ok(OrgAppState {
@@ -1441,6 +1470,12 @@ pub fn router(state: AppState) -> Router {
             "/server/snapshot/status",
             get(snapshot::http_snapshot_status_handler),
         )
+        // The permissions dry-run: coverage + "what would break if I
+        // enforced right now" + the observed would-deny tally. Same
+        // bearer as the snapshot routes (`TASK_BACKUP_GIT_TOKEN`), and
+        // like them it is 503 when that token is unset — no new secret,
+        // and nothing new is exposed on a default dev boot.
+        .route("/server/permissions", get(permissions_report_handler))
         .with_state(state.clone());
 
     Router::new()
@@ -1451,8 +1486,87 @@ pub fn router(state: AppState) -> Router {
         .merge(server_mgmt)
         .merge(watch_bridge::watch_router())
         .merge(blob_router)
-        .layer(tower_http::cors::CorsLayer::permissive())
+        .layer(cors_layer())
         .with_state(state)
+}
+
+/// CORS policy. **Default is unchanged**: with `TASK_CORS_ALLOWED_ORIGINS`
+/// unset (or `*`) this is the same `CorsLayer::permissive()` the server has
+/// always used — any origin, any method, any header — plus a startup
+/// warning, because "any origin" on an internet-reachable server that
+/// accepts bearer tokens is a policy nobody chose on purpose.
+///
+/// Set it to a comma-separated origin list
+/// (`https://task.example,https://app.example`) to restrict the `Origin`
+/// allowlist; methods and headers stay permissive so nothing else about
+/// the surface changes. Credentials are never allowed automatically —
+/// Task authenticates with bearer tokens in vox metadata, not cookies, so
+/// `Access-Control-Allow-Credentials` is not needed for the app to work.
+fn cors_layer() -> tower_http::cors::CorsLayer {
+    use axum::http::HeaderValue;
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+
+    let raw = std::env::var("TASK_CORS_ALLOWED_ORIGINS").unwrap_or_default();
+    let raw = raw.trim();
+    let permissive = |why: &str| {
+        tracing::warn!(
+            var = "TASK_CORS_ALLOWED_ORIGINS",
+            reason = why,
+            "CORS is PERMISSIVE — every origin may call this server. Set \
+             TASK_CORS_ALLOWED_ORIGINS to a comma-separated origin list on \
+             any internet-reachable deployment.",
+        );
+        CorsLayer::permissive()
+    };
+    if raw.is_empty() {
+        return permissive("unset");
+    }
+    if raw == "*" {
+        return permissive("set to `*`");
+    }
+    let origins: Vec<HeaderValue> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| match HeaderValue::from_str(s) {
+            Ok(v) => Some(v),
+            Err(_) => {
+                tracing::warn!(origin = s, "ignoring unparseable CORS origin");
+                None
+            }
+        })
+        .collect();
+    if origins.is_empty() {
+        // Better a loud fall-back to today's behaviour than a server that
+        // silently refuses every browser after a typo in the var.
+        return permissive("no parseable origins in the list");
+    }
+    tracing::info!(
+        origins = %raw,
+        count = origins.len(),
+        "CORS restricted to the configured origin allowlist",
+    );
+    CorsLayer::permissive().allow_origin(AllowOrigin::list(origins))
+}
+
+/// `GET /server/permissions` — the enforcement dry-run.
+///
+/// Answers "if I set `TASK_ENFORCE_PERMISSIONS=1` right now, what would
+/// break?" from three angles: permit-table coverage, a static replay of
+/// every permit through the live engine, and the tally of denials the
+/// running server has actually observed. Auth + the 503-when-unconfigured
+/// behaviour are the snapshot routes' (`TASK_BACKUP_GIT_TOKEN`).
+async fn permissions_report_handler(headers: axum::http::HeaderMap) -> axum::response::Response {
+    if let Err(resp) = snapshot::check_backup_auth(&headers) {
+        return *resp;
+    }
+    let engine = org_permission_engine();
+    axum::Json(permits::report_json(
+        enforce_permissions(),
+        engine.as_ref(),
+        &permission_deny_ledger(),
+    ))
+    .into_response()
 }
 
 /// `.well-known/task-server.json` — federation discovery.
@@ -1629,55 +1743,69 @@ async fn legacy_vox_handler(
 /// with architect's composable layer system; the same router is reused
 /// for the WebSocket transport here and the in-process `LocalServer`
 /// transport (see [`org_local_server`]).
-/// Permit tables for the org lane's permission gate. METHOD-level: the
-/// gate checks the coarse resource (`vault/{path}` ⇒ `vault/**`);
-/// path-exact checks arrive with the share lane (service impls calling the
-/// engine directly). Services without a table pass through
-/// (`UnlistedPolicy::Allow`) so coverage can grow service by service.
-const VAULT_PERMITS: architect_permissions::ServicePermits =
-    architect_permissions::ServicePermits {
-        service: "vault-sync",
-        methods: &[
-            architect_permissions::MethodPermit::new("manifest", "read", "vault/**"),
-            architect_permissions::MethodPermit::new("get_file", "read", "vault/{path}"),
-            architect_permissions::MethodPermit::new("put_file", "write", "vault/{path}"),
-            architect_permissions::MethodPermit::new("delete_file", "write", "vault/{path}"),
-            architect_permissions::MethodPermit::new("folder_index", "read", "vault/**"),
-            architect_permissions::MethodPermit::new("set_folder", "write", "vault/{path}"),
-            architect_permissions::MethodPermit::new("open_collab", "read", "vault/{path}"),
-            architect_permissions::MethodPermit::new("base_views", "read", "vault/{path}"),
-            architect_permissions::MethodPermit::new("subscribe", "read", "vault/**"),
-        ],
-    };
+/// The role every validated user gets on the org lane until per-row
+/// membership sync lands (see `plans/architect-permissions.md`).
+pub const DEFAULT_ORG_ROLE: &str = "member";
 
-const MEDIA_PERMITS: architect_permissions::ServicePermits =
-    architect_permissions::ServicePermits {
-        service: "media",
-        methods: &[
-            architect_permissions::MethodPermit::new("stat", "read", "media/{content_hash}"),
-            architect_permissions::MethodPermit::new("read", "read", "media/{content_hash}")
-                .audited(),
-        ],
-    };
+/// Is the gate enforcing? **Off unless `TASK_ENFORCE_PERMISSIONS` is
+/// exactly `1`** — the deliberate operator action. Everything else
+/// (unset, empty, `true`, `yes`) leaves the gate in observe-only mode,
+/// exactly as before permit tables existed.
+#[must_use]
+pub fn enforce_permissions() -> bool {
+    std::env::var("TASK_ENFORCE_PERMISSIONS").is_ok_and(|v| v == "1")
+}
+
+/// Server-wide tally of every (would-be) denial the gate produced. Read
+/// by `GET /server/permissions`; written by [`permits::GateAudit`].
+#[must_use]
+pub fn permission_deny_ledger() -> Arc<permits::DenyLedger> {
+    static LEDGER: std::sync::LazyLock<Arc<permits::DenyLedger>> =
+        std::sync::LazyLock::new(Arc::default);
+    LEDGER.clone()
+}
+
+/// The org lane's permission engine: the role engine (every validated
+/// user is a [`DEFAULT_ORG_ROLE`]) plus a scope engine granting
+/// [`permits::PUBLIC_GLOB`] to EVERY principal — including anonymous
+/// ones, which is how the sign-in path stays reachable once enforcement
+/// is on (see `permits`' module docs). First-allow-wins, so the public
+/// rules only ever widen.
+#[must_use]
+pub fn org_permission_engine() -> Arc<dyn architect_permissions::PermissionEngine> {
+    let roles = architect_permissions::RoleEngine::new().with_default_user_role(DEFAULT_ORG_ROLE);
+    let public = architect_permissions::ScopeEngine::new(vec![architect_permissions::Rule::new(
+        permits::PUBLIC_GLOB,
+        &["*"],
+    )]);
+    Arc::new(
+        architect_permissions::CompositeEngine::new()
+            .push(Arc::new(roles))
+            .push(Arc::new(public)),
+    )
+}
 
 /// Build the org lane's permission gate: session-validating identity over
-/// THIS org's auth store, role engine with `member` as the default role for
-/// any validated user (per-row membership sync lands with shares), permit
-/// tables for the share-relevant services. Observe-only unless
-/// `TASK_ENFORCE_PERMISSIONS=1`.
+/// THIS org's auth store, the [`org_permission_engine`], and a permit
+/// table for EVERY service [`org_layer_router`] mounts (see [`permits`]).
+///
+/// **Runtime defaults are unchanged**: `UnlistedPolicy::Allow` and
+/// `observe_only(!enforce)` with `enforce` false unless
+/// `TASK_ENFORCE_PERMISSIONS=1`. Installing tables changes what is
+/// *evaluated and logged*, never what is refused, while the gate is in
+/// observe-only mode — [`architect::permissions_gate::PermissionedRouter`]
+/// dispatches to the inner router on every outcome when `observe_only` is
+/// set.
 fn build_org_permissions_gate(auth: &AuthState) -> architect::permissions_gate::PermissionsGate {
     use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
-    let roles = architect_permissions::RoleEngine::new().with_default_user_role("member");
     let identity = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
-    let enforce = std::env::var("TASK_ENFORCE_PERMISSIONS").is_ok_and(|v| v == "1");
-    PermissionsGate::new(Arc::new(roles), Arc::new(identity))
+    let enforce = enforce_permissions();
+    let audit = permits::GateAudit::new(enforce, permission_deny_ledger(), DEFAULT_ORG_ROLE);
+    let gate = PermissionsGate::new(org_permission_engine(), Arc::new(identity))
+        .with_audit(Arc::new(audit))
         .unlisted(UnlistedPolicy::Allow)
-        .observe_only(!enforce)
-        .permit(vault_proto::descriptor(), VAULT_PERMITS)
-        .permit(
-            media_proto::media_service_service_descriptor(),
-            MEDIA_PERMITS,
-        )
+        .observe_only(!enforce);
+    permits::install(gate)
 }
 
 /// Schema stamps for every vox service [`org_layer_router`]
@@ -1693,81 +1821,14 @@ fn build_org_permissions_gate(auth: &AuthState) -> architect::permissions_gate::
 /// task-server" instead of letting the skew surface as decode
 /// errors.
 ///
-/// Keep in lockstep with [`org_layer_router`] below — a missing
-/// entry only costs coverage for that service, never
-/// correctness.
+/// The descriptor list is [`permits::mounted_descriptors`] — the
+/// SAME list the permit gate folds, so stamps and permits can no
+/// longer drift from each other (they used to be two hand-kept
+/// copies). `permits_cover_router` asserts it matches what
+/// [`org_layer_router`] actually mounts.
 #[must_use]
 pub fn schema_stamps() -> Vec<(&'static str, String)> {
-    org_proto::schema_stamp::stamp_services([
-        architect_auth::auth_service_service_descriptor(),
-        attachments_proto::attachment_service_service_descriptor(),
-        vault_proto::descriptor(),
-        architect_permissions_proto::permissions_service_service_descriptor(),
-        share_proto::share_service_service_descriptor(),
-        agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
-        agent_proto::service::sessions::sessions_rpc_service_descriptor(),
-        agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
-        agent_proto::service::threads::threads_rpc_service_descriptor(),
-        agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
-        agent_proto::service::discovery::discovery_rpc_service_descriptor(),
-        timer_proto::service::timer_service_rpc_service_descriptor(),
-        threads::service::threads_service_rpc_service_descriptor(),
-        prefs_proto::service::prefs_service_rpc_service_descriptor(),
-        scheduling_proto::service::day_templates::day_templates_rpc_service_descriptor(),
-        scheduling_proto::service::day_plans::day_plans_rpc_service_descriptor(),
-        scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
-        scheduling_proto::service::event_types::event_types_rpc_service_descriptor(),
-        scheduling_proto::service::schedules::schedules_rpc_service_descriptor(),
-        scheduling_proto::service::slots::slots_rpc_service_descriptor(),
-        scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
-        inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
-        recall_proto::service::recall::recall_rpc_service_descriptor(),
-        contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
-        tag_proto::service::tags::tag_service_rpc_service_descriptor(),
-        finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
-        finance_proto::service::ledger::ledger_rpc_service_descriptor(),
-        wiki_proto::service::schema::schema_rpc_service_descriptor(),
-        wiki_proto::service::catalog::catalog_rpc_service_descriptor(),
-        wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor(),
-        wiki_proto::service::graph::graph_rpc_service_descriptor(),
-        wiki_proto::service::pages::pages_rpc_service_descriptor(),
-        wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
-        wiki_proto::service::lint::lint_rpc_service_descriptor(),
-        wiki_proto::service::search::search_rpc_service_descriptor(),
-        wiki_proto::service::watcher::watcher_rpc_service_descriptor(),
-        wiki_proto::service::multimodal::multimodal_rpc_service_descriptor(),
-        wiki_proto::service::review::review_rpc_service_descriptor(),
-        project::project_service_descriptor(),
-        goal::goal_service_descriptor(),
-        milestone::milestone_service_descriptor(),
-        workstream::workstream_service_descriptor(),
-        workstream::workstream_stream_descriptor(),
-        task::task_service_descriptor(),
-        task::task_stream_descriptor(),
-        locations::locations_service_descriptor(),
-        inventory::inventory_service_descriptor(),
-        scripture::scripture_service_descriptor(),
-        links::links_service_descriptor(),
-        collection::collection_service_descriptor(),
-        resources_proto::resources_service_rpc_service_descriptor(),
-        cookbook::cookbook_service_descriptor(),
-        mealplan::mealplan_service_descriptor(),
-        pantry::pantry_service_descriptor(),
-        mealplan::shopping::shopping_service_rpc_service_descriptor(),
-        mealplan::substitutions::substitution_service_rpc_service_descriptor(),
-        body::body_service_descriptor(),
-        exercises::exercises_service_descriptor(),
-        workouts::workouts_service_descriptor(),
-        intake::intake_service_descriptor(),
-        email_proto::descriptor(),
-        git_proto::repo::repo_catalog_rpc_service_descriptor(),
-        git_proto::issues::issue_tracker_rpc_service_descriptor(),
-        git_proto::reviews::review_surface_rpc_service_descriptor(),
-        git_proto::connections::repo_connections_rpc_service_descriptor(),
-        crdt::sync::doc_sync_service_descriptor(),
-        crdt::sync::doc_presence_service_descriptor(),
-        vault_proto::vault_graph_rpc_service_descriptor(),
-    ])
+    org_proto::schema_stamp::stamp_services(permits::mounted_descriptors())
 }
 
 pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
@@ -1795,11 +1856,18 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.attachments.clone(),
             )),
         )
-        // Vault file replication (manifest / get / put / delete / subscribe).
+        // Vault file replication (manifest / get / put / delete).
         .with(
             vault_proto::descriptor(),
             vault_proto::serve(org.vault_sync.clone()),
         )
+        // Live vault changes — `VaultSync`'s `#[subscribe]` stream
+        // sibling. The hub lives on the `vault::Backend` above, so
+        // every path publishes into it: wire PUT/DELETE/set_folder,
+        // in-process writers holding a backend clone, and the
+        // filesystem watcher (external edits from vim / Obsidian /
+        // `git pull`).
+        .merge(vault_proto::stream_layer(org.vault_sync.clone()))
         // Permissions oracle — the caller's capability manifest, answered
         // by the SAME engine + identity the org lane's gate enforces with.
         .with(
@@ -1846,10 +1914,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         )
         // Agent subscriptions — live AgentEvent streams per session;
         // what the chat UI renders deltas from.
-        .with(
-            agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
-            agent_proto::service::subscriptions::serve(org.agent_router.clone()),
-        )
+        // Live agent events — the `#[subscribe]` stream over the hub
+        // both agent backends publish into. One subscription per
+        // client; the envelope's `session_id` is the filter.
+        .merge(agent_proto::service::subscriptions::stream_layer(
+            org.agent_router.clone(),
+        ))
         // Agent discovery — live model/skill/capability lists for the
         // chat UI's pickers and inspector panel.
         .with(
@@ -1980,7 +2050,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             wiki_proto::service::review::review_rpc_service_descriptor(),
             wiki_proto::service::review::serve(wiki.clone()),
-        );
+        )
+        // Live wiki changes — the `Events` `#[subscribe]` stream.
+        // The hub lives on the `WikiBackend`, so every committed
+        // page write / ingest enqueue / review enqueue publishes
+        // into it.
+        .merge(wiki_proto::service::events::stream_layer(wiki.clone()));
 
     // Project / Goal / Milestone / Task readers (vault-backed).
     router = router
@@ -2105,6 +2180,9 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             email_proto::descriptor(),
             email_proto::serve(org.email.clone()),
         )
+        // Live mailbox changes — `EmailSync`'s `#[subscribe]`
+        // stream sibling, served from the backend's hub.
+        .merge(email_proto::stream_layer(org.email.clone()))
         .with(
             git_proto::repo::repo_catalog_rpc_service_descriptor(),
             git_proto::repo::serve(org.forge.clone()),
@@ -2117,6 +2195,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             git_proto::reviews::review_surface_rpc_service_descriptor(),
             git_proto::reviews::serve(org.forge.clone()),
         )
+        // Live forge changes — the `#[subscribe]` stream siblings of
+        // `IssueTracker` / `ReviewSurface`. The hubs live on the
+        // forge backend, so every issue / PR write this server
+        // commits publishes into them.
+        .merge(git_proto::issues::stream_layer(org.forge.clone()))
+        .merge(git_proto::reviews::stream_layer(org.forge.clone()))
         .with(
             git_proto::connections::repo_connections_rpc_service_descriptor(),
             git_proto::connections::serve(connections::ConnectionsBackend::new(

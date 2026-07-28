@@ -7,8 +7,8 @@
 //! the same task sorted differently on the two pages. Dedupe here so
 //! every list agrees on one ordering. (Issue #27, item 2.)
 
-use project::ProjectInfo;
-use task::TaskInfo as DbTask;
+use project_proto::ProjectInfo;
+use task_proto::TaskInfo as DbTask;
 
 /// Sort key for task/issue priority: urgent → high → normal → low →
 /// lowest/unknown. Lower rank sorts first. Empty string is treated as
@@ -44,7 +44,7 @@ pub fn is_active(status: &str) -> bool {
 
 /// Whether a task is still open (not in any terminal status).
 pub fn is_open_task(t: &DbTask) -> bool {
-    task::status_is_open(&t.status)
+    task_proto::status_is_open(&t.status)
 }
 
 /// Whether a task is actively being worked: explicitly `in-progress`,

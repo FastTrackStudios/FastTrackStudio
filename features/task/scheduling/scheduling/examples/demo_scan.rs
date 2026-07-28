@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use scheduling::vault_scheduler::VaultScheduler;
 use scheduling_proto::{Bookings, DayTemplates, EventTypes, Schedules};
-use store_proto::mem::MemStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = PathBuf::from(
@@ -12,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .nth(1)
             .unwrap_or_else(|| "examples/vault".into()),
     );
-    let s = VaultScheduler::new(root, Box::new(MemStore::new()), Box::new(MemStore::new()))?;
+    let s = VaultScheduler::new(root)?;
     let dts = s.list_day_templates()?;
     let ets = s.list_event_types()?;
     let scs = s.list_schedules()?;

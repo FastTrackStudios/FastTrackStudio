@@ -23,9 +23,11 @@ use wiki_proto::review::ReviewItem;
 use wiki_proto::schema as stypes;
 use wiki_proto::search::{SearchHits, SearchOpts};
 use wiki_proto::pages as ptypes;
+use wiki_proto::service::events::EventsStreamSource;
 use wiki_proto::service::{
     Catalog, Graph, Ingest, Lint, Multimodal, Pages, RawLayer, Review, Schema, Search, Watcher,
 };
+use wiki_proto::{WikiChange, WikiEvent};
 
 use crate::WikiLive;
 
@@ -44,6 +46,15 @@ pub struct WikiBackend {
     /// toggle); spawning the actual watcher thread happens
     /// on `set_watch(true)`.
     watch_flags: Arc<std::sync::Mutex<HashMap<String, bool>>>,
+    /// Fan-out hub behind the `Events` `#[subscribe]` stream. Every
+    /// committed mutation publishes here (see [`Self::emit`]),
+    /// wrapped with its `wiki_id` so subscribers — who see every
+    /// wiki this backend serves — can filter. Sliding mailbox: a
+    /// slow subscriber loses its oldest queued events and re-pulls
+    /// when its stream re-establishes. Clones share the hub (`Arc`
+    /// inside), so the service mount and the stream mount can each
+    /// hold a backend clone.
+    changes: architect::PubSub<WikiChange>,
 }
 
 impl WikiBackend {
@@ -71,7 +82,19 @@ impl WikiBackend {
         Self {
             layout,
             watch_flags: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            changes: architect::PubSub::sliding(256),
         }
+    }
+
+    /// Announce a committed change to every `changes` subscriber.
+    /// Call only *after* the write landed — subscribers use these to
+    /// decide what to re-fetch, so a speculative event costs a
+    /// pointless round-trip (or worse, shows state that never was).
+    fn emit(&self, wiki_id: &str, event: WikiEvent) {
+        self.changes.publish(WikiChange {
+            wiki_id: wiki_id.to_string(),
+            event,
+        });
     }
 
     fn resolve(&self, wiki_id: &str) -> Result<WikiLive, WikiError> {
@@ -364,12 +387,29 @@ impl Pages for WikiBackend {
         }
         std::fs::write(&abs, markdown)
             .map_err(|e| WikiError::Io(format!("write {}: {e}", abs.display())))?;
-        Ok(ptypes::WikiPageDoc {
+        let doc = ptypes::WikiPageDoc {
             path: rel,
             markdown: markdown.to_string(),
             sha256: sha256_hex(markdown.as_bytes()),
             modified: mtime_utc(&abs),
-        })
+        };
+        self.emit(
+            wiki_id,
+            WikiEvent::PageWritten {
+                path: doc.path.clone(),
+                at: doc.modified,
+            },
+        );
+        Ok(doc)
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in
+/// [`WikiBackend::emit`], on every committed mutation.
+impl EventsStreamSource for WikiBackend {
+    fn changes_hub(&self) -> &architect::PubSub<WikiChange> {
+        &self.changes
     }
 }
 
@@ -531,7 +571,15 @@ impl Ingest for WikiBackend {
         let task = w
             .enqueue_ingest(source_path, local_kind, &bytes)
             .map_err(map_err)?;
-        Ok(to_proto_task(task))
+        let task = to_proto_task(task);
+        self.emit(
+            wiki_id,
+            WikiEvent::IngestEnqueued {
+                task_id: task.id.clone(),
+                source_path: source_path.to_string(),
+            },
+        );
+        Ok(task)
     }
     fn list_ingest(&self, wiki_id: &str) -> Result<Vec<itypes::IngestTask>, WikiError> {
         let w = self.resolve(wiki_id)?;
@@ -795,7 +843,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 impl Review for WikiBackend {
     fn enqueue_review(&self, wiki_id: &str, item: ReviewItem) -> Result<(), WikiError> {
         let w = self.resolve(wiki_id)?;
-        w.enqueue_review(item).map_err(map_err)
+        let item_id = item.id.clone();
+        w.enqueue_review(item).map_err(map_err)?;
+        self.emit(wiki_id, WikiEvent::ReviewEnqueued { item_id });
+        Ok(())
     }
 
     fn list_review(&self, wiki_id: &str) -> Result<Vec<ReviewItem>, WikiError> {

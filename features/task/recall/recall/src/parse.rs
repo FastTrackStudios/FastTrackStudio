@@ -8,24 +8,19 @@
 //! files).
 
 use recall_proto::{CardType, RecallCard};
-use thiserror::Error;
+use vault_entity::yaml;
+
+pub use vault_entity::ParseError;
 
 /// The line that separates the front from the back in the body.
 pub const BACK_MARKER: &str = "<!-- back -->";
 
-#[derive(Debug, Error)]
-pub enum ParseError {
-    #[error("invalid frontmatter: {0}")]
-    Frontmatter(String),
-}
-
 /// Split a markdown file's leading YAML frontmatter from the body.
-/// Returns `(frontmatter, body)`. Mirrors `inbox::parse`.
+/// Returns `(frontmatter, body)`. One splitter for the whole tree —
+/// [`vault_entity::frontmatter::split`].
 #[must_use]
 pub fn frontmatter_split(src: &str) -> Option<(&str, &str)> {
-    let rest = src.strip_prefix("---\n")?;
-    let end = rest.find("\n---\n")?;
-    Some((&rest[..end], &rest[end + 5..]))
+    vault_entity::frontmatter::split(src)
 }
 
 /// Split a card body into `(front, back)` around [`BACK_MARKER`]. A
@@ -39,30 +34,6 @@ pub fn split_body(body: &str) -> (String, String) {
     }
 }
 
-fn take_str(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
-    map.get(serde_yaml::Value::from(key))
-        .and_then(serde_yaml::Value::as_str)
-        .map(str::to_string)
-}
-
-fn take_f64(map: &serde_yaml::Mapping, key: &str) -> f64 {
-    map.get(serde_yaml::Value::from(key))
-        .and_then(serde_yaml::Value::as_f64)
-        .unwrap_or(0.0)
-}
-
-fn take_i64(map: &serde_yaml::Mapping, key: &str) -> i64 {
-    map.get(serde_yaml::Value::from(key))
-        .and_then(serde_yaml::Value::as_i64)
-        .unwrap_or(0)
-}
-
-fn take_bool(map: &serde_yaml::Mapping, key: &str) -> bool {
-    map.get(serde_yaml::Value::from(key))
-        .and_then(serde_yaml::Value::as_bool)
-        .unwrap_or(false)
-}
-
 /// Parse a learning card. `path` supplies the fallback id (the file
 /// stem) when frontmatter has none; `body` is the raw markdown after
 /// the frontmatter fence.
@@ -72,9 +43,9 @@ pub fn parse_recall_card(
     body: &str,
 ) -> Result<RecallCard, ParseError> {
     let map: serde_yaml::Mapping = serde_yaml::from_str(frontmatter_yaml)
-        .map_err(|e| ParseError::Frontmatter(e.to_string()))?;
+        .map_err(|e| ParseError::Yaml(e.to_string()))?;
 
-    let id = take_str(&map, "id").unwrap_or_else(|| {
+    let id = yaml::str_at(&map, "id").unwrap_or_else(|| {
         std::path::Path::new(path)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -86,18 +57,18 @@ pub fn parse_recall_card(
 
     Ok(RecallCard {
         id,
-        project: take_str(&map, "project").unwrap_or_default(),
-        card_type: take_str(&map, "card_type").unwrap_or_else(|| CardType::FREE.to_string()),
+        project: yaml::str_at(&map, "project").unwrap_or_default(),
+        card_type: yaml::str_at(&map, "card_type").unwrap_or_else(|| CardType::FREE.to_string()),
         front,
         back,
-        source_note: take_str(&map, "source_note"),
-        stability: take_f64(&map, "sr-stability"),
-        difficulty: take_f64(&map, "sr-difficulty"),
-        reps: take_i64(&map, "sr-reps"),
-        lapses: take_i64(&map, "sr-lapses"),
-        due: take_str(&map, "sr-due"),
-        last_review: take_str(&map, "sr-last-review"),
-        archived: take_bool(&map, "archived"),
-        created: take_str(&map, "created").unwrap_or_default(),
+        source_note: yaml::str_at(&map, "source_note"),
+        stability: yaml::f64_at(&map, "sr-stability").unwrap_or(0.0),
+        difficulty: yaml::f64_at(&map, "sr-difficulty").unwrap_or(0.0),
+        reps: yaml::i64_at(&map, "sr-reps").unwrap_or(0),
+        lapses: yaml::i64_at(&map, "sr-lapses").unwrap_or(0),
+        due: yaml::str_at(&map, "sr-due"),
+        last_review: yaml::str_at(&map, "sr-last-review"),
+        archived: yaml::bool_at(&map, "archived").unwrap_or(false),
+        created: yaml::str_at(&map, "created").unwrap_or_default(),
     })
 }

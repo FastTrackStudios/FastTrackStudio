@@ -1,11 +1,15 @@
-// architect's `Entity` derive emits a `#[cfg(feature = "vox")]`
-// block; we don't expose a vox feature here (project is a
-// wire/file format, not a service trait) so the gated code
-// never compiles, but rustc still flags the cfg as unknown.
-// Allow at crate scope until architect grows opt-out support.
+// architect's `Entity` derive emits cfg-gated blocks; allow
+// at crate scope.
 #![allow(unexpected_cfgs)]
 
 //! `project` — first-party project feature.
+//!
+//! The wasm-clean wire surface ([`ProjectInfo`] / [`Status`], the
+//! per-project state registry, and the [`ProjectService`] RPC
+//! trait) lives in the sibling [`project_proto`] crate; this crate
+//! sits on top of it and owns the vault-backed side (parse /
+//! serialize / scan / write / [`ProjectBackend`]). Every proto item
+//! is re-exported here at its historical `project::…` path.
 //!
 //! Projects are plain markdown pages living under
 //! `Projects/*.md` in the vault. Frontmatter carries the
@@ -38,21 +42,22 @@
 //!   scanner.
 
 pub mod model;
-pub mod parse;
 pub mod service;
 pub mod states;
 
-// FS-dependent modules (vault::Vault, std::fs walks). The
-// wasm-targeted UI imports the wire types + RPC client only,
-// not these.
-#[cfg(not(target_arch = "wasm32"))]
+// FS-dependent modules. `entity` / `parse` reach the shared
+// `vault-entity` support layer, which walks `std::fs` (and pulls a
+// file watcher), as do `backend` / `scan` / `write`. Browser
+// consumers take `project-proto` instead of this crate, so none of
+// it needs a target gate.
 pub mod backend;
-#[cfg(not(target_arch = "wasm32"))]
+pub mod entity;
+pub mod parse;
 pub mod scan;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod write;
 
 pub use model::{ProjectInfo, Status};
+pub use entity::Projects;
 pub use parse::{ParseError, looks_like_project, parse_page, parse_str};
 pub use service::{ProjectError, ProjectService, ProjectServiceRpc};
 #[cfg(feature = "vox")]
@@ -64,9 +69,6 @@ pub use service::{
 };
 pub use states::{StateDef, StateGroup, StatesConfig, default_states, resolve_state_group};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use backend::ProjectBackend;
-#[cfg(not(target_arch = "wasm32"))]
 pub use scan::scan_vault;
-#[cfg(not(target_arch = "wasm32"))]
 pub use write::{WriteError, serialize_project, write_project};

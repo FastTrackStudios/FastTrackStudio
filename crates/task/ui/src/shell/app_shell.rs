@@ -13,9 +13,6 @@ pub fn AppShell() -> Element {
 
     // Quick-capture + data-refresh signals for the persistent chrome.
     provide_chrome_contexts();
-    // Now Playing control surface — shared by the headless engine
-    // (GlobalNowPlayer) and the status-bar tab (NowPlayingTab).
-    crate::shell::now_playing::provide_now_playing_ctl();
     // Ctrl+P command-palette visibility (same pattern as FleetingOpen).
     crate::palette::provide_palette_context();
     // Obsidian-style route tabs (the strip lives in the TopBar) —
@@ -165,14 +162,14 @@ pub fn AppShell() -> Element {
         // Global Now Playing engine — headless, mounted here (outside the
         // route Outlet) so playback survives navigation. The UI is the
         // status-bar tab (desktop) / the floating tab below (mobile).
-        crate::shell::now_playing::GlobalNowPlayer {}
+        task_player_ui::GlobalNowPlayer {}
         // Marks the playing setlist row + feeds its artwork waveform.
-        crate::shell::now_playing::NowPlayingStripHighlighter {}
+        task_player_ui::NowPlayingStripHighlighter {}
         // Mobile: no desktop status bar, so float the same tab above the
         // bottom tab bar. Renders nothing until something plays.
         if !share {
             div { class: "md:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] right-2 z-40",
-                crate::shell::now_playing::NowPlayingTab {}
+                task_player_ui::NowPlayingTab {}
             }
         }
         // Single global capture modal, toggled from any fleeting button.

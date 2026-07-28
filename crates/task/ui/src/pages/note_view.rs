@@ -572,7 +572,7 @@ pub(crate) fn NoteView(
                             crate::pages::experience::FullscreenExperience {
                                 title: basename_of(&path).to_string(),
                                 on_exit: move |_| setlist_fullscreen.set(false),
-                                crate::pages::setlist_session::SetlistPlayer {
+                                task_player_ui::SetlistPlayer {
                                     songs: vec![song_slug_value.clone()],
                                     org: home.read().clone(),
                                     fullscreen: true,
@@ -613,7 +613,7 @@ pub(crate) fn NoteView(
                             crate::pages::experience::FullscreenExperience {
                                 title: basename_of(&path).to_string(),
                                 on_exit: move |_| setlist_fullscreen.set(false),
-                                crate::pages::setlist_session::SetlistPlayer {
+                                task_player_ui::SetlistPlayer {
                                     songs: setlist_songs_value.clone(),
                                     org: home.read().clone(),
                                     fullscreen: true,

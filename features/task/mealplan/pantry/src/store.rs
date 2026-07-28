@@ -1,36 +1,45 @@
 //! File-backed [`PantryService`] impl.
+//!
+//! CRUD is [`vault_entity::VaultEntityStore`]; what stays here is
+//! `rename` (the shared store deliberately never moves a file) and
+//! the food-specific mutators — consume / restock / open, the stock
+//! ledger, and barcode resolution.
 
 use std::sync::{Arc, Mutex};
 
 use uuid::Uuid;
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::PantryItems;
 use crate::model::{PantryItem, StockEntry};
 use crate::parse::{looks_like_pantry_item, parse_page};
-use crate::scan::scan_vault;
 use crate::service::{BarcodeResolution, ConsumeReceipt, EntryDebit, PantryError, PantryService};
-use crate::write::{default_pantry_path, serialize_pantry_item};
+
+vault_entity::entity_error_bridge!(PantryError);
 
 #[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
-    inner: Arc<Mutex<Vault>>,
+    inner: VaultEntityStore<PantryItems>,
 }
 
 impl Store {
     #[must_use]
     pub fn new(vault: Vault) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(vault)),
+            inner: VaultEntityStore::new(vault),
         }
     }
 
     pub fn from_shared(inner: Arc<Mutex<Vault>>) -> Self {
-        Self { inner }
+        Self {
+            inner: VaultEntityStore::from_shared(inner),
+        }
     }
 
     #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
-        self.inner.clone()
+        self.inner.shared()
     }
 }
 
@@ -38,92 +47,63 @@ fn map_io(e: impl std::fmt::Display) -> PantryError {
     PantryError::Io(e.to_string())
 }
 
-fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
-    vault.pages.iter().position(|p| {
-        looks_like_pantry_item(p) && parse_page(p).map(|i| i.id == id).unwrap_or(false)
-    })
-}
-
 impl PantryService for Store {
     fn list(&self) -> Result<Vec<PantryItem>, PantryError> {
-        let guard = self.inner.lock().expect("pantry store poisoned");
-        Ok(scan_vault(&guard))
+        Ok(self.inner.list())
     }
 
     fn get(&self, id: &str) -> Result<PantryItem, PantryError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| PantryError::BadRequest(format!("id: {e}")))?;
-        let guard = self.inner.lock().expect("pantry store poisoned");
-        for page in guard.pages.iter().filter(|p| looks_like_pantry_item(p)) {
-            if let Ok(i) = parse_page(page) {
-                if i.id == uuid {
-                    return Ok(i);
-                }
-            }
-        }
-        Err(PantryError::NotFound(id.to_string()))
+        self.inner.get(id).map_err(from_entity_error)
     }
 
     fn create(&self, mut item: PantryItem) -> Result<PantryItem, PantryError> {
-        if item.id.is_nil() {
-            item.id = Uuid::new_v4();
-        }
-        if item.path.is_empty() {
-            item.path = default_pantry_path(&item.name, None);
-        }
+        // The `pantry` tag is the discriminator. `to_markdown` asserts
+        // it on the bytes; assert it on the value too so the record the
+        // caller gets back matches what landed on disk.
         if !item.tags.iter().any(|t| t == "pantry") {
             item.tags.push("pantry".into());
         }
-        let now = chrono::Utc::now();
-        item.date_created.get_or_insert(now);
-        item.date_modified = Some(now);
-        let body = serialize_pantry_item(&item).map_err(map_io)?;
-        let mut guard = self.inner.lock().expect("pantry store poisoned");
-        if guard.pages.iter().any(|p| p.rel_path == item.path) {
-            return Err(PantryError::AlreadyExists(item.path));
-        }
-        vault::create_page(&mut guard, &item.path, body).map_err(map_io)?;
-        Ok(item)
+        self.inner.create(item).map_err(from_entity_error)
     }
 
-    fn update(&self, mut item: PantryItem) -> Result<PantryItem, PantryError> {
-        let mut guard = self.inner.lock().expect("pantry store poisoned");
-        let idx =
-            find_idx(&guard, item.id).ok_or_else(|| PantryError::NotFound(item.id.to_string()))?;
-        item.path = guard.pages[idx].rel_path.clone();
-        item.date_modified = Some(chrono::Utc::now());
-        let body = serialize_pantry_item(&item).map_err(map_io)?;
-        guard.pages[idx].raw = body;
-        let path = item.path.clone();
-        vault::save_page(&mut guard, &path).map_err(map_io)?;
-        Ok(item)
+    fn update(&self, item: PantryItem) -> Result<PantryItem, PantryError> {
+        self.inner.update(item).map_err(from_entity_error)
     }
 
+    /// Move a page to `new_path`, keeping its bytes verbatim.
+    ///
+    /// Not plain CRUD — the shared store deliberately never moves a
+    /// file on update — so it stays hand-written here.
     fn rename(&self, id: &str, new_path: &str) -> Result<PantryItem, PantryError> {
         let uuid = Uuid::parse_str(id).map_err(|e| PantryError::BadRequest(format!("id: {e}")))?;
-        let mut guard = self.inner.lock().expect("pantry store poisoned");
-        let idx = find_idx(&guard, uuid).ok_or_else(|| PantryError::NotFound(id.to_string()))?;
-        if guard.pages.iter().any(|p| p.rel_path == new_path) {
-            return Err(PantryError::AlreadyExists(new_path.to_string()));
-        }
-        let old_path = guard.pages[idx].rel_path.clone();
-        let raw = guard.pages[idx].raw.clone();
-        vault::delete_page(&mut guard, &old_path).map_err(map_io)?;
-        vault::create_page(&mut guard, new_path, raw).map_err(map_io)?;
-        let new_page = guard
-            .pages
-            .iter()
-            .find(|p| p.rel_path == new_path)
-            .ok_or_else(|| PantryError::Io("rename: page missing post-write".into()))?;
-        parse_page(new_page).map_err(|e| PantryError::Io(e.to_string()))
+        self.inner
+            .with_vault_mut(|guard| -> Result<PantryItem, PantryError> {
+                let idx = guard
+                    .pages
+                    .iter()
+                    .position(|p| {
+                        looks_like_pantry_item(p)
+                            && parse_page(p).map(|i| i.id == uuid).unwrap_or(false)
+                    })
+                    .ok_or_else(|| PantryError::NotFound(id.to_string()))?;
+                if guard.pages.iter().any(|p| p.rel_path == new_path) {
+                    return Err(PantryError::AlreadyExists(new_path.to_string()));
+                }
+                let old_path = guard.pages[idx].rel_path.clone();
+                let raw = guard.pages[idx].raw.clone();
+                vault::delete_page(&mut *guard, &old_path).map_err(map_io)?;
+                vault::create_page(&mut *guard, new_path, raw).map_err(map_io)?;
+                let new_page = guard
+                    .pages
+                    .iter()
+                    .find(|p| p.rel_path == new_path)
+                    .ok_or_else(|| PantryError::Io("rename: page missing post-write".into()))?;
+                parse_page(new_page).map_err(|e| PantryError::Io(e.to_string()))
+            })
     }
 
     fn delete(&self, id: &str) -> Result<(), PantryError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| PantryError::BadRequest(format!("id: {e}")))?;
-        let mut guard = self.inner.lock().expect("pantry store poisoned");
-        let idx = find_idx(&guard, uuid).ok_or_else(|| PantryError::NotFound(id.to_string()))?;
-        let path = guard.pages[idx].rel_path.clone();
-        vault::delete_page(&mut guard, &path).map_err(map_io)?;
-        Ok(())
+        self.inner.delete(id).map_err(from_entity_error)
     }
 
     fn consume(&self, id: &str, amount: f64) -> Result<PantryItem, PantryError> {
@@ -169,15 +149,9 @@ impl PantryService for Store {
         if needle.is_empty() {
             return Err(PantryError::BadRequest("empty barcode".into()));
         }
-        let guard = self.inner.lock().expect("pantry store poisoned");
-        for page in guard.pages.iter().filter(|p| looks_like_pantry_item(p)) {
-            if let Ok(i) = parse_page(page) {
-                if i.barcodes.iter().any(|b| b == needle) {
-                    return Ok(i);
-                }
-            }
-        }
-        Err(PantryError::NotFound(format!("barcode: {needle}")))
+        self.inner
+            .find(|i| i.barcodes.iter().any(|b| b == needle))
+            .ok_or_else(|| PantryError::NotFound(format!("barcode: {needle}")))
     }
 
     fn add_stock(&self, id: &str, mut entry: StockEntry) -> Result<PantryItem, PantryError> {

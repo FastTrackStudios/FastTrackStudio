@@ -1,44 +1,28 @@
-//! `vault::VaultPage` → `Goal`.
+//! `vault_proto::VaultPage` → `Goal`.
 //!
-//! Discriminator: `type: goal` in the frontmatter (or `goal`
-//! in `tags:`). Missing optional fields fall back to
-//! defaults; missing `id` is synthesized from the path so
-//! legacy pages still load — callers should `write_goal` to
-//! persist.
+//! The field mapping lives in [`crate::entity`]; this module keeps the
+//! historical `goal::parse::*` paths working.
+//!
+//! Discriminator: `type: goal` in the frontmatter (or `goal` in
+//! `tags:`). Missing optional fields fall back to defaults; missing
+//! `id` is synthesized from the path so legacy pages still load —
+//! callers should `write_goal` to persist.
 
-use thiserror::Error;
-use uuid::Uuid;
+pub use vault_entity::ParseError;
+
+use vault_entity::VaultEntity;
 use vault_proto::VaultPage;
 
+use crate::entity::Goals;
 use crate::model::Goal;
 
-#[derive(Debug, Error)]
-pub enum ParseError {
-    #[error("page has no frontmatter")]
-    NoFrontmatter,
-    #[error("frontmatter is not a YAML mapping")]
-    NotAMapping,
-    #[error("frontmatter parse: {0}")]
-    Yaml(String),
-}
-
+/// True when `page` carries `type: goal` (or the tag).
 #[must_use]
 pub fn looks_like_goal(page: &VaultPage) -> bool {
-    let Some((fm, _)) = split_frontmatter(&page.raw) else {
-        return false;
-    };
-    let Ok(map) = serde_yaml::from_str::<serde_yaml::Mapping>(fm) else {
-        return false;
-    };
-    if map.get("type").and_then(|v| v.as_str()) == Some("goal") {
-        return true;
-    }
-    if let Some(seq) = map.get("tags").and_then(|v| v.as_sequence()) {
-        return seq.iter().any(|v| v.as_str() == Some("goal"));
-    }
-    false
+    vault_entity::frontmatter::has_type(&page.raw, Goals::TYPE)
 }
 
+/// Parse a goal page.
 pub fn parse_page(page: &VaultPage) -> Result<Goal, ParseError> {
     parse_goal(&page.rel_path, &page.basename, &page.raw)
 }
@@ -47,75 +31,7 @@ pub fn parse_page(page: &VaultPage) -> Result<Goal, ParseError> {
 /// callers that don't have a `VaultPage` handy (e.g. CLI
 /// importers, migration scripts).
 pub fn parse_goal(rel_path: &str, basename: &str, raw: &str) -> Result<Goal, ParseError> {
-    let (fm, body) = split_frontmatter(raw).ok_or(ParseError::NoFrontmatter)?;
-    let map: serde_yaml::Mapping =
-        serde_yaml::from_str(fm).map_err(|e| ParseError::Yaml(e.to_string()))?;
-
-    let id = take_str(&map, "id")
-        .and_then(|s| Uuid::parse_str(&s).ok())
-        .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_URL, rel_path.as_bytes()));
-    let title = take_str(&map, "title").unwrap_or_else(|| basename.to_string());
-    let kind = take_str(&map, "kind").unwrap_or_else(|| "lifetime".into());
-    let status = take_str(&map, "status").unwrap_or_else(|| "aspiration".into());
-    let parent_id = take_str(&map, "parentId")
-        .or_else(|| take_str(&map, "parent_id"))
-        .and_then(|s| Uuid::parse_str(&s).ok());
-    let target_date = take_str(&map, "targetDate")
-        .or_else(|| take_str(&map, "target_date"))
-        .and_then(|s| s.parse().ok());
-    let cycle_id = take_str(&map, "cycleId")
-        .or_else(|| take_str(&map, "cycle_id"))
-        .and_then(|s| Uuid::parse_str(&s).ok());
-    let tags = take_string_list(&map, "tags")
-        .into_iter()
-        .filter(|t| t != "goal")
-        .collect();
-    let date_created = take_str(&map, "dateCreated").and_then(|s| s.parse().ok());
-    let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
-
-    Ok(Goal {
-        path: rel_path.to_string(),
-        id,
-        title,
-        kind,
-        status,
-        parent_id,
-        target_date,
-        cycle_id,
-        tags,
-        date_created,
-        date_modified,
-        details: body.to_string(),
-    })
-}
-
-pub(crate) fn split_frontmatter(src: &str) -> Option<(&str, &str)> {
-    let rest = src.strip_prefix("---\n")?;
-    let end = rest.find("\n---\n")?;
-    Some((&rest[..end], &rest[end + 5..]))
-}
-
-fn take_str(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
-    map.get(key).and_then(|v| match v {
-        serde_yaml::Value::String(s) => Some(s.clone()),
-        serde_yaml::Value::Number(n) => Some(n.to_string()),
-        serde_yaml::Value::Bool(b) => Some(b.to_string()),
-        _ => None,
-    })
-}
-
-fn take_string_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
-    let Some(v) = map.get(key) else {
-        return Vec::new();
-    };
-    match v {
-        serde_yaml::Value::Sequence(seq) => seq
-            .iter()
-            .filter_map(|item| item.as_str().map(std::string::ToString::to_string))
-            .collect(),
-        serde_yaml::Value::String(s) => vec![s.clone()],
-        _ => Vec::new(),
-    }
+    crate::entity::from_parts(rel_path, basename, raw)
 }
 
 #[cfg(test)]

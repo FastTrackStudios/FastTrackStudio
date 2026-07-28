@@ -16,21 +16,22 @@
 //! - [`IfMatch::Force`]      — unconditional. Only safe on the
 //!   first push of a brand-new vault.
 //!
-//! Live events: every successful PUT / DELETE publishes a
-//! [`VaultEvent`] on the per-vault `broadcast::Sender`. A
-//! subscribing client receives every committed change; if the
-//! channel laps (capacity 256), the server sends
-//! [`VaultEvent::Resync`] so the client knows to re-pull the
-//! manifest.
+//! Live events: every successful PUT / DELETE goes to two places
+//! at once (see [`Backend::emit`]) — the per-vault
+//! `broadcast::Sender` that in-process listeners (collab
+//! write-behind, the server's link-sync loop) hold, and the
+//! `architect::PubSub` hub behind the `#[subscribe] fn changes`
+//! stream that wire subscribers attach to. Wire events are wrapped
+//! as [`VaultChange`] so the `vault_id` travels with them — the
+//! stream is unfiltered and clients keep the vault they browse.
 //!
 //! Disk-side externalities (file changes from outside the
 //! backend — vim/obsidian/git pulls/etc.) are picked up by
 //! attaching a watcher via [`Backend::start_watcher`]: the
 //! returned [`WatcherHandle`] keeps a [`crate::watcher`] alive
-//! and forwards every FS change into the same broadcast channel
-//! that powers `subscribe`. Drop the handle to detach. Caller
-//! is expected to start one watcher per registered vault; the
-//! backend itself doesn't auto-spawn.
+//! and forwards every FS change onto both of the above. Drop the
+//! handle to detach. Caller is expected to start one watcher per
+//! registered vault; the backend itself doesn't auto-spawn.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -43,7 +44,8 @@ use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 use vault_proto::{
     BaseGroup, BaseRowView, BaseView, CollabAck, FileBytes, FolderIndex, IfMatch, Manifest,
-    ManifestEntry, PageMeta, PutAck, VaultEvent, VaultSync, VaultSyncError, collab_doc_id,
+    ManifestEntry, PageMeta, PutAck, VaultChange, VaultEvent, VaultSync, VaultSyncError,
+    VaultSyncStreamSource, collab_doc_id,
 };
 
 use crate::vault::Vault;
@@ -93,10 +95,23 @@ pub struct Backend {
     /// `lock` → `read-sha` → `write` → `unlock`. Refine to a
     /// per-vault `RwLock` if write contention shows up.
     write_lock: Arc<std::sync::Mutex<()>>,
-    /// Per-vault broadcast sender, lazily created on first
-    /// `subscribe`. Capacity 256: rapid bursts coalesce
-    /// client-side via [`VaultEvent::Resync`].
+    /// Per-vault broadcast sender, lazily created on first use.
+    /// Capacity 256: rapid bursts coalesce client-side via
+    /// [`VaultEvent::Resync`].
+    ///
+    /// In-process fan-out only (the collab write-behind, the
+    /// server's link-sync loop). Wire subscribers ride the
+    /// [`Self::changes`] hub below.
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<VaultEvent>>>>,
+    /// Fan-out hub behind the `#[subscribe] fn changes` stream —
+    /// every event that goes onto a per-vault broadcast channel is
+    /// published here too, wrapped with its `vault_id` so
+    /// subscribers (who see *all* vaults) can filter. Sliding
+    /// mailbox: a slow subscriber loses its oldest queued events
+    /// and re-pulls when its stream re-establishes. Clones share
+    /// the hub (`Arc` inside), so the service mount and the stream
+    /// mount can each hold a backend clone.
+    changes: architect::PubSub<VaultChange>,
     /// CRDT collaboration registrations: `doc_id → (vault_id, path)`.
     /// Populated by [`VaultSync::open_collab`]; consulted by the
     /// server's doc-registry admission hook (which only sees a
@@ -138,8 +153,22 @@ impl Backend {
             layout,
             write_lock: Arc::new(std::sync::Mutex::new(())),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            changes: architect::PubSub::sliding(256),
             collab: Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Announce a committed change: onto `vault_id`'s in-process
+    /// broadcast channel AND the wire hub. Call only *after* the
+    /// write landed on disk — subscribers fold these into state they
+    /// fetched via `manifest` / `folder_index`, so a speculative
+    /// event would desync them.
+    fn emit(&self, vault_id: &str, event: VaultEvent) {
+        let _ = self.channel_blocking(vault_id).send(event.clone());
+        self.changes.publish(VaultChange {
+            vault_id: vault_id.to_string(),
+            event,
+        });
     }
 
     /// Reverse-resolve a collab doc id to its `(vault_id, path)`,
@@ -239,9 +268,11 @@ impl Backend {
         let (rx, guard) = watcher::watch(root.clone(), WATCHER_DEBOUNCE)?;
 
         let thread_name = format!("vault-sync-watcher:{vault_id}");
+        let hub = self.changes.clone();
+        let id = vault_id.to_string();
         std::thread::Builder::new()
             .name(thread_name)
-            .spawn(move || forward_watcher_events(root, rx, tx))
+            .spawn(move || forward_watcher_events(root, rx, tx, hub, id))
             .map_err(|e| WatchError::Notify(format!("spawn watcher thread: {e}")))?;
 
         Ok(WatcherHandle { _guard: guard })
@@ -335,13 +366,15 @@ impl VaultSync for Backend {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_millis() as i64);
         drop(g);
-        let tx = self.channel_blocking(vault_id);
-        let _ = tx.send(VaultEvent::Put {
-            path: path.to_string(),
-            sha256: new_sha.clone(),
-            mtime_ms,
-            size: bytes.len() as u64,
-        });
+        self.emit(
+            vault_id,
+            VaultEvent::Put {
+                path: path.to_string(),
+                sha256: new_sha.clone(),
+                mtime_ms,
+                size: bytes.len() as u64,
+            },
+        );
         Ok(PutAck {
             sha256: new_sha,
             mtime_ms,
@@ -375,10 +408,12 @@ impl VaultSync for Backend {
         }
         std::fs::remove_file(&abs).map_err(io_err)?;
         drop(g);
-        let tx = self.channel_blocking(vault_id);
-        let _ = tx.send(VaultEvent::Delete {
-            path: path.to_string(),
-        });
+        self.emit(
+            vault_id,
+            VaultEvent::Delete {
+                path: path.to_string(),
+            },
+        );
         Ok(())
     }
 
@@ -579,13 +614,15 @@ impl VaultSync for Backend {
         let new_sha = sha256_hex(&new_bytes);
         let mtime_ms = mtime_now();
         drop(g);
-        let tx = self.channel_blocking(vault_id);
-        let _ = tx.send(VaultEvent::Put {
-            path: path.to_string(),
-            sha256: new_sha.clone(),
-            mtime_ms,
-            size: new_bytes.len() as u64,
-        });
+        self.emit(
+            vault_id,
+            VaultEvent::Put {
+                path: path.to_string(),
+                sha256: new_sha.clone(),
+                mtime_ms,
+                size: new_bytes.len() as u64,
+            },
+        );
         Ok(PutAck {
             sha256: new_sha,
             mtime_ms,
@@ -609,29 +646,15 @@ impl VaultSync for Backend {
         })
     }
 
-    async fn subscribe(&self, vault_id: String, tx: vox::Tx<VaultEvent>) {
-        // Validate up front so misconfigured callers fail fast.
-        if !self.knows(&vault_id) {
-            let _ = tx.close(Default::default()).await;
-            return;
-        }
-        let sender = self.channel(&vault_id).await;
-        let mut rx = sender.subscribe();
-        loop {
-            match rx.recv().await {
-                Ok(evt) => {
-                    if tx.send(evt).await.is_err() {
-                        return;
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => return,
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    if tx.send(VaultEvent::Resync).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in
+/// [`Backend::emit`], on every committed write (and on every external
+/// edit the watcher forwards).
+impl VaultSyncStreamSource for Backend {
+    fn changes_hub(&self) -> &architect::PubSub<VaultChange> {
+        &self.changes
     }
 }
 
@@ -841,13 +864,17 @@ fn mtime_ms(abs: &Path) -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
-/// Pump `watcher` events into the broadcast channel. Runs on a
-/// dedicated OS thread spawned by [`Backend::start_watcher`];
+/// Pump `watcher` events into the in-process broadcast channel and
+/// the wire hub — the same pair [`Backend::emit`] writes, so an
+/// external edit is indistinguishable from a PUT downstream. Runs
+/// on a dedicated OS thread spawned by [`Backend::start_watcher`];
 /// exits when the watcher guard drops (closing the sender).
 fn forward_watcher_events(
     root: PathBuf,
     rx: std::sync::mpsc::Receiver<watcher::VaultEvent>,
     tx: broadcast::Sender<VaultEvent>,
+    hub: architect::PubSub<VaultChange>,
+    vault_id: String,
 ) {
     while let Ok(evt) = rx.recv() {
         let abs = match evt {
@@ -881,6 +908,10 @@ fn forward_watcher_events(
         } else {
             VaultEvent::Delete { path: rel }
         };
+        hub.publish(VaultChange {
+            vault_id: vault_id.clone(),
+            event: payload.clone(),
+        });
         if tx.send(payload).is_err() {
             // No active subscribers — keep pumping; new
             // subscribers attach later via the same channel.

@@ -4,7 +4,7 @@
 use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Repeat, Timer};
-use task::TimeEntry as DbTimeEntry;
+use task_proto::TimeEntry as DbTimeEntry;
 
 use crate::views::detail_full::SectionLabel;
 

@@ -55,7 +55,7 @@ impl ReviewSurface for Backend {
         Backend::check_forge(repo)?;
         let backend = self.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let created: Result<PullRequest, GitError> = self.runtime().block_on(async move {
             let raw = backend
                 .octo()
                 .pulls(&repo.owner, &repo.repo)
@@ -66,7 +66,14 @@ impl ReviewSurface for Backend {
                 .await
                 .map_err(map_err)?;
             Ok(translate_pr(&repo, raw))
-        })
+        });
+        if let Ok(pr) = &created {
+            self.publish_review(GitEvent::PullRequestCreated {
+                repo: pr.repo.clone(),
+                pr: pr.id,
+            });
+        }
+        created
     }
 
     fn update_pull_request(
@@ -78,7 +85,7 @@ impl ReviewSurface for Backend {
         Backend::check_forge(repo)?;
         let backend = self.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let updated: Result<PullRequest, GitError> = self.runtime().block_on(async move {
             let handle = backend.octo().pulls(&repo.owner, &repo.repo);
             let mut req = handle.update(pr.0);
             if let Some(ref t) = update.title {
@@ -104,7 +111,15 @@ impl ReviewSurface for Backend {
             // unhandled here; documented on the tracking task.
             let raw = req.send().await.map_err(map_err)?;
             Ok(translate_pr(&repo, raw))
-        })
+        });
+        if let Ok(pr) = &updated {
+            self.publish_review(GitEvent::PullRequestUpdated {
+                repo: pr.repo.clone(),
+                pr: pr.id,
+                state: pr.state,
+            });
+        }
+        updated
     }
 
     fn list_reviews(&self, repo: &RepoId, pr: PullRequestId) -> Result<Vec<Review>, GitError> {
@@ -161,8 +176,9 @@ impl ReviewSurface for Backend {
     ) -> Result<Option<String>, GitError> {
         Backend::check_forge(repo)?;
         let backend = self.clone();
+        let event_repo = repo.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let merged: Result<Option<String>, GitError> = self.runtime().block_on(async move {
             let merge_method = match method {
                 MergeMethod::Merge => octocrab::params::pulls::MergeMethod::Merge,
                 MergeMethod::Squash => octocrab::params::pulls::MergeMethod::Squash,
@@ -178,11 +194,23 @@ impl ReviewSurface for Backend {
                 .map_err(map_err)?;
             // octocrab's Merge model exposes the resulting sha.
             Ok(merged.sha)
-        })
+        });
+        if merged.is_ok() {
+            self.publish_review(GitEvent::PullRequestUpdated {
+                repo: event_repo,
+                pr,
+                state: PullRequestState::Merged,
+            });
+        }
+        merged
     }
+}
 
-    async fn subscribe(&self, _repo: RepoId, _tx: Tx<GitEvent>) {
-        // First pass: no event source. See issues::subscribe.
+/// The `#[subscribe]` backend contract for pull-request traffic.
+/// Same scope as the issue stream: changes this process commits.
+impl git_proto::reviews::ReviewSurfaceStreamSource for Backend {
+    fn review_events_hub(&self) -> &architect::PubSub<GitEvent> {
+        self.review_hub()
     }
 }
 

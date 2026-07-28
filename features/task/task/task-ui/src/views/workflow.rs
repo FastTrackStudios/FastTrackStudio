@@ -4,7 +4,7 @@
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Bot, User};
 use fts_ui::prelude::*;
-use task::model::Estimate;
+use task_proto::model::Estimate;
 use uuid::Uuid;
 use workflows_proto::AgentRef;
 

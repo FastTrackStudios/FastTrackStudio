@@ -1,44 +1,23 @@
 //! `Workstream` → markdown bytes. Frontmatter carries
 //! `type: workstream` for the parser discriminator.
+//!
+//! Serialization lives in [`crate::entity`]; this module keeps the
+//! historical `workstream::write::*` paths working and owns the two
+//! things the shared store doesn't cover — writing straight to a vault
+//! root on disk, and the project-derived default path.
 
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use thiserror::Error;
+use vault_entity::store::VaultEntity;
 
+pub use vault_entity::WriteError;
+
+use crate::entity::Workstreams;
 use crate::model::Workstream;
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml: {0}")]
-    Yaml(String),
-    #[error("io: {0}")]
-    Io(String),
-    #[error("file exists at {0}; refusing to overwrite (pass overwrite=true)")]
-    Exists(String),
-    #[error("bad path: {0}")]
-    BadPath(String),
-}
-
 pub fn serialize_workstream(w: &Workstream) -> Result<String, WriteError> {
-    let mut wrapper = serde_yaml::Mapping::new();
-    wrapper.insert("type".into(), "workstream".into());
-    let body_yaml = serde_yaml::to_value(w).map_err(|e| WriteError::Yaml(e.to_string()))?;
-    if let serde_yaml::Value::Mapping(map) = body_yaml {
-        for (k, v) in map {
-            wrapper.insert(k, v);
-        }
-    }
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(wrapper))
-        .map_err(|e| WriteError::Yaml(e.to_string()))?;
-    let body = if w.details.is_empty() {
-        String::new()
-    } else if w.details.starts_with('\n') {
-        w.details.clone()
-    } else {
-        format!("\n{}", w.details)
-    };
-    Ok(format!("---\n{yaml}---\n{body}"))
+    Workstreams::to_markdown(w)
 }
 
 pub fn write_workstream(
@@ -57,10 +36,8 @@ pub fn write_workstream(
         std::fs::create_dir_all(parent).map_err(|e| WriteError::Io(e.to_string()))?;
     }
     let now = Utc::now();
-    if w.date_created.is_none() {
-        w.date_created = Some(now);
-    }
-    w.date_modified = Some(now);
+    Workstreams::on_create(w, now);
+    Workstreams::on_update(w, now);
     let body = serialize_workstream(w)?;
     std::fs::write(&abs, body).map_err(|e| WriteError::Io(e.to_string()))?;
     Ok(abs)
@@ -77,9 +54,12 @@ pub fn write_workstream(
 /// project file stays as a sibling of the new folder. Honors
 /// the project's on-disk casing so existing `Projects/Health/`
 /// trees stay one folder, not two.
+///
+/// Derived from the owning project rather than a fixed folder, so it
+/// can't go through [`VaultEntity::default_path`] and stays here.
 #[must_use]
 pub fn default_workstream_path(project_rel_path: &str, title: &str) -> String {
-    let ws = slugify(title);
+    let ws = vault_entity::slugify(title, Workstreams::TYPE);
     // Derive the project's folder:
     // - if the project file is `X/X.md` or `X/something.md`, use `X/`
     // - if it's a flat `X.md`, use the file stem
@@ -99,29 +79,6 @@ pub fn default_workstream_path(project_rel_path: &str, title: &str) -> String {
         // Just append `workstreams/`.
         format!("{parent}/workstreams/{ws}.md")
     }
-}
-
-pub(crate) fn slugify(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_dash = false;
-    for ch in s.chars() {
-        if ch.is_alphanumeric() {
-            for lc in ch.to_lowercase() {
-                out.push(lc);
-            }
-            prev_dash = false;
-        } else if !prev_dash && !out.is_empty() {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        out.push_str("workstream");
-    }
-    out
 }
 
 #[cfg(test)]

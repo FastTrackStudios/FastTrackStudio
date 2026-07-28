@@ -1,8 +1,8 @@
-//! Quick-add input bar. Today: plain title. Future: parse
-//! natural language (`"Buy milk tomorrow #errands @shopping"`)
-//! the same way `task::capture::capture` does on the desktop
-//! side. Until that's reachable from wasm, the only thing the
-//! input does is set the title.
+//! Quick-add input bar. The component only sets the title; the
+//! natural-language extraction
+//! (`"Buy milk tomorrow #errands @shopping"`) runs in the
+//! consumer's create path, which re-captures that title through
+//! `task_proto::capture`.
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::Plus;

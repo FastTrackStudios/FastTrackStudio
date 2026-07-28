@@ -95,7 +95,49 @@ pub fn WikiPageView(path: String) -> Element {
         fetch_page(&slug, &fetch_path).await
     }));
 
+    // ── Live page changes ─────────────────────────────────────
+    // The `Events` `#[subscribe]` stream — a page rewritten by the
+    // wiki pipeline (ingest output, an applied review action) or by
+    // another reader refreshes here instead of showing a stale body
+    // until reload. An edit in progress wins: re-reading under the
+    // author would throw away their draft, and the sha guard on save
+    // already turns a concurrent write into a visible conflict.
     let mut editing = use_signal(|| false);
+    let live_path = path.clone();
+    architect::use_stream(
+        move |tx| {
+            let slug = first_slug(&selection, &org_list);
+            async move {
+                let Some(slug) = slug else {
+                    return false;
+                };
+                let Ok(client) = crate::vox_clients::establish_for::<
+                    wiki_proto::service::events::EventsStreamClient,
+                >(&slug)
+                .await
+                else {
+                    return false;
+                };
+                client.changes(tx).await.is_ok()
+            }
+        },
+        move |change: wiki_proto::WikiChange| {
+            let mut page = page;
+            if change.wiki_id != WIKI_ID || *editing.peek() {
+                return;
+            }
+            let touched = match &change.event {
+                wiki_proto::WikiEvent::PageWritten { path, .. }
+                | wiki_proto::WikiEvent::PageDeleted { path, .. } => path == &live_path,
+                wiki_proto::WikiEvent::Resync => true,
+                _ => false,
+            };
+            if touched {
+                page.restart();
+            }
+        },
+    );
+
     let mut draft = use_signal(String::new);
     let mut base_sha = use_signal(String::new);
     let mut save_error = use_signal(String::new);

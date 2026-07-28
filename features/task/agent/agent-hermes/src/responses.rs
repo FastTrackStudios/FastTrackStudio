@@ -27,11 +27,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use agent_proto::event::AgentEvent;
+use agent_proto::event::{AgentEvent, EventTap, SessionEvents};
 use agent_proto::tool::{ToolCall, ToolStatus};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
-use tokio::sync::broadcast;
 
 use crate::stream::{TurnOutcome, pump_sse};
 use crate::{Cancel, HermesConfig};
@@ -175,7 +174,7 @@ pub(crate) async fn run_turn_responses(
     model: &str,
     messages: &[Value],
     previous_response_id: &str,
-    events_tx: &broadcast::Sender<AgentEvent>,
+    events_tx: &SessionEvents,
     cancel: &Cancel,
 ) -> Result<TurnOutcome, TurnError> {
     let Some(last) = messages.last() else {
@@ -252,7 +251,7 @@ fn handle_event(
     v: &Value,
     session_id: &str,
     message_id: &str,
-    events_tx: &broadcast::Sender<AgentEvent>,
+    events_tx: &SessionEvents,
     state: &mut RespState,
 ) {
     let kind = v.get("type").and_then(Value::as_str).unwrap_or_default();
@@ -340,7 +339,7 @@ fn start_tool(
     item: &Value,
     session_id: &str,
     message_id: &str,
-    events_tx: &broadcast::Sender<AgentEvent>,
+    events_tx: &SessionEvents,
     state: &mut RespState,
 ) {
     let call_id = item
@@ -393,7 +392,7 @@ fn finish_tool(
     item: &Value,
     session_id: &str,
     message_id: &str,
-    events_tx: &broadcast::Sender<AgentEvent>,
+    events_tx: &SessionEvents,
     state: &mut RespState,
 ) {
     let call_id = item
@@ -451,6 +450,14 @@ fn finish_tool(
 mod tests {
     use super::*;
 
+    /// Test event sink + its tap. `SessionEvents::send` mirrors into
+    /// the tap synchronously, so `tap.try_next()` sees whatever the
+    /// code under test just published.
+    fn sink() -> (SessionEvents, EventTap) {
+        SessionEvents::tapped("s1")
+    }
+
+
     fn state() -> RespState {
         RespState {
             outcome: TurnOutcome::default(),
@@ -495,7 +502,7 @@ mod tests {
 
     #[test]
     fn tool_lifecycle_emits_started_then_finished_with_duration() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, rx) = sink();
         let mut st = state();
         handle_event(
             &json!({
@@ -526,14 +533,14 @@ mod tests {
             &tx,
             &mut st,
         );
-        match rx.try_recv().unwrap() {
+        match rx.try_next().unwrap() {
             AgentEvent::ToolStarted { tool_call } => {
                 assert_eq!(tool_call.title, "terminal · ls");
                 assert_eq!(tool_call.status, ToolStatus::InProgress);
             }
             other => panic!("unexpected: {other:?}"),
         }
-        match rx.try_recv().unwrap() {
+        match rx.try_next().unwrap() {
             AgentEvent::ToolFinished { tool_call } => {
                 assert_eq!(tool_call.status, ToolStatus::Done);
                 assert_eq!(tool_call.preview, "a.rs b.rs");
@@ -577,7 +584,7 @@ mod tests {
 
     #[test]
     fn error_shaped_output_marks_the_tool_failed() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, rx) = sink();
         let mut st = state();
         handle_event(
             &json!({
@@ -589,7 +596,7 @@ mod tests {
             &tx,
             &mut st,
         );
-        let _ = rx.try_recv();
+        let _ = rx.try_next();
         handle_event(
             &json!({
                 "type": "response.output_item.added",
@@ -600,7 +607,7 @@ mod tests {
             &tx,
             &mut st,
         );
-        match rx.try_recv().unwrap() {
+        match rx.try_next().unwrap() {
             AgentEvent::ToolFinished { tool_call } => {
                 assert_eq!(tool_call.status, ToolStatus::Error);
             }
@@ -610,7 +617,7 @@ mod tests {
 
     #[test]
     fn result_without_a_matching_call_id_settles_the_oldest_open_tool() {
-        let (tx, _rx) = broadcast::channel(16);
+        let (tx, _rx) = sink();
         let mut st = state();
         for id in ["c1", "c2"] {
             handle_event(
@@ -640,7 +647,7 @@ mod tests {
 
     #[test]
     fn text_deltas_accumulate_and_completion_carries_usage() {
-        let (tx, _rx) = broadcast::channel(16);
+        let (tx, _rx) = sink();
         let mut st = state();
         handle_event(
             &json!({"type": "response.created", "response": {"id": "resp_1"}}),
@@ -677,7 +684,7 @@ mod tests {
 
     #[test]
     fn failed_response_records_the_error_message() {
-        let (tx, _rx) = broadcast::channel(16);
+        let (tx, _rx) = sink();
         let mut st = state();
         handle_event(
             &json!({
@@ -694,7 +701,7 @@ mod tests {
 
     #[test]
     fn reasoning_deltas_are_forwarded() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, rx) = sink();
         let mut st = state();
         handle_event(
             &json!({"type": "response.reasoning_summary_text.delta", "delta": "hmm"}),
@@ -705,7 +712,7 @@ mod tests {
         );
         assert_eq!(st.outcome.reasoning, "hmm");
         assert!(matches!(
-            rx.try_recv().unwrap(),
+            rx.try_next().unwrap(),
             AgentEvent::ReasoningDelta { .. }
         ));
     }

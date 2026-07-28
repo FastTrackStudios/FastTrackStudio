@@ -35,7 +35,7 @@ pub use account::{Account, AccountId};
 pub use draft::{Attachment, AttachmentMeta, Draft};
 pub use envelope::{Addr, Envelope};
 pub use error::EmailSyncError;
-pub use event::EmailEvent;
+pub use event::{EmailChange, EmailEvent};
 pub use flag::{Flag, FlagDelta};
 pub use folder::{Folder, FolderRole};
 pub use message::{Message, MessageId, ThreadId};
@@ -51,4 +51,14 @@ pub use service::{EmailSync, EmailSyncRpc};
 pub use service::{
     EmailSyncClient, EmailSyncRpcDispatcher as Dispatcher, Service,
     email_sync_rpc_service_descriptor as descriptor, layer, serve,
+};
+
+// `#[subscribe] fn changes` stream sibling — live mailbox changes.
+// Mount `email_proto::stream_layer(backend)` next to
+// `email_proto::serve(backend)`; clients subscribe through
+// `EmailSyncStreamClient::changes(tx)` (see `architect::use_stream`).
+#[cfg(feature = "vox")]
+pub use service::{
+    EmailSyncStreamClient, EmailSyncStreamSource, stream_layer, stream_serve,
+    email_sync_stream_service_descriptor as stream_descriptor,
 };

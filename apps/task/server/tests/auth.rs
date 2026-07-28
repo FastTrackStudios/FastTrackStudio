@@ -14,11 +14,34 @@
 use architect_auth::{CreateEmailPasswordUser, SignInEmailPassword};
 use task_server::{AppState, AuthState, capability::ServerKeypair, router};
 
-async fn boot_server() -> eyre::Result<(String, AuthState)> {
+static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Returns the `TempDir` so the caller keeps the data root alive for the
+/// duration of the test — dropping it early would delete the org out from
+/// under the running server.
+async fn boot_server() -> eyre::Result<(String, AuthState, tempfile::TempDir)> {
     // In-memory auth DB so tests don't touch the user's XDG dir.
     let auth = AuthState::open("sqlite::memory:", "test-secret-at-least-32-bytes!!!").await?;
     let keypair = ServerKeypair::generate_ephemeral();
+
+    // `AppState::new_with_auth` resolves its org through
+    // `DataRoot::from_env()`, which falls back to `~/.task` when
+    // `TASK_DATA_ROOT` is unset. Without this, the test ran against the
+    // developer's real Task data — passing only because that data root
+    // happened to contain an org, and touching it as a side effect. Every
+    // other suite in this directory already sandboxes this way.
+    let tmp = tempfile::tempdir()?;
+    let guard = ENV_LOCK.lock().await;
+    // SAFETY: held under `ENV_LOCK` while `AppState` reads the env.
+    unsafe {
+        std::env::set_var("TASK_DATA_ROOT", tmp.path());
+    }
+    org_proto::DataRoot::from_env()
+        .map_err(|e| eyre::eyre!("data root: {e}"))?
+        .init_org("auth-test", "Auth Test", true)
+        .map_err(|e| eyre::eyre!("scaffold org: {e}"))?;
     let state = AppState::new_with_auth(auth.clone(), keypair).await?;
+    drop(guard);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
@@ -26,12 +49,12 @@ async fn boot_server() -> eyre::Result<(String, AuthState)> {
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
-    Ok((format!("ws://127.0.0.1:{port}/vox"), auth))
+    Ok((format!("ws://127.0.0.1:{port}/vox"), auth, tmp))
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn signup_signin_current_session_roundtrip() -> eyre::Result<()> {
-    let (url, auth_state) = boot_server().await?;
+    let (url, auth_state, _data_root) = boot_server().await?;
 
     // Seed the user server-side. Open signup over vox is a later
     // phase — Phase 2 just proves the auth pipeline is live.

@@ -1,108 +1,16 @@
-//! Multi-org selection model + discovery.
+//! Org **discovery** — the `/.well-known/task-server.json` fetch.
 //!
-//! The server hosts several orgs (`/.well-known/task-server.json`
-//! lists them). The UI lets you view **all** of them at once (the
-//! default) or scope to a single org. The selection is held in a
-//! `Signal<OrgSelection>` context; data fetchers resolve it to a list
-//! of slugs via [`selected_slugs`] and fan out per org.
+//! The selection model itself ([`OrgMeta`], [`OrgSelection`],
+//! [`selected_slugs`] and friends) lives in [`task_ui_core::orgs`] so
+//! feature UI crates can scope their own fetches without depending on
+//! this shell; it is re-exported here, so every `crate::orgs::…` path
+//! still resolves.
+//!
+//! Discovery stays here because it is the one platform-specific piece:
+//! `window.fetch` on wasm, `reqwest` (rustls — works in the iOS
+//! sandbox) on native, with a Sentry breadcrumb on failure.
 
-/// App-root context: the last org-discovery error (a native `fetch_orgs`
-/// failure), surfaced in the Servers UI so a stuck "org discovery hasn't
-/// resolved yet" shows *why* — a connect timeout, TLS error, 404, etc. —
-/// instead of the app silently sitting on an empty org list. `None` = no
-/// error / discovery succeeded.
-#[derive(Clone, Copy)]
-pub struct DiscoveryError(pub dioxus::prelude::Signal<Option<String>>);
-
-/// One hosted org, as surfaced by the server's well-known endpoint.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct OrgMeta {
-    pub slug: String,
-    pub name: String,
-    pub is_home: bool,
-    /// Org's stable UUID (`org.toml` `id`). `None` for older servers
-    /// that don't surface it. Needed by org-scoped services like the
-    /// timer that key on `org_id`.
-    pub id: Option<uuid::Uuid>,
-}
-
-/// What the org switcher is pointed at. `All` aggregates every hosted
-/// org; `One` scopes to a single slug. Defaults to `All`.
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
-pub enum OrgSelection {
-    #[default]
-    All,
-    One(String),
-}
-
-impl OrgSelection {
-    /// Display label for the switcher trigger.
-    #[must_use]
-    pub fn label(&self, orgs: &[OrgMeta]) -> String {
-        match self {
-            Self::All => "All organizations".to_string(),
-            Self::One(slug) => orgs
-                .iter()
-                .find(|o| &o.slug == slug)
-                .map_or_else(|| slug.clone(), |o| o.name.clone()),
-        }
-    }
-}
-
-/// Resolve a selection to the concrete slugs to fetch from. `All`
-/// expands to every hosted org (home org first for stable ordering);
-/// `One` is just that slug.
-#[must_use]
-pub fn selected_slugs(sel: &OrgSelection, orgs: &[OrgMeta]) -> Vec<String> {
-    match sel {
-        OrgSelection::One(slug) => vec![slug.clone()],
-        OrgSelection::All => {
-            let mut slugs: Vec<String> = orgs.iter().map(|o| o.slug.clone()).collect();
-            slugs.sort_by_key(|s| orgs.iter().find(|o| &o.slug == s).map(|o| !o.is_home));
-            slugs
-        }
-    }
-}
-
-/// Where a newly-created record should land: the selected org, or the
-/// home org (falling back to the first hosted org) when viewing All.
-#[must_use]
-pub fn create_target(sel: &OrgSelection, orgs: &[OrgMeta]) -> String {
-    match sel {
-        OrgSelection::One(slug) => slug.clone(),
-        OrgSelection::All => orgs
-            .iter()
-            .find(|o| o.is_home)
-            .or_else(|| orgs.first())
-            .map(|o| o.slug.clone())
-            .unwrap_or_default(),
-    }
-}
-
-/// The home org's slug (falls back to the first hosted org, then to
-/// an empty string before discovery resolves).
-#[must_use]
-pub fn home_slug(orgs: &[OrgMeta]) -> String {
-    orgs.iter()
-        .find(|o| o.is_home)
-        .or_else(|| orgs.first())
-        .map(|o| o.slug.clone())
-        .unwrap_or_default()
-}
-
-/// The single org that org-scoped surfaces (the vault page, the note
-/// palette/omni-picker) should read from. When the switcher is scoped to
-/// `One`, that org; otherwise the home org. `All` has no single vault to
-/// show, so it falls back to home — pick a specific org in the switcher
-/// to browse or search its vault. This is what lets the vault/palette
-/// follow the org switcher instead of being pinned to the home org.
-#[must_use]
-pub fn active_slug(sel: &OrgSelection, orgs: &[OrgMeta]) -> String {
-    match sel {
-        OrgSelection::One(slug) => slug.clone(),
-        OrgSelection::All => home_slug(orgs),
-    }
-}
+pub use task_ui_core::orgs::*;
 
 // ── discovery ───────────────────────────────────────────────────────
 
@@ -132,21 +40,6 @@ fn parse_orgs(body: &str) -> Result<Vec<OrgMeta>, String> {
             id: o.id,
         })
         .collect())
-}
-
-/// HTTP(S) base derived from the configured vox WebSocket URL —
-/// `ws://host/…` → `http://host`, `wss://` → `https://`.
-#[must_use]
-pub fn http_base() -> String {
-    let v = crate::vox_session::vox_url();
-    let v = v.trim_end_matches("/vox").trim_end_matches('/');
-    if let Some(rest) = v.strip_prefix("wss://") {
-        format!("https://{rest}")
-    } else if let Some(rest) = v.strip_prefix("ws://") {
-        format!("http://{rest}")
-    } else {
-        v.to_string()
-    }
 }
 
 /// Fetch the hosted org list from `/.well-known/task-server.json`.

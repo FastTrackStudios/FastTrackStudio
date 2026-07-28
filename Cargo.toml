@@ -839,8 +839,9 @@ libc = "0.2"
 # into `vox`/`server`/`native`), mirroring Task's original table.
 # crates/task/
 task-telemetry = { path = "crates/task/telemetry" }
+task-ui-core = { path = "crates/task/ui-core" }
+task-player-ui = { path = "crates/task/player-ui" }
 ui = { path = "crates/task/ui" }
-store-proto = { path = "crates/task/store-proto", default-features = false }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }
@@ -872,9 +873,11 @@ label-proto = { path = "features/task/label/label-proto" }
 tag-proto = { path = "features/task/tag/tag-proto" }
 tag = { path = "features/task/tag/tag" }
 task = { path = "features/task/task/task", default-features = false }
+task-proto = { path = "features/task/task/task-proto", default-features = false }
 task-ui = { path = "features/task/task/task-ui" }
 task-server = { path = "apps/task/server" }
 project = { path = "features/task/project/project", default-features = false }
+project-proto = { path = "features/task/project/project-proto", default-features = false }
 org-proto = { path = "features/task/org/org-proto" }
 org-snapshot = { path = "features/task/org/org-snapshot" }
 timer-proto = { path = "features/task/timer/timer-proto", default-features = false }
@@ -883,6 +886,10 @@ threads-proto = { path = "features/task/threads/threads-proto", default-features
 threads-db = { path = "features/task/threads/threads-db" }
 threads = { path = "features/task/threads/threads" }
 threads-ui = { path = "features/task/threads/threads-ui" }
+links-ui = { path = "features/task/links/links-ui" }
+email-ui = { path = "features/task/email/email-ui" }
+goal-ui = { path = "features/task/goal/goal-ui" }
+scripture-ui = { path = "features/task/scripture/scripture-ui" }
 prefs-proto = { path = "features/task/prefs/prefs-proto" }
 prefs = { path = "features/task/prefs/prefs" }
 identity-proto = { path = "features/task/identity/identity-proto" }

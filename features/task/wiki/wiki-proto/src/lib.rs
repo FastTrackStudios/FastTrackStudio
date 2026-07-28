@@ -82,7 +82,7 @@ pub mod search;
 pub mod service;
 
 pub use error::WikiError;
-pub use event::WikiEvent;
+pub use event::{WikiChange, WikiEvent};
 
 // Per-capability trait re-exports. There is **no**
 // umbrella `WikiService` — callers express what they need

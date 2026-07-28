@@ -6,58 +6,31 @@
 //! written through this path parse with a deterministic
 //! uuid-v5-of-path fallback (see `parse_page`), which this
 //! writer persists on the next save.
+//!
+//! Serialization lives in [`crate::entity`]; this module keeps the
+//! historical `project::write::*` paths working and adds the one thing
+//! the shared store doesn't cover — writing straight to a vault root
+//! on disk, without an in-memory `Vault`.
 
 use std::path::{Path, PathBuf};
 
-use thiserror::Error;
 use uuid::Uuid;
+use vault_entity::store::VaultEntity;
 
+pub use vault_entity::WriteError;
+
+use crate::entity::Projects;
 use crate::model::ProjectInfo;
-
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml: {0}")]
-    Yaml(String),
-    #[error("io: {0}")]
-    Io(String),
-    #[error("file exists at {0}; refusing to overwrite (pass overwrite=true)")]
-    Exists(String),
-    #[error("bad path: {0}")]
-    BadPath(String),
-}
 
 /// Serialize a `ProjectInfo` into the full markdown source:
 /// `---` fenced frontmatter + body. Round-trip-clean for the
 /// fields the model tracks.
+///
+/// `type: project` is the scanner's discriminator and is emitted
+/// first, so a fresh `task project create` round-trips through
+/// `looks_like_project` without needing a `project` tag.
 pub fn serialize_project(project: &ProjectInfo) -> Result<String, WriteError> {
-    // Make sure `id` is non-nil before serializing so the
-    // file is downstream-FK-safe on first write.
-    let mut p = project.clone();
-    if p.id.is_nil() {
-        p.id = Uuid::new_v4();
-    }
-    // `type: project` is the scanner's discriminator. Emit it
-    // first so a fresh `task project create` round-trips
-    // through `looks_like_project` without needing a `project`
-    // tag. Mirrors `goal::serialize_goal`.
-    let mut wrapper = serde_yaml::Mapping::new();
-    wrapper.insert("type".into(), "project".into());
-    let body_yaml = serde_yaml::to_value(&p).map_err(|e| WriteError::Yaml(e.to_string()))?;
-    if let serde_yaml::Value::Mapping(m) = body_yaml {
-        for (k, v) in m {
-            wrapper.insert(k, v);
-        }
-    }
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(wrapper))
-        .map_err(|e| WriteError::Yaml(e.to_string()))?;
-    let body = if p.details.is_empty() {
-        String::new()
-    } else if p.details.starts_with('\n') {
-        p.details.clone()
-    } else {
-        format!("\n{}", p.details)
-    };
-    Ok(format!("---\n{yaml}---\n{body}"))
+    Projects::to_markdown(project)
 }
 
 /// Write a project to `<vault_root>/<project.path>`. Creates
@@ -88,23 +61,13 @@ pub fn write_project(
 
 /// Conventional path for a freshly captured project — slug
 /// from the title, dropped under `Projects/`.
+///
+/// A title that slugifies to nothing falls back to
+/// `Projects/untitled-project.md` — under the folder, like every other
+/// title.
 #[must_use]
 pub fn default_project_path(title: &str) -> String {
-    let slug = title
-        .to_ascii_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>();
-    let cleaned = slug
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    if cleaned.is_empty() {
-        "untitled-project.md".to_string()
-    } else {
-        format!("Projects/{cleaned}.md")
-    }
+    Projects::default_path(title, None)
 }
 
 #[cfg(test)]
@@ -157,5 +120,20 @@ mod tests {
         let back = crate::parse_str("Projects/demo.md", "demo", &raw).expect("re-parse");
         assert_eq!(back.states, p.states);
         assert_eq!(back.id, p.id);
+    }
+
+    /// The slug rule, and the fallback for a title that slugifies to
+    /// nothing — which lands under `Projects/` like every other title.
+    /// It used to drop the folder and write to the vault root.
+    #[test]
+    fn default_path_slugs_the_title() {
+        assert_eq!(
+            default_project_path("Mobile  Push!"),
+            "Projects/mobile-push.md"
+        );
+        assert_eq!(
+            default_project_path("!!!"),
+            "Projects/untitled-project.md"
+        );
     }
 }

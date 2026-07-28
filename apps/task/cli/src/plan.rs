@@ -1136,7 +1136,7 @@ pub(crate) async fn timer_ctx(org_override: Option<&str>) -> eyre::Result<TimerC
     let user_id = std::env::var("TASK_USER_ID")
         .ok()
         .and_then(|s| s.parse::<uuid::Uuid>().ok())
-        .unwrap_or_else(|| crate::timer_owner_id(org_id));
+        .unwrap_or_else(|| crate::timer::timer_owner_id(org_id));
     let conn = Database::connect(&db_url)
         .await
         .map_err(|e| eyre::eyre!("connect timer db `{db_url}`: {e}"))?;

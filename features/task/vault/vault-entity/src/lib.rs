@@ -37,12 +37,26 @@
 //! }
 //! ```
 
+//! ## Features
+//!
+//! - `store` (default) — [`VaultEntity`] and [`VaultEntityStore`], the
+//!   generic CRUD half. Requires `vault`, which reaches `notify`/`mio`
+//!   and so is native-only.
+//! - No features — just the readers and writers (`frontmatter`, `yaml`,
+//!   `slug`, `error`). This is what a slice whose `parse` module is
+//!   wasm-visible should depend on: `vault-entity = { workspace = true,
+//!   default-features = false }`.
+
 pub mod error;
 pub mod frontmatter;
 pub mod slug;
-pub mod store;
 pub mod yaml;
+
+#[cfg(feature = "store")]
+pub mod store;
 
 pub use error::{EntityError, ParseError, WriteError};
 pub use slug::{entity_path, slugify};
+
+#[cfg(feature = "store")]
 pub use store::{VaultEntity, VaultEntityStore};

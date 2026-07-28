@@ -16,16 +16,15 @@
 //! for tests / in-process callers.
 
 use crate::{
-    BaseView, CollabAck, FileBytes, FolderIndex, IfMatch, Manifest, PutAck, VaultEvent,
+    BaseView, CollabAck, FileBytes, FolderIndex, IfMatch, Manifest, PutAck, VaultChange,
     VaultSyncError,
 };
-use vox::Tx;
 
 /// File-replication operations on a single server. Sync methods
 /// (cheap when called in-process; marshaled through the
-/// backend's `HasDispatcher` for remote callers).
-/// [`Self::subscribe`] is async because the broadcast stream
-/// can't be expressed in a sync signature.
+/// backend's `HasDispatcher` for remote callers). Live changes
+/// arrive on the [`Self::changes`] `#[subscribe]` stream, served
+/// from the backend's `architect::PubSub` hub.
 #[architect::rpc]
 pub trait VaultSync {
     /// List every file in `vault_id`. Empty vault = empty list,
@@ -93,10 +92,13 @@ pub trait VaultSync {
     /// [`VaultSyncError::NotFound`] if the base doesn't exist.
     fn base_views(&self, vault_id: &str, base_path: &str) -> Result<Vec<BaseView>, VaultSyncError>;
 
-    /// Subscribe to live change events for `vault_id`. The
-    /// server keeps sending until the caller drops `tx`. On
-    /// broadcast-lag the server sends [`VaultEvent::Resync`]
-    /// and continues — clients should re-pull the manifest in
-    /// response.
-    async fn subscribe(&self, vault_id: String, tx: Tx<VaultEvent>);
+    /// Every vault change, as it happens — fires on each
+    /// successful PUT / DELETE / folder re-file, and on external
+    /// edits picked up by the filesystem watcher. The stream is
+    /// unfiltered (all vault ids this backend serves); each
+    /// [`VaultChange`] carries its `vault_id` so subscribers can
+    /// keep the one they browse. See [`VaultChange`] for the
+    /// fetch-once-then-fold subscriber contract.
+    #[subscribe]
+    fn changes(&self) -> VaultChange;
 }

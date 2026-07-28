@@ -20,25 +20,37 @@
 //! rollup design.
 
 pub mod model;
-pub mod parse;
 pub mod rollup;
 pub mod service;
-pub mod write;
 
+// `entity` / `parse` / `write` / `backend` all reach the shared
+// `vault-entity` support layer, which walks `std::fs` (and pulls a
+// file watcher). Wasm consumers take `workstream-proto` directly;
+// `rollup` is pure and stays available everywhere.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod backend;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod entity;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod parse;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod write;
 
 pub use model::{AgentRefList, Links, Status, Workstream};
-pub use parse::{ParseError, looks_like_workstream, parse_page, parse_workstream};
 pub use rollup::{estimate_points, rollup, rollup_tasks, rollup_with, subtask_rollup};
 pub use service::{
     StateGroupCounts, WorkstreamError, WorkstreamEvent, WorkstreamRollup, WorkstreamService,
     WorkstreamWithRollup,
 };
-pub use write::{WriteError, default_workstream_path, serialize_workstream, write_workstream};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::WorkstreamBackend;
+#[cfg(not(target_arch = "wasm32"))]
+pub use entity::Workstreams;
+#[cfg(not(target_arch = "wasm32"))]
+pub use parse::{ParseError, looks_like_workstream, parse_page, parse_workstream};
+#[cfg(not(target_arch = "wasm32"))]
+pub use write::{WriteError, default_workstream_path, serialize_workstream, write_workstream};
 
 #[cfg(feature = "vox")]
 pub use workstream_proto::{

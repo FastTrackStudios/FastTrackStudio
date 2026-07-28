@@ -51,7 +51,6 @@ crates/task/
   ui/           package `ui` — THE Dioxus app shell: router, pages/,
                 theming, stores, vox session. NOT `task-ui`.
   telemetry/    package `task-telemetry` — sentry + tracing layer
-  store-proto/  shared store wire types
   xtask/        package `xtask` — TS codegen (see "Known stale" below)
 
 features/task/<slice>/
