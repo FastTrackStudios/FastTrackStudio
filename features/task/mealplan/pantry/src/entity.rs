@@ -83,9 +83,6 @@ impl VaultEntity for PantryItems {
             .and_then(|s| Uuid::parse_str(&s).ok())
             .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_URL, page.rel_path.as_bytes()));
 
-        // Tags are kept verbatim — `item` and `pantry` are both load-
-        // bearing discriminators the writer re-asserts, so unlike the
-        // single-type slices nothing is filtered out here.
         Ok(PantryItem {
             path: page.rel_path.clone(),
             id,
@@ -94,7 +91,16 @@ impl VaultEntity for PantryItems {
             location_id: yaml::str_at(&map, "location_id").and_then(|s| Uuid::parse_str(&s).ok()),
             condition: yaml::str_at(&map, "condition").unwrap_or_else(|| "good".into()),
             status: yaml::str_at(&map, "status").unwrap_or_else(|| "stored".into()),
-            tags: crate::model::StringList(yaml::string_list_at(&map, "tags")),
+            // The two discriminators are structure, not user tags, and
+            // every other slice keeps its own out of this list. They
+            // survive a round-trip regardless: `to_markdown` writes
+            // `type: item` and re-asserts the `pantry` tag.
+            tags: crate::model::StringList(
+                yaml::string_list_at(&map, "tags")
+                    .into_iter()
+                    .filter(|t| t != INVENTORY_TYPE && t != PANTRY_TAG)
+                    .collect(),
+            ),
             date_created: yaml::timestamp_at(&map, "dateCreated"),
             date_modified: yaml::timestamp_at(&map, "dateModified"),
             food_category: yaml::str_at(&map, "foodCategory").unwrap_or_default(),
@@ -200,4 +206,44 @@ fn parse_stock_entries(map: &serde_yaml::Mapping) -> Vec<StockEntry> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn page(raw: &str) -> VaultPage {
+        VaultPage {
+            rel_path: "Operations/Inventory/Pantry/rice.md".into(),
+            basename: "rice".into(),
+            folder: "Operations/Inventory/Pantry".into(),
+            raw: raw.to_string(),
+            mtime: std::time::SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    const RAW: &str = "---\ntype: item\nname: Rice\ntags:\n  - item\n  - pantry\n  - staple\n---\n";
+
+    /// `item` and `pantry` are how a page is recognised, not tags the
+    /// user typed — they used to show up in the UI's tag list.
+    #[test]
+    fn discriminators_are_not_user_tags() {
+        let item = PantryItems::from_page(&page(RAW)).unwrap();
+        assert_eq!(&*item.tags, &["staple".to_string()]);
+    }
+
+    /// Dropping them from the model must not stop the page matching:
+    /// the writer puts `type: item` back in the frontmatter and
+    /// re-asserts the `pantry` tag.
+    #[test]
+    fn a_round_trip_still_matches() {
+        let item = PantryItems::from_page(&page(RAW)).unwrap();
+        let rewritten = PantryItems::to_markdown(&item).unwrap();
+        assert!(
+            PantryItems::matches(&page(&rewritten)),
+            "rewritten page no longer matches:\n{rewritten}"
+        );
+        let back = PantryItems::from_page(&page(&rewritten)).unwrap();
+        assert_eq!(&*back.tags, &["staple".to_string()]);
+    }
 }
