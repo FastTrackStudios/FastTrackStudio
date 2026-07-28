@@ -17,6 +17,10 @@ fts-ui.workspace = true
 # `OrgMeta::id` — the org's stable UUID from the well-known endpoint.
 uuid = { workspace = true, features = ["v4", "js", "serde"] }
 
+# Plugin vocabulary — `plugin_set_for` resolves an org's deny-list to
+# the enabled set the shell gates nav/widgets/routes on. Wasm-clean.
+task-plugin.workspace = true
+
 # Vox runtime + the WebSocket transport the per-org connection root dials.
 vox-core.workspace = true
 vox-websocket.workspace = true

@@ -258,22 +258,30 @@ fn MilestonesRoute() -> Element {
 
 #[component]
 fn FitnessRoute() -> Element {
-    rsx! { pages::fitness::FitnessView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "fitness", pages::fitness::FitnessView {} }
+    }
 }
 
 #[component]
 fn MealplanRoute() -> Element {
-    rsx! { pages::mealplan::MealplanView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "mealplan", pages::mealplan::MealplanView {} }
+    }
 }
 
 #[component]
 fn RecipeCookRoute(path: String) -> Element {
-    rsx! { pages::cook_mode::RecipeCookView { path } }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "mealplan", pages::cook_mode::RecipeCookView { path } }
+    }
 }
 
 #[component]
 fn RecipeEditRoute(path: String) -> Element {
-    rsx! { pages::recipe_edit::EditRecipeView { path } }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "mealplan", pages::recipe_edit::EditRecipeView { path } }
+    }
 }
 
 #[component]

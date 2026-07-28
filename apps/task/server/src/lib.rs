@@ -1616,6 +1616,10 @@ async fn well_known_handler(State(state): State<AppState>) -> axum::Json<serde_j
                 "display_name": manifest.display_name,
                 "is_home": manifest.is_home,
                 "federation_url": manifest.federation_url,
+                // Org-level config, not secret (the doc already carries
+                // schema stamps): the client shell hides a disabled
+                // plugin's nav/widgets/routes from this list.
+                "disabled_plugins": manifest.disabled_plugins.0,
                 "vox": format!("/org/{slug}/vox"),
                 "health": format!("/org/{slug}/health"),
             }))

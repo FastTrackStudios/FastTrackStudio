@@ -9,6 +9,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# Plugin vocabulary — the registry drops specs whose owning plugin is
+# disabled for the active org (`WidgetRegistry::set_plugin_set`).
+task-plugin.workspace = true
 dioxus = { workspace = true }
 # `EditorState` / `DecoratedRange` for the decoration-pass hook — the
 # same types the shell's own decoration source produces.

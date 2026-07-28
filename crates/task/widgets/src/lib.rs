@@ -228,9 +228,10 @@ pub struct WidgetSpec {
     /// (autosave-sink protection).
     pub fullscreen_owns_body: bool,
     /// The owning plugin's id from the `task-plugin` catalog
-    /// (`"fasttrackstudio"`, `"scripture"`, …). A hook only for now:
-    /// the registry will later drop specs whose plugin is disabled for
-    /// the org. `None` (or `"core"`) means always available.
+    /// (`"fasttrackstudio"`, `"scripture"`, …). The registry drops
+    /// specs whose plugin is disabled for the active org (see
+    /// [`WidgetRegistry::set_plugin_set`]). `None` (or `"core"`) means
+    /// always available.
     pub plugin: Option<&'static str>,
 }
 
@@ -302,10 +303,24 @@ impl WidgetSpec {
 
 /// The registry the app root fills and provides as Dioxus context.
 /// Cheap to clone (shared inner). Registration happens once, at the
-/// root, before any note renders.
-#[derive(Clone, Default)]
+/// root, before any note renders; the *active* set additionally
+/// filters on the org's enabled plugins (see [`Self::set_plugin_set`])
+/// at read time, so an org switch retunes the same registry.
+#[derive(Clone)]
 pub struct WidgetRegistry {
     specs: Rc<RefCell<Vec<WidgetSpec>>>,
+    /// The active org's enabled plugins. Defaults to "everything on";
+    /// the shell mirrors the discovered org state into it.
+    plugins: Rc<RefCell<task_plugin::PluginSet>>,
+}
+
+impl Default for WidgetRegistry {
+    fn default() -> Self {
+        Self {
+            specs: Rc::default(),
+            plugins: Rc::new(RefCell::new(task_plugin::PluginSet::resolve(None))),
+        }
+    }
 }
 
 impl WidgetRegistry {
@@ -328,6 +343,27 @@ impl WidgetRegistry {
         }
     }
 
+    /// Point the registry at the ACTIVE org's enabled plugin set. Specs
+    /// whose [`WidgetSpec::plugin`] is not in the set stop matching,
+    /// decorating, and handling hrefs until the set changes back —
+    /// registration is untouched, so this is cheap to flip on every org
+    /// switch.
+    pub fn set_plugin_set(&self, set: task_plugin::PluginSet) {
+        *self.plugins.borrow_mut() = set;
+    }
+
+    /// The registered specs whose owning plugin is enabled for the
+    /// active org (`plugin: None` is always available).
+    fn active_specs(&self) -> Vec<WidgetSpec> {
+        let plugins = self.plugins.borrow();
+        self.specs
+            .borrow()
+            .iter()
+            .filter(|s| s.plugin.is_none_or(|p| plugins.contains(p)))
+            .cloned()
+            .collect()
+    }
+
     /// The specs claiming the open note, most specific claim first
     /// (`NoteType` > `NoteExperience` > `NoteFlag`, then registration
     /// order). The first entry with a render fn is the note's widget
@@ -339,16 +375,16 @@ impl WidgetRegistry {
             _ => None,
         };
         let doc = (ctx.doc)();
-        let specs = self.specs.borrow().clone();
+        let specs = self.active_specs();
         note_matches_inner(&specs, note_type.as_deref(), &doc)
     }
 
-    /// Every registered decoration pass, deduped by fn identity (a
+    /// Every enabled decoration pass, deduped by fn identity (a
     /// provider may attach the same pass to several specs).
     #[must_use]
     pub fn decoration_passes(&self) -> Vec<DecorationPass> {
         let mut out: Vec<DecorationPass> = Vec::new();
-        for spec in self.specs.borrow().iter() {
+        for spec in &self.active_specs() {
             if let Some(p) = spec.decorations {
                 if !out.iter().any(|q| std::ptr::fn_addr_eq(*q, p)) {
                     out.push(p);
@@ -375,7 +411,7 @@ impl WidgetRegistry {
         }
         // 2. Specs claiming an embedded target, in document order.
         let doc = (ctx.doc)();
-        let specs = self.specs.borrow().clone();
+        let specs = self.active_specs();
         for target in standalone_wikilink_targets(&doc) {
             let Some(resolved) = (ctx.resolve)(&target) else {
                 continue;
@@ -572,6 +608,35 @@ mod tests {
         let inner = reg.specs.borrow();
         assert_eq!(inner.len(), 1);
         assert!(inner[0].hide_note_header, "first registration wins");
+    }
+
+    #[test]
+    fn disabled_plugin_specs_stop_matching_and_decorating() {
+        fn pass(_: &EditorState) -> Vec<DecoratedRange> {
+            Vec::new()
+        }
+        let reg = WidgetRegistry::new();
+        reg.register(vec![
+            spec("meal", vec![WidgetMatch::NoteType("recipe")])
+                .decorations(pass)
+                .plugin("mealplan"),
+            spec("plain", vec![WidgetMatch::NoteType("recipe")]),
+        ]);
+        let specs = reg.active_specs();
+        assert_eq!(specs.len(), 2, "everything on by default");
+        assert_eq!(reg.decoration_passes().len(), 1);
+
+        reg.set_plugin_set(task_plugin::PluginSet::resolve(Some(
+            &task_plugin::PluginChoice::Disabled(vec!["mealplan".into()]),
+        )));
+        let specs = reg.active_specs();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].id, "plain", "un-owned spec survives");
+        assert!(reg.decoration_passes().is_empty(), "gated pass dropped");
+
+        // Flipping back re-enables without re-registration.
+        reg.set_plugin_set(task_plugin::PluginSet::resolve(None));
+        assert_eq!(reg.active_specs().len(), 2);
     }
 
     #[test]
