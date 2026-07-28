@@ -62,18 +62,12 @@ pub fn write_project(
 /// Conventional path for a freshly captured project — slug
 /// from the title, dropped under `Projects/`.
 ///
-/// A title that slugifies to nothing yields a bare
-/// `untitled-project.md` (no `Projects/` prefix) — preserved verbatim
-/// from the hand-written version, which is why this can't be
-/// [`VaultEntity::default_path`].
+/// A title that slugifies to nothing falls back to
+/// `Projects/untitled-project.md` — under the folder, like every other
+/// title.
 #[must_use]
 pub fn default_project_path(title: &str) -> String {
-    let cleaned = vault_entity::slugify(title, "");
-    if cleaned.is_empty() {
-        "untitled-project.md".to_string()
-    } else {
-        format!("{}/{cleaned}.md", Projects::DEFAULT_FOLDER)
-    }
+    Projects::default_path(title, None)
 }
 
 #[cfg(test)]
@@ -128,14 +122,18 @@ mod tests {
         assert_eq!(back.id, p.id);
     }
 
-    /// The slug rule, and the bare-filename fallback for a title that
-    /// slugifies to nothing.
+    /// The slug rule, and the fallback for a title that slugifies to
+    /// nothing — which lands under `Projects/` like every other title.
+    /// It used to drop the folder and write to the vault root.
     #[test]
     fn default_path_slugs_the_title() {
         assert_eq!(
             default_project_path("Mobile  Push!"),
             "Projects/mobile-push.md"
         );
-        assert_eq!(default_project_path("!!!"), "untitled-project.md");
+        assert_eq!(
+            default_project_path("!!!"),
+            "Projects/untitled-project.md"
+        );
     }
 }

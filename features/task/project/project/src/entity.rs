@@ -27,6 +27,10 @@ impl VaultEntity for Projects {
 
     const TYPE: &'static str = "project";
     const DEFAULT_FOLDER: &'static str = "Projects";
+    /// Not the `TYPE` default: a title that slugifies to nothing has
+    /// always produced `untitled-project.md`, and that filename is what
+    /// existing vaults contain.
+    const SLUG_FALLBACK: &'static str = "untitled-project";
 
     fn id(p: &ProjectInfo) -> Uuid {
         p.id
