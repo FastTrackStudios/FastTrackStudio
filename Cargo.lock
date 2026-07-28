@@ -23207,11 +23207,13 @@ name = "signal-drums"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "daw",
  "kontrol",
  "midicore",
  "signal-drums-proto",
  "signal-fx",
  "signal-plugin-host",
+ "signal-rig-host",
  "signal-sampler",
  "tracing",
  "tracing-subscriber",
