@@ -22,6 +22,7 @@
 //!
 //! Future: a `video:` queue swaps the `<audio>` for a `<video>`.
 
+use crate::format::duration_mmss;
 use dioxus::prelude::*;
 
 /// A transport command the [`NowPlayingTab`] UI posts to the headless
@@ -81,11 +82,6 @@ pub fn provide_now_playing_ctl() {
         amp: Signal::new(0.0),
         cmd: Signal::new((0, NpCmd::Toggle)),
     });
-}
-
-fn fmt_mmss(s: f64) -> String {
-    let s = s.max(0.0) as u64;
-    format!("{}:{:02}", s / 60, s % 60)
 }
 
 /// The bottom-right status-bar tab. Renders nothing until something plays.
@@ -156,7 +152,7 @@ pub fn NowPlayingTab() -> Element {
                 }
             }
             // ── elapsed time ──
-            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{fmt_mmss(pos)}" }
+            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{duration_mmss(pos)}" }
             // ── stretchy custom seek bar (middle) ──
             div { class: "group/seek relative flex h-2.5 min-w-0 flex-1 items-center",
                 div { class: "h-1 w-full overflow-hidden rounded-full bg-muted",
@@ -180,7 +176,7 @@ pub fn NowPlayingTab() -> Element {
                 }
             }
             // ── total time ──
-            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{fmt_mmss(dur)}" }
+            span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{duration_mmss(dur)}" }
             // ── song details (right): album art + title/subtitle ──
             div { class: "flex shrink-0 items-center gap-2",
                 div { class: "min-w-0 text-right leading-tight",

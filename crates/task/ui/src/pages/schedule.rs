@@ -359,7 +359,7 @@ fn BlockEditor(
                         input {
                             class: "{input_cls}",
                             r#type: "time",
-                            value: "{fmt_time(start())}",
+                            value: "{fmt_minute_of_day(start())}",
                             oninput: move |e| {
                                 if let Some(m) = parse_time(&e.value()) {
                                     start.set(m);
@@ -372,7 +372,7 @@ fn BlockEditor(
                         input {
                             class: "{input_cls}",
                             r#type: "time",
-                            value: "{fmt_time(end())}",
+                            value: "{fmt_minute_of_day(end())}",
                             oninput: move |e| {
                                 if let Some(m) = parse_time(&e.value()) {
                                     end.set(m);
@@ -618,7 +618,7 @@ fn category_color(c: BlockCategory) -> ColorTag {
     }
 }
 
-fn fmt_time(min: u16) -> String {
+fn fmt_minute_of_day(min: u16) -> String {
     let m = min.min(1439);
     format!("{:02}:{:02}", m / 60, m % 60)
 }

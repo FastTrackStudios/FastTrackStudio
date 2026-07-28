@@ -14,6 +14,7 @@
 //! Requires a signed-in session (the member list is derived from the
 //! caller's token); Guest sees a sign-in prompt.
 
+use crate::format::money;
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
@@ -24,10 +25,6 @@ use crate::auth::AuthCtx;
 use crate::chrome::resolve_org;
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::pages::contacts::PersonChip;
-
-fn money(cents: i64) -> String {
-    format!("${}.{:02}", cents / 100, (cents % 100).abs())
-}
 
 /// A member joined with their org-level rate (0 = unset) and, if one
 /// exists, the phone from a linked contact.

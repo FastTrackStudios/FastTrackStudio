@@ -924,14 +924,6 @@ pub(crate) mod imp {
     // ── small format helpers ────────────────────────────────────────────────
 
     #[allow(dead_code)] // kept as a shared helper; the inline scrubber that
-    // used it moved to the progress bars.
-    pub(crate) fn fmt_time(s: f64) -> String {
-        let s = s.max(0.0);
-        let m = (s / 60.0) as u64;
-        let sec = (s % 60.0) as u64;
-        format!("{m}:{sec:02}")
-    }
-
     /// Which tab is showing in the player.
     #[derive(Clone, Copy, PartialEq)]
     enum Tab {

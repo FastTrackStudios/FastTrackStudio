@@ -15,6 +15,7 @@
 //! first-class. Everything is theme-token only (no hex in styling) so
 //! it tracks light/dark automatically — dark is the default.
 
+use crate::format::status_variant;
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     CalendarDays, Flag, FolderKanban, Layers, LayoutGrid, LayoutList, Plus, User,
@@ -783,15 +784,6 @@ fn matches_status(status: &str, bucket: Bucket) -> bool {
     match bucket {
         Bucket::Active => matches!(status, "active" | "open" | "in_progress"),
         Bucket::Hold => matches!(status, "on_hold" | "on-hold" | "paused" | "waiting"),
-    }
-}
-
-fn status_variant(status: &str) -> StatusBadgeVariant {
-    match status {
-        "active" | "open" | "in_progress" => StatusBadgeVariant::Success,
-        "on_hold" | "on-hold" | "paused" | "waiting" => StatusBadgeVariant::Warning,
-        "cancelled" | "canceled" | "abandoned" | "blocked" => StatusBadgeVariant::Danger,
-        _ => StatusBadgeVariant::Neutral,
     }
 }
 

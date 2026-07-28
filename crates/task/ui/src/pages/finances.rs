@@ -4,6 +4,7 @@
 //! chosen period. The finance service isn't mounted over vox yet, so
 //! everything here is computed from the (mounted) timer `list_sessions`.
 
+use crate::format::money;
 use std::collections::HashMap;
 
 use chrono::{Datelike, Utc};
@@ -28,10 +29,6 @@ impl Period {
             Self::All => "All time",
         }
     }
-}
-
-fn money(cents: i64) -> String {
-    format!("${:.2}", cents as f64 / 100.0)
 }
 
 fn hours(secs: i64) -> String {

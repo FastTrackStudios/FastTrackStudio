@@ -35,6 +35,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(target_arch = "wasm32")]
 mod imp {
+    use crate::format::duration_mmss;
     use std::rc::Rc;
 
     use dioxus::prelude::*;
@@ -1011,7 +1012,7 @@ mod imp {
             .find(|s| song_progress >= s.start_percent && song_progress < s.end_percent)
             .or_else(|| sections.last())
             .map(|s| s.name.clone());
-        let time_str = format!("{} / {}", fmt_time(pos), fmt_time(duration));
+        let time_str = format!("{} / {}", duration_mmss(pos), duration_mmss(duration));
         let progress_clamped = song_progress.clamp(0.0, 100.0);
 
         // Progress WITHIN the current section (0–100) for the section bar.
@@ -1608,13 +1609,6 @@ mod imp {
         }
     }
 
-    /// `mm:ss` for the timeline caption's elapsed / total readout.
-    fn fmt_time(secs: f64) -> String {
-        let s = secs.max(0.0);
-        let m = (s / 60.0).floor() as i64;
-        let rem = (s % 60.0).floor() as i64;
-        format!("{m}:{rem:02}")
-    }
 }
 
 #[cfg(target_arch = "wasm32")]

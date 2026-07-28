@@ -9,6 +9,7 @@
 //! Money renders from minor units (i64 cents) the same way
 //! [`crate::pages::invoices`] does.
 
+use crate::format::money;
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
@@ -19,13 +20,6 @@ use finance_proto::AccountBalance;
 use finance_proto::ledger::{Account, AccountKind, Transaction};
 
 use crate::orgs::{OrgMeta, OrgSelection};
-
-/// Render signed minor units as currency (mirrors `invoices::money`).
-fn money(cents: i64) -> String {
-    let neg = cents < 0;
-    let v = cents.unsigned_abs();
-    format!("{}${}.{:02}", if neg { "-" } else { "" }, v / 100, v % 100)
-}
 
 /// Display label for an account category.
 fn kind_label(k: &AccountKind) -> &'static str {

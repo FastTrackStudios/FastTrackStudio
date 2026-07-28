@@ -12,6 +12,7 @@
 //! running timers pinned under the header so they stay visible while
 //! you scroll the steps.
 
+use crate::format::duration_hms;
 use std::collections::HashSet;
 
 use cookbook_proto::{Recipe, RecipeTimer};
@@ -239,7 +240,7 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                                     key: "{id}",
                                     class: "flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm {pill}",
                                     span { class: "font-medium", "{t.label}" }
-                                    span { class: "font-mono tabular-nums", "{fmt_mmss(t.remaining)}" }
+                                    span { class: "font-mono tabular-nums", "{duration_hms(t.remaining)}" }
                                     button {
                                         class: "flex size-5 items-center justify-center rounded-full hover:bg-foreground/10",
                                         aria_label: "Dismiss timer",
@@ -494,7 +495,7 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                                                                             span { "{n} · " }
                                                                         }
                                                                     }
-                                                                    span { class: "font-mono tabular-nums", "{fmt_mmss(secs)}" }
+                                                                    span { class: "font-mono tabular-nums", "{duration_hms(secs)}" }
                                                                 }
                                                             }
                                                         }
@@ -606,18 +607,6 @@ pub fn RecipeCookView(path: String) -> Element {
                 }
             }
         },
-    }
-}
-
-/// Seconds → `M:SS` (or `H:MM:SS` past an hour).
-fn fmt_mmss(secs: u32) -> String {
-    let h = secs / 3600;
-    let m = (secs % 3600) / 60;
-    let s = secs % 60;
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m}:{s:02}")
     }
 }
 
