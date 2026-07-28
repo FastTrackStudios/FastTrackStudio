@@ -5,13 +5,8 @@
 //! `body` becomes the markdown body verbatim.
 
 use inbox_proto::InboxItem;
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml serialize: {0}")]
-    Yaml(String),
-}
+pub use vault_entity::WriteError;
 
 pub fn serialize_inbox_item(item: &InboxItem) -> Result<String, WriteError> {
     let mut map = serde_yaml::Mapping::new();
