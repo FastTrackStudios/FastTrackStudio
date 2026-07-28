@@ -25836,6 +25836,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "task-plugin"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "task-proto"
 version = "0.1.0"
 dependencies = [

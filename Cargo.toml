@@ -840,6 +840,7 @@ libc = "0.2"
 # wasm-clean surface keep `default-features = false` (the consumer opts
 # into `vox`/`server`/`native`), mirroring Task's original table.
 # crates/task/
+task-plugin = { path = "crates/task/plugin" }
 task-telemetry = { path = "crates/task/telemetry" }
 task-ui-core = { path = "crates/task/ui-core" }
 task-player-ui = { path = "crates/task/player-ui" }
