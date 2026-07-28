@@ -71,7 +71,9 @@ pub fn use_org_theme_overrides() -> OrgThemeOverrides {
 /// Build a `ThemeState` for a preset name + mode. Falls back to the
 /// fts-ui default preset if the name doesn't match anything.
 /// The Obsidian dark palette (Cody, 2026-07-03) — kept in lockstep
-/// with the static sheet in `apps/web/fts-theme.css`. The runtime
+/// with the static override sheet at `apps/task/fts-theme.css`, which
+/// layers these same tokens over the canonical design-token sheet at
+/// `libs/fts-ui/fts-ui/assets/fts-theme.css`. The runtime
 /// `ThemeProvider` writes tokens onto `.fts-theme-root`, which beats
 /// the stylesheet's `:root` block for everything inside the app — so
 /// the palette must be applied HERE, not only in the CSS file.

@@ -38,15 +38,23 @@ task *args:
 #
 # NOTE: serve WITHOUT hot-patching — `dx serve`'s default hot-patch
 # path breaks wasm builds (LinkError / subsecond panic on edit).
-web:
+web: css
     cd web && dx serve --web --addr 0.0.0.0 --hot-patch false
 
-# Regenerate desktop/assets/tailwind.css from the source
-# `tailwind.css` input. Run after touching `@source` paths or the
-# `@layer components` block. `tailwindcss` comes from the nix
-# devshell — `direnv` already loaded it, no explicit nix call.
-desktop-css:
-    tailwindcss -i desktop/tailwind.css -o desktop/assets/tailwind.css
+# Regenerate every app's assets/tailwind.css from the ONE source
+# input, `apps/task/tailwind.css`. The output is gitignored build
+# artifact — each app's build.rs regenerates it during a normal cargo
+# build, so you rarely need this by hand; it's here for `dx serve`
+# (which reads assets/ before cargo runs) and for a quick refresh after
+# touching `@source` paths. `tailwindcss` comes from the nix devshell —
+# `direnv` already loaded it, no explicit nix call.
+css:
+    tailwindcss -i tailwind.css -o desktop/assets/tailwind.css
+    tailwindcss -i tailwind.css -o mobile/assets/tailwind.css
+    tailwindcss -i tailwind.css -o web/assets/tailwind.css
+
+# Back-compat aliases — all three sheets come from the same input now.
+desktop-css: css
 
 # Native desktop window (package `task-app-desktop`). Regenerates
 # tailwind first so any new utility classes in touched sources
@@ -61,8 +69,7 @@ desktop-release: desktop-css
     cd desktop && dx serve --platform desktop --release
 
 # Regenerate mobile/assets/tailwind.css (package `task-app-mobile`).
-mobile-css:
-    tailwindcss -i mobile/tailwind.css -o mobile/assets/tailwind.css
+mobile-css: css
 
 # Canonical server. Default bind is 0.0.0.0:9090; override with
 # TASK_SERVER_BIND. See `.env.example` for the full env surface.
