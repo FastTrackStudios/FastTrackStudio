@@ -196,7 +196,7 @@ impl PluginSet {
     /// about a plugin this build doesn't know can't serve it anyway.
     #[must_use]
     pub fn contains(&self, id: &str) -> bool {
-        self.enabled.iter().any(|e| *e == id)
+        self.enabled.contains(&id)
     }
 
     /// The enabled ids, catalog order.

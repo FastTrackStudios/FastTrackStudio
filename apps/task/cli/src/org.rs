@@ -213,7 +213,7 @@ fn run_plugins(cmd: PluginsCmd) -> eyre::Result<()> {
         PluginsCmd::Disable { id, org } => {
             let mut active = crate::org_ctx::resolve_active(org.as_deref())?;
             check_toggleable(&id)?;
-            if active.manifest.disabled_plugins.iter().any(|d| *d == id) {
+            if active.manifest.disabled_plugins.contains(&id) {
                 println!("`{id}` is already disabled for `{}`", active.manifest.slug);
                 return Ok(());
             }
