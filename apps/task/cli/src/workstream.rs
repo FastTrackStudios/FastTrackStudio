@@ -268,7 +268,7 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
                 None => workstream::Status::Backlog.as_str().to_string(),
                 Some(s) => canonical_status(s)?,
             };
-            let details = crate::resolve_body(body)?;
+            let details = crate::shared::resolve_body(body)?;
             let new_ws = workstream::Workstream {
                 id: uuid::Uuid::nil(),
                 path: path.unwrap_or_default(),
@@ -427,7 +427,7 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
             let url = ws_url(org, server)?;
             let client = connect(&url).await?;
             let w = json_out::resolve_workstream_flexible(&client, &target).await?;
-            if !yes && !crate::confirm(&format!("delete `{}` ({})?", w.title, w.path))? {
+            if !yes && !crate::shared::confirm(&format!("delete `{}` ({})?", w.title, w.path))? {
                 println!("aborted");
                 return Ok(());
             }

@@ -32,6 +32,7 @@ mod workstream;
 
 use clap::{Parser, Subcommand};
 use shared::RemoteVoxConfig;
+use shared::{confirm, git, resolve_body, short_uuid};
 use std::collections::HashMap;
 #[derive(Parser)]
 #[command(name = "task", about = "Task management CLI", version)]
@@ -5662,33 +5663,6 @@ fn parse_state_spec(spec: &str) -> eyre::Result<(String, project::StateGroup, Op
         )
     })?;
     Ok((name.to_string(), group, color))
-}
-
-fn resolve_body(arg: Option<String>) -> eyre::Result<String> {
-    use std::io::Read;
-    match arg {
-        None => Ok(String::new()),
-        Some(s) if s == "-" => {
-            let mut buf = String::new();
-            std::io::stdin().read_to_string(&mut buf)?;
-            Ok(buf)
-        }
-        Some(s) => Ok(s),
-    }
-}
-
-fn confirm(prompt: &str) -> eyre::Result<bool> {
-    use std::io::{BufRead, Write};
-    let stdin = std::io::stdin();
-    let mut out = std::io::stdout();
-    write!(out, "{prompt} [y/N] ")?;
-    out.flush()?;
-    let mut line = String::new();
-    stdin.lock().read_line(&mut line)?;
-    Ok(matches!(
-        line.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
 }
 
 fn print_project_row(p: &project::ProjectInfo, indent: usize) {
@@ -13676,11 +13650,6 @@ async fn resolve_issue_id(
     json_out::resolve_task_flexible(client, id).await
 }
 
-fn short_uuid(u: &uuid::Uuid) -> String {
-    let s = u.to_string();
-    s.chars().take(8).collect()
-}
-
 #[allow(clippy::ref_option)] // ergonomic: callers pass `&t.workflow` directly
 fn workflow_summary(w: &Option<task::model::WorkflowAttrs>) -> String {
     let Some(w) = w else {
@@ -16199,22 +16168,6 @@ fn forge_link_store(org_slug: &str) -> eyre::Result<git_config::FileStore> {
 }
 
 // ── git helpers for `task code` ──────────────────────────────
-
-/// Run `git <args>` in the cwd, returning trimmed stdout.
-fn git(args: &[&str]) -> eyre::Result<String> {
-    let out = std::process::Command::new("git")
-        .args(args)
-        .output()
-        .map_err(|e| eyre::eyre!("git {}: {e}", args.join(" ")))?;
-    if !out.status.success() {
-        return Err(eyre::eyre!(
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
 
 fn current_branch() -> eyre::Result<String> {
     git(&["rev-parse", "--abbrev-ref", "HEAD"])
