@@ -2071,10 +2071,19 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             goal::goal_service_descriptor(),
             goal::serve_goal_service(org.goals.clone()),
         )
+        // Live goal changes — `GoalService`'s `#[subscribe]` stream
+        // sibling, served from the hub on the `GoalBackend` above.
+        .merge(goal::goal_service_stream_layer(org.goals.clone()))
         .with(
             milestone::milestone_service_descriptor(),
             milestone::serve_milestone_service(org.milestones.clone()),
         )
+        // Live milestone changes — `MilestoneService`'s
+        // `#[subscribe]` stream sibling, served from the hub on the
+        // `MilestoneBackend` above.
+        .merge(milestone::milestone_service_stream_layer(
+            org.milestones.clone(),
+        ))
         .with(
             workstream::workstream_service_descriptor(),
             workstream::serve_workstream_service(org.workstreams.clone()),

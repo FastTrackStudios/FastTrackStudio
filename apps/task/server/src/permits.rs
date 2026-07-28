@@ -220,9 +220,11 @@ table!(PROJECT_STREAM, "project-stream", "projects/**", [rd "events"]);
 table!(GOAL, "goal", "goals/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "rename", wa "delete",
 ]);
+table!(GOAL_STREAM, "goal-stream", "goals/**", [rd "events"]);
 table!(MILESTONE, "milestone", "milestones/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "rename", wa "delete",
 ]);
+table!(MILESTONE_STREAM, "milestone-stream", "milestones/**", [rd "events"]);
 table!(WORKSTREAM, "workstream", "workstreams/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update",
     wr "set_status", wa "delete", rd "rollup",
@@ -499,7 +501,9 @@ pub fn mounts() -> Vec<Mount> {
         m(project::project_service_descriptor(), PROJECT),
         m(project::project_stream_descriptor(), PROJECT_STREAM),
         m(goal::goal_service_descriptor(), GOAL),
+        m(goal::goal_stream_descriptor(), GOAL_STREAM),
         m(milestone::milestone_service_descriptor(), MILESTONE),
+        m(milestone::milestone_stream_descriptor(), MILESTONE_STREAM),
         m(workstream::workstream_service_descriptor(), WORKSTREAM),
         m(workstream::workstream_stream_descriptor(), WORKSTREAM_STREAM),
         m(task::task_service_descriptor(), TASK),
