@@ -753,9 +753,9 @@ pub(crate) fn ChatPane(
     let mut history = use_signal(PromptHistory::default);
     // Whether the reader is following the tail; drives Jump to latest.
     let mut scroll = use_signal(|| ScrollMode::FollowingEnd);
-    // Why the last subscription ended — read back by the reconnect
-    // loop so the chip can say what went wrong.
-    let closed_reason = use_signal(String::new);
+    // How many times the event stream has had to reconnect this
+    // session — the health chip shows it once it's non-zero.
+    let reconnects = use_signal(|| 0u32);
     let mut tokens = use_signal(|| (session.usage.input_tokens, session.usage.output_tokens));
     let mut spend = use_signal(|| session.usage.estimated_cost_usd);
     let mut turn_started = use_signal(|| None::<chrono::DateTime<chrono::Utc>>);
@@ -829,270 +829,268 @@ pub(crate) fn ChatPane(
         });
     });
 
-    // Transcript load + live event pump, once per mounted session.
-    // The pump reconnects on its own: a dropped lane (server
-    // restart, network blip) used to leave the chat silently dead
-    // until you reselected it.
+    // ── Transcript hydrate + live event fold ──────────────────
+    // `Subscriptions`' `#[subscribe]` stream, consumed through
+    // `architect::use_stream` — it owns the reconnect + backoff that
+    // used to be a hand-rolled loop here.
+    //
+    // The subscribe future runs on every (re)connect and re-pulls the
+    // transcript first: that is both the initial hydrate and the
+    // recovery path for events published while we were detached
+    // (fetch-once-then-fold, per the `AgentEventEnvelope` contract —
+    // subscribe first so nothing is missed in between).
     let stream_slug = slug.clone();
     let stream_sid = session_id.clone();
-    use_future(move || {
-        let slug = stream_slug.clone();
-        let sid = stream_sid.clone();
-        async move {
-            match crate::feeds::fetch_agent_messages(&slug, &sid).await {
-                Ok(mut msgs) => {
-                    msgs.reverse();
-                    messages.set(msgs);
-                }
-                Err(e) => error.set(format!("Couldn't load the transcript: {e}")),
-            }
-
-            // `attempt` drives the backoff and resets after a
-            // connection that actually held; `reconnects` is the
-            // lifetime count the chip reports.
-            let mut attempt: u32 = 0;
-            let mut reconnects: u32 = 0;
-            loop {
-                if attempt > 0 {
-                    // Capped exponential backoff, then re-pull the
-                    // transcript so anything missed while we were
-                    // disconnected lands before the stream resumes.
-                    let secs = 2u32.saturating_pow(attempt.min(4)).min(30);
-                    let why = match &*stream_state.peek() {
-                        StreamState::Retrying { why, .. } => why.clone(),
-                        _ => "disconnected".to_string(),
-                    };
-                    stream_state.set(StreamState::Retrying { why, secs });
-                    architect::platform::sleep(std::time::Duration::from_secs(u64::from(secs)))
-                        .await;
-                    if let Ok(mut msgs) = crate::feeds::fetch_agent_messages(&slug, &sid).await {
+    let filter_sid = session_id.clone();
+    let resync_slug = slug.clone();
+    let resync_sid = session_id.clone();
+    architect::use_stream(
+        move |tx| {
+            let slug = stream_slug.clone();
+            let sid = stream_sid.clone();
+            let (mut messages, mut error, mut stream_state, mut reconnects) =
+                (messages, error, stream_state, reconnects);
+            let (mut busy, mut stopping, mut streaming) = (busy, stopping, streaming);
+            async move {
+                match crate::feeds::fetch_agent_messages(&slug, &sid).await {
+                    Ok(mut msgs) => {
                         msgs.reverse();
                         messages.set(msgs);
                     }
+                    Err(e) => error.set(format!("Couldn't load the transcript: {e}")),
                 }
-
-                let (tx, mut rx) = vox::channel::<AgentEvent>();
-                let mut closed_w = closed_reason;
-                let sub_slug = slug.clone();
-                let sub_sid = sid.clone();
-                spawn(async move {
-                    let outcome =
-                        crate::feeds::subscribe_agent_session(&sub_slug, &sub_sid, tx).await;
-                    closed_w.set(match outcome {
-                        Ok(()) => "the server closed the event stream".to_string(),
-                        Err(e) => e,
-                    });
-                });
-                stream_state.set(StreamState::Live(reconnects));
-                attempt += 1;
-                let connected_at = chrono::Utc::now();
-                while let Ok(Some(ev)) = rx.recv().await {
-                    match ev.get().clone() {
-                        AgentEvent::TurnStarted { at, .. } => {
-                            busy.set(true);
-                            stopping.set(false);
-                            error.set(String::new());
-                            reasoning.set(String::new());
-                            live_lines.set(Vec::new());
-                            turn_started.set(Some(at));
-                            elapsed.set(0);
-                            on_activity.call(());
-                        }
-                        AgentEvent::MessageWritten { message } => {
-                            if streaming
-                                .peek()
-                                .as_ref()
-                                .is_some_and(|(id, _)| *id == message.id)
-                            {
-                                streaming.set(None);
-                            }
-                            let mut list = messages.write();
-                            if let Some(existing) = list.iter_mut().find(|m| m.id == message.id) {
-                                *existing = message;
-                            } else if matches!(message.role, Role::User)
-                                && list.last().is_some_and(|m| {
-                                    m.id.starts_with("local-") && text_of(m) == text_of(&message)
-                                })
-                            {
-                                *list.last_mut().expect("non-empty") = message;
-                            } else {
-                                list.push(message);
-                            }
-                        }
-                        AgentEvent::MessageDelta {
-                            message_id,
-                            content_delta,
-                            ..
-                        } => {
-                            let mut cur = streaming.write();
-                            match cur.as_mut() {
-                                Some((id, text)) if *id == message_id => {
-                                    text.push_str(&content_delta)
-                                }
-                                _ => *cur = Some((message_id, content_delta)),
-                            }
-                        }
-                        AgentEvent::ReasoningDelta { delta, .. } => {
-                            reasoning.write().push_str(&delta);
-                        }
-                        AgentEvent::ToolStarted { tool_call } => {
-                            push_line(
-                                &mut live_lines.write(),
-                                ActivityLine {
-                                    tone: ToolTone::Running,
-                                    text: tool_label(&tool_call),
-                                    tool_id: tool_call.id.clone(),
-                                    args: pretty_json(&tool_call.input_json),
-                                    output: String::new(),
-                                    duration_ms: 0,
-                                },
-                            );
-                        }
-                        AgentEvent::ToolFinished { tool_call } => {
-                            let ok =
-                                !matches!(tool_call.status, agent_proto::tool::ToolStatus::Error);
-                            settle_tool(
-                                &mut live_lines.write(),
-                                &tool_call.id,
-                                tool_label(&tool_call),
-                                ok,
-                                tool_call.duration_ms,
-                                if tool_call.output_json.is_empty() {
-                                    tool_call.preview.clone()
-                                } else {
-                                    tool_call.output_json.clone()
-                                },
-                            );
-                        }
-                        AgentEvent::ToolProgress { preview, .. } => {
-                            push_line(&mut live_lines.write(), ActivityLine::note(preview));
-                        }
-                        AgentEvent::Warning { kind, message, .. } => {
-                            push_line(
-                                &mut live_lines.write(),
-                                ActivityLine::note(format!("{kind}: {message}")),
-                            );
-                        }
-                        AgentEvent::CompressionStarted { engine, .. } => {
-                            push_line(
-                                &mut live_lines.write(),
-                                ActivityLine::note(format!("compressing context ({engine})")),
-                            );
-                        }
-                        AgentEvent::CompressionFinished { .. } => {
-                            push_line(
-                                &mut live_lines.write(),
-                                ActivityLine::note("context compressed"),
-                            );
-                        }
-                        AgentEvent::QuestionAsked { request } => {
-                            pending_question.set(Some(request));
-                        }
-                        AgentEvent::QuestionResolved { .. } => pending_question.set(None),
-                        AgentEvent::Metering {
-                            input_tokens,
-                            output_tokens,
-                            estimated_cost_usd,
-                            ..
-                        } => {
-                            tokens.set((input_tokens, output_tokens));
-                            if estimated_cost_usd > 0.0 {
-                                spend += estimated_cost_usd;
-                            }
-                        }
-                        AgentEvent::TurnFinished { message_id, at, .. } => {
-                            // Fold the live work log behind its assistant
-                            // message (t3code's turn fold).
-                            let duration = turn_started
-                                .peek()
-                                .as_ref()
-                                .map(|t0| (at - *t0).num_seconds().max(0))
-                                .unwrap_or(0);
-                            let lines = std::mem::take(&mut *live_lines.write());
-                            let r = std::mem::take(&mut *reasoning.write());
-                            if !lines.is_empty() || !r.is_empty() {
-                                turns.write().insert(
-                                    message_id,
-                                    TurnLog {
-                                        lines,
-                                        reasoning: r,
-                                        duration_secs: duration,
-                                    },
-                                );
-                            }
-                            busy.set(false);
-                            stopping.set(false);
-                            streaming.set(None);
-                            responding.set(String::new());
-                            turn_started.set(None);
-                            on_activity.call(());
-                            // Drain the queue.
-                            let next = {
-                                let mut q = queued.write();
-                                if q.is_empty() {
-                                    None
-                                } else {
-                                    Some(q.remove(0))
-                                }
-                            };
-                            if let Some(text) = next {
-                                dispatch_text(text);
-                            }
-                        }
-                        AgentEvent::TurnErrored { kind, message, .. } => {
-                            busy.set(false);
-                            stopping.set(false);
-                            streaming.set(None);
-                            responding.set(String::new());
-                            turn_started.set(None);
-                            error.set(format!("{kind}: {message}"));
-                            on_activity.call(());
-                        }
-                        AgentEvent::TurnCancelled { .. } => {
-                            busy.set(false);
-                            stopping.set(false);
-                            streaming.set(None);
-                            responding.set(String::new());
-                            turn_started.set(None);
-                            push_line(&mut live_lines.write(), ActivityLine::note("cancelled"));
-                            on_activity.call(());
-                        }
-                        AgentEvent::Resync => {
-                            if let Ok(mut msgs) =
-                                crate::feeds::fetch_agent_messages(&slug, &sid).await
-                            {
-                                msgs.reverse();
-                                messages.set(msgs);
-                            }
-                        }
-                        _ => {}
+                let client = match crate::vox_clients::establish_for::<
+                    agent_proto::service::subscriptions::SubscriptionsStreamClient,
+                >(&slug)
+                .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        stream_state.set(StreamState::Retrying { why: e, secs: 0 });
+                        return false;
                     }
-                }
-                // The lane closed. Fall through to the backoff at
-                // the top of the loop; a turn that was in flight is
-                // no longer being reported, so stop the spinner.
+                };
+                stream_state.set(StreamState::Live(*reconnects.peek()));
+                let outcome = client.events(tx).await;
+                // The lane closed. A turn that was in flight is no
+                // longer being reported, so stop the spinner; the hook
+                // backs off and re-runs this future.
                 reconnects += 1;
-                // A connection that held for a while is evidence the
-                // server is fine — don't make the next blip wait out
-                // an escalated backoff.
-                if (chrono::Utc::now() - connected_at).num_seconds() > 60 {
-                    attempt = 1;
-                }
-                let why = closed_reason.peek().clone();
                 stream_state.set(StreamState::Retrying {
-                    why: if why.is_empty() {
-                        "disconnected".to_string()
-                    } else {
-                        why
+                    why: match outcome {
+                        Ok(()) => "the server closed the event stream".to_string(),
+                        Err(e) => format!("{e:?}"),
                     },
                     secs: 0,
                 });
                 busy.set(false);
                 stopping.set(false);
                 streaming.set(None);
+                true
             }
-        }
-    });
+        },
+        move |envelope: agent_proto::AgentEventEnvelope| {
+            // One stream carries every session the backend runs —
+            // keep this chat's own.
+            if envelope.session_id != filter_sid {
+                return;
+            }
+            let (mut busy, mut stopping, mut error, mut reasoning, mut live_lines) =
+                (busy, stopping, error, reasoning, live_lines);
+            let (mut turn_started, mut elapsed, mut streaming, mut messages) =
+                (turn_started, elapsed, streaming, messages);
+            let (mut pending_question, mut tokens, mut spend, mut turns) =
+                (pending_question, tokens, spend, turns);
+            let (mut responding, mut queued) = (responding, queued);
+            let (slug, sid) = (resync_slug.clone(), resync_sid.clone());
+            match envelope.event {
+                AgentEvent::TurnStarted { at, .. } => {
+                    busy.set(true);
+                    stopping.set(false);
+                    error.set(String::new());
+                    reasoning.set(String::new());
+                    live_lines.set(Vec::new());
+                    turn_started.set(Some(at));
+                    elapsed.set(0);
+                    on_activity.call(());
+                }
+                AgentEvent::MessageWritten { message } => {
+                    if streaming
+                        .peek()
+                        .as_ref()
+                        .is_some_and(|(id, _)| *id == message.id)
+                    {
+                        streaming.set(None);
+                    }
+                    let mut list = messages.write();
+                    if let Some(existing) = list.iter_mut().find(|m| m.id == message.id) {
+                        *existing = message;
+                    } else if matches!(message.role, Role::User)
+                        && list.last().is_some_and(|m| {
+                            m.id.starts_with("local-") && text_of(m) == text_of(&message)
+                        })
+                    {
+                        *list.last_mut().expect("non-empty") = message;
+                    } else {
+                        list.push(message);
+                    }
+                }
+                AgentEvent::MessageDelta {
+                    message_id,
+                    content_delta,
+                    ..
+                } => {
+                    let mut cur = streaming.write();
+                    match cur.as_mut() {
+                        Some((id, text)) if *id == message_id => {
+                            text.push_str(&content_delta)
+                        }
+                        _ => *cur = Some((message_id, content_delta)),
+                    }
+                }
+                AgentEvent::ReasoningDelta { delta, .. } => {
+                    reasoning.write().push_str(&delta);
+                }
+                AgentEvent::ToolStarted { tool_call } => {
+                    push_line(
+                        &mut live_lines.write(),
+                        ActivityLine {
+                            tone: ToolTone::Running,
+                            text: tool_label(&tool_call),
+                            tool_id: tool_call.id.clone(),
+                            args: pretty_json(&tool_call.input_json),
+                            output: String::new(),
+                            duration_ms: 0,
+                        },
+                    );
+                }
+                AgentEvent::ToolFinished { tool_call } => {
+                    let ok =
+                        !matches!(tool_call.status, agent_proto::tool::ToolStatus::Error);
+                    settle_tool(
+                        &mut live_lines.write(),
+                        &tool_call.id,
+                        tool_label(&tool_call),
+                        ok,
+                        tool_call.duration_ms,
+                        if tool_call.output_json.is_empty() {
+                            tool_call.preview.clone()
+                        } else {
+                            tool_call.output_json.clone()
+                        },
+                    );
+                }
+                AgentEvent::ToolProgress { preview, .. } => {
+                    push_line(&mut live_lines.write(), ActivityLine::note(preview));
+                }
+                AgentEvent::Warning { kind, message, .. } => {
+                    push_line(
+                        &mut live_lines.write(),
+                        ActivityLine::note(format!("{kind}: {message}")),
+                    );
+                }
+                AgentEvent::CompressionStarted { engine, .. } => {
+                    push_line(
+                        &mut live_lines.write(),
+                        ActivityLine::note(format!("compressing context ({engine})")),
+                    );
+                }
+                AgentEvent::CompressionFinished { .. } => {
+                    push_line(
+                        &mut live_lines.write(),
+                        ActivityLine::note("context compressed"),
+                    );
+                }
+                AgentEvent::QuestionAsked { request } => {
+                    pending_question.set(Some(request));
+                }
+                AgentEvent::QuestionResolved { .. } => pending_question.set(None),
+                AgentEvent::Metering {
+                    input_tokens,
+                    output_tokens,
+                    estimated_cost_usd,
+                    ..
+                } => {
+                    tokens.set((input_tokens, output_tokens));
+                    if estimated_cost_usd > 0.0 {
+                        spend += estimated_cost_usd;
+                    }
+                }
+                AgentEvent::TurnFinished { message_id, at, .. } => {
+                    // Fold the live work log behind its assistant
+                    // message (t3code's turn fold).
+                    let duration = turn_started
+                        .peek()
+                        .as_ref()
+                        .map(|t0| (at - *t0).num_seconds().max(0))
+                        .unwrap_or(0);
+                    let lines = std::mem::take(&mut *live_lines.write());
+                    let r = std::mem::take(&mut *reasoning.write());
+                    if !lines.is_empty() || !r.is_empty() {
+                        turns.write().insert(
+                            message_id,
+                            TurnLog {
+                                lines,
+                                reasoning: r,
+                                duration_secs: duration,
+                            },
+                        );
+                    }
+                    busy.set(false);
+                    stopping.set(false);
+                    streaming.set(None);
+                    responding.set(String::new());
+                    turn_started.set(None);
+                    on_activity.call(());
+                    // Drain the queue.
+                    let next = {
+                        let mut q = queued.write();
+                        if q.is_empty() {
+                            None
+                        } else {
+                            Some(q.remove(0))
+                        }
+                    };
+                    if let Some(text) = next {
+                        dispatch_text(text);
+                    }
+                }
+                AgentEvent::TurnErrored { kind, message, .. } => {
+                    busy.set(false);
+                    stopping.set(false);
+                    streaming.set(None);
+                    responding.set(String::new());
+                    turn_started.set(None);
+                    error.set(format!("{kind}: {message}"));
+                    on_activity.call(());
+                }
+                AgentEvent::TurnCancelled { .. } => {
+                    busy.set(false);
+                    stopping.set(false);
+                    streaming.set(None);
+                    responding.set(String::new());
+                    turn_started.set(None);
+                    push_line(&mut live_lines.write(), ActivityLine::note("cancelled"));
+                    on_activity.call(());
+                }
+                // The server skipped events (mailbox overflow) — the
+                // transcript can't be folded forward from here, so
+                // re-pull it. The fold handler is sync; the refetch
+                // rides its own task.
+                AgentEvent::Resync => {
+                    spawn(async move {
+                        if let Ok(mut msgs) =
+                            crate::feeds::fetch_agent_messages(&slug, &sid).await
+                        {
+                            msgs.reverse();
+                            messages.set(msgs);
+                        }
+                    });
+                }
+                _ => {}
+            }
+        },
+    );
 
     // Send-or-queue (CodexMonitor: the button morphs; typing while
     // the agent runs queues the message for the next turn).

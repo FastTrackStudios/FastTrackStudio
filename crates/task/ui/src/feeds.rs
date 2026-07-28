@@ -1967,7 +1967,8 @@ pub async fn create_agent_session(
 }
 
 /// Kick off one turn — the user message goes to the session's
-/// backend; events stream over `subscribe_agent_session`.
+/// backend; the reply streams over the `Subscriptions` events
+/// stream the chat view subscribes to.
 pub async fn dispatch_agent_turn(
     slug: &str,
     session_id: &str,
@@ -2191,25 +2192,6 @@ pub async fn delete_agent_session(slug: &str, session_id: &str) -> Result<(), St
         .delete_session(session_id.to_owned())
         .await
         .map_err(|e| format!("{slug}: delete session: {e:?}"))
-}
-
-/// Open the live event stream for a session. Returns after handing
-/// the `tx` to the server — pump the paired `rx` for
-/// [`agent_proto::event::AgentEvent`]s; the call ends when the
-/// server drops the lane or the receiver is dropped.
-pub async fn subscribe_agent_session(
-    slug: &str,
-    session_id: &str,
-    tx: vox::Tx<agent_proto::event::AgentEvent>,
-) -> Result<(), String> {
-    let client = crate::vox_clients::establish_for::<
-        agent_proto::service::subscriptions::SubscriptionsClient,
-    >(slug)
-    .await?;
-    client
-        .subscribe_session(session_id.to_owned(), tx)
-        .await
-        .map_err(|e| format!("{slug}: subscribe session: {e:?}"))
 }
 
 // ── Email ───────────────────────────────────────────────────────────

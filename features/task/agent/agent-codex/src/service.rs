@@ -6,15 +6,13 @@
 //!   only for the backend's lifetime (file-backed
 //!   persistence lands once we wire `wiki-live`-style state).
 //! - [`TurnDispatch`] — wraps [`crate::chat::ChatHandle`]
-//!   so each turn spawns `codex app-server` and streams
-//!   events to the session's broadcast channel.
+//!   so each turn spawns `codex app-server` and publishes
+//!   events into the backend's event hub.
 //! - [`Threads`] — message history rebuilt from
 //!   accumulated `MessageDelta`s.
-//! - [`Subscriptions`] — `subscribe_session` over the
-//!   per-session broadcast channel. `subscribe_board` /
-//!   `subscribe_global` close immediately (Codex doesn't
-//!   own boards; global firehose is `subscribe_raw` on the
-//!   backend handle instead).
+//! - `Subscriptions` — the `#[subscribe] fn events` stream,
+//!   served from that one hub (the raw `AppServerEvent`
+//!   firehose stays on `subscribe_raw`).
 //!
 //! Codex *does not* implement: `ToolCalls`, Reasoning,
 //! Attachments, Approvals, Questions, Kanban, Profiles,
@@ -26,18 +24,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use agent_proto::error::AgentError;
-use agent_proto::event::AgentEvent;
+use agent_proto::event::{AgentEvent, AgentEventEnvelope, SessionEvents};
 use agent_proto::message::{ContentBlock, Message, Role};
 use agent_proto::service::sessions::{CreateSession, SessionFilter, SessionPage, Sessions};
-use agent_proto::service::subscriptions::Subscriptions;
+use agent_proto::service::subscriptions::SubscriptionsStreamSource;
 use agent_proto::service::threads::Threads;
 use agent_proto::service::turn_dispatch::{DispatchAck, DispatchTurn, TurnDispatch};
 use agent_proto::session::{Session, SessionStatus, SourceTag, UsageStats};
 use chrono::Utc;
 use futures::StreamExt;
-use tokio::sync::broadcast;
 use uuid::Uuid;
-use vox::Tx;
 
 use crate::chat::ChatOpts;
 use crate::{CodexBackend, SessionRow};
@@ -91,7 +87,7 @@ impl Sessions for CodexBackend {
                 updated_at: None,
             },
         };
-        let (events_tx, _) = broadcast::channel::<AgentEvent>(256);
+        let events_tx = SessionEvents::new(self.inner.events.clone(), id.clone());
         let mut sessions = self.inner.sessions.blocking_lock();
         sessions.insert(
             id,
@@ -368,41 +364,13 @@ impl Threads for CodexBackend {
 }
 
 // ────────────────────── Subscriptions ──────────────────────
-impl Subscriptions for CodexBackend {
-    async fn subscribe_session(&self, session_id: String, tx: Tx<AgentEvent>) {
-        let rx = {
-            let sessions = self.inner.sessions.lock().await;
-            let Some(row) = sessions.get(&session_id) else {
-                let _ = tx.close(vox::Metadata::default()).await;
-                return;
-            };
-            row.events_tx.subscribe()
-        };
-        let mut rx = rx;
-        loop {
-            match rx.recv().await {
-                Ok(ev) => {
-                    if tx.send(ev).await.is_err() {
-                        return;
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => return,
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    if tx.send(AgentEvent::Resync).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    async fn subscribe_board(&self, _board_id: String, tx: Tx<AgentEvent>) {
-        let _ = tx.close(vox::Metadata::default()).await;
-    }
-
-    async fn subscribe_global(&self, _tx: Tx<AgentEvent>) {
-        // Backend exposes the raw firehose via
-        // `CodexBackend::subscribe_raw()` for debug;
-        // proto-shaped global is not wired today.
+/// The `#[subscribe]` backend contract. Publishing happens through
+/// each session's [`SessionEvents`] as its turn runs; the stream
+/// host attaches every subscriber sink to this one hub. The raw
+/// `AppServerEvent` firehose stays available out-of-band via
+/// [`CodexBackend::subscribe_raw`].
+impl SubscriptionsStreamSource for CodexBackend {
+    fn events_hub(&self) -> &architect::PubSub<AgentEventEnvelope> {
+        &self.inner.events
     }
 }

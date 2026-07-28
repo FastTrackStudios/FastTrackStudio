@@ -87,7 +87,7 @@ pub mod tasks;
 pub mod tool;
 
 pub use error::AgentError;
-pub use event::AgentEvent;
+pub use event::{AgentEvent, AgentEventEnvelope};
 
 // Convenience re-exports of the per-capability traits.
 // Concrete RPC scaffolding (per-trait `Rpc` mirror,

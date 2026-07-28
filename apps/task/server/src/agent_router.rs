@@ -13,23 +13,27 @@
 use agent_codex::CodexBackend;
 use agent_hermes::HermesBackend;
 use agent_proto::error::AgentError;
-use agent_proto::event::AgentEvent;
+use agent_proto::event::{AgentEvent, AgentEventEnvelope};
 use agent_proto::message::Message;
 use agent_proto::service::discovery::{
     BackendHealth, CapabilityFlag, Discovery, ModelInfo, SkillInfo,
 };
 use agent_proto::service::routines::{NewRoutine, Routine, Routines};
 use agent_proto::service::sessions::{CreateSession, SessionFilter, SessionPage, Sessions};
-use agent_proto::service::subscriptions::Subscriptions;
+use agent_proto::service::subscriptions::SubscriptionsStreamSource;
 use agent_proto::service::threads::Threads;
 use agent_proto::service::turn_dispatch::{DispatchAck, DispatchTurn, TurnDispatch};
 use agent_proto::session::Session;
-use vox::Tx;
 
 #[derive(Clone, architect::HasDispatcher)]
 pub struct AgentRouter {
     codex: CodexBackend,
     hermes: Option<HermesBackend>,
+    /// The one event hub both backends publish into — see
+    /// [`AgentRouter::new`]. Serving `Subscriptions` from a single
+    /// hub is what lets one client subscription cover sessions
+    /// owned by either backend.
+    events: architect::PubSub<AgentEventEnvelope>,
 }
 
 /// Which backend owns a session.
@@ -39,8 +43,25 @@ enum Owner {
 }
 
 impl AgentRouter {
-    pub fn new(codex: CodexBackend, hermes: Option<HermesBackend>) -> Self {
-        Self { codex, hermes }
+    /// Route over `codex` + optional `hermes`, all three sharing
+    /// `events`.
+    ///
+    /// The hub must be the same one both backends were built with
+    /// (`CodexBackend::with_events` / `HermesBackend::with_events`):
+    /// a `#[subscribe]` stream is served from exactly one hub, and
+    /// the router's job is to make two backends look like one
+    /// service. Ownership routing still happens per call for
+    /// everything else — only the event feed is merged.
+    pub fn new(
+        codex: CodexBackend,
+        hermes: Option<HermesBackend>,
+        events: architect::PubSub<AgentEventEnvelope>,
+    ) -> Self {
+        Self {
+            codex,
+            hermes,
+            events,
+        }
     }
 
     /// Resolve a session's owning backend. Registries are
@@ -272,29 +293,12 @@ impl Discovery for AgentRouter {
     }
 }
 
-impl Subscriptions for AgentRouter {
-    async fn subscribe_session(&self, session_id: String, tx: Tx<AgentEvent>) {
-        // Async ownership probe — the sync `owner()` path uses
-        // `blocking_lock` and would panic inside the runtime.
-        if let Some(h) = &self.hermes {
-            if h.has_session(&session_id).await {
-                h.subscribe_session(session_id, tx).await;
-                return;
-            }
-        }
-        if self.codex.has_session(&session_id).await {
-            self.codex.subscribe_session(session_id, tx).await;
-            return;
-        }
-        let _ = tx.close(vox::Metadata::default()).await;
-    }
-
-    async fn subscribe_board(&self, _board_id: String, tx: Tx<AgentEvent>) {
-        let _ = tx.close(vox::Metadata::default()).await;
-    }
-
-    async fn subscribe_global(&self, tx: Tx<AgentEvent>) {
-        let _ = tx.close(vox::Metadata::default()).await;
+/// The `#[subscribe]` backend contract: the shared hub both agent
+/// backends publish into, so one subscription carries every session
+/// regardless of which backend runs it.
+impl SubscriptionsStreamSource for AgentRouter {
+    fn events_hub(&self) -> &architect::PubSub<AgentEventEnvelope> {
+        &self.events
     }
 }
 

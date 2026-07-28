@@ -672,16 +672,22 @@ pub(crate) async fn build_org_state(
         // Codex agent backend. In-process, in-memory session
         // registry + turn dispatch — hosts the `Sessions` +
         // `TurnDispatch` vox services behind the `/agents` UI.
-        let agent_codex = agent_codex::CodexBackend::new();
+        // One event hub across both agent backends: `Subscriptions`
+        // is a single `#[subscribe]` stream served from one
+        // `PubSub`, so Codex and Hermes publish into the same hub
+        // and a client's one subscription covers sessions on either.
+        let agent_events = architect::PubSub::sliding(512);
+        let agent_codex = agent_codex::CodexBackend::with_events(agent_events.clone());
         // Hermes gateway backend — enabled when TASK_HERMES_URL is
         // set (see agent_hermes::HermesConfig::from_env). When
         // present it becomes the DEFAULT chat backend: sessions
         // created without an explicit backend_id land on Hermes.
-        let agent_hermes = agent_hermes::HermesBackend::from_env();
+        let agent_hermes = agent_hermes::HermesBackend::from_env_with_events(agent_events.clone());
         if let Some(h) = &agent_hermes {
             tracing::info!(url = %h.config().base_url, model = %h.config().model, "hermes agent gateway configured");
         }
-        let agent_router = agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes);
+        let agent_router =
+            agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes, agent_events);
 
         // Timer store. SQLite at
         // `<data_root>/orgs/<slug>/timer.sqlite`
@@ -1721,7 +1727,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         agent_proto::service::sessions::sessions_rpc_service_descriptor(),
         agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
         agent_proto::service::threads::threads_rpc_service_descriptor(),
-        agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
+        agent_proto::service::subscriptions::subscriptions_stream_service_descriptor(),
         agent_proto::service::discovery::discovery_rpc_service_descriptor(),
         timer_proto::service::timer_service_rpc_service_descriptor(),
         threads::service::threads_service_rpc_service_descriptor(),
@@ -1866,10 +1872,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         )
         // Agent subscriptions — live AgentEvent streams per session;
         // what the chat UI renders deltas from.
-        .with(
-            agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
-            agent_proto::service::subscriptions::serve(org.agent_router.clone()),
-        )
+        // Live agent events — the `#[subscribe]` stream over the hub
+        // both agent backends publish into. One subscription per
+        // client; the envelope's `session_id` is the filter.
+        .merge(agent_proto::service::subscriptions::stream_layer(
+            org.agent_router.clone(),
+        ))
         // Agent discovery — live model/skill/capability lists for the
         // chat UI's pickers and inspector panel.
         .with(
