@@ -8142,6 +8142,7 @@ dependencies = [
 name = "email-ui"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "chrono",
  "dioxus",
  "email-proto",

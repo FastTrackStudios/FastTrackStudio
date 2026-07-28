@@ -1319,6 +1319,7 @@ feeds! {
         delete_agent_routine(id: &str) -> ()
             = delete_routine(String::new(), id.to_owned()) as "delete routine";
     }
+}
 
 // ── Email ───────────────────────────────────────────────────────────
 

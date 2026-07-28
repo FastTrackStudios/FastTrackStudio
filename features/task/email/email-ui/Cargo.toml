@@ -15,6 +15,9 @@ fts-ui.workspace = true
 # per-org vox connection, and the loading / error / empty phases.
 task-ui-core.workspace = true
 email-proto = { workspace = true, features = ["vox"] }
+# `use_stream` — holds the `EmailSync` change stream open and
+# re-establishes it across reconnects.
+architect = { workspace = true, features = ["atom", "vox", "client", "platform"] }
 # Envelope date formatting in the local zone.
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 

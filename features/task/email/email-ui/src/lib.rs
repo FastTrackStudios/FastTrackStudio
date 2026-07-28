@@ -82,9 +82,10 @@ pub fn EmailView() -> Element {
                 let Some(slug) = slug else {
                     return false;
                 };
-                let Ok(client) =
-                    crate::vox_clients::establish_for::<email_proto::EmailSyncStreamClient>(&slug)
-                        .await
+                let Ok(client) = task_ui_core::vox_clients::establish_for::<
+                    email_proto::EmailSyncStreamClient,
+                >(&slug)
+                .await
                 else {
                     return false;
                 };
