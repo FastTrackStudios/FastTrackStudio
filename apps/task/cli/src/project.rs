@@ -4,7 +4,7 @@
 
 use clap::Subcommand;
 
-use crate::connect_task_client;
+use crate::task_cmd::connect_task_client;
 use crate::establish_client;
 use crate::establish_for_url;
 use crate::resolve_active_org;

@@ -363,7 +363,7 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
             let url = ws_url(org, server)?;
             let client = connect(&url).await?;
             let w = json_out::resolve_workstream_flexible(&client, &target).await?;
-            let tc = crate::connect_task_client(&url).await?;
+            let tc = crate::task_cmd::connect_task_client(&url).await?;
             let mut updated = Vec::with_capacity(tasks.len());
             for tref in &tasks {
                 let mut t = json_out::resolve_task_flexible(&tc, tref).await?;
