@@ -19996,12 +19996,10 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "chrono",
- "facet 0.50.0-rc.5",
  "fake",
  "project-proto",
  "sea-orm",
  "serde",
- "serde_json",
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
@@ -25631,13 +25629,12 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "chrono",
- "facet 0.50.0-rc.5",
  "fake",
- "indexmap 2.14.0",
  "sea-orm",
  "serde",
  "serde_json",
  "serde_yaml",
+ "task-proto",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -25792,6 +25789,24 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "task-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
+ "vox",
+ "vox-types",
+ "workflows-proto",
 ]
 
 [[package]]

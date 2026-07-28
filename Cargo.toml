@@ -869,6 +869,7 @@ label-proto = { path = "features/task/label/label-proto" }
 tag-proto = { path = "features/task/tag/tag-proto" }
 tag = { path = "features/task/tag/tag" }
 task = { path = "features/task/task/task", default-features = false }
+task-proto = { path = "features/task/task/task-proto", default-features = false }
 task-ui = { path = "features/task/task/task-ui" }
 task-server = { path = "apps/task/server" }
 project = { path = "features/task/project/project", default-features = false }

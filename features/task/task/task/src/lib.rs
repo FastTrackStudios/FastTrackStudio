@@ -4,6 +4,15 @@
 
 //! `task` — first-party task feature.
 //!
+//! The wasm-clean wire surface ([`TaskInfo`] and its enums, the
+//! pure domain rules — [`relations`] / [`relevance`] / [`capture`]
+//! — and the [`TaskService`] RPC trait with its `#[subscribe]
+//! events` stream) lives in the sibling [`task_proto`] crate;
+//! this crate sits on top of it and owns the vault-backed side
+//! (parse / serialize / scan / write / [`TaskBackend`]). Every
+//! proto item is re-exported here at its historical `task::…`
+//! path.
+//!
 //! Tasks are plain markdown pages with YAML frontmatter living
 //! inside a `vault::Vault`. The schema mirrors
 //! [callumalpass/tasknotes](https://github.com/callumalpass/tasknotes)
@@ -29,14 +38,13 @@
 //!
 //! ## Wasm
 //!
-//! The wire/file-format surface (`model`, `parse`, `service` and
-//! its `vox` client) compiles on `wasm32` so `task-ui` can drive
-//! a `TaskServiceClient` from the browser. The FS-dependent
-//! modules (`scan`, `write`, `backend` — they open a
-//! `vault::Vault` or touch `std::fs`) sit behind a
-//! `not(target_arch = "wasm32")` gate so the wasm crate graph
-//! never inherits `vault`'s tokio-net transitive. Mirrors
-//! `project`.
+//! Wasm consumers take [`task_proto`] directly — the wire model,
+//! the pure domain rules and the RPC client all live there. The
+//! FS-dependent modules here (`scan`, `write`, `backend` — they
+//! open a `vault::Vault` or touch `std::fs`) sit behind a
+//! `not(target_arch = "wasm32")` gate so a wasm crate graph that
+//! still reaches this crate never inherits `vault`'s tokio-net
+//! transitive. Mirrors `project`.
 
 pub mod capture;
 pub mod model;
