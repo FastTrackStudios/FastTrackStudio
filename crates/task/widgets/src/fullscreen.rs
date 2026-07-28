@@ -1,65 +1,19 @@
-//! **Experiences** — a note can declare an immersive, full-screen view of
-//! itself (distinct from the vault's editing "views"). A `type: setlist`
-//! note, or any note with an `experience:` frontmatter key, opens straight
-//! into its Experience; `Esc` (or the close control) drops back to the
-//! normal vault + sidebars.
+//! **Experiences** — the fullscreen chrome a note widget's immersive
+//! view (and the shell's own full-screen flows, e.g. inbox triage)
+//! renders inside.
 //!
 //! [`FullscreenExperience`] is the chrome: a fixed, viewport-covering
 //! overlay (so it escapes the pane/sidebar layout regardless of nesting)
 //! with a slim top bar and an `Esc`-to-exit affordance. The experience's
 //! own content — the setlist player today, more to come — renders inside.
 //!
-//! An experience can be configured to auto-open full-screen or stay
-//! embedded; the setlist experience auto-opens.
+//! Which note opens which experience is the widget registry's business
+//! (`type:` / `experience:` frontmatter claims — see the crate docs): a
+//! widget whose spec sets `fullscreen_owns_body` mounts this chrome
+//! while its [`WidgetCtx::fullscreen`](crate::WidgetCtx) signal is set.
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::Minimize2;
-
-/// Which immersive experience a note declares. Parsed from the note's
-/// `type:` / `experience:` frontmatter by [`experience_of`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExperienceKind {
-    /// The setlist player — navigator + transport + chart/mixer.
-    Setlist,
-    /// The single-song player — the same immersive chart/mixer/transport
-    /// experience as a one-song set.
-    Song,
-    /// Inbox triage — process captured items one at a time.
-    Inbox,
-}
-
-impl ExperienceKind {
-    /// Whether this experience auto-opens full-screen on note open.
-    pub fn auto_fullscreen(self) -> bool {
-        match self {
-            // Setlist notes open on the NOTE (the embedded streaming
-            // player); the fullscreen rehearsal Experience is entered
-            // deliberately via the Setlist button.
-            ExperienceKind::Setlist => false,
-            // A song note IS its player: opening it drops straight into the
-            // full-screen experience. The embedded (minimized) view is the
-            // compact streaming card.
-            ExperienceKind::Song => true,
-            // Inbox is entered deliberately (a "Process" button), not on
-            // every note open.
-            ExperienceKind::Inbox => false,
-        }
-    }
-}
-
-/// Resolve a note's Experience from its `type` and an optional
-/// `experience:` frontmatter value. `type: setlist` implies the setlist
-/// experience; an explicit `experience: <name>` selects one for a note
-/// that isn't typed as one.
-pub fn experience_of(note_type: Option<&str>, experience: Option<&str>) -> Option<ExperienceKind> {
-    let want = experience.map(str::trim).filter(|s| !s.is_empty());
-    match (note_type, want) {
-        (Some("setlist"), _) | (_, Some("setlist")) => Some(ExperienceKind::Setlist),
-        (Some("song"), _) | (_, Some("song")) => Some(ExperienceKind::Song),
-        (_, Some("inbox")) => Some(ExperienceKind::Inbox),
-        _ => None,
-    }
-}
 
 /// Full-screen Experience chrome: a viewport overlay with a top bar
 /// (title + exit) that renders `children` beneath. `on_exit` fires on
