@@ -4,6 +4,15 @@
 
 //! `task` — first-party task feature.
 //!
+//! The wasm-clean wire surface ([`TaskInfo`] and its enums, the
+//! pure domain rules — [`relations`] / [`relevance`] / [`capture`]
+//! — and the [`TaskService`] RPC trait with its `#[subscribe]
+//! events` stream) lives in the sibling [`task_proto`] crate;
+//! this crate sits on top of it and owns the vault-backed side
+//! (parse / serialize / scan / write / [`TaskBackend`]). Every
+//! proto item is re-exported here at its historical `task::…`
+//! path.
+//!
 //! Tasks are plain markdown pages with YAML frontmatter living
 //! inside a `vault::Vault`. The schema mirrors
 //! [callumalpass/tasknotes](https://github.com/callumalpass/tasknotes)
@@ -29,14 +38,11 @@
 //!
 //! ## Wasm
 //!
-//! The wire/file-format surface (`model`, `parse`, `service` and
-//! its `vox` client) compiles on `wasm32` so `task-ui` can drive
-//! a `TaskServiceClient` from the browser. The FS-dependent
-//! modules (`scan`, `write`, `backend` — they open a
-//! `vault::Vault` or touch `std::fs`) sit behind a
-//! `not(target_arch = "wasm32")` gate so the wasm crate graph
-//! never inherits `vault`'s tokio-net transitive. Mirrors
-//! `project`.
+//! There is nothing to gate here any more. Browser consumers take
+//! [`task_proto`] — the wire model, the pure domain rules and the
+//! RPC client all live there — so this crate is unconditionally
+//! the server side: it opens a `vault::Vault` and walks
+//! `std::fs`. Mirrors `project`.
 
 pub mod capture;
 pub mod model;
@@ -45,16 +51,10 @@ pub mod relations;
 pub mod relevance;
 pub mod service;
 
-// FS-dependent modules (vault::Vault, std::fs walks). The
-// wasm-targeted UI imports the wire types + RPC client only,
-// not these.
-#[cfg(not(target_arch = "wasm32"))]
-pub mod scan;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod write;
-
-#[cfg(not(target_arch = "wasm32"))]
+// FS-dependent modules (vault::Vault, std::fs walks).
 pub mod backend;
+pub mod scan;
+pub mod write;
 
 pub use capture::{capture, infer_project_id};
 pub use model::{
@@ -73,11 +73,8 @@ pub use service::{
 };
 pub use workflows_proto;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use backend::TaskBackend;
-#[cfg(not(target_arch = "wasm32"))]
 pub use scan::scan_vault;
-#[cfg(not(target_arch = "wasm32"))]
 pub use write::{WriteError, serialize_task, write_task};
 
 #[cfg(feature = "vox")]

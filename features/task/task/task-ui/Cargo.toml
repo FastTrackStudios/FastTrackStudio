@@ -1,6 +1,6 @@
 [package]
 name = "task-ui"
-description = "Dioxus UI for the `task` feature — list / kanban / quick-add. Dumb components (no fs / no CRDT); consumers feed `TaskInfo` rows in via props and handle `TaskMutation` callbacks. Mirrors the TaskNotes (callumalpass/tasknotes) field shape so wiring to the file-backed `task` crate later is mechanical."
+description = "Dioxus UI for the `task` feature — list / kanban / quick-add / detail. Dumb components (no fs / no RPC); consumers feed `task_proto::TaskInfo` rows in via props and handle `TaskMutation` callbacks. Binds to the wire contract directly — there is no UI-side mirror of the persistence shape."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,23 +17,18 @@ serde = { workspace = true, features = ["derive"] }
 # the session-history feed.
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4", "js", "serde"] }
-# Full persistence model for the detail-page family
-# (`TaskDetailFull` + sections). The list / kanban / quick-edit
-# sheet keep the local wasm mirror (`crate::model::TaskInfo`);
-# the detail components consume `task::TaskInfo` +
-# `WorkflowAttrs` directly so the page layer can hand its
-# authoritative rows straight in. Components stay dumb — only
-# the model / service types are used, no RPC from this crate.
-# (`default-features = false` is aspirational: the workspace dep
-# doesn't set default-features, so vox rides along for now —
-# same pre-existing idiom as task → vault-proto.)
-task = { workspace = true, default-features = false }
-# Status -> StateGroup resolution (`project::states`) — progress
-# classification ("is this done?") routes through canonical
-# state groups so custom status names classify correctly. The
-# UI keeps its local `Status` enum for pills / columns; groups
-# only decide progress. Wasm-clean (model/states modules only).
-project = { workspace = true, default-features = false }
+# THE model every component in this crate renders — the wire
+# contract itself, not a mirror of it. Wasm-clean and RPC-free
+# (the workspace entry pins `default-features = false`, so no
+# vox): components stay dumb, the page layer hands its
+# authoritative rows straight in.
+task-proto = { workspace = true }
+# Status -> StateGroup resolution (`project_proto::states`) —
+# progress classification ("is this done?") routes through
+# canonical state groups so custom status names classify
+# correctly. `Status` stays the display enum for pills / columns;
+# groups only decide progress.
+project-proto = { workspace = true }
 # Transition / Activity / AgentRef for the session-history feed
 # + assignee chips.
 workflows-proto = { workspace = true }

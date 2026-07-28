@@ -2,7 +2,9 @@
 //! every variant as a literal at scan time. Same rationale as
 //! `view-calendar/components/style.rs`.
 
-use crate::model::{Priority, Status};
+use task_proto::{Priority, Status};
+
+use crate::display::{PriorityLabel, StatusLabel};
 
 /// Pill classes for a [`Status`] badge.
 #[must_use]

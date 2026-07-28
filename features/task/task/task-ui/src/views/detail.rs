@@ -16,7 +16,9 @@ use uuid::Uuid;
 
 use crate::TaskInfo;
 use crate::TaskMutation;
-use crate::model::{Priority, Status};
+use task_proto::{Priority, Status};
+
+use crate::display::{PriorityLabel, StatusLabel, TaskDisplay};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TaskDetailProps {

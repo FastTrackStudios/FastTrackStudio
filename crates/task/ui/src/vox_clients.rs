@@ -15,8 +15,8 @@
 pub use task_ui_core::vox_clients::{RootLane, caller_for, establish_for, establish_server};
 
 /// An org's `TaskServiceClient` — a view over the org's shared caller.
-pub async fn task_client(slug: &str) -> Result<task::TaskServiceClient, String> {
-    establish_for::<task::TaskServiceClient>(slug).await
+pub async fn task_client(slug: &str) -> Result<task_proto::TaskServiceClient, String> {
+    establish_for::<task_proto::TaskServiceClient>(slug).await
 }
 
 /// An org's `VaultSyncClient` — backs the `/vault` route (manifest,

@@ -1,4 +1,4 @@
-//! Live-data adapter: `task::TaskInfo` → `view::gantt` shapes.
+//! Live-data adapter: `task_proto::TaskInfo` → `view::gantt` shapes.
 //!
 //! Pure transform (no Dioxus, no IO) so it unit-tests cleanly. The
 //! `/gantt` page ([`crate::pages::gantt`]) feeds the result straight
@@ -19,7 +19,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveTime, TimeZone, Utc};
-use task::TaskInfo as DbTask;
+use task_proto::TaskInfo as DbTask;
 use uuid::Uuid;
 use view::gantt::{GanttLink, GanttTask, LinkType, TaskType};
 
@@ -198,10 +198,10 @@ pub fn to_gantt(tasks: &[DbTask]) -> (Vec<GanttTask>, Vec<GanttLink>) {
 mod tests {
     use super::*;
 
-    use task::model::WorkflowAttrs;
+    use task_proto::model::WorkflowAttrs;
 
     fn base(title: &str) -> DbTask {
-        task::capture(title)
+        task_proto::capture(title)
     }
 
     #[test]

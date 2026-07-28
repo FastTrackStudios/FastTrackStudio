@@ -19996,11 +19996,10 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "chrono",
- "facet 0.50.0-rc.5",
  "fake",
+ "project-proto",
  "sea-orm",
  "serde",
- "serde_json",
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
@@ -20009,6 +20008,24 @@ dependencies = [
  "vault",
  "vault-entity",
  "vault-proto",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "project-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
  "vox",
  "vox-types",
 ]
@@ -25601,13 +25618,12 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "chrono",
- "facet 0.50.0-rc.5",
  "fake",
- "indexmap 2.14.0",
  "sea-orm",
  "serde",
  "serde_json",
  "serde_yaml",
+ "task-proto",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -25765,6 +25781,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "task-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
+ "vox",
+ "vox-types",
+ "workflows-proto",
+]
+
+[[package]]
 name = "task-server"
 version = "0.1.0"
 dependencies = [
@@ -25884,11 +25918,11 @@ dependencies = [
  "chrono",
  "dioxus",
  "fts-ui",
- "project",
+ "project-proto",
  "pulldown-cmark",
  "serde",
  "serde_json",
- "task",
+ "task-proto",
  "uuid 1.23.4",
  "workflows-proto",
 ]
@@ -27698,7 +27732,7 @@ dependencies = [
  "nucleo-matcher",
  "pantry-proto",
  "prefs-proto",
- "project",
+ "project-proto",
  "recall-proto",
  "reqwest 0.12.28",
  "resources-proto",
@@ -27712,8 +27746,8 @@ dependencies = [
  "share-proto",
  "spaced-repetition",
  "tag-proto",
- "task",
  "task-player-ui",
+ "task-proto",
  "task-ui",
  "task-ui-core",
  "threads",

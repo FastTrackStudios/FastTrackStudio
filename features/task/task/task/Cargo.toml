@@ -10,21 +10,27 @@ repository.workspace = true
 
 [dependencies]
 architect = { workspace = true }
+# The wasm-clean wire contract: `TaskInfo` + its enums, the pure
+# domain rules (relations / relevance / capture) and the
+# `TaskService` RPC trait. This crate is the vault-backed half
+# sitting on top of it, and re-exports every proto item at its
+# historical `task::…` path.
+task-proto = { workspace = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-indexmap = { workspace = true }
-facet = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7", "serde"] }
 workflows-proto.workspace = true
-# `VaultPage` lives in vault-proto (wasm-clean wire shape). The
-# parser consumes the proto shape so it works everywhere; the
-# richer `vault::Vault` (filesystem walker) is server-only and
-# sits behind a non-wasm gate below.
+# `VaultPage` lives in vault-proto (wasm-clean wire shape); the
+# richer `vault::Vault` is the filesystem walker. Plain deps now:
+# this crate is the server-side half of the slice, and browser
+# consumers take `task-proto` instead — nothing wasm reaches it,
+# so the old `cfg(not(target_arch = "wasm32"))` dance is gone.
 vault-proto = { workspace = true, default-features = false }
+vault = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
@@ -33,18 +39,13 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 
 [features]
 default = ["vox"]
-vox = ["dep:vox", "dep:vox-types", "architect/vox"]
-server = ["architect/server-seaorm", "dep:sea-orm"]
-fake = ["dep:fake", "architect/fake", "workflows-proto/fake"]
+vox = ["dep:vox", "dep:vox-types", "architect/vox", "task-proto/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm", "task-proto/server"]
+fake = ["dep:fake", "architect/fake", "workflows-proto/fake", "task-proto/fake"]
 full = ["vox", "server", "fake"]
-
-# `vault::Vault` is server-only (it walks std::fs and pulls
-# tokio-net transitively). The wasm UI imports task's wire types
-# + RPC client (model / parse / service) without touching the
-# scanner / writer / backend, so vault sits behind a non-wasm
-# gate to keep it out of the wasm crate graph. Mirrors `project`.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-vault = { workspace = true }
+# Forwarded so `task`-shaped consumers can still opt the wire
+# model into the client-side optimistic store.
+atom = ["task-proto/atom"]
 
 [dev-dependencies]
 tempfile = "3"

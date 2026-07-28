@@ -5,7 +5,9 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{Ban, Check, Ellipsis, Hash, Trash2};
 use uuid::Uuid;
 
-use crate::model::{Priority, Status};
+use task_proto::{Priority, Status};
+
+use crate::display::{PriorityLabel, StatusLabel, TaskDisplay};
 use crate::{TaskInfo, TaskMutation};
 
 use super::palette::{priority_pill, status_pill};
@@ -90,7 +92,7 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
                         } else {
                             "inline-flex items-center rounded-full bg-muted/50 px-1.5 py-0 text-[10px] tabular-nums text-muted-foreground"
                         },
-                        {crate::model::duration_label(tracked)}
+                        {crate::display::duration_label(tracked)}
                     }
                 }
                 if let Some(d) = t.due_date() {

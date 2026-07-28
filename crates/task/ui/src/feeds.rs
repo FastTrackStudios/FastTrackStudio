@@ -8,8 +8,8 @@
 //! doesn't blank the whole view); an error only surfaces if *nothing*
 //! came back.
 
-use project::ProjectInfo;
-use task::TaskInfo as DbTask;
+use project_proto::ProjectInfo;
+use task_proto::TaskInfo as DbTask;
 // The `feeds!` declaration macro and the multi-org fan-out helpers live
 // in `task-ui-core`, so feature UI crates declare their own calls the
 // same way — see that module's docs for the shape.
@@ -18,7 +18,7 @@ use task_ui_core::feeds::{collect, fan_out, fan_out_tagged};
 
 /// Active projects across the selected orgs (concurrent fan-out).
 pub async fn fetch_projects(slugs: &[String]) -> Result<Vec<ProjectInfo>, String> {
-    fan_out(slugs, "list", |c: project::ProjectServiceClient| async move { c.list().await }).await
+    fan_out(slugs, "list", |c: project_proto::ProjectServiceClient| async move { c.list().await }).await
 }
 
 /// Tasks across the selected orgs (concurrent fan-out).
@@ -34,7 +34,7 @@ pub async fn fetch_tasks(slugs: &[String]) -> Result<Vec<DbTask>, String> {
 /// org it came from — feeds the shared project store so mutations and
 /// the detail page can route back to the owning org.
 pub async fn fetch_projects_tagged(slugs: &[String]) -> Result<Vec<(String, ProjectInfo)>, String> {
-    fan_out_tagged(slugs, "list", |c: project::ProjectServiceClient| async move {
+    fan_out_tagged(slugs, "list", |c: project_proto::ProjectServiceClient| async move {
         c.list().await
     })
     .await
@@ -44,7 +44,7 @@ pub async fn fetch_projects_tagged(slugs: &[String]) -> Result<Vec<(String, Proj
 /// it came from — so mutations can be routed back to the right org's
 /// `TaskService` when viewing "All".
 pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)>, String> {
-    fan_out_tagged(slugs, "list", |c: task::TaskServiceClient| async move { c.list().await }).await
+    fan_out_tagged(slugs, "list", |c: task_proto::TaskServiceClient| async move { c.list().await }).await
 }
 
 feeds! {
@@ -273,13 +273,13 @@ feeds! {
             = add_comment(repo, git_proto::IssueId(number), body) as format!("add comment #{number}");
     }
 
-    project::ProjectServiceClient {
+    project_proto::ProjectServiceClient {
         /// Update a project (write-through to its markdown). Used to change the
         /// project type from the detail page.
-        create_project(project: project::ProjectInfo) -> project::ProjectInfo
+        create_project(project: project_proto::ProjectInfo) -> project_proto::ProjectInfo
             = create(project) as "create project";
 
-        update_project(project: project::ProjectInfo) -> project::ProjectInfo
+        update_project(project: project_proto::ProjectInfo) -> project_proto::ProjectInfo
             = update(project) as "update project";
     }
 
@@ -324,9 +324,9 @@ feeds! {
 /// Promote an inbox item into a Task — `title` is the headline, `details`
 /// the markdown body. Returns the created task (its `path` is the
 /// provenance back-link to store in `processed_into`).
-pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task::TaskInfo, String> {
-    let client = crate::vox_clients::establish_for::<task::TaskServiceClient>(slug).await?;
-    let t = task::TaskInfo {
+pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task_proto::TaskInfo, String> {
+    let client = crate::vox_clients::establish_for::<task_proto::TaskServiceClient>(slug).await?;
+    let t = task_proto::TaskInfo {
         id: uuid::Uuid::nil(),
         path: String::new(),
         title: title.to_owned(),
@@ -334,19 +334,19 @@ pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task:
         priority: "normal".into(),
         due: None,
         scheduled: None,
-        tags: task::model::StringList(vec!["task".into()]),
-        contexts: task::model::StringList::default(),
-        projects: task::model::StringList::default(),
+        tags: task_proto::model::StringList(vec!["task".into()]),
+        contexts: task_proto::model::StringList::default(),
+        projects: task_proto::model::StringList::default(),
         project_id: None,
         milestone_id: None,
         time_estimate: None,
-        time_entries: task::model::TimeEntries::default(),
+        time_entries: task_proto::model::TimeEntries::default(),
         recurrence: None,
         recurrence_anchor: None,
-        complete_instances: task::model::StringList::default(),
+        complete_instances: task_proto::model::StringList::default(),
         completed_date: None,
         agent_profile: String::new(),
-        dispatched_agent_tasks: task::model::StringList::default(),
+        dispatched_agent_tasks: task_proto::model::StringList::default(),
         date_created: None,
         date_modified: None,
         details: details.to_owned(),
@@ -1155,7 +1155,7 @@ pub async fn find_project(id: &str, slugs: &[String]) -> Result<(ProjectInfo, St
     let uuid = uuid::Uuid::parse_str(id).map_err(|_| "invalid project id".to_owned())?;
     let mut last_err = None;
     for slug in slugs {
-        match crate::vox_clients::establish_for::<project::ProjectServiceClient>(slug).await {
+        match crate::vox_clients::establish_for::<project_proto::ProjectServiceClient>(slug).await {
             Ok(client) => match client.get(uuid).await {
                 Ok(p) => return Ok((p, slug.clone())),
                 Err(e) => last_err = Some(format!("{slug}: {e:?}")),

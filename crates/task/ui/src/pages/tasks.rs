@@ -9,10 +9,10 @@
 //! rollback + tray notification).
 //!
 //! Defaults to **Active + Relevant** (`plans/relevancy-and-inbox.md`):
-//! the filtering itself is `task::relevance` — the same domain
+//! the filtering itself is `task_proto::relevance` — the same domain
 //! functions the server's `TaskService::query` and the CLI's
 //! `task task list --relevant` run — this page only assembles the
-//! [`task::RelevanceContext`] (browser clock + the running timer
+//! [`task_proto::RelevanceContext`] (browser clock + the running timer
 //! session's project) and renders toggle chips. Toggles persist
 //! per-account ([`crate::prefs`]).
 //!
@@ -126,7 +126,7 @@ pub fn TasksView() -> Element {
             .and_then(|r| r.session.project_id);
 
         let now = chrono::Local::now();
-        let ctx = task::RelevanceContext {
+        let ctx = task_proto::RelevanceContext {
             local_hhmm: Some(now.format("%H:%M").to_string()),
             local_date: Some(now.format("%Y-%m-%d").to_string()),
             // FUTURE(plans/relevancy-and-inbox.md): device from
@@ -135,17 +135,17 @@ pub fn TasksView() -> Element {
             device: None,
             active_project,
         };
-        let mut domain: Vec<&task::TaskInfo> = rows.iter().map(|(_, r)| &r.task).collect();
+        let mut domain: Vec<&task_proto::TaskInfo> = rows.iter().map(|(_, r)| &r.task).collect();
         let total = domain.len();
         if active_only {
-            domain.retain(|t| task::status_is_open(&t.status));
+            domain.retain(|t| task_proto::status_is_open(&t.status));
         }
         if relevant_only {
-            domain.retain(|t| task::is_relevant(t, &ctx));
+            domain.retain(|t| task_proto::is_relevant(t, &ctx));
             // One next action per project — the Relevant view is
             // "what would I do right now", not the project backlog.
-            task::condense_next_per_project(&mut domain);
-            domain.sort_by_key(|t| task::relevance_rank(t, &ctx));
+            task_proto::condense_next_per_project(&mut domain);
+            domain.sort_by_key(|t| task_proto::relevance_rank(t, &ctx));
         }
         let hidden = total - domain.len();
         // Project indication: resolve the authoritative project_id
@@ -159,13 +159,13 @@ pub fn TasksView() -> Element {
         let ui_tasks: Vec<UiTask> = domain
             .iter()
             .map(|t| {
-                let mut ui = stores::to_ui(t);
-                if ui.projects.is_empty() {
+                let mut row = (*t).clone();
+                if row.projects.is_empty() {
                     if let Some(name) = t.project_id.and_then(|id| project_names.get(&id)) {
-                        ui.projects.push(name.clone());
+                        row.projects.push(name.clone());
                     }
                 }
-                ui
+                row
             })
             .collect();
 
