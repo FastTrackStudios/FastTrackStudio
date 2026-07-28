@@ -6,12 +6,21 @@
 //! subscribes a `TaskServiceStreamClient`, then mutates through the
 //! `TaskServiceClient` and asserts the publish-on-write events
 //! arrive: create ⇒ `Upserted(full TaskInfo)`, delete ⇒ `Deleted(id)`.
+//!
+//! **The subscribe call is held in flight, not awaited.** vox scopes
+//! channels to their request, so the generated stream host attaches
+//! the sink and then parks in `pending()` — the call staying pending
+//! IS the healthy subscribed state, and it resolves only when the
+//! subscription ends (see `architect::use_stream`). Awaiting
+//! `events(tx)` therefore hangs forever; the test drives it as a
+//! background task and waits for the sink to reach the backend hub
+//! (`PubSub::subscriber_count`) before mutating, so no event is missed.
 
 use std::time::Duration;
 
 use architect::{LayerRouter, LocalServer, Scope};
 use task::service::TaskEvent;
-use task::{TaskBackend, TaskServiceClient, TaskServiceStreamClient};
+use task::{TaskBackend, TaskServiceClient, TaskServiceStreamClient, TaskServiceStreamSource};
 
 /// Receive the next event, copying it out of the `SelfRef` lend
 /// (same pattern as `architect::use_stream`). Bounded so a missing
@@ -50,10 +59,22 @@ async fn create_and_delete_reach_subscriber() {
         .await
         .expect("establish TaskServiceStreamClient");
 
-    // Subscribe BEFORE mutating — the awaited call returns once the
-    // sink is attached to the backend hub, so nothing is missed.
+    // Subscribe BEFORE mutating. The call stays in flight for the
+    // life of the subscription (see the module docs), so spawn it
+    // and then wait for the sink to attach to the backend hub —
+    // once `subscriber_count() > 0` the publish-on-write path
+    // reaches us and nothing is missed.
     let (tx, mut rx) = vox::channel::<TaskEvent>();
-    stream.events(tx).await.expect("subscribe to task events");
+    let subscription = tokio::spawn(async move {
+        stream.events(tx).await.expect("subscribe to task events");
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while backend.events_hub().subscriber_count() == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("subscriber sink never reached the backend hub");
 
     // create ⇒ Upserted carrying the full post-write task.
     let created = tasks
@@ -82,5 +103,8 @@ async fn create_and_delete_reach_subscriber() {
         "expected Deleted after delete"
     );
 
+    // End the subscription (the in-flight call never resolves on its
+    // own — dropping/aborting it is the unsubscribe), then tear down.
+    subscription.abort();
     scope.close().await;
 }
