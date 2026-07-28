@@ -3,24 +3,15 @@
 
 use chrono::NaiveDate;
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::PantryItems;
 use crate::model::PantryItem;
-use crate::parse::{looks_like_pantry_item, parse_page};
 
+/// Every pantry page, parse failures logged and skipped.
 #[must_use]
 pub fn scan_vault(vault: &Vault) -> Vec<PantryItem> {
-    vault
-        .pages
-        .iter()
-        .filter(|p| looks_like_pantry_item(p))
-        .filter_map(|p| match parse_page(p) {
-            Ok(i) => Some(i),
-            Err(e) => {
-                tracing::warn!(path = %p.rel_path, ?e, "pantry parse failed");
-                None
-            }
-        })
-        .collect()
+    VaultEntityStore::<PantryItems>::scan(vault)
 }
 
 /// Convenience: every pantry item past its printed expiry as
