@@ -4703,6 +4703,27 @@ async fn doctor_check_schema(ws_url: &str) -> eyre::Result<()> {
     Ok(())
 }
 
+/// The authorization half of `task doctor`: how much of the org lane the
+/// permission gate actually covers, and what would break if enforcement
+/// were switched on.
+///
+/// Static and offline — it folds the very same `permits` tables the server
+/// installs (the CLI links `task_server`), so it answers for the build in
+/// front of you without needing a running server or a token. For the
+/// *runtime* half — what real clients have actually been refused — ask a
+/// running server: `GET /server/permissions` with the
+/// `TASK_BACKUP_GIT_TOKEN` bearer.
+fn doctor_check_permissions() {
+    println!("{}", task_server::permits::coverage_summary());
+    if task_server::enforce_permissions() {
+        println!("  TASK_ENFORCE_PERMISSIONS=1 in this environment — the gate ENFORCES.");
+    } else {
+        println!(
+            "  Enforcement is OFF here (TASK_ENFORCE_PERMISSIONS != 1); the gate audits only."
+        );
+    }
+}
+
 async fn run(cli: Cli) -> eyre::Result<()> {
     match cli.command {
         Commands::Doctor => {
@@ -4713,6 +4734,7 @@ async fn run(cli: Cli) -> eyre::Result<()> {
                 RemoteVoxConfig::from_args(server.clone(), cli.session_token, cli.organization_id)?;
             println!("Vox endpoint: {}", remote.display_url);
             doctor_check_schema(&server).await?;
+            doctor_check_permissions();
         }
         Commands::Vault { cmd } => match cmd {
             // Sync ops touch vox and need async; everything
