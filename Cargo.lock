@@ -25773,6 +25773,7 @@ dependencies = [
  "sha2 0.10.9",
  "song",
  "task",
+ "task-plugin",
  "task-server",
  "tempfile",
  "threads",
