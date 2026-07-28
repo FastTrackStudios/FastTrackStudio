@@ -186,6 +186,9 @@ members = [
     "crates/signal/grid",
     "crates/signal/grid-ui",
     "crates/signal/daw-bridge",
+    "crates/signal/rig-host",
+    "crates/signal/rigs-proto",
+    "crates/signal/widgets",
     # ── features/fx — built-in FX (wave 4; vendored from FTS plugin repos)
     # Facade crates (eq / comp / reverb / delay / …) are the public deps;
     # the -dsp crates are internal (like signal-proto under the facade).
@@ -195,7 +198,6 @@ members = [
     "features/fx/saturate/saturate-dsp",
     "features/fx/trigger/trigger",
     "features/fx/trigger/trigger-dsp",
-    "features/fx/trigger/trigger-profiles",
     "features/fx/trigger/trigger-ui",
     "features/fx/eq/eq",
     "features/fx/eq/eq-dsp",
@@ -206,6 +208,7 @@ members = [
     "features/fx/eq/spectrum-analyzer/spectrum-analyzer-dsp",
     "features/fx/comp/comp",
     "features/fx/comp/comp-dsp",
+    "features/fx/comp/comp-profiles",
     "features/fx/comp/comp-ui",
     "features/fx/reverb/reverb",
     "features/fx/reverb/reverb-dsp",
@@ -515,6 +518,9 @@ signal-live = { path = "crates/signal/live" }
 signal-storage = { path = "crates/signal/storage" }
 signal-import = { path = "crates/signal/import" }
 signal-daw-bridge = { path = "crates/signal/daw-bridge" }
+signal-rig-host = { path = "crates/signal/rig-host" }
+signal-rigs-proto = { path = "crates/signal/rigs-proto" }
+signal-widgets = { path = "crates/signal/widgets" }
 signal-nam = { path = "features/nam" }
 signal-extension = { path = "features/reaper/signal-extension" }
 signal-macromod = { path = "features/fx/macromod" }
@@ -547,7 +553,6 @@ saturate = { path = "features/fx/saturate/saturate" }
 saturate-dsp = { path = "features/fx/saturate/saturate-dsp" }
 trigger = { path = "features/fx/trigger/trigger" }
 trigger-dsp = { path = "features/fx/trigger/trigger-dsp" }
-trigger-profiles = { path = "features/fx/trigger/trigger-profiles" }
 # The trigger plugin editor. Core (waveform/threshold SVG math) is portable;
 # the nice-plug/Blitz editor is behind its `native` feature.
 trigger-ui = { path = "features/fx/trigger/trigger-ui", default-features = false }
