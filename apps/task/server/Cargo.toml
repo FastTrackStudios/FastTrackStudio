@@ -121,7 +121,6 @@ contacts-proto = { workspace = true, features = ["vox"] }
 contacts = { workspace = true }
 tag-proto = { workspace = true, features = ["vox"] }
 tag = { workspace = true }
-store-proto = { workspace = true }
 # Finance: SQLite + migrations only at this slice; service
 # traits (Invoicing / Ledger) get mounted in a follow-up
 # once their SeaORM-backed impls land.

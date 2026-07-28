@@ -837,7 +837,6 @@ task-telemetry = { path = "crates/task/telemetry" }
 task-ui-core = { path = "crates/task/ui-core" }
 task-player-ui = { path = "crates/task/player-ui" }
 ui = { path = "crates/task/ui" }
-store-proto = { path = "crates/task/store-proto", default-features = false }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }

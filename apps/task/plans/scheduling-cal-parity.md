@@ -176,6 +176,18 @@ swap backends freely):**
   keyring isn't available. Documented as machine-only, never
   synced.
 
+> **Superseded (2026-07-27).** `store-proto` was deleted. It only
+> ever shipped `MemStore`, the promised `store-json` / `store-sqlite`
+> siblings were never written, and the server mounted the in-memory
+> pair in production — so the one thing written through it (the
+> booking audit trail) was lost on every restart. Nothing in the tree
+> ever called `KvStore::put` or `LogStore::read`. The audit trail now
+> lives where the rest of the slice's state lives: the vault, at
+> `Records/audit/booking-events.jsonl` (`scheduling::audit`). The
+> design below is kept for context; reach for a per-slice sqlite
+> store (the tree's sea-orm idiom) if a future feature needs indexed
+> app-state, not a resurrected generic proto.
+
 App-state lives behind a **general** persistence proto so any
 feature can use it, not just scheduling. `crates/store-proto/`
 exposes two capability sub-traits — same pattern as the scheduling
@@ -252,7 +264,8 @@ Suggested order for follow-up commits (top = next):
 
 1. ~~**Vault-backed `SchedulingService`**~~ — 🟢 done. `VaultScheduler`
    round-trips every entity through `<vault>/scheduling/*.md`,
-   uses pluggable `KvStore` + `LogStore` for sidecar state, and
+   keeps sidecar state (the booking audit trail) durable in the
+   vault as JSONL, and
    includes a real slot-generation algorithm (rules ∩ ¬bookings).
    21/21 tests cover parse/write + slot edges + end-to-end on-disk
    roundtrips.

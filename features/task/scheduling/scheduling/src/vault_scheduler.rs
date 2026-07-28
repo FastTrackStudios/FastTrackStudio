@@ -1,10 +1,10 @@
-//! Disk-backed scheduler. Markdown content lives at
-//! `<vault_root>/Projects/Scheduling/<kind>/<file>.md` (config)
-//! and `<vault_root>/Records/bookings/<id>.md` (history); app-state goes
-//! through pluggable `KvStore` + `LogStore` impls (see
-//! `store-proto`). The scheduler doesn't care where the state
-//! actually lands — JSON-on-disk, `SQLite`, in-memory all wire in
-//! the same way.
+//! Disk-backed scheduler. Everything it owns lives in the vault:
+//! `<vault_root>/Projects/Scheduling/<kind>/<file>.md` (config),
+//! `<vault_root>/Records/bookings/<id>.md` (history), and the
+//! append-only booking audit trail at
+//! `<vault_root>/Records/audit/booking-events.jsonl` (see
+//! [`crate::audit`]). One storage substrate — the vault — so a
+//! restart, a copy, or a sync carries the whole state.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -16,8 +16,7 @@ use scheduling_proto::{
     DayPlan, DayPlans, DayTemplate, DayTemplateId, DayTemplates, EventType, EventTypeId,
     EventTypes, NewBooking, ScheduleId, Schedules, SchedulingError, SlotQuery, Slots, TimeSlot,
 };
-use store_proto::{KvStore, LogStore};
-
+use crate::audit::{self, BookingAuditEntry};
 use crate::parse::{
     parse_booking, parse_cal_event, parse_day_plan, parse_day_template, parse_event_type,
     parse_schedule,
@@ -51,10 +50,9 @@ pub enum VaultSchedulerError {
     BadRoot(String),
 }
 
-/// Disk-backed implementation. Holds an absolute vault root + a
-/// pair of trait-object stores for app state. Methods serialize
-/// against a coarse `Mutex` so concurrent UI callers don't race
-/// on a single file write.
+/// Disk-backed implementation. Holds an absolute vault root.
+/// Methods serialize against a coarse `Mutex` so concurrent UI
+/// callers don't race on a single file write.
 ///
 /// `Clone` is cheap — every field is shared behind an `Arc` — so the
 /// server can hand a clone to each vox service descriptor it mounts.
@@ -66,21 +64,15 @@ pub struct VaultScheduler {
     /// fine for the desktop use case. `Arc`'d so clones share one
     /// lock (and thus one serialization point).
     write_lock: Arc<Mutex<()>>,
-    kv: Arc<dyn KvStore + Send + Sync>,
-    log: Arc<dyn LogStore + Send + Sync>,
 }
 
 impl VaultScheduler {
     /// Open a scheduler rooted at `vault_root`. Creates the
-    /// `<root>/Projects/Scheduling/<kind>/` and `<root>/Records/bookings/`
-    /// subdirectories on demand at
+    /// `<root>/Projects/Scheduling/<kind>/`, `<root>/Records/bookings/`
+    /// and `<root>/Records/audit/` subdirectories on demand at
     /// first write — we don't pre-make them so empty installs
     /// don't litter the vault.
-    pub fn new(
-        vault_root: impl Into<PathBuf>,
-        kv: Box<dyn KvStore + Send + Sync>,
-        log: Box<dyn LogStore + Send + Sync>,
-    ) -> Result<Self, VaultSchedulerError> {
+    pub fn new(vault_root: impl Into<PathBuf>) -> Result<Self, VaultSchedulerError> {
         let root = vault_root.into();
         if !root.is_dir() {
             return Err(VaultSchedulerError::BadRoot(root.display().to_string()));
@@ -88,13 +80,34 @@ impl VaultScheduler {
         Ok(Self {
             root,
             write_lock: Arc::new(Mutex::new(())),
-            kv: Arc::from(kv),
-            log: Arc::from(log),
         })
     }
 
     pub fn root(&self) -> &std::path::Path {
         &self.root
+    }
+
+    /// Every booking audit entry recorded in this vault, oldest
+    /// first. Survives restarts — the trail is a file, not process
+    /// memory.
+    pub fn booking_audit(&self) -> Result<Vec<BookingAuditEntry>, SchedulingError> {
+        audit::read(&self.root).map_err(io)
+    }
+
+    /// Append one audit entry. Best-effort: a failure here must not
+    /// roll back the booking write that produced it, so it is logged
+    /// and swallowed.
+    fn audit(&self, entry: &BookingAuditEntry) {
+        // Same serialization point as `write_file` — never called
+        // while that guard is held (the guard drops at the end of
+        // each write helper), so this can't self-deadlock.
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(e) = audit::append(&self.root, entry) {
+            tracing::warn!(error = %e, "scheduling: booking audit append failed");
+        }
     }
 
     /// Read every entity of a given kind from disk. Errors on
@@ -357,20 +370,7 @@ impl Bookings for VaultScheduler {
         };
         let body = serialize_booking(&persisted).map_err(write_err)?;
         self.write_file(&persisted.path, &body)?;
-        // Audit log via the injected `LogStore`. Failure here
-        // shouldn't roll back the booking — log it and move on.
-        let _ = self.log.append(
-            "scheduling.audit",
-            format!("created:{}", persisted.id.0).into_bytes(),
-        );
-        // Invalidate any cached busy-time window touching this
-        // slot. v1 just clears the whole namespace — the cache
-        // is a future optimization anyway.
-        if let Ok(keys) = self.kv.list_keys("scheduling.cache") {
-            for k in keys {
-                let _ = self.kv.delete("scheduling.cache", &k);
-            }
-        }
+        self.audit(&BookingAuditEntry::created(&persisted.id.0));
         Ok(persisted)
     }
 
@@ -383,10 +383,10 @@ impl Bookings for VaultScheduler {
         booking.status = status;
         let body = serialize_booking(&booking).map_err(write_err)?;
         self.write_file(&booking.path, &body)?;
-        let _ = self.log.append(
-            "scheduling.audit",
-            format!("status:{}:{:?}", id.0, status).into_bytes(),
-        );
+        self.audit(&BookingAuditEntry::status_changed(
+            &id.0,
+            format!("{status:?}"),
+        ));
         Ok(())
     }
 }
@@ -428,14 +428,11 @@ mod tests {
     use scheduling_proto::{
         AvailabilityRule, BlockCategory, TimeBlock, TimeBlockId, TimeOfDay, Weekday,
     };
-    use store_proto::MemStore;
     use tempfile::TempDir;
 
     fn fixture() -> (TempDir, VaultScheduler) {
         let tmp = TempDir::new().expect("tempdir");
-        let kv: Box<dyn KvStore + Send + Sync> = Box::new(MemStore::new());
-        let log: Box<dyn LogStore + Send + Sync> = Box::new(MemStore::new());
-        let sched = VaultScheduler::new(tmp.path(), kv, log).expect("new scheduler");
+        let sched = VaultScheduler::new(tmp.path()).expect("new scheduler");
         (tmp, sched)
     }
 
@@ -492,6 +489,50 @@ mod tests {
 
         let listed = sched.list_bookings().unwrap();
         assert_eq!(listed.len(), 1);
+
+        let trail = sched.booking_audit().unwrap();
+        assert_eq!(trail.len(), 1);
+        assert_eq!(trail[0].event, "created");
+        assert_eq!(trail[0].booking_id, persisted.id.0);
+    }
+
+    /// The audit trail is state the server used to keep in an
+    /// in-memory store — it vanished on every restart. Prove it now
+    /// survives: write through one scheduler, drop it, rebuild a
+    /// fresh one over the same vault root, read it back.
+    #[test]
+    fn booking_audit_survives_a_restart() {
+        let tmp = TempDir::new().expect("tempdir");
+
+        let booking_id = {
+            let sched = VaultScheduler::new(tmp.path()).expect("new scheduler");
+            let persisted = sched
+                .create_booking(&NewBooking {
+                    event_type_id: EventTypeId("c30".into()),
+                    start_utc: "2026-06-01T09:00:00+00:00".into(),
+                    end_utc: "2026-06-01T09:30:00+00:00".into(),
+                    attendee_name: "Alice".into(),
+                    attendee_email: "alice@x".into(),
+                    note: None,
+                })
+                .unwrap();
+            sched
+                .update_booking_status(&persisted.id, BookingStatus::Cancelled)
+                .unwrap();
+            persisted.id
+        }; // scheduler dropped — everything in process memory is gone
+
+        // "Restart": a brand-new scheduler over the same data root,
+        // exactly what the server does on boot.
+        let rebooted = VaultScheduler::new(tmp.path()).expect("reopen scheduler");
+        let trail = rebooted.booking_audit().unwrap();
+        assert_eq!(trail.len(), 2, "audit trail lost across restart: {trail:?}");
+        assert_eq!(trail[0].event, "created");
+        assert_eq!(trail[0].booking_id, booking_id.0);
+        assert_eq!(trail[1].event, "status");
+        assert_eq!(trail[1].status.as_deref(), Some("Cancelled"));
+        // The booking itself round-trips too.
+        assert_eq!(rebooted.list_bookings().unwrap().len(), 1);
     }
 
     #[test]
