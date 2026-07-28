@@ -162,6 +162,91 @@ pub fn VaultView(
     });
     let mut focused = use_signal(|| 0usize);
     let focus_tick = use_signal(|| 0u64);
+    // Bumped by the live-change stream below (someone *else's* write).
+    // Separate from `focus_tick`, which NoteView drives off our own
+    // save count — sharing one signal would let the two clobber each
+    // other. Panels that want "refresh on any commit" read the sum.
+    let mut vault_tick = use_signal(|| 0u64);
+    let refresh_key = use_memo(move || *focus_tick.read() + *vault_tick.read());
+
+    // ── Live vault changes ────────────────────────────────────
+    // The `VaultSync` `#[subscribe]` stream: every committed write
+    // (ours, another client's, or an external edit the server's
+    // filesystem watcher picked up) arrives as a `VaultChange`.
+    //
+    // The folder tree is a *derived* view — `PageMeta.title` /
+    // `.folder` come from parsed frontmatter the event doesn't
+    // carry — so a change can't be folded into it; it re-pulls
+    // `folder_index` instead. The event is the trigger, the rpc
+    // stays the source of truth. Same for the backlinks / links /
+    // verses panels, which ride `refresh_key`.
+    //
+    // The subscribe future reads `active`, so switching orgs
+    // re-runs the hook and re-subscribes against the new org's
+    // stream. Every *re*-subscribe also restarts the tree, which is
+    // the recovery path for events published while we were detached
+    // (the hub is a sliding mailbox — nothing is replayed).
+    let mut subscribed_once = use_signal(|| false);
+    architect::use_stream(
+        move |tx| {
+            // Signals are `Copy`; the hook takes `Fn`, so take
+            // fresh mutable handles per call rather than capturing
+            // by mutable reference.
+            let (mut files, mut vault_tick, mut subscribed_once) =
+                (files, vault_tick, subscribed_once);
+            let slug = active();
+            if *subscribed_once.peek() {
+                files.restart();
+                vault_tick += 1;
+            }
+            subscribed_once.set(true);
+            async move {
+                if slug.is_empty() {
+                    return false;
+                }
+                let Ok(client) = crate::vox_clients::establish_for::<
+                    vault_proto::VaultSyncStreamClient,
+                >(&slug)
+                .await
+                else {
+                    return false;
+                };
+                client.changes(tx).await.is_ok()
+            }
+        },
+        move |change: vault_proto::VaultChange| {
+            let (mut files, mut vault_tick) = (files, vault_tick);
+            // The stream is unfiltered — one backend can serve
+            // several vault ids. Keep the one this page browses.
+            if change.vault_id != crate::document_session::VAULT_ID {
+                return;
+            }
+            let path = match &change.event {
+                vault_proto::VaultEvent::Put { path, .. }
+                | vault_proto::VaultEvent::Delete { path } => path.as_str(),
+                // Explicit server "you missed something" hint.
+                vault_proto::VaultEvent::Resync => {
+                    files.restart();
+                    vault_tick += 1;
+                    return;
+                }
+            };
+            let ext = std::path::Path::new(path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or_default();
+            // The tree holds notes + base views only; attachments and
+            // sidecars churn without changing it.
+            if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("base") {
+                files.restart();
+            }
+            // A note's body edit can add or drop wikilinks + tags, so
+            // the link panels of whatever is focused may be stale.
+            if ext.eq_ignore_ascii_case("md") {
+                vault_tick += 1;
+            }
+        },
+    );
 
     // The focused note's live editor doc, published by its `NoteView`
     // and consumed by the right-sidebar Properties tab.
@@ -314,7 +399,7 @@ pub fn VaultView(
     let mut tag_rows = use_signal(Vec::<TagCount>::new);
     use_effect(move || {
         let slug = active();
-        let _refresh = *focus_tick.read();
+        let _refresh = refresh_key();
         spawn(async move {
             if let Ok(tags) = vault_lookup::tag_candidates(slug).await {
                 tag_rows.set(tags);
@@ -414,7 +499,7 @@ pub fn VaultView(
     let backlinks = use_resource(move || {
         let slug = active();
         let path = selected();
-        let _refresh = *focus_tick.read();
+        let _refresh = refresh_key();
         async move {
             match path {
                 Some(p) => fetch_backlinks(slug, p).await,
@@ -427,7 +512,7 @@ pub fn VaultView(
     let outlinks = use_resource(move || {
         let slug = active();
         let path = selected();
-        let _refresh = *focus_tick.read();
+        let _refresh = refresh_key();
         async move {
             match path {
                 Some(p) => fetch_links(slug, p).await,
@@ -441,7 +526,7 @@ pub fn VaultView(
     let verses = use_resource(move || {
         let slug = active();
         let path = selected();
-        let _refresh = *focus_tick.read();
+        let _refresh = refresh_key();
         async move {
             let Some(p) = path else { return Vec::new() };
             let links = crate::feeds::fetch_links_for(&slug, &format!("note:{p}"))

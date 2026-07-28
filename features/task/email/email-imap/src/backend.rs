@@ -41,6 +41,14 @@ pub struct Backend {
     /// `subscribe`. Same shape as `vault::sync::Backend` +
     /// `email-maildir::Backend`.
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<EmailEvent>>>>,
+    /// Fan-out hub behind the `#[subscribe] fn changes` stream.
+    /// Every event that goes onto a per-account broadcast channel
+    /// is published here too, wrapped with its `account` so
+    /// subscribers — who see every account this backend serves —
+    /// can filter. Sliding mailbox: a slow subscriber loses its
+    /// oldest queued events and re-pulls on reconnect, which is
+    /// what `EmailEvent::Resync` asks for anyway.
+    changes: architect::PubSub<email_proto::EmailChange>,
     /// Tokio runtime needed inside the sync `EmailSync` methods.
     /// We use `block_on` via `TokioBlockingDispatcher`; this
     /// handle gives us access to the same runtime the backend
@@ -96,6 +104,7 @@ impl Backend {
         Ok(Self {
             accounts: Arc::new(accounts),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            changes: architect::PubSub::sliding(256),
             runtime,
             locks: Arc::new(RwLock::new(HashMap::new())),
         })
@@ -131,13 +140,25 @@ impl Backend {
         tx
     }
 
+    /// Announce a change on both paths: `account`'s in-process
+    /// broadcast channel and the wire hub. Call only once the
+    /// mailbox actually changed — subscribers re-read on the event.
+    pub async fn emit(&self, account: &str, event: EmailEvent) {
+        let _ = self.channel(account).await.send(event.clone());
+        self.changes.publish(email_proto::EmailChange {
+            account: account.to_string(),
+            event,
+        });
+    }
+
     /// Start a long-lived IDLE loop on `folder` (alias name).
     /// Returns a `JoinHandle` callers (typically `email-sync`)
     /// can abort to stop the loop. Server responses break IDLE
     /// every ~28 minutes (under the RFC 2177 30-minute cap) so
     /// the session never goes stale; on each break we emit
-    /// `EmailEvent::Resync` on the per-account broadcast and
-    /// re-enter IDLE.
+    /// `EmailEvent::Resync` — on the per-account broadcast AND
+    /// the wire hub the `changes` stream serves — and re-enter
+    /// IDLE.
     ///
     /// Emitting `Resync` instead of fine-grained events is
     /// intentional for phase 1 — `email-sync`'s next poll cycle
@@ -152,11 +173,10 @@ impl Backend {
     ) -> Result<tokio::task::JoinHandle<()>, EmailSyncError> {
         let state = self.state(account)?;
         let resolved = state.aliases.resolve(folder).to_string();
-        let sender = self.channel(account).await;
         let backend = self.clone();
         let account = account.to_string();
         let handle = tokio::spawn(async move {
-            backend.idle_loop(account, resolved, sender).await;
+            backend.idle_loop(account, resolved).await;
         });
         Ok(handle)
     }
@@ -164,12 +184,7 @@ impl Backend {
     /// Continuous IDLE driver. Reconnects on any error with a
     /// short backoff so a transient network blip doesn't kill
     /// the watcher.
-    async fn idle_loop(
-        self,
-        account: String,
-        folder: String,
-        sender: broadcast::Sender<EmailEvent>,
-    ) {
+    async fn idle_loop(self, account: String, folder: String) {
         const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(28 * 60);
         const RECONNECT_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -192,15 +207,14 @@ impl Backend {
             match session_result {
                 Ok(()) => {
                     // Break of IDLE = server told us something
-                    // changed (or the timeout fired). Either
-                    // way the safe answer is `Resync` — let
-                    // `email-sync` re-pull deltas. If everyone
-                    // unsubscribed, `send` returns Err and we
-                    // exit gracefully.
-                    if sender.send(EmailEvent::Resync).is_err() {
-                        tracing::debug!("idle: no subscribers, exiting");
-                        return;
-                    }
+                    // changed (or the timeout fired). Either way
+                    // the safe answer is `Resync` — let
+                    // `email-sync` (in-process) and every wire
+                    // subscriber re-pull deltas. Keep idling
+                    // regardless of who is listening: the wire hub
+                    // has no "no subscribers" signal, and a
+                    // subscriber can attach at any time.
+                    self.emit(&account, EmailEvent::Resync).await;
                 }
                 Err(err) => {
                     tracing::warn!(%err, "idle: cycle failed, backing off");
@@ -745,30 +759,6 @@ impl EmailSync for Backend {
             backend.run_send(state, draft).await
         })
     }
-
-    async fn subscribe(&self, account: String, tx: vox::Tx<EmailEvent>) {
-        if self.state(&account).is_err() {
-            let _ = tx.close(Default::default()).await;
-            return;
-        }
-        let sender = self.channel(&account).await;
-        let mut rx = sender.subscribe();
-        loop {
-            match rx.recv().await {
-                Ok(evt) => {
-                    if tx.send(evt).await.is_err() {
-                        return;
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => return,
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    if tx.send(EmailEvent::Resync).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
-    }
 }
 
 fn map_connect_err(e: ConnectError) -> EmailSyncError {
@@ -814,5 +804,15 @@ mod tests {
             Some(email_proto::FolderRole::Sent)
         );
         assert_eq!(infer_role("Lists.rust-users"), None);
+    }
+}
+
+/// The `#[subscribe]` backend contract: the hub the stream host
+/// attaches subscriber sinks to. The IDLE watcher publishes into
+/// it — an IMAP server breaking IDLE means "something changed",
+/// which is exactly `EmailEvent::Resync`.
+impl email_proto::EmailSyncStreamSource for Backend {
+    fn changes_hub(&self) -> &architect::PubSub<email_proto::EmailChange> {
+        &self.changes
     }
 }

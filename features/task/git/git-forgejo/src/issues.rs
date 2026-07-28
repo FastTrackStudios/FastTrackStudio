@@ -130,7 +130,7 @@ impl IssueTracker for Backend {
         let base = self.check_forge(repo)?.to_string();
         let backend = self.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let created: Result<Issue, GitError> = self.runtime().block_on(async move {
             #[derive(Serialize)]
             struct Body {
                 title: String,
@@ -149,7 +149,14 @@ impl IssueTracker for Backend {
             let resp = check_status(resp).await?;
             let raw: RawIssue = resp.json().await.map_err(map_err)?;
             Ok(translate_issue(&repo, raw))
-        })
+        });
+        if let Ok(issue) = &created {
+            self.publish_issue(GitEvent::IssueCreated {
+                repo: issue.repo.clone(),
+                issue: issue.id,
+            });
+        }
+        created
     }
 
     fn update_issue(
@@ -161,7 +168,7 @@ impl IssueTracker for Backend {
         let base = self.check_forge(repo)?.to_string();
         let backend = self.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let updated: Result<Issue, GitError> = self.runtime().block_on(async move {
             #[allow(clippy::struct_field_names)]
             #[derive(Serialize, Default)]
             struct Body {
@@ -208,7 +215,15 @@ impl IssueTracker for Backend {
             // sees it).
             let _ = update.labels;
             Ok(translate_issue(&repo, raw))
-        })
+        });
+        if let Ok(issue) = &updated {
+            self.publish_issue(GitEvent::IssueUpdated {
+                repo: issue.repo.clone(),
+                issue: issue.id,
+                state: issue.state,
+            });
+        }
+        updated
     }
 
     fn list_comments(&self, repo: &RepoId, issue: IssueId) -> Result<Vec<Comment>, GitError> {
@@ -242,8 +257,9 @@ impl IssueTracker for Backend {
     ) -> Result<Comment, GitError> {
         let base = self.check_forge(repo)?.to_string();
         let backend = self.clone();
+        let event_repo = repo.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let posted: Result<Comment, GitError> = self.runtime().block_on(async move {
             #[derive(Serialize)]
             struct Body {
                 body: String,
@@ -264,19 +280,29 @@ impl IssueTracker for Backend {
             let resp = check_status(resp).await?;
             let raw: RawComment = resp.json().await.map_err(map_err)?;
             Ok(translate_comment(raw))
-        })
+        });
+        if posted.is_ok() {
+            self.publish_issue(GitEvent::IssueCommented {
+                repo: event_repo,
+                issue,
+            });
+        }
+        posted
     }
+}
 
-    async fn subscribe(&self, _repo: RepoId, _tx: Tx<GitEvent>) {
-        // Forgejo doesn't expose a long-poll event stream, and
-        // webhooks need an externally-reachable receiver. A
-        // 30s polling loop diffing against a local cache is the
-        // intended Phase 2 implementation; until then we keep
-        // the subscription open and emit nothing.
-        tracing::warn!(
-            target: "git_forgejo",
-            "IssueTracker::subscribe not yet implemented — no events will be delivered"
-        );
+/// The `#[subscribe]` backend contract for issue traffic.
+///
+/// Forgejo exposes no long-poll event stream and webhooks need an
+/// externally-reachable receiver, so the hub only carries changes
+/// **this process** commits — the writes Task itself makes through
+/// `create_issue` / `update_issue` / `add_comment`. That is exactly
+/// what the UI needs to stop refetching after its own mutations;
+/// forge-side changes by other actors still arrive via the server's
+/// poll loop.
+impl git_proto::issues::IssueTrackerStreamSource for Backend {
+    fn issue_events_hub(&self) -> &architect::PubSub<GitEvent> {
+        self.issue_hub()
     }
 }
 

@@ -157,7 +157,6 @@ const VAULT: ServicePermits = ServicePermits {
         MethodPermit::new("set_folder", Action::WRITE, "vault/{path}"),
         MethodPermit::new("open_collab", Action::READ, "vault/{path}"),
         MethodPermit::new("base_views", Action::READ, "vault/{path}"),
-        MethodPermit::new("subscribe", Action::READ, "vault/**"),
     ],
 };
 
@@ -196,8 +195,11 @@ table!(AGENT_THREADS, "agent-threads", "agent/threads/**", [
     rd "list_messages", rd "read_message", cm "append_note",
 ]);
 
+// The three `subscribe_*(id, tx)` calls collapsed into one unfiltered
+// `#[subscribe]` stream — the envelope names its session and subscribers
+// filter client-side — so this is now one read over every agent event.
 table!(AGENT_SUBSCRIPTIONS, "agent-subscriptions", "agent/events/**", [
-    rd "subscribe_session", rd "subscribe_board", rd "subscribe_global",
+    rd "events",
 ]);
 
 table!(AGENT_DISCOVERY, "agent-discovery", "agent/discovery/**", [
@@ -391,21 +393,33 @@ table!(INTAKE, "intake", "fitness/intake/**", [
 table!(EMAIL, "email", "email/**", [
     rd "accounts", rd "list_folders", rd "fetch_envelopes", rd "fetch_message",
     dl "fetch_attachment", wr "set_flags", wr "move_message", wa "delete_message",
-    wr "append_draft", wa "send", rd "subscribe",
+    wr "append_draft", wa "send",
 ]);
 table!(FORGE_REPOS, "forge-repos", "forge/repos/**", [rd "list_repos", rd "get_repo"]);
 table!(FORGE_ISSUES, "forge-issues", "forge/issues/**", [
     rd "list_issues", rd "get_issue", wr "create_issue", wr "update_issue",
-    rd "list_comments", cm "add_comment", rd "subscribe",
+    rd "list_comments", cm "add_comment",
 ]);
 table!(FORGE_REVIEWS, "forge-reviews", "forge/reviews/**", [
     rd "list_pull_requests", rd "get_pull_request", wr "create_pull_request",
     wr "update_pull_request", rd "list_reviews", wr "request_reviewers",
-    wa "merge_pull_request", rd "subscribe",
+    wa "merge_pull_request",
 ]);
 table!(FORGE_CONNECTIONS, "forge-connections", "forge/connections/**", [
     rd "list_connected_repos", rd "repos_for_project",
 ]);
+
+// ── `#[subscribe]` stream siblings ───────────────────────────────────────
+//
+// Each stream is a separate vox service with its own descriptor, so it
+// needs its own table. Attaching to a change feed is a read over the whole
+// resource: the streams are unfiltered — subscribers filter client-side —
+// so a subscriber sees every change the org produces for that domain.
+table!(VAULT_STREAM, "vault-sync-stream", "vault/**", [rd "changes"]);
+table!(WIKI_STREAM, "wiki-events", "wiki/**", [rd "changes"]);
+table!(EMAIL_STREAM, "email-stream", "email/**", [rd "changes"]);
+table!(FORGE_ISSUES_STREAM, "forge-issues-stream", "forge/issues/**", [rd "issue_events"]);
+table!(FORGE_REVIEWS_STREAM, "forge-reviews-stream", "forge/reviews/**", [rd "review_events"]);
 
 // ── The mount list ───────────────────────────────────────────────────────
 
@@ -446,6 +460,7 @@ pub fn mounts() -> Vec<Mount> {
         ),
         m(media_proto::media_service_service_descriptor(), MEDIA),
         m(vault_proto::descriptor(), VAULT),
+        m(vault_proto::stream_descriptor(), VAULT_STREAM),
         m(vault_proto::vault_graph_rpc_service_descriptor(), VAULT_GRAPH),
         m(share_proto::share_service_service_descriptor(), SHARE),
         m(crdt::sync::doc_sync_service_descriptor(), DOC_SYNC),
@@ -468,7 +483,7 @@ pub fn mounts() -> Vec<Mount> {
             AGENT_THREADS,
         ),
         m(
-            agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
+            agent_proto::service::subscriptions::subscriptions_stream_service_descriptor(),
             AGENT_SUBSCRIPTIONS,
         ),
         m(
@@ -574,6 +589,10 @@ pub fn mounts() -> Vec<Mount> {
             WIKI_SEARCH,
         ),
         m(
+            wiki_proto::service::events::events_stream_service_descriptor(),
+            WIKI_STREAM,
+        ),
+        m(
             wiki_proto::service::watcher::watcher_rpc_service_descriptor(),
             WIKI_WATCHER,
         ),
@@ -605,6 +624,7 @@ pub fn mounts() -> Vec<Mount> {
         m(intake::intake_service_descriptor(), INTAKE),
         // Outside world
         m(email_proto::descriptor(), EMAIL),
+        m(email_proto::stream_descriptor(), EMAIL_STREAM),
         m(git_proto::repo::repo_catalog_rpc_service_descriptor(), FORGE_REPOS),
         m(
             git_proto::issues::issue_tracker_rpc_service_descriptor(),
@@ -613,6 +633,14 @@ pub fn mounts() -> Vec<Mount> {
         m(
             git_proto::reviews::review_surface_rpc_service_descriptor(),
             FORGE_REVIEWS,
+        ),
+        m(
+            git_proto::issues::issue_tracker_stream_service_descriptor(),
+            FORGE_ISSUES_STREAM,
+        ),
+        m(
+            git_proto::reviews::review_surface_stream_service_descriptor(),
+            FORGE_REVIEWS_STREAM,
         ),
         m(
             git_proto::connections::repo_connections_rpc_service_descriptor(),

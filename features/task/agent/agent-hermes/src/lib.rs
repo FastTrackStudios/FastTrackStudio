@@ -32,10 +32,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use agent_proto::event::AgentEvent;
+use agent_proto::event::{AgentEventEnvelope, SessionEvents};
 use agent_proto::message::Message;
 use agent_proto::session::Session;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 
 pub const BACKEND_ID: &str = "hermes";
 
@@ -124,9 +124,10 @@ impl Cancel {
 /// Per-session bookkeeping.
 pub(crate) struct SessionRow {
     pub(crate) session: Session,
-    /// Translated `AgentEvent`s for this session — UIs subscribe,
-    /// `dispatch_turn`'s worker publishes.
-    pub(crate) events_tx: broadcast::Sender<AgentEvent>,
+    /// This session's publish end of the backend-wide event hub —
+    /// `dispatch_turn`'s worker sends into it, wire subscribers
+    /// attach to the hub behind the `Subscriptions` stream.
+    pub(crate) events_tx: SessionEvents,
     /// Full transcript (user + assistant), chronological. Replayed
     /// as the `messages` array on each turn.
     pub(crate) messages: Vec<Message>,
@@ -157,11 +158,29 @@ pub(crate) struct HermesInner {
     /// Latched once a gateway 404s `/v1/responses` — pre-Responses
     /// deployments shouldn't pay a failed round-trip per turn.
     pub(crate) legacy_transport: AtomicBool,
+    /// Fan-out hub behind the `Subscriptions` `#[subscribe]` stream.
+    /// Every session's [`SessionEvents`] publishes here, so ONE
+    /// subscription carries every session's traffic (the envelope's
+    /// `session_id` is the client's filter). Sliding mailbox: a slow
+    /// subscriber loses its oldest queued events — for the settled
+    /// transcript that's recoverable (re-pull on reconnect); for
+    /// token deltas it only clips the animation.
+    ///
+    /// Shared, not owned: the server hands the same hub to every
+    /// agent backend so the router can serve them from one stream.
+    pub(crate) events: architect::PubSub<AgentEventEnvelope>,
 }
 
 impl HermesBackend {
     #[must_use]
     pub fn new(config: HermesConfig) -> Self {
+        Self::with_events(config, architect::PubSub::sliding(512))
+    }
+
+    /// Same, sharing an existing event hub — how a multi-backend
+    /// router gets one `Subscriptions` stream over several backends.
+    #[must_use]
+    pub fn with_events(config: HermesConfig, events: architect::PubSub<AgentEventEnvelope>) -> Self {
         Self {
             inner: Arc::new(HermesInner {
                 config,
@@ -169,6 +188,7 @@ impl HermesBackend {
                 runtime: tokio::runtime::Handle::current(),
                 sessions: Mutex::new(HashMap::new()),
                 legacy_transport: AtomicBool::new(false),
+                events,
             }),
         }
     }
@@ -178,6 +198,18 @@ impl HermesBackend {
     #[must_use]
     pub fn from_env() -> Option<Self> {
         HermesConfig::from_env().map(Self::new)
+    }
+
+    /// [`Self::from_env`] on a shared event hub.
+    #[must_use]
+    pub fn from_env_with_events(events: architect::PubSub<AgentEventEnvelope>) -> Option<Self> {
+        HermesConfig::from_env().map(|c| Self::with_events(c, events))
+    }
+
+    /// The hub every session of this backend publishes into.
+    #[must_use]
+    pub fn events(&self) -> &architect::PubSub<AgentEventEnvelope> {
+        &self.inner.events
     }
 
     #[must_use]

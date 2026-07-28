@@ -18,11 +18,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use agent_proto::event::AgentEvent;
+use agent_proto::event::{AgentEvent, EventTap, SessionEvents};
 use agent_proto::message::{ContentBlock, Message, Role};
 use futures::StreamExt;
 use serde_json::{Value, json};
-use tokio::sync::broadcast;
 
 use crate::responses::{TurnError, run_turn_responses};
 use crate::{Cancel, HermesConfig};
@@ -155,7 +154,7 @@ pub(crate) async fn run_turn(
     messages: Vec<Value>,
     previous_response_id: &str,
     legacy_transport: &AtomicBool,
-    events_tx: &broadcast::Sender<AgentEvent>,
+    events_tx: &SessionEvents,
     cancel: &Cancel,
 ) -> Result<TurnOutcome, String> {
     let mut chain = previous_response_id;
@@ -237,7 +236,7 @@ async fn run_turn_chat(
     message_id: &str,
     model: &str,
     messages: Vec<Value>,
-    events_tx: &broadcast::Sender<AgentEvent>,
+    events_tx: &SessionEvents,
     cancel: &Cancel,
 ) -> Result<TurnOutcome, String> {
     let url = format!("{}/chat/completions", cfg.base_url);
@@ -282,7 +281,7 @@ fn handle_chunk(
     v: &Value,
     session_id: &str,
     message_id: &str,
-    events_tx: &broadcast::Sender<AgentEvent>,
+    events_tx: &SessionEvents,
     outcome: &mut TurnOutcome,
 ) {
     let object = v.get("object").and_then(Value::as_str).unwrap_or_default();
@@ -370,6 +369,14 @@ fn handle_chunk(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test event sink + its tap. `SessionEvents::send` mirrors into
+    /// the tap synchronously, so `tap.try_next()` sees whatever the
+    /// code under test just published.
+    fn sink() -> (SessionEvents, EventTap) {
+        SessionEvents::tapped("s1")
+    }
+
     use chrono::Utc;
 
     fn msg(role: Role, text: &str) -> Message {
@@ -404,7 +411,7 @@ mod tests {
 
     #[test]
     fn chunk_deltas_accumulate_and_emit() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, rx) = sink();
         let mut outcome = TurnOutcome::default();
         let chunk: Value = serde_json::json!({
             "object": "chat.completion.chunk",
@@ -420,14 +427,14 @@ mod tests {
         assert_eq!(outcome.text, "Hello");
         assert_eq!(outcome.input_tokens, 10);
         assert!(matches!(
-            rx.try_recv().unwrap(),
+            rx.try_next().unwrap(),
             AgentEvent::MessageDelta { .. }
         ));
     }
 
     #[test]
     fn hermes_tool_event_becomes_tool_progress() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, rx) = sink();
         let mut outcome = TurnOutcome::default();
         let ev: Value = serde_json::json!({
             "object": "hermes.tool.progress",
@@ -435,7 +442,7 @@ mod tests {
             "progress": 0.5,
         });
         handle_chunk(&ev, "s1", "m1", &tx, &mut outcome);
-        match rx.try_recv().unwrap() {
+        match rx.try_next().unwrap() {
             AgentEvent::ToolProgress {
                 preview, progress, ..
             } => {

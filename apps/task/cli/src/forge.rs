@@ -45,10 +45,10 @@ pub(crate) fn forgejo_base_url(flag: Option<String>) -> eyre::Result<String> {
 }
 
 /// A constructed forge backend, picked by the repo's `Forge`
-/// variant. `IssueTracker` carries an `async fn subscribe`, so
-/// the trait isn't object-safe — enum dispatch instead of
-/// `Box<dyn>`. Each method forwards to the matching backend's
-/// sync `IssueTracker` impl.
+/// variant. Enum dispatch rather than `Box<dyn IssueTracker>` —
+/// the trait's methods take `&RepoId` and it isn't worth an
+/// object-safe wrapper for two variants. Each method forwards to
+/// the matching backend's sync `IssueTracker` impl.
 pub(crate) enum ForgeBackend {
     Forgejo(git_forgejo::Backend),
     Github(git_github::Backend),

@@ -32,6 +32,10 @@ use view_knowledge_graph::{
 
 use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
 
+/// The single wiki id the server hosts per org (mirrors
+/// `wiki_page::WIKI_ID`).
+const WIKI_ID: &str = "default";
+
 /// Which corpus the graph shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GraphSource {
@@ -57,8 +61,9 @@ pub fn WikiView() -> Element {
         ..GraphFilterState::default()
     });
 
-    // Fetch + build once per (org, source) change.
-    let graph = use_resource(move || async move {
+    // Fetch + build once per (org, source) change; the live stream
+    // below restarts it when the corpus changes under us.
+    let mut graph = use_resource(move || async move {
         let slugs = selected_slugs(&selection.read(), &org_list.read());
         let slug = slugs
             .first()
@@ -72,6 +77,65 @@ pub fn WikiView() -> Element {
             }
         }
     });
+
+    // ── Live wiki changes ─────────────────────────────────────
+    // The `Events` `#[subscribe]` stream: the LLM-wiki pipeline
+    // writes pages in the background (ingest, review actions), so
+    // the graph used to go stale until you navigated away and back.
+    //
+    // The relevance graph is server-built from parsed page content,
+    // which a `PageWritten` can't carry — so a page event re-runs
+    // the fetch rather than folding. The event is the trigger, the
+    // rpc stays the source of truth. Re-subscribing (org switch,
+    // reconnect) also re-fetches: events published while we were
+    // detached are gone from the sliding mailbox.
+    let mut subscribed_once = use_signal(|| false);
+    architect::use_stream(
+        move |tx| {
+            // Signals are `Copy`; the hook takes `Fn`, so take fresh
+            // mutable handles per call.
+            let (mut graph, mut subscribed_once) = (graph, subscribed_once);
+            let slug = selected_slugs(&selection.read(), &org_list.read())
+                .first()
+                .cloned();
+            if *subscribed_once.peek() {
+                graph.restart();
+            }
+            subscribed_once.set(true);
+            async move {
+                let Some(slug) = slug else {
+                    return false;
+                };
+                let Ok(client) = crate::vox_clients::establish_for::<
+                    wiki_proto::service::events::EventsStreamClient,
+                >(&slug)
+                .await
+                else {
+                    return false;
+                };
+                client.changes(tx).await.is_ok()
+            }
+        },
+        move |change: wiki_proto::WikiChange| {
+            let mut graph = graph;
+            // The stream is unfiltered — one backend can serve
+            // several wikis. Keep the one this page shows.
+            if change.wiki_id != WIKI_ID {
+                return;
+            }
+            // Only corpus changes move the graph; queue traffic
+            // (ingest / review) doesn't until it produces a page.
+            if matches!(
+                change.event,
+                wiki_proto::WikiEvent::PageWritten { .. }
+                    | wiki_proto::WikiEvent::PageDeleted { .. }
+                    | wiki_proto::WikiEvent::PeerPulled { .. }
+                    | wiki_proto::WikiEvent::Resync
+            ) {
+                graph.restart();
+            }
+        },
+    );
 
     let discovering = org_list.read().is_empty();
     let body = if discovering {

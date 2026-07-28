@@ -15,9 +15,8 @@
 //! in-process callers.
 
 use crate::{
-    Account, Draft, EmailEvent, EmailSyncError, Envelope, FlagDelta, Folder, Message, SeqRange,
+    Account, Draft, EmailChange, EmailSyncError, Envelope, FlagDelta, Folder, Message, SeqRange,
 };
-use vox::Tx;
 
 #[architect::rpc]
 pub trait EmailSync {
@@ -80,10 +79,12 @@ pub trait EmailSync {
     /// `Sent`).
     fn send(&self, account: &str, draft: Draft) -> Result<String, EmailSyncError>;
 
-    /// Subscribe to live change events for one account. The
-    /// server keeps sending until the caller drops `tx`. On
-    /// broadcast-lag the server sends [`EmailEvent::Resync`]
-    /// and continues — clients should re-pull folder listings
-    /// + envelopes in response.
-    async fn subscribe(&self, account: String, tx: Tx<EmailEvent>);
+    /// Every mailbox change, as it happens — new mail, flag
+    /// changes, moves, deletions, folder-list changes. Unfiltered
+    /// across accounts; each [`EmailChange`] carries its `account`
+    /// so a reader keeps the mailbox it's showing. See
+    /// [`EmailChange`] for the fetch-once-then-re-read subscriber
+    /// contract.
+    #[subscribe]
+    fn changes(&self) -> EmailChange;
 }

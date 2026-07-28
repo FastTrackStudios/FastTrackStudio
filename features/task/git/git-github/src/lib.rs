@@ -31,6 +31,16 @@ pub struct Backend {
 struct Inner {
     octo: octocrab::Octocrab,
     runtime: tokio::runtime::Handle,
+    /// Fan-out hubs behind the `#[subscribe]` streams — issue
+    /// traffic and pull-request traffic kept apart so a reviews
+    /// subscriber doesn't pay for issue churn. Every committed
+    /// mutation publishes into one (see `publish_issue` /
+    /// `publish_review`). Sliding mailboxes: a slow subscriber
+    /// loses its oldest queued events and re-reads on reconnect —
+    /// correct here, since events are "that row is stale" hints,
+    /// not state.
+    issue_events: architect::PubSub<git_proto::GitEvent>,
+    review_events: architect::PubSub<git_proto::GitEvent>,
 }
 
 impl Backend {
@@ -52,8 +62,36 @@ impl Backend {
             .build()
             .map_err(|e| BuildError::Octocrab(e.to_string()))?;
         Ok(Self {
-            inner: Arc::new(Inner { octo, runtime }),
+            inner: Arc::new(Inner {
+                octo,
+                runtime,
+                issue_events: architect::PubSub::sliding(256),
+                review_events: architect::PubSub::sliding(256),
+            }),
         })
+    }
+
+
+    /// Announce a committed issue change. Call only after GitHub
+    /// accepted the write — subscribers re-read on the event, so a
+    /// speculative one shows state that never was.
+    pub(crate) fn publish_issue(&self, event: git_proto::GitEvent) {
+        self.inner.issue_events.publish(event);
+    }
+
+    /// Announce a committed pull-request change.
+    pub(crate) fn publish_review(&self, event: git_proto::GitEvent) {
+        self.inner.review_events.publish(event);
+    }
+
+    /// The hub the `IssueTracker` stream is served from.
+    pub(crate) fn issue_hub(&self) -> &architect::PubSub<git_proto::GitEvent> {
+        &self.inner.issue_events
+    }
+
+    /// The hub the `ReviewSurface` stream is served from.
+    pub(crate) fn review_hub(&self) -> &architect::PubSub<git_proto::GitEvent> {
+        &self.inner.review_events
     }
 
     /// Reject non-GitHub repos at the boundary so backend

@@ -673,16 +673,22 @@ pub(crate) async fn build_org_state(
         // Codex agent backend. In-process, in-memory session
         // registry + turn dispatch — hosts the `Sessions` +
         // `TurnDispatch` vox services behind the `/agents` UI.
-        let agent_codex = agent_codex::CodexBackend::new();
+        // One event hub across both agent backends: `Subscriptions`
+        // is a single `#[subscribe]` stream served from one
+        // `PubSub`, so Codex and Hermes publish into the same hub
+        // and a client's one subscription covers sessions on either.
+        let agent_events = architect::PubSub::sliding(512);
+        let agent_codex = agent_codex::CodexBackend::with_events(agent_events.clone());
         // Hermes gateway backend — enabled when TASK_HERMES_URL is
         // set (see agent_hermes::HermesConfig::from_env). When
         // present it becomes the DEFAULT chat backend: sessions
         // created without an explicit backend_id land on Hermes.
-        let agent_hermes = agent_hermes::HermesBackend::from_env();
+        let agent_hermes = agent_hermes::HermesBackend::from_env_with_events(agent_events.clone());
         if let Some(h) = &agent_hermes {
             tracing::info!(url = %h.config().base_url, model = %h.config().model, "hermes agent gateway configured");
         }
-        let agent_router = agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes);
+        let agent_router =
+            agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes, agent_events);
 
         // Timer store. SQLite at
         // `<data_root>/orgs/<slug>/timer.sqlite`
@@ -1833,11 +1839,18 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.attachments.clone(),
             )),
         )
-        // Vault file replication (manifest / get / put / delete / subscribe).
+        // Vault file replication (manifest / get / put / delete).
         .with(
             vault_proto::descriptor(),
             vault_proto::serve(org.vault_sync.clone()),
         )
+        // Live vault changes — `VaultSync`'s `#[subscribe]` stream
+        // sibling. The hub lives on the `vault::Backend` above, so
+        // every path publishes into it: wire PUT/DELETE/set_folder,
+        // in-process writers holding a backend clone, and the
+        // filesystem watcher (external edits from vim / Obsidian /
+        // `git pull`).
+        .merge(vault_proto::stream_layer(org.vault_sync.clone()))
         // Permissions oracle — the caller's capability manifest, answered
         // by the SAME engine + identity the org lane's gate enforces with.
         .with(
@@ -1884,10 +1897,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         )
         // Agent subscriptions — live AgentEvent streams per session;
         // what the chat UI renders deltas from.
-        .with(
-            agent_proto::service::subscriptions::subscriptions_rpc_service_descriptor(),
-            agent_proto::service::subscriptions::serve(org.agent_router.clone()),
-        )
+        // Live agent events — the `#[subscribe]` stream over the hub
+        // both agent backends publish into. One subscription per
+        // client; the envelope's `session_id` is the filter.
+        .merge(agent_proto::service::subscriptions::stream_layer(
+            org.agent_router.clone(),
+        ))
         // Agent discovery — live model/skill/capability lists for the
         // chat UI's pickers and inspector panel.
         .with(
@@ -2018,7 +2033,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             wiki_proto::service::review::review_rpc_service_descriptor(),
             wiki_proto::service::review::serve(wiki.clone()),
-        );
+        )
+        // Live wiki changes — the `Events` `#[subscribe]` stream.
+        // The hub lives on the `WikiBackend`, so every committed
+        // page write / ingest enqueue / review enqueue publishes
+        // into it.
+        .merge(wiki_proto::service::events::stream_layer(wiki.clone()));
 
     // Project / Goal / Milestone / Task readers (vault-backed).
     router = router
@@ -2143,6 +2163,9 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             email_proto::descriptor(),
             email_proto::serve(org.email.clone()),
         )
+        // Live mailbox changes — `EmailSync`'s `#[subscribe]`
+        // stream sibling, served from the backend's hub.
+        .merge(email_proto::stream_layer(org.email.clone()))
         .with(
             git_proto::repo::repo_catalog_rpc_service_descriptor(),
             git_proto::repo::serve(org.forge.clone()),
@@ -2155,6 +2178,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             git_proto::reviews::review_surface_rpc_service_descriptor(),
             git_proto::reviews::serve(org.forge.clone()),
         )
+        // Live forge changes — the `#[subscribe]` stream siblings of
+        // `IssueTracker` / `ReviewSurface`. The hubs live on the
+        // forge backend, so every issue / PR write this server
+        // commits publishes into them.
+        .merge(git_proto::issues::stream_layer(org.forge.clone()))
+        .merge(git_proto::reviews::stream_layer(org.forge.clone()))
         .with(
             git_proto::connections::repo_connections_rpc_service_descriptor(),
             git_proto::connections::serve(connections::ConnectionsBackend::new(

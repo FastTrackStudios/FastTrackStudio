@@ -56,12 +56,51 @@ pub fn EmailView() -> Element {
         }
     });
 
-    let envelopes = use_resource(move || async move {
+    let mut envelopes = use_resource(move || async move {
         match (slug(), selected_account()) {
             (Some(s), Some(acct)) => fetch_email_envelopes(&s, &acct, 50).await,
             _ => Ok(Vec::new()),
         }
     });
+
+    // ── Live mailbox changes ──────────────────────────────────
+    // `EmailSync`'s `#[subscribe]` stream. Mail is the archetypal
+    // push surface — new mail should land in the list, not wait for
+    // a revisit. Events name what changed, not the new value (an
+    // `Envelope` is a mailbox read, and IMAP's IDLE only reports
+    // *that* something changed), so a hit for the selected account
+    // re-lists.
+    //
+    // How live this actually is depends on the mounted backend:
+    // `email-imap` publishes from its IDLE loop; the maildir
+    // backend the server mounts today has no watcher and no
+    // supported mutations, so its stream is silent until one lands.
+    architect::use_stream(
+        move |tx| {
+            let slug = slug();
+            async move {
+                let Some(slug) = slug else {
+                    return false;
+                };
+                let Ok(client) =
+                    crate::vox_clients::establish_for::<email_proto::EmailSyncStreamClient>(&slug)
+                        .await
+                else {
+                    return false;
+                };
+                client.changes(tx).await.is_ok()
+            }
+        },
+        move |change: email_proto::EmailChange| {
+            let mut envelopes = envelopes;
+            // One stream carries every account the backend serves —
+            // keep the mailbox on screen.
+            if selected_account.peek().as_deref() != Some(change.account.as_str()) {
+                return;
+            }
+            envelopes.restart();
+        },
+    );
 
     let accounts_err = match &*accounts.read() {
         Some(Err(e)) => Some(e.clone()),

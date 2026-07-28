@@ -11,17 +11,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use agent_proto::error::AgentError;
-use agent_proto::event::AgentEvent;
+use agent_proto::event::{AgentEvent, AgentEventEnvelope, SessionEvents};
 use agent_proto::message::{ContentBlock, Message, Role};
 use agent_proto::service::sessions::{CreateSession, SessionFilter, SessionPage, Sessions};
-use agent_proto::service::subscriptions::Subscriptions;
+use agent_proto::service::subscriptions::SubscriptionsStreamSource;
 use agent_proto::service::threads::Threads;
 use agent_proto::service::turn_dispatch::{DispatchAck, DispatchTurn, TurnDispatch};
 use agent_proto::session::{Session, SessionStatus, SourceTag, UsageStats};
 use chrono::Utc;
-use tokio::sync::broadcast;
 use uuid::Uuid;
-use vox::Tx;
 
 use crate::stream::{run_turn, wire_messages};
 use crate::{BACKEND_ID, HermesBackend, SessionRow};
@@ -66,7 +64,7 @@ impl Sessions for HermesBackend {
                 updated_at: None,
             },
         };
-        let (events_tx, _) = broadcast::channel::<AgentEvent>(256);
+        let events_tx = SessionEvents::new(self.inner.events.clone(), id.clone());
         let mut sessions = self.inner.sessions.blocking_lock();
         sessions.insert(
             id,
@@ -427,39 +425,11 @@ impl Threads for HermesBackend {
 }
 
 // ────────────────────── Subscriptions ──────────────────────
-impl Subscriptions for HermesBackend {
-    async fn subscribe_session(&self, session_id: String, tx: Tx<AgentEvent>) {
-        let rx = {
-            let sessions = self.inner.sessions.lock().await;
-            let Some(row) = sessions.get(&session_id) else {
-                let _ = tx.close(vox::Metadata::default()).await;
-                return;
-            };
-            row.events_tx.subscribe()
-        };
-        let mut rx = rx;
-        loop {
-            match rx.recv().await {
-                Ok(ev) => {
-                    if tx.send(ev).await.is_err() {
-                        return;
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => return,
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    if tx.send(AgentEvent::Resync).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    async fn subscribe_board(&self, _board_id: String, tx: Tx<AgentEvent>) {
-        let _ = tx.close(vox::Metadata::default()).await;
-    }
-
-    async fn subscribe_global(&self, tx: Tx<AgentEvent>) {
-        let _ = tx.close(vox::Metadata::default()).await;
+/// The `#[subscribe]` backend contract. Publishing happens through
+/// each session's [`SessionEvents`] as its turn runs; the stream
+/// host attaches every subscriber sink to this one hub.
+impl SubscriptionsStreamSource for HermesBackend {
+    fn events_hub(&self) -> &architect::PubSub<AgentEventEnvelope> {
+        &self.inner.events
     }
 }

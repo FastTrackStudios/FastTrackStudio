@@ -60,7 +60,7 @@ impl IssueTracker for Backend {
         Backend::check_forge(repo)?;
         let backend = self.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let created: Result<Issue, GitError> = self.runtime().block_on(async move {
             let raw = backend
                 .octo()
                 .issues(&repo.owner, &repo.repo)
@@ -70,7 +70,14 @@ impl IssueTracker for Backend {
                 .await
                 .map_err(map_err)?;
             Ok(translate_issue(&repo, raw))
-        })
+        });
+        if let Ok(issue) = &created {
+            self.publish_issue(GitEvent::IssueCreated {
+                repo: issue.repo.clone(),
+                issue: issue.id,
+            });
+        }
+        created
     }
 
     fn update_issue(
@@ -82,7 +89,7 @@ impl IssueTracker for Backend {
         Backend::check_forge(repo)?;
         let backend = self.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let updated: Result<Issue, GitError> = self.runtime().block_on(async move {
             let handle = backend.octo().issues(&repo.owner, &repo.repo);
             let mut req = handle.update(issue.0);
             if let Some(ref t) = update.title {
@@ -114,7 +121,15 @@ impl IssueTracker for Backend {
             }
             let raw = req.send().await.map_err(map_err)?;
             Ok(translate_issue(&repo, raw))
-        })
+        });
+        if let Ok(issue) = &updated {
+            self.publish_issue(GitEvent::IssueUpdated {
+                repo: issue.repo.clone(),
+                issue: issue.id,
+                state: issue.state,
+            });
+        }
+        updated
     }
 
     fn list_comments(&self, repo: &RepoId, issue: IssueId) -> Result<Vec<Comment>, GitError> {
@@ -152,8 +167,9 @@ impl IssueTracker for Backend {
     ) -> Result<Comment, GitError> {
         Backend::check_forge(repo)?;
         let backend = self.clone();
+        let event_repo = repo.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let posted: Result<Comment, GitError> = self.runtime().block_on(async move {
             let c = backend
                 .octo()
                 .issues(&repo.owner, &repo.repo)
@@ -168,15 +184,28 @@ impl IssueTracker for Backend {
                 },
                 body: c.body.unwrap_or_default(),
             })
-        })
+        });
+        if posted.is_ok() {
+            self.publish_issue(GitEvent::IssueCommented {
+                repo: event_repo,
+                issue,
+            });
+        }
+        posted
     }
+}
 
-    async fn subscribe(&self, _repo: RepoId, _tx: Tx<GitEvent>) {
-        // First pass: no event source. Phase 2 polls via
-        // octocrab.repos().events() or attaches a webhook
-        // receiver. The trait permits dropping `tx` to signal
-        // shutdown; doing nothing here keeps it open until the
-        // caller drops.
+/// The `#[subscribe]` backend contract for issue traffic.
+///
+/// GitHub gives us no push channel here (a webhook receiver needs
+/// an externally-reachable endpoint; `repos().events()` is a poll),
+/// so the hub carries the changes **this process** commits — the
+/// writes Task itself makes. That's what lets a UI stop refetching
+/// after its own mutations; forge-side changes by other actors
+/// still arrive via the server's poll loop.
+impl git_proto::issues::IssueTrackerStreamSource for Backend {
+    fn issue_events_hub(&self) -> &architect::PubSub<GitEvent> {
+        self.issue_hub()
     }
 }
 

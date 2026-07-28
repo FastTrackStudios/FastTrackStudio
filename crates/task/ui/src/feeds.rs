@@ -1261,7 +1261,8 @@ feeds! {
 
     agent_proto::service::turn_dispatch::TurnDispatchClient {
         /// Kick off one turn — the user message goes to the session's
-        /// backend; events stream over `subscribe_agent_session`.
+        /// backend; the reply arrives on the `Subscriptions` events
+        /// stream the chat view holds open.
         dispatch_agent_turn(session_id: &str, text: &str, model_override: &str) -> agent_proto::service::turn_dispatch::DispatchAck
             = dispatch_turn(agent_proto::service::turn_dispatch::DispatchTurn { session_id: session_id.to_owned(), text: text.to_owned(), attachments: Vec::new(), profile_override_id: String::new(), personality_override_id: String::new(), model_override: model_override.to_owned(), }) as "dispatch turn";
 
@@ -1318,16 +1319,6 @@ feeds! {
         delete_agent_routine(id: &str) -> ()
             = delete_routine(String::new(), id.to_owned()) as "delete routine";
     }
-
-    agent_proto::service::subscriptions::SubscriptionsClient {
-        /// Open the live event stream for a session. Returns after handing
-        /// the `tx` to the server — pump the paired `rx` for
-        /// [`agent_proto::event::AgentEvent`]s; the call ends when the
-        /// server drops the lane or the receiver is dropped.
-        subscribe_agent_session(session_id: &str, tx: vox::Tx<agent_proto::event::AgentEvent>) -> ()
-            = subscribe_session(session_id.to_owned(), tx) as "subscribe session";
-    }
-}
 
 // ── Email ───────────────────────────────────────────────────────────
 

@@ -18,7 +18,7 @@
 //!   by the CLI demo and by `agent-wiki`'s ingest bridge.
 //! - `impl Agents for CodexBackend` — proto-shaped surface.
 //!   Codex-relevant methods (sessions, `dispatch_turn`,
-//!   `subscribe_session`) are real; non-Codex methods
+//!   the event stream) are real; non-Codex methods
 //!   (profiles, kanban, projects, ...) return
 //!   `AgentError::Unsupported`.
 
@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, broadcast};
 
-use agent_proto::event::AgentEvent;
+use agent_proto::event::{AgentEvent, AgentEventEnvelope, SessionEvents};
 use agent_proto::session::Session;
 
 pub use chat::{ChatHandle, ChatOpts};
@@ -72,10 +72,11 @@ impl vendor::events::EventSink for BroadcastSink {
 /// Per-session bookkeeping carried by [`CodexBackend`].
 pub(crate) struct SessionRow {
     pub(crate) session: Session,
-    /// Broadcast channel of translated `AgentEvent`s for
-    /// this session. Subscribers (UIs, CLIs, agent-wiki
-    /// bridges) hit this; `dispatch_turn` populates it.
-    pub(crate) events_tx: broadcast::Sender<AgentEvent>,
+    /// This session's publish end of the backend-wide event
+    /// hub. `dispatch_turn` sends into it; wire subscribers
+    /// (UIs, CLIs, agent-wiki bridges) attach to the hub
+    /// behind the `Subscriptions` stream.
+    pub(crate) events_tx: SessionEvents,
     /// Accumulated assistant text keyed by message id —
     /// `list_messages` rebuilds `Message`s from this.
     pub(crate) accumulated: HashMap<String, String>,
@@ -92,23 +93,46 @@ pub struct CodexBackend {
 pub(crate) struct CodexInner {
     pub(crate) sink: BroadcastSink,
     pub(crate) sessions: Mutex<HashMap<String, SessionRow>>,
+    /// Fan-out hub behind the `Subscriptions` `#[subscribe]`
+    /// stream — every session's [`SessionEvents`] publishes
+    /// here, so ONE subscription carries every session (the
+    /// envelope's `session_id` is the client's filter).
+    /// Shared, not owned: the server hands the same hub to
+    /// every agent backend so the router serves them as one
+    /// stream.
+    pub(crate) events: architect::PubSub<AgentEventEnvelope>,
 }
 
 impl CodexBackend {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_events(architect::PubSub::sliding(512))
+    }
+
+    /// Same, sharing an existing event hub — how a
+    /// multi-backend router gets one `Subscriptions` stream
+    /// over several backends.
+    #[must_use]
+    pub fn with_events(events: architect::PubSub<AgentEventEnvelope>) -> Self {
         Self {
             inner: Arc::new(CodexInner {
                 sink: BroadcastSink::new(1024),
                 sessions: Mutex::new(HashMap::new()),
+                events,
             }),
         }
     }
 
+    /// The hub every session of this backend publishes into.
+    #[must_use]
+    pub fn events(&self) -> &architect::PubSub<AgentEventEnvelope> {
+        &self.inner.events
+    }
+
     /// Subscribe to the raw Codex event stream — every
     /// `AppServerEvent` regardless of workspace. UIs prefer
-    /// `subscribe_session` (in the trait) for filtered
-    /// streams.
+    /// the `Subscriptions` `events` stream (translated,
+    /// session-stamped) instead.
     /// Async session-existence probe — for callers already inside
     /// the runtime (the sync trait methods use `blocking_lock` and
     /// must not be called from async context).
