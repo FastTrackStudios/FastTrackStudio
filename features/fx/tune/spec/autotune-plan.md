@@ -109,3 +109,14 @@ incl. melonix deep-dive.
   Remaining for the editor: piano-roll surface (signal-ui) over
   PitchDoc, time-warp in the render (frame remapping), engine-side
   render jobs + styx doc format.
+
+- **DSP hardening + editor surface (same day)**: YIN difference
+  function FFT-accelerated (O(W log W), matches naive within 1 cent
+  82–880 Hz); analyze() gained the aperiodicity confidence gate +
+  octave-glitch median repair (tested on tone+noise). signal-ui gained
+  `PitchEditor` (wasm-clean, inline styles for the future Blitz
+  build): piano-roll blob view over host-owned PitchDoc via
+  BlobView/BlobEdit props — drag-to-transpose w/ optional semitone
+  snap, selection rail with drift/vibrato sliders + Robot. Host-side
+  PitchDoc↔BlobView conversion + engine render jobs are the remaining
+  integration; time-warp render + styx doc format still open.
