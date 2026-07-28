@@ -1672,13 +1672,16 @@ async fn per_org_api_handler(
     State(state): State<AppState>,
     axum::extract::Path(slug): axum::extract::Path<String>,
 ) -> axum::response::Response {
-    if state.org(&slug).is_none() {
+    let Some(org) = state.org(&slug) else {
         return axum::response::IntoResponse::into_response((
             axum::http::StatusCode::NOT_FOUND,
             format!("org `{slug}` not hosted"),
         ));
-    }
-    let mut body = api_ref::reference_json();
+    };
+    // The org's plugin set decides the per-service `mounted` flag and
+    // the top-level `plugins` state; the catalog itself stays complete
+    // (a disabled service is listed with `"mounted": false`).
+    let mut body = api_ref::reference_json_for(&org.plugins);
     if let Some(obj) = body.as_object_mut() {
         obj.insert("org".to_owned(), serde_json::Value::String(slug));
     }

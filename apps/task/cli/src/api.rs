@@ -19,7 +19,7 @@
 //!   serves (minus the `org` field the handler stamps in).
 
 use clap::Args;
-use task_server::api_ref::{ApiService, reference};
+use task_server::api_ref::{ApiService, reference, reference_for};
 
 #[derive(Args)]
 pub(crate) struct ApiArgs {
@@ -46,11 +46,16 @@ pub(crate) fn run_api(args: ApiArgs) -> eyre::Result<()> {
         );
         return Ok(());
     }
-    let services = reference();
     if args.markdown {
-        print!("{}", render_markdown(&services));
+        // The committed reference is build-static: full catalog, no
+        // org's deny-list applied.
+        print!("{}", render_markdown(&reference()));
         return Ok(());
     }
+    // Interactive views: apply the LOCAL active org's deny-list (when
+    // one resolves without side effects) so disabled services are
+    // marked — they still list; they just won't answer on the wire.
+    let services = reference_for(&local_plugin_set());
     match args.service {
         Some(query) => render_one(&services, &query),
         None => {
@@ -58,6 +63,33 @@ pub(crate) fn run_api(args: ApiArgs) -> eyre::Result<()> {
             Ok(())
         }
     }
+}
+
+/// The plugin set of the locally-active org, resolved WITHOUT side
+/// effects (no auto-bootstrap — `task api` is a read-only, build-static
+/// command). Falls back to "everything on" when no org resolves: the
+/// session's active slug first, else the single local org.
+fn local_plugin_set() -> task_plugin::PluginSet {
+    let disabled = (|| {
+        let root = org_proto::DataRoot::from_env().ok()?;
+        let orgs = root.scan_orgs().ok()?;
+        let active = crate::session_store::load()
+            .ok()
+            .flatten()
+            .map(|s| s.active_slug())
+            .filter(|s| !s.is_empty());
+        let manifest = match active {
+            Some(slug) => orgs.iter().find(|(o, _)| o.slug() == slug).map(|(_, m)| m),
+            None if orgs.len() == 1 => Some(&orgs[0].1),
+            None => None,
+        }?;
+        Some(manifest.disabled_plugins.0.clone())
+    })();
+    task_plugin::PluginSet::resolve(
+        disabled
+            .map(task_plugin::PluginChoice::Disabled)
+            .as_ref(),
+    )
 }
 
 /// Find a service by alias, descriptor name, or unique substring.
@@ -92,11 +124,17 @@ fn find<'a>(services: &'a [ApiService], query: &str) -> Result<&'a ApiService, S
 
 fn render_index(services: &[ApiService]) {
     let streams = services.iter().filter(|s| s.stream).count();
+    let disabled = services.iter().filter(|s| !s.mounted).count();
     println!(
-        "{} services mounted ({} streams, {} rpc). `task api <service>` for methods.",
+        "{} services ({} streams, {} rpc{}). `task api <service>` for methods.",
         services.len(),
         streams,
-        services.len() - streams
+        services.len() - streams,
+        if disabled > 0 {
+            format!(", {disabled} disabled for the active org")
+        } else {
+            String::new()
+        },
     );
     println!();
     let width = services
@@ -104,14 +142,17 @@ fn render_index(services: &[ApiService]) {
         .map(|s| s.alias.unwrap_or(s.name).len())
         .max()
         .unwrap_or(0);
+    let plugin_width = services.iter().map(|s| s.plugin.len()).max().unwrap_or(0);
     for s in services {
         println!(
-            "  {:width$}  {:2} method(s)  {}  stamp {}   ({})",
+            "  {:width$}  {:plugin_width$}  {:2} method(s)  {}  stamp {}   ({}){}",
             s.alias.unwrap_or(s.name),
+            s.plugin,
             s.methods.len(),
             if s.stream { "stream" } else { "rpc   " },
             s.stamp,
             s.name,
+            if s.mounted { "" } else { "  [DISABLED]" },
         );
     }
 }
@@ -119,7 +160,7 @@ fn render_index(services: &[ApiService]) {
 fn render_one(services: &[ApiService], query: &str) -> eyre::Result<()> {
     let s = find(services, query).map_err(|e| eyre::eyre!(e))?;
     println!(
-        "{} ({}) — {}, stamp {}",
+        "{} ({}) — {}, plugin `{}`, stamp {}{}",
         s.alias.unwrap_or(s.name),
         s.name,
         if s.stream {
@@ -127,7 +168,13 @@ fn render_one(services: &[ApiService], query: &str) -> eyre::Result<()> {
         } else {
             "rpc service"
         },
+        s.plugin,
         s.stamp,
+        if s.mounted {
+            ""
+        } else {
+            "  [DISABLED for the active org — not mounted on its router]"
+        },
     );
     if let Some(doc) = s.doc {
         println!("  {}", doc.trim());
@@ -199,7 +246,7 @@ fn render_markdown(services: &[ApiService]) -> String {
             if s.stream { " — stream" } else { "" }
         );
         let _ = writeln!(out);
-        let _ = writeln!(out, "Schema stamp: `{}`", s.stamp);
+        let _ = writeln!(out, "Plugin: `{}` — schema stamp: `{}`", s.plugin, s.stamp);
         let _ = writeln!(out);
         let _ = writeln!(out, "| method | args | permit | notes |");
         let _ = writeln!(out, "|---|---|---|---|");

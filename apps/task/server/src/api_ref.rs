@@ -19,6 +19,7 @@
 
 use crate::permits;
 use org_proto::schema_stamp::service_stamp;
+use task_plugin::PluginSet;
 
 /// One method of a mounted service, joined with its permit.
 pub struct ApiMethod {
@@ -55,14 +56,33 @@ pub struct ApiService {
     /// Every method is a channel push — a `#[subscribe]` stream
     /// sibling service.
     pub stream: bool,
+    /// Owning plugin's `task_plugin::CATALOG` id (`"core"` for
+    /// platform services).
+    pub plugin: &'static str,
+    /// Is the service actually served for the plugin set the reference
+    /// was built against? [`reference`] (the build catalog) marks
+    /// everything mounted; [`reference_for`] flags a disabled plugin's
+    /// services `false` instead of omitting them, so `task api` and the
+    /// endpoint can show the whole catalog with its per-org state.
+    pub mounted: bool,
     pub methods: Vec<ApiMethod>,
     pub doc: Option<&'static str>,
 }
 
-/// Fold the mount registry into the reference. Registry order (the
-/// order `org_layer_router` mounts) is preserved.
+/// Fold the mount registry into the reference — the full build catalog,
+/// everything marked mounted. Registry order (the order
+/// `org_layer_router` mounts) is preserved.
 #[must_use]
 pub fn reference() -> Vec<ApiService> {
+    reference_for(&PluginSet::resolve(None))
+}
+
+/// The reference against one org's plugin set: every service this build
+/// knows, with `mounted` reflecting whether `set` actually serves it.
+/// Disabled services are listed (not omitted) — the catalog is
+/// build-static; only the flag is org-state.
+#[must_use]
+pub fn reference_for(set: &PluginSet) -> Vec<ApiService> {
     permits::mounts()
         .into_iter()
         .map(|mount| {
@@ -91,6 +111,8 @@ pub fn reference() -> Vec<ApiService> {
                 alias: mount.permits.as_ref().map(|t| t.service),
                 stamp: service_stamp(d),
                 stream: !methods.is_empty() && methods.iter().all(|m| m.stream),
+                plugin: mount.plugin,
+                mounted: set.contains(mount.plugin),
                 methods,
                 doc: d.doc,
             }
@@ -98,21 +120,44 @@ pub fn reference() -> Vec<ApiService> {
         .collect()
 }
 
-/// The JSON body of `GET /org/{slug}/api`.
+/// The JSON body of `GET /org/{slug}/api` with everything enabled — the
+/// build-static view `task api --json` renders.
 #[must_use]
 pub fn reference_json() -> serde_json::Value {
-    let services = reference();
+    reference_json_for(&PluginSet::resolve(None))
+}
+
+/// The JSON body of `GET /org/{slug}/api` for one org's plugin set.
+///
+/// Every service of the build catalog is listed — a disabled plugin's
+/// services carry `"mounted": false` rather than being omitted, so a
+/// client can render the whole catalog and say *why* a service is
+/// absent from the wire. The top-level `plugins` array is the catalog
+/// with this org's enabled state.
+#[must_use]
+pub fn reference_json_for(set: &PluginSet) -> serde_json::Value {
+    let services = reference_for(set);
     let streams = services.iter().filter(|s| s.stream).count();
+    let mounted = services.iter().filter(|s| s.mounted).count();
     serde_json::json!({
         "version": 1,
         "generated_from": "task_server::permits::mounts()",
         "service_count": services.len(),
+        "mounted_count": mounted,
         "stream_count": streams,
+        "plugins": task_plugin::CATALOG.iter().map(|p| serde_json::json!({
+            "id": p.id,
+            "name": p.name,
+            "core": p.core,
+            "enabled": set.contains(p.id),
+        })).collect::<Vec<_>>(),
         "services": services.iter().map(|s| serde_json::json!({
             "name": s.name,
             "alias": s.alias,
             "stamp": s.stamp,
             "stream": s.stream,
+            "plugin": s.plugin,
+            "mounted": s.mounted,
             "doc": s.doc,
             "methods": s.methods.iter().map(|m| serde_json::json!({
                 "name": m.name,
@@ -188,5 +233,36 @@ mod tests {
             reference().len()
         );
         assert!(v["services"].as_array().is_some_and(|a| !a.is_empty()));
+        // Full set: every service mounted, every catalog plugin enabled.
+        assert_eq!(v["mounted_count"], v["service_count"]);
+        assert!(
+            v["plugins"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["enabled"] == true)
+        );
+    }
+
+    /// A deny-list keeps the catalog complete but flags the denied
+    /// plugin's services unmounted — listing-with-flag, not omission.
+    #[test]
+    fn disabled_plugins_are_listed_with_mounted_false() {
+        use task_plugin::{PluginChoice, PluginSet};
+        let set = PluginSet::resolve(Some(&PluginChoice::Disabled(vec!["mealplan".into()])));
+        let services = reference_for(&set);
+        assert_eq!(services.len(), reference().len(), "catalog stays complete");
+        let (off, on): (Vec<_>, Vec<_>) = services.iter().partition(|s| !s.mounted);
+        assert!(!off.is_empty() && off.iter().all(|s| s.plugin == "mealplan"));
+        assert!(on.iter().all(|s| s.plugin != "mealplan"));
+
+        let v = reference_json_for(&set);
+        let plugins = v["plugins"].as_array().unwrap();
+        let mealplan = plugins.iter().find(|p| p["id"] == "mealplan").unwrap();
+        assert_eq!(mealplan["enabled"], false);
+        assert_eq!(
+            v["mounted_count"].as_u64().unwrap() as usize,
+            on.len(),
+        );
     }
 }

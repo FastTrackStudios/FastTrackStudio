@@ -6,11 +6,11 @@
      the single registry the router, permit gate, and schema stamps derive from.
      Served live at `GET /org/{slug}/api`. -->
 
-75 services mounted: 65 plain RPC, 10 `#[subscribe]` streams. Every method lists its permit — the `<action>` on `<resource>` the permissions gate checks (see `apps/task/server/src/permits.rs`). `audited` methods emit an audit line even when allowed. A `stream` method takes a `Tx` sink and pushes to the caller instead of returning once.
+83 services mounted: 65 plain RPC, 18 `#[subscribe]` streams. Every method lists its permit — the `<action>` on `<resource>` the permissions gate checks (see `apps/task/server/src/permits.rs`). `audited` methods emit an audit line even when allowed. A `stream` method takes a `Tx` sink and pushes to the caller instead of returning once.
 
 ## `auth` (AuthService)
 
-Schema stamp: `66044c970637a966`
+Plugin: `core` — schema stamp: `66044c970637a966`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -24,7 +24,7 @@ Schema stamp: `66044c970637a966`
 
 ## `permissions` (PermissionsService)
 
-Schema stamp: `c20f2ef985520960`
+Plugin: `core` — schema stamp: `c20f2ef985520960`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -33,7 +33,7 @@ Schema stamp: `c20f2ef985520960`
 
 ## `attachments` (AttachmentService)
 
-Schema stamp: `b210328c506e1690`
+Plugin: `core` — schema stamp: `b210328c506e1690`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -43,7 +43,7 @@ Schema stamp: `b210328c506e1690`
 
 ## `media` (MediaService)
 
-Schema stamp: `fde688afbb970039`
+Plugin: `core` — schema stamp: `fde688afbb970039`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -52,7 +52,7 @@ Schema stamp: `fde688afbb970039`
 
 ## `vault-sync` (VaultSyncRpc)
 
-Schema stamp: `ba3389e731b79eb8`
+Plugin: `core` — schema stamp: `ba3389e731b79eb8`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -67,7 +67,7 @@ Schema stamp: `ba3389e731b79eb8`
 
 ## `vault-sync-stream` (VaultSyncStream) — stream
 
-Schema stamp: `1e7f7ff14fe06c56`
+Plugin: `core` — schema stamp: `1e7f7ff14fe06c56`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -75,7 +75,7 @@ Schema stamp: `1e7f7ff14fe06c56`
 
 ## `vault-graph` (VaultGraphRpc)
 
-Schema stamp: `a052614cb08bb49a`
+Plugin: `core` — schema stamp: `a052614cb08bb49a`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -88,7 +88,7 @@ Schema stamp: `a052614cb08bb49a`
 
 ## `share` (ShareService)
 
-Schema stamp: `dab09d3f620a4c09`
+Plugin: `core` — schema stamp: `dab09d3f620a4c09`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -100,7 +100,7 @@ Schema stamp: `dab09d3f620a4c09`
 
 ## `doc-sync` (DocSync) — stream
 
-Schema stamp: `adb32a8efbc4b061`
+Plugin: `core` — schema stamp: `adb32a8efbc4b061`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -108,7 +108,7 @@ Schema stamp: `adb32a8efbc4b061`
 
 ## `doc-presence` (DocPresence) — stream
 
-Schema stamp: `5cffa57c1f8b156e`
+Plugin: `core` — schema stamp: `5cffa57c1f8b156e`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -116,7 +116,7 @@ Schema stamp: `5cffa57c1f8b156e`
 
 ## `agent-tasks` (AgentTaskQueue)
 
-Schema stamp: `2901b1d751044c21`
+Plugin: `agent` — schema stamp: `2901b1d751044c21`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -129,7 +129,7 @@ Schema stamp: `2901b1d751044c21`
 
 ## `agent-sessions` (SessionsRpc)
 
-Schema stamp: `20daebb18a1ca73e`
+Plugin: `agent` — schema stamp: `20daebb18a1ca73e`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -144,7 +144,7 @@ Schema stamp: `20daebb18a1ca73e`
 
 ## `agent-turns` (TurnDispatchRpc)
 
-Schema stamp: `2ae062b43ad63a9a`
+Plugin: `agent` — schema stamp: `2ae062b43ad63a9a`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -154,7 +154,7 @@ Schema stamp: `2ae062b43ad63a9a`
 
 ## `agent-threads` (ThreadsRpc)
 
-Schema stamp: `0133f034b611e516`
+Plugin: `agent` — schema stamp: `0133f034b611e516`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -164,7 +164,7 @@ Schema stamp: `0133f034b611e516`
 
 ## `agent-subscriptions` (SubscriptionsStream) — stream
 
-Schema stamp: `da7b504dda036f6e`
+Plugin: `agent` — schema stamp: `da7b504dda036f6e`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -172,7 +172,7 @@ Schema stamp: `da7b504dda036f6e`
 
 ## `agent-discovery` (DiscoveryRpc)
 
-Schema stamp: `405a046e1b7c4c80`
+Plugin: `agent` — schema stamp: `405a046e1b7c4c80`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -183,7 +183,7 @@ Schema stamp: `405a046e1b7c4c80`
 
 ## `agent-routines` (RoutinesRpc)
 
-Schema stamp: `2092551a25360d26`
+Plugin: `agent` — schema stamp: `2092551a25360d26`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -195,7 +195,7 @@ Schema stamp: `2092551a25360d26`
 
 ## `project` (ProjectServiceRpc)
 
-Schema stamp: `4491227d91ff7b90`
+Plugin: `core` — schema stamp: `4491227d91ff7b90`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -207,9 +207,17 @@ Schema stamp: `4491227d91ff7b90`
 | `rename` | `id`, `new_path` | `write` on `projects/**` | — |
 | `delete` | `id` | `write` on `projects/**` | audited |
 
+## `project-stream` (ProjectServiceStream) — stream
+
+Plugin: `core` — schema stamp: `71314d5c2f2464a4`
+
+| method | args | permit | notes |
+|---|---|---|---|
+| `events` | `sink` | `read` on `projects/**` | stream |
+
 ## `goal` (GoalServiceRpc)
 
-Schema stamp: `5341902c6cc8cad2`
+Plugin: `core` — schema stamp: `5341902c6cc8cad2`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -221,9 +229,17 @@ Schema stamp: `5341902c6cc8cad2`
 | `rename` | `id`, `new_path` | `write` on `goals/**` | — |
 | `delete` | `id` | `write` on `goals/**` | audited |
 
+## `goal-stream` (GoalServiceStream) — stream
+
+Plugin: `core` — schema stamp: `f0e8f8eb34b6f71f`
+
+| method | args | permit | notes |
+|---|---|---|---|
+| `events` | `sink` | `read` on `goals/**` | stream |
+
 ## `milestone` (MilestoneServiceRpc)
 
-Schema stamp: `103db2d13bf34b5e`
+Plugin: `core` — schema stamp: `103db2d13bf34b5e`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -235,9 +251,17 @@ Schema stamp: `103db2d13bf34b5e`
 | `rename` | `id`, `new_path` | `write` on `milestones/**` | — |
 | `delete` | `id` | `write` on `milestones/**` | audited |
 
+## `milestone-stream` (MilestoneServiceStream) — stream
+
+Plugin: `core` — schema stamp: `d5fcfa70ebcffefb`
+
+| method | args | permit | notes |
+|---|---|---|---|
+| `events` | `sink` | `read` on `milestones/**` | stream |
+
 ## `workstream` (WorkstreamServiceRpc)
 
-Schema stamp: `790028acb3484c66`
+Plugin: `core` — schema stamp: `790028acb3484c66`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -252,7 +276,7 @@ Schema stamp: `790028acb3484c66`
 
 ## `workstream-stream` (WorkstreamServiceStream) — stream
 
-Schema stamp: `17f8a666e6a2a9b3`
+Plugin: `core` — schema stamp: `17f8a666e6a2a9b3`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -260,7 +284,7 @@ Schema stamp: `17f8a666e6a2a9b3`
 
 ## `task` (TaskServiceRpc)
 
-Schema stamp: `c513b7e17a405951`
+Plugin: `core` — schema stamp: `c513b7e17a405951`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -278,7 +302,7 @@ Schema stamp: `c513b7e17a405951`
 
 ## `task-stream` (TaskServiceStream) — stream
 
-Schema stamp: `2e19ced670f4930b`
+Plugin: `core` — schema stamp: `2e19ced670f4930b`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -286,7 +310,7 @@ Schema stamp: `2e19ced670f4930b`
 
 ## `timer` (TimerService)
 
-Schema stamp: `a48a5e0252767dcd`
+Plugin: `core` — schema stamp: `a48a5e0252767dcd`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -304,9 +328,17 @@ Schema stamp: `a48a5e0252767dcd`
 | `list_org_member_rates` | `org_id` | `read` on `timer/**` | — |
 | `list_project_member_rates` | `project_id` | `read` on `timer/**` | — |
 
+## `timer-stream` (TimerServiceStream) — stream
+
+Plugin: `core` — schema stamp: `420ab9513b52369b`
+
+| method | args | permit | notes |
+|---|---|---|---|
+| `events` | `sink` | `read` on `timer/**` | stream |
+
 ## `threads` (ThreadsService)
 
-Schema stamp: `c7dc2af6e1f9bcbc`
+Plugin: `core` — schema stamp: `c7dc2af6e1f9bcbc`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -321,7 +353,7 @@ Schema stamp: `c7dc2af6e1f9bcbc`
 
 ## `prefs` (PrefsService)
 
-Schema stamp: `c9fb51716d9fc2cd`
+Plugin: `core` — schema stamp: `c9fb51716d9fc2cd`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -330,7 +362,7 @@ Schema stamp: `c9fb51716d9fc2cd`
 
 ## `day-templates` (DayTemplatesRpc)
 
-Schema stamp: `446792622394beac`
+Plugin: `scheduling` — schema stamp: `446792622394beac`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -341,7 +373,7 @@ Schema stamp: `446792622394beac`
 
 ## `day-plans` (DayPlansRpc)
 
-Schema stamp: `89c5cc6f4e2ded99`
+Plugin: `scheduling` — schema stamp: `89c5cc6f4e2ded99`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -351,7 +383,7 @@ Schema stamp: `89c5cc6f4e2ded99`
 
 ## `calendar-events` (CalendarEventsRpc)
 
-Schema stamp: `4e6f60ff24118b6f`
+Plugin: `scheduling` — schema stamp: `4e6f60ff24118b6f`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -361,7 +393,7 @@ Schema stamp: `4e6f60ff24118b6f`
 
 ## `event-types` (EventTypesRpc)
 
-Schema stamp: `0407815bc7b28566`
+Plugin: `scheduling` — schema stamp: `0407815bc7b28566`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -372,7 +404,7 @@ Schema stamp: `0407815bc7b28566`
 
 ## `schedules` (SchedulesRpc)
 
-Schema stamp: `a5153cadde47a680`
+Plugin: `scheduling` — schema stamp: `a5153cadde47a680`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -383,7 +415,7 @@ Schema stamp: `a5153cadde47a680`
 
 ## `slots` (SlotsRpc)
 
-Schema stamp: `20b0cb35cabc4f87`
+Plugin: `scheduling` — schema stamp: `20b0cb35cabc4f87`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -391,7 +423,7 @@ Schema stamp: `20b0cb35cabc4f87`
 
 ## `bookings` (BookingsRpc)
 
-Schema stamp: `2f094cd467e8f67d`
+Plugin: `scheduling` — schema stamp: `2f094cd467e8f67d`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -400,9 +432,17 @@ Schema stamp: `2f094cd467e8f67d`
 | `create_booking` | `booking` | `write` on `scheduling/bookings/**` | — |
 | `update_booking_status` | `id`, `status` | `write` on `scheduling/bookings/**` | — |
 
+## `scheduling-events` (SchedulingEventsStream) — stream
+
+Plugin: `scheduling` — schema stamp: `aacb88fceb226e1d`
+
+| method | args | permit | notes |
+|---|---|---|---|
+| `events` | `sink` | `read` on `scheduling/**` | stream |
+
 ## `inbox` (InboxRpc)
 
-Schema stamp: `e3309d34aacd2f4b`
+Plugin: `core` — schema stamp: `e3309d34aacd2f4b`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -412,9 +452,17 @@ Schema stamp: `e3309d34aacd2f4b`
 | `upsert_inbox_item` | `item` | `write` on `inbox/**` | — |
 | `delete_inbox_item` | `id` | `write` on `inbox/**` | audited |
 
+## `inbox-stream` (InboxStream) — stream
+
+Plugin: `core` — schema stamp: `18590160ce7459bd`
+
+| method | args | permit | notes |
+|---|---|---|---|
+| `events` | `sink` | `read` on `inbox/**` | stream |
+
 ## `recall` (RecallRpc)
 
-Schema stamp: `b273280d67ef5c84`
+Plugin: `recall` — schema stamp: `b273280d67ef5c84`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -423,9 +471,17 @@ Schema stamp: `b273280d67ef5c84`
 | `upsert_card` | `card` | `write` on `recall/**` | — |
 | `delete_card` | `id` | `write` on `recall/**` | audited |
 
+## `recall-stream` (RecallStream) — stream
+
+Plugin: `recall` — schema stamp: `69e79dd5c6df9d63`
+
+| method | args | permit | notes |
+|---|---|---|---|
+| `events` | `sink` | `read` on `recall/**` | stream |
+
 ## `contacts` (ContactsRpc)
 
-Schema stamp: `3183ca6a232e423f`
+Plugin: `contacts` — schema stamp: `3183ca6a232e423f`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -438,9 +494,17 @@ Schema stamp: `3183ca6a232e423f`
 | `delete_account` | `id` | `write` on `contacts/**` | audited |
 | `sync_account` | `id` | `write` on `contacts/**` | audited |
 
+## `contacts-stream` (ContactsStream) — stream
+
+Plugin: `contacts` — schema stamp: `68bf42f299f1ff31`
+
+| method | args | permit | notes |
+|---|---|---|---|
+| `events` | `sink` | `read` on `contacts/**` | stream |
+
 ## `tags` (TagServiceRpc)
 
-Schema stamp: `72f2a6ff1e78a186`
+Plugin: `core` — schema stamp: `72f2a6ff1e78a186`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -451,7 +515,7 @@ Schema stamp: `72f2a6ff1e78a186`
 
 ## `scripture` (ScriptureServiceRpc)
 
-Schema stamp: `464df04f44aeb954`
+Plugin: `scripture` — schema stamp: `464df04f44aeb954`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -472,7 +536,7 @@ Schema stamp: `464df04f44aeb954`
 
 ## `links` (LinksServiceRpc)
 
-Schema stamp: `c5c32de59903f282`
+Plugin: `core` — schema stamp: `c5c32de59903f282`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -484,7 +548,7 @@ Schema stamp: `c5c32de59903f282`
 
 ## `collection` (CollectionServiceRpc)
 
-Schema stamp: `0ce252dab5a62852`
+Plugin: `fasttrackstudio` — schema stamp: `0ce252dab5a62852`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -497,7 +561,7 @@ Schema stamp: `0ce252dab5a62852`
 
 ## `resources` (ResourcesServiceRpc)
 
-Schema stamp: `b324784fa40b557b`
+Plugin: `core` — schema stamp: `b324784fa40b557b`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -505,7 +569,7 @@ Schema stamp: `b324784fa40b557b`
 
 ## `invoicing` (InvoicingRpc)
 
-Schema stamp: `473a14f2f1f08794`
+Plugin: `finance` — schema stamp: `473a14f2f1f08794`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -523,7 +587,7 @@ Schema stamp: `473a14f2f1f08794`
 
 ## `ledger` (LedgerRpc)
 
-Schema stamp: `af1147b7f586cc62`
+Plugin: `finance` — schema stamp: `af1147b7f586cc62`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -535,7 +599,7 @@ Schema stamp: `af1147b7f586cc62`
 
 ## `wiki-schema` (SchemaRpc)
 
-Schema stamp: `658bb14de7a9c4a4`
+Plugin: `wiki` — schema stamp: `658bb14de7a9c4a4`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -548,7 +612,7 @@ Schema stamp: `658bb14de7a9c4a4`
 
 ## `wiki-catalog` (CatalogRpc)
 
-Schema stamp: `1efe171502d83278`
+Plugin: `wiki` — schema stamp: `1efe171502d83278`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -558,7 +622,7 @@ Schema stamp: `1efe171502d83278`
 
 ## `wiki-raw` (RawLayerRpc)
 
-Schema stamp: `c3f86f7199ee96c3`
+Plugin: `wiki` — schema stamp: `c3f86f7199ee96c3`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -570,7 +634,7 @@ Schema stamp: `c3f86f7199ee96c3`
 
 ## `wiki-graph` (GraphRpc)
 
-Schema stamp: `b42fc42808db4045`
+Plugin: `wiki` — schema stamp: `b42fc42808db4045`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -581,7 +645,7 @@ Schema stamp: `b42fc42808db4045`
 
 ## `wiki-pages` (PagesRpc)
 
-Schema stamp: `f3e7b11714a44bd6`
+Plugin: `wiki` — schema stamp: `f3e7b11714a44bd6`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -591,7 +655,7 @@ Schema stamp: `f3e7b11714a44bd6`
 
 ## `wiki-ingest` (IngestRpc)
 
-Schema stamp: `e8df02e00385891e`
+Plugin: `wiki` — schema stamp: `e8df02e00385891e`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -606,7 +670,7 @@ Schema stamp: `e8df02e00385891e`
 
 ## `wiki-lint` (LintRpc)
 
-Schema stamp: `2f9dbfadd3eb4a5a`
+Plugin: `wiki` — schema stamp: `2f9dbfadd3eb4a5a`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -616,7 +680,7 @@ Schema stamp: `2f9dbfadd3eb4a5a`
 
 ## `wiki-search` (SearchRpc)
 
-Schema stamp: `2d0d4ffacab1e1ce`
+Plugin: `wiki` — schema stamp: `2d0d4ffacab1e1ce`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -624,7 +688,7 @@ Schema stamp: `2d0d4ffacab1e1ce`
 
 ## `wiki-events` (EventsStream) — stream
 
-Schema stamp: `a82bddd598991545`
+Plugin: `wiki` — schema stamp: `a82bddd598991545`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -632,7 +696,7 @@ Schema stamp: `a82bddd598991545`
 
 ## `wiki-watcher` (WatcherRpc)
 
-Schema stamp: `337ca6dde0d51a6f`
+Plugin: `wiki` — schema stamp: `337ca6dde0d51a6f`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -641,7 +705,7 @@ Schema stamp: `337ca6dde0d51a6f`
 
 ## `wiki-multimodal` (MultimodalRpc)
 
-Schema stamp: `74971e036ac473fd`
+Plugin: `wiki` — schema stamp: `74971e036ac473fd`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -649,7 +713,7 @@ Schema stamp: `74971e036ac473fd`
 
 ## `wiki-review` (ReviewRpc)
 
-Schema stamp: `0881527ef447a035`
+Plugin: `wiki` — schema stamp: `0881527ef447a035`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -659,7 +723,7 @@ Schema stamp: `0881527ef447a035`
 
 ## `locations` (LocationsServiceRpc)
 
-Schema stamp: `c265c7bd8380a2b7`
+Plugin: `home` — schema stamp: `c265c7bd8380a2b7`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -672,7 +736,7 @@ Schema stamp: `c265c7bd8380a2b7`
 
 ## `inventory` (InventoryServiceRpc)
 
-Schema stamp: `1de6386e67e35a85`
+Plugin: `home` — schema stamp: `1de6386e67e35a85`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -689,7 +753,7 @@ Schema stamp: `1de6386e67e35a85`
 
 ## `cookbook` (CookbookServiceRpc)
 
-Schema stamp: `fb790207efbcd9b3`
+Plugin: `mealplan` — schema stamp: `fb790207efbcd9b3`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -703,7 +767,7 @@ Schema stamp: `fb790207efbcd9b3`
 
 ## `mealplan` (MealplanServiceRpc)
 
-Schema stamp: `5f8b448efff1207f`
+Plugin: `mealplan` — schema stamp: `5f8b448efff1207f`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -720,7 +784,7 @@ Schema stamp: `5f8b448efff1207f`
 
 ## `pantry` (PantryServiceRpc)
 
-Schema stamp: `f33d579e96fc53e9`
+Plugin: `mealplan` — schema stamp: `f33d579e96fc53e9`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -742,7 +806,7 @@ Schema stamp: `f33d579e96fc53e9`
 
 ## `shopping` (ShoppingServiceRpc)
 
-Schema stamp: `c8a4a56f4e9b76cb`
+Plugin: `mealplan` — schema stamp: `c8a4a56f4e9b76cb`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -759,7 +823,7 @@ Schema stamp: `c8a4a56f4e9b76cb`
 
 ## `substitutions` (SubstitutionServiceRpc)
 
-Schema stamp: `c74bff9435eec316`
+Plugin: `mealplan` — schema stamp: `c74bff9435eec316`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -772,7 +836,7 @@ Schema stamp: `c74bff9435eec316`
 
 ## `body` (BodyServiceRpc)
 
-Schema stamp: `81afcaa6c3012ca1`
+Plugin: `fitness` — schema stamp: `81afcaa6c3012ca1`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -786,7 +850,7 @@ Schema stamp: `81afcaa6c3012ca1`
 
 ## `exercises` (ExercisesServiceRpc)
 
-Schema stamp: `9c04f00c785c8c8e`
+Plugin: `fitness` — schema stamp: `9c04f00c785c8c8e`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -800,7 +864,7 @@ Schema stamp: `9c04f00c785c8c8e`
 
 ## `workouts` (WorkoutsServiceRpc)
 
-Schema stamp: `73c6d5281212e007`
+Plugin: `fitness` — schema stamp: `73c6d5281212e007`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -819,7 +883,7 @@ Schema stamp: `73c6d5281212e007`
 
 ## `intake` (IntakeServiceRpc)
 
-Schema stamp: `35915551e8628c59`
+Plugin: `fitness` — schema stamp: `35915551e8628c59`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -836,7 +900,7 @@ Schema stamp: `35915551e8628c59`
 
 ## `email` (EmailSyncRpc)
 
-Schema stamp: `df6d5c18087eba09`
+Plugin: `email` — schema stamp: `df6d5c18087eba09`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -853,7 +917,7 @@ Schema stamp: `df6d5c18087eba09`
 
 ## `email-stream` (EmailSyncStream) — stream
 
-Schema stamp: `f2a53b26b14f4fae`
+Plugin: `email` — schema stamp: `f2a53b26b14f4fae`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -861,7 +925,7 @@ Schema stamp: `f2a53b26b14f4fae`
 
 ## `forge-repos` (RepoCatalogRpc)
 
-Schema stamp: `b36a0493f396cec0`
+Plugin: `forge` — schema stamp: `b36a0493f396cec0`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -870,7 +934,7 @@ Schema stamp: `b36a0493f396cec0`
 
 ## `forge-issues` (IssueTrackerRpc)
 
-Schema stamp: `80593cb8612de6a2`
+Plugin: `forge` — schema stamp: `80593cb8612de6a2`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -883,7 +947,7 @@ Schema stamp: `80593cb8612de6a2`
 
 ## `forge-reviews` (ReviewSurfaceRpc)
 
-Schema stamp: `fcace7b88f4e0257`
+Plugin: `forge` — schema stamp: `fcace7b88f4e0257`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -897,7 +961,7 @@ Schema stamp: `fcace7b88f4e0257`
 
 ## `forge-issues-stream` (IssueTrackerStream) — stream
 
-Schema stamp: `d1959584664f569e`
+Plugin: `forge` — schema stamp: `d1959584664f569e`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -905,7 +969,7 @@ Schema stamp: `d1959584664f569e`
 
 ## `forge-reviews-stream` (ReviewSurfaceStream) — stream
 
-Schema stamp: `610bcf152bad7ba9`
+Plugin: `forge` — schema stamp: `610bcf152bad7ba9`
 
 | method | args | permit | notes |
 |---|---|---|---|
@@ -913,7 +977,7 @@ Schema stamp: `610bcf152bad7ba9`
 
 ## `forge-connections` (RepoConnections)
 
-Schema stamp: `b37ad30d0297cb44`
+Plugin: `forge` — schema stamp: `b37ad30d0297cb44`
 
 | method | args | permit | notes |
 |---|---|---|---|
