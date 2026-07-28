@@ -273,6 +273,10 @@ table!(SLOTS, "slots", "scheduling/slots/**", [rd "list_open_slots"]);
 table!(BOOKINGS, "bookings", "scheduling/bookings/**", [
     rd "list_bookings", rd "get_booking", wr "create_booking", wr "update_booking_status",
 ]);
+// The slice's one stream: attaching is a read over the whole
+// scheduling resource — the event names the sub-resource and
+// subscribers filter client-side.
+table!(SCHEDULING_STREAM, "scheduling-events", "scheduling/**", [rd "events"]);
 
 // ── Knowledge lane ───────────────────────────────────────────────────────
 
@@ -548,6 +552,10 @@ pub fn mounts() -> Vec<Mount> {
         m(
             scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
             BOOKINGS,
+        ),
+        m(
+            scheduling_proto::scheduling_events_stream_descriptor(),
+            SCHEDULING_STREAM,
         ),
         // Knowledge
         m(inbox_proto::service::inbox::inbox_rpc_service_descriptor(), INBOX),

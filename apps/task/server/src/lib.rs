@@ -1983,6 +1983,14 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
             scheduling_proto::service::bookings::serve(org.scheduling.clone()),
         )
+        // Live scheduling changes — the slice's ONE `#[subscribe]`
+        // stream (day templates / day plans / calendar events /
+        // event types / schedules / bookings), served from the hub
+        // on the `VaultScheduler` above. The event names which
+        // sub-resource changed; subscribers filter client-side.
+        .merge(scheduling_proto::scheduling_events_stream_layer(
+            org.scheduling.clone(),
+        ))
         .with(
             inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
             inbox_proto::service::inbox::serve(org.inbox.clone()),
