@@ -297,6 +297,15 @@ impl RawLayer for WikiBackend {
         }
         Ok(tasks)
     }
+    fn rescan_diff(&self, wiki_id: &str) -> Result<wiki_proto::raw::SourceDiff, WikiError> {
+        let w = self.resolve(wiki_id)?;
+        let diff = w.rescan_sources().map_err(map_err)?;
+        Ok(wiki_proto::raw::SourceDiff {
+            created: diff.created,
+            modified: diff.modified,
+            deleted: diff.deleted,
+        })
+    }
 }
 
 // ────────────────────── Pages ──────────────────────

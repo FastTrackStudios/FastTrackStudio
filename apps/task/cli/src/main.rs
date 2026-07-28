@@ -6,17 +6,19 @@
 //! for `task task …` is `task_cmd` — `mod task` at the crate root
 //! would shadow the `task` crate itself.
 //!
-//! Commands reach their data one of two ways, and which one is not
-//! yet a settled design. Most go through vox against
-//! `/org/<slug>/vox`. A handful — `wiki`, `vault`, `agent`, `label`,
-//! `code`, `cycle`, `setup` — open the org tree on disk directly,
-//! and `timer` / `finance` / `auth` / `inbox` do both. The
-//! direct-to-disk paths resolve through
-//! `org_proto::DataRoot::from_env()` and therefore only work against
-//! an org hosted on this machine; `auth` makes that explicit with a
-//! guard that refuses to run against a remote session. Unifying this
-//! needs a decision about whether the CLI is a client or a
-//! co-resident tool.
+//! Commands reach their data through vox against `/org/<slug>/vox`
+//! — a remote server when the session points at one, or the
+//! in-process embedded backend (`TASK_EMBED=1`) — so permissions,
+//! streams, and the per-org plugin gate apply uniformly. The
+//! remaining direct-to-disk paths are deliberate, each documented at
+//! its site: machine-local dev-loop state (`label`, `code`, `cycle`,
+//! `setup` webhook config), the local LLM-runner wiki verbs
+//! (`agent_wiki::bridge` drives a co-resident `WikiLive`), explicit
+//! local-path escape hatches (`wiki --vault <existing dir>`,
+//! `vault --fs`), and true presentation-only work (invoice PDF
+//! shell-out). Direct-to-disk resolution goes through
+//! `org_proto::DataRoot::from_env()` and only works against an org
+//! hosted on this machine.
 //!
 //! Server endpoint resolution (first match wins):
 //! 1. `--server <url>` flag.

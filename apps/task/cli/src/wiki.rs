@@ -10,6 +10,45 @@ use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
 use crate::shared::confirm;
 
+/// Wiki id the flat (vault-path) wiki commands address when they
+/// route over vox — the one-wiki-per-org convention the server
+/// mounts (`WikiBackend::single("default", …)`).
+const ORG_WIKI_ID: &str = "default";
+
+/// How a flat wiki command reaches its data.
+///
+/// The flat commands (`task wiki graph|gaps|search|clusters|
+/// health|import|rescan|findings`) predate the vox surface and
+/// address a wiki by filesystem path (`--vault`). Unification
+/// rule:
+///
+/// - `--vault` (or its `examples/vault` default) names an
+///   EXISTING local directory → FS-native behaviour, unchanged
+///   from the pre-vox code path. An explicit on-disk path is
+///   authoritative; this is the documented local escape hatch
+///   (dev vaults under `examples/`, offline inspection of a
+///   copied tree).
+/// - the path does NOT exist (previously a hard `canonicalize`
+///   error) → route to the active org's wiki over vox — remote
+///   server or embedded in-process backend alike — so the same
+///   command works wherever the session points, and plugin
+///   gating + permissions apply because the data comes through
+///   the org router.
+enum VaultRoute {
+    /// Canonicalized local vault root.
+    Local(std::path::PathBuf),
+    /// Per-org vox URL (`…/org/<slug>/vox`).
+    Vox(String),
+}
+
+fn route_vault(vault: &std::path::Path) -> eyre::Result<VaultRoute> {
+    if let Ok(p) = vault.canonicalize() {
+        return Ok(VaultRoute::Local(p));
+    }
+    let slug = resolve_active_org(None)?;
+    Ok(VaultRoute::Vox(resolve_org_vox_url(None, &slug)))
+}
+
 // A clap command enum: constructed once per invocation, so the
 // inter-variant size gap is irrelevant, and boxing a variant's
 // args fights the `Subcommand` derive / flattening.
@@ -858,17 +897,26 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             limit,
             json,
         } => {
-            let vault = vault
-                .canonicalize()
-                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
             let opts = wiki_proto::graph::GraphOpts {
                 query,
                 node_type,
                 limit,
                 weights: None,
             };
-            let graph = wiki_graph::build_graph(&vault, opts)
-                .map_err(|e| eyre::eyre!("build_graph: {e}"))?;
+            // Same `WikiGraph` shape either way — the server runs
+            // the identical `wiki_graph::build_graph` over its
+            // vault root.
+            let graph = match route_vault(&vault)? {
+                VaultRoute::Local(vault) => wiki_graph::build_graph(&vault, opts)
+                    .map_err(|e| eyre::eyre!("build_graph: {e}"))?,
+                VaultRoute::Vox(url) => {
+                    let c: wiki_proto::service::graph::GraphClient =
+                        establish_for_url(&url).await?;
+                    c.build_graph(ORG_WIKI_ID.to_string(), opts)
+                        .await
+                        .map_err(|e| eyre::eyre!("build_graph: {e:?}"))?
+                }
+            };
             if json {
                 let payload = serde_json::json!({
                     "nodes": graph.nodes.iter().map(|n| serde_json::json!({
@@ -903,6 +951,11 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             }
             Ok(())
         }
+        // `context` stays FS-native: `build_context` composes the
+        // wiki graph with LOCAL overlays (`--notes` tree, `--links`
+        // jsonl) that only exist on this machine's disk; no RPC
+        // carries that composition (gap — the Graph service covers
+        // plain `build_graph` only).
         WikiCmd::Context {
             query,
             vault,
@@ -1081,10 +1134,18 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             Ok(())
         }
         WikiCmd::Gaps { vault, json } => {
-            let vault = vault
-                .canonicalize()
-                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
-            let gaps = wiki_graph::find_gaps(&vault).map_err(|e| eyre::eyre!("find_gaps: {e}"))?;
+            let gaps = match route_vault(&vault)? {
+                VaultRoute::Local(vault) => {
+                    wiki_graph::find_gaps(&vault).map_err(|e| eyre::eyre!("find_gaps: {e}"))?
+                }
+                VaultRoute::Vox(url) => {
+                    let c: wiki_proto::service::graph::GraphClient =
+                        establish_for_url(&url).await?;
+                    c.gaps(ORG_WIKI_ID.to_string())
+                        .await
+                        .map_err(|e| eyre::eyre!("find_gaps: {e:?}"))?
+                }
+            };
             if json {
                 let payload: Vec<_> = gaps
                     .iter()
@@ -1127,9 +1188,6 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             include_content,
             hybrid,
         } => {
-            let vault = vault
-                .canonicalize()
-                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
             let opts = wiki_proto::search::SearchOpts {
                 query: query.clone(),
                 top_k,
@@ -1141,7 +1199,18 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                 },
                 node_type,
             };
-            let hits = wiki_search::search(&vault, opts).map_err(|e| eyre::eyre!("search: {e}"))?;
+            let hits = match route_vault(&vault)? {
+                VaultRoute::Local(vault) => {
+                    wiki_search::search(&vault, opts).map_err(|e| eyre::eyre!("search: {e}"))?
+                }
+                VaultRoute::Vox(url) => {
+                    let c: wiki_proto::service::search::SearchClient =
+                        establish_for_url(&url).await?;
+                    c.search(ORG_WIKI_ID.to_string(), opts)
+                        .await
+                        .map_err(|e| eyre::eyre!("search: {e:?}"))?
+                }
+            };
             println!(
                 "mode={:?}  token={}  vector={}  total={}",
                 hits.mode,
@@ -1158,11 +1227,17 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             Ok(())
         }
         WikiCmd::Clusters { vault } => {
-            let vault = vault
-                .canonicalize()
-                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
-            let clusters = wiki_graph::build_clusters(&vault)
-                .map_err(|e| eyre::eyre!("build_clusters: {e}"))?;
+            let clusters = match route_vault(&vault)? {
+                VaultRoute::Local(vault) => wiki_graph::build_clusters(&vault)
+                    .map_err(|e| eyre::eyre!("build_clusters: {e}"))?,
+                VaultRoute::Vox(url) => {
+                    let c: wiki_proto::service::graph::GraphClient =
+                        establish_for_url(&url).await?;
+                    c.clusters(ORG_WIKI_ID.to_string())
+                        .await
+                        .map_err(|e| eyre::eyre!("build_clusters: {e:?}"))?
+                }
+            };
             println!("clusters: {}", clusters.len());
             for c in &clusters {
                 println!(
@@ -1180,6 +1255,12 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             debounce_secs,
             dry_run,
         } => {
+            // Stays FS-native by design: this is a long-running
+            // inotify watcher over a LOCAL directory. The server's
+            // Watcher service is a toggle for its own co-resident
+            // watcher (`task wiki watch on|off`), and no RPC
+            // streams FS events — watching a remote org's disk
+            // from here is not a thing.
             let vault = vault
                 .canonicalize()
                 .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
@@ -1220,23 +1301,46 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             Ok(())
         }
         WikiCmd::Health { vault } => {
-            let vault = vault
-                .canonicalize()
-                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
-            let wiki = wiki_live::WikiLive::open(&vault);
-            let h = wiki.health().map_err(|e| eyre::eyre!("health: {e}"))?;
-            println!("bootstrapped:    {}", h.bootstrap_done);
-            println!("schema_present:  {}", h.schema_present);
-            println!("purpose_present: {}", h.purpose_present);
-            println!("pages:           {}", h.page_count);
-            println!("sources:         {}", h.source_count);
-            println!("queue_depth:     {}", h.queue_depth);
-            println!("queue_failed:    {}", h.queue_failed);
-            if let Some(t) = h.last_ingest_at {
-                println!("last_ingest_at:  {t}");
-            }
-            if let Some(t) = h.last_rescan_at {
-                println!("last_rescan_at:  {t}");
+            match route_vault(&vault)? {
+                VaultRoute::Local(vault) => {
+                    let wiki = wiki_live::WikiLive::open(&vault);
+                    let h = wiki.health().map_err(|e| eyre::eyre!("health: {e}"))?;
+                    println!("bootstrapped:    {}", h.bootstrap_done);
+                    println!("schema_present:  {}", h.schema_present);
+                    println!("purpose_present: {}", h.purpose_present);
+                    println!("pages:           {}", h.page_count);
+                    println!("sources:         {}", h.source_count);
+                    println!("queue_depth:     {}", h.queue_depth);
+                    println!("queue_failed:    {}", h.queue_failed);
+                    if let Some(t) = h.last_ingest_at {
+                        println!("last_ingest_at:  {t}");
+                    }
+                    if let Some(t) = h.last_rescan_at {
+                        println!("last_rescan_at:  {t}");
+                    }
+                }
+                VaultRoute::Vox(url) => {
+                    // Same snapshot via the Schema service. The
+                    // wire shape carries no `last_rescan_at`, so
+                    // that (conditional) line is simply absent
+                    // here.
+                    let c: wiki_proto::service::schema::SchemaClient =
+                        establish_for_url(&url).await?;
+                    let h = c
+                        .health(ORG_WIKI_ID.to_string())
+                        .await
+                        .map_err(|e| eyre::eyre!("health: {e:?}"))?;
+                    println!("bootstrapped:    {}", h.bootstrap_done);
+                    println!("schema_present:  {}", h.schema_present);
+                    println!("purpose_present: {}", h.purpose_present);
+                    println!("pages:           {}", h.page_count);
+                    println!("sources:         {}", h.source_count);
+                    println!("queue_depth:     {}", h.queue_depth);
+                    println!("queue_failed:    {}", h.queue_failed);
+                    if let Some(t) = h.last_ingest_at {
+                        println!("last_ingest_at:  {t}");
+                    }
+                }
             }
             Ok(())
         }
@@ -1246,20 +1350,104 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             flatten,
             ext,
         } => {
-            let vault = vault
-                .canonicalize()
-                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
-            let wiki = wiki_live::WikiLive::open(&vault);
-            wiki.bootstrap()
-                .map_err(|e| eyre::eyre!("bootstrap: {e}"))?;
-            let opts = wiki_live::ImportFolderOpts {
-                preserve_structure: !flatten,
-                include_exts: ext.split(',').map(|s| s.trim().to_lowercase()).collect(),
-                exclude_substrings: vec![".git/".into(), "node_modules/".into(), "target/".into()],
+            let include_exts: Vec<String> =
+                ext.split(',').map(|s| s.trim().to_lowercase()).collect();
+            let exclude_substrings = [".git/", "node_modules/", "target/"];
+            let refs = match route_vault(&vault)? {
+                VaultRoute::Local(vault) => {
+                    let wiki = wiki_live::WikiLive::open(&vault);
+                    wiki.bootstrap()
+                        .map_err(|e| eyre::eyre!("bootstrap: {e}"))?;
+                    let opts = wiki_live::ImportFolderOpts {
+                        preserve_structure: !flatten,
+                        include_exts,
+                        exclude_substrings: exclude_substrings
+                            .iter()
+                            .map(|s| (*s).to_owned())
+                            .collect(),
+                    };
+                    wiki.import_folder(&dir, opts)
+                        .map_err(|e| eyre::eyre!("import_folder: {e}"))?
+                }
+                VaultRoute::Vox(url) => {
+                    // The directory being imported is local by
+                    // definition; the WIKI is not. Mirror
+                    // `WikiLive::import_folder`'s walk + filters
+                    // here, then land each file over the wire via
+                    // `import_raw_source` (sha-deduped
+                    // server-side), exactly what the local helper
+                    // does underneath.
+                    use wiki_proto::service::raw_layer::RawLayerClient;
+                    if !dir.is_dir() {
+                        return Err(eyre::eyre!(
+                            "import_folder: {} is not a directory",
+                            dir.display()
+                        ));
+                    }
+                    let schema: wiki_proto::service::schema::SchemaClient =
+                        establish_for_url(&url).await?;
+                    schema
+                        .bootstrap(ORG_WIKI_ID.to_string())
+                        .await
+                        .map_err(|e| eyre::eyre!("bootstrap: {e:?}"))?;
+                    let raw: RawLayerClient = establish_for_url(&url).await?;
+                    let mut refs = Vec::new();
+                    for entry in walkdir::WalkDir::new(&dir)
+                        .into_iter()
+                        .filter_map(Result::ok)
+                    {
+                        let path = entry.path();
+                        if !path.is_file() {
+                            continue;
+                        }
+                        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                            continue;
+                        };
+                        if name.starts_with('.') {
+                            continue;
+                        }
+                        let rel = path.strip_prefix(&dir).map_or_else(
+                            |_| name.to_string(),
+                            |p| p.to_string_lossy().to_string(),
+                        );
+                        if exclude_substrings.iter().any(|sub| rel.contains(sub)) {
+                            continue;
+                        }
+                        if !include_exts.is_empty() {
+                            let e = path
+                                .extension()
+                                .and_then(|s| s.to_str())
+                                .map(str::to_ascii_lowercase)
+                                .unwrap_or_default();
+                            if !include_exts.contains(&e) {
+                                continue;
+                            }
+                        }
+                        let bytes = std::fs::read(path)?;
+                        let filename = if flatten {
+                            rel.replace(['/', '\\'], "_")
+                        } else {
+                            rel.replace('\\', "/")
+                        };
+                        let mime = archive_mime_for_filename(name);
+                        let r = raw
+                            .import_raw_source(
+                                ORG_WIKI_ID.to_string(),
+                                wiki_proto::raw::ImportRawSource {
+                                    filename,
+                                    mime,
+                                    title: String::new(),
+                                    bytes,
+                                    auto_enqueue: false,
+                                },
+                            )
+                            .await
+                            .map_err(|e| eyre::eyre!("import_raw_source {rel}: {e:?}"))?;
+                        refs.push(r);
+                    }
+                    refs
+                }
             };
-            let refs = wiki
-                .import_folder(&dir, opts)
-                .map_err(|e| eyre::eyre!("import_folder: {e}"))?;
             println!("Imported {} file(s) from {}", refs.len(), dir.display());
             for r in refs.iter().take(40) {
                 println!("  {} ({} bytes)", r.path, r.size);
@@ -1270,46 +1458,102 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             Ok(())
         }
         WikiCmd::Rescan { vault, enqueue } => {
-            let vault = vault
-                .canonicalize()
-                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
-            let wiki = wiki_live::WikiLive::open(&vault);
-            let diff = wiki
-                .rescan_sources()
-                .map_err(|e| eyre::eyre!("rescan: {e}"))?;
-            println!(
-                "created={} modified={} deleted={}",
-                diff.created.len(),
-                diff.modified.len(),
-                diff.deleted.len()
-            );
-            for c in &diff.created {
-                println!("  + {c}");
-            }
-            for m in &diff.modified {
-                println!("  ~ {m}");
-            }
-            for d in &diff.deleted {
-                println!("  - {d}");
-            }
-            if enqueue {
-                let mut count = 0;
-                for c in diff.created.iter().chain(diff.modified.iter()) {
-                    let abs = wiki.wiki_root().join(c);
-                    let bytes = std::fs::read(&abs)?;
-                    let kind = if diff.created.contains(c) {
-                        wiki_live::queue::SourceChange::Created
-                    } else {
-                        wiki_live::queue::SourceChange::Modified
-                    };
-                    wiki.enqueue_ingest(c, kind, &bytes)
-                        .map_err(|e| eyre::eyre!("enqueue {c}: {e}"))?;
-                    count += 1;
+            match route_vault(&vault)? {
+                VaultRoute::Local(vault) => {
+                    let wiki = wiki_live::WikiLive::open(&vault);
+                    let diff = wiki
+                        .rescan_sources()
+                        .map_err(|e| eyre::eyre!("rescan: {e}"))?;
+                    println!(
+                        "created={} modified={} deleted={}",
+                        diff.created.len(),
+                        diff.modified.len(),
+                        diff.deleted.len()
+                    );
+                    for c in &diff.created {
+                        println!("  + {c}");
+                    }
+                    for m in &diff.modified {
+                        println!("  ~ {m}");
+                    }
+                    for d in &diff.deleted {
+                        println!("  - {d}");
+                    }
+                    if enqueue {
+                        let mut count = 0;
+                        for c in diff.created.iter().chain(diff.modified.iter()) {
+                            let abs = wiki.wiki_root().join(c);
+                            let bytes = std::fs::read(&abs)?;
+                            let kind = if diff.created.contains(c) {
+                                wiki_live::queue::SourceChange::Created
+                            } else {
+                                wiki_live::queue::SourceChange::Modified
+                            };
+                            wiki.enqueue_ingest(c, kind, &bytes)
+                                .map_err(|e| eyre::eyre!("enqueue {c}: {e}"))?;
+                            count += 1;
+                        }
+                        println!("enqueued {count} ingest task(s)");
+                    }
                 }
-                println!("enqueued {count} ingest task(s)");
+                VaultRoute::Vox(url) => {
+                    // `rescan_diff` is the read-only sibling of
+                    // the raw layer's `rescan_sources` RPC —
+                    // added precisely so this command keeps its
+                    // "diff first, enqueue only on --enqueue"
+                    // contract over the wire.
+                    use wiki_proto::service::ingest::IngestClient;
+                    use wiki_proto::service::raw_layer::RawLayerClient;
+                    let raw: RawLayerClient = establish_for_url(&url).await?;
+                    let diff = raw
+                        .rescan_diff(ORG_WIKI_ID.to_string())
+                        .await
+                        .map_err(|e| eyre::eyre!("rescan: {e:?}"))?;
+                    println!(
+                        "created={} modified={} deleted={}",
+                        diff.created.len(),
+                        diff.modified.len(),
+                        diff.deleted.len()
+                    );
+                    for c in &diff.created {
+                        println!("  + {c}");
+                    }
+                    for m in &diff.modified {
+                        println!("  ~ {m}");
+                    }
+                    for d in &diff.deleted {
+                        println!("  - {d}");
+                    }
+                    if enqueue {
+                        let ing: IngestClient = establish_for_url(&url).await?;
+                        let mut count = 0;
+                        for c in diff.created.iter().chain(diff.modified.iter()) {
+                            let kind = if diff.created.contains(c) {
+                                wiki_proto::ingest::SourceChange::Created
+                            } else {
+                                wiki_proto::ingest::SourceChange::Modified
+                            };
+                            ing.enqueue_ingest(ORG_WIKI_ID.to_string(), c.clone(), kind)
+                                .await
+                                .map_err(|e| eyre::eyre!("enqueue {c}: {e:?}"))?;
+                            count += 1;
+                        }
+                        println!("enqueued {count} ingest task(s)");
+                    }
+                }
             }
             Ok(())
         }
+        // `lint` / `dedup` / `research` / `ingest` / `deepen` stay
+        // FS-native: they RUN the LLM here (agent-codex is a local
+        // process supervisor) and `agent_wiki::bridge` drives it
+        // against a concrete `WikiLive` handle. Putting their data
+        // over vox means either running the agent server-side (the
+        // server's `Lint::lint` is an explicit stub) or re-basing
+        // the bridge on the wiki RPC clients — a real refactor,
+        // reported as a gap, not smuggled in here. Their *outputs*
+        // (findings, queue rows, pages) are visible over vox via
+        // `findings` / `ingest-queue` / `review`.
         WikiCmd::Lint {
             vault,
             model,
@@ -1338,18 +1582,36 @@ pub(crate) async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             Ok(())
         }
         WikiCmd::Findings { vault } => {
-            let vault = vault
-                .canonicalize()
-                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
-            let wiki = wiki_live::WikiLive::open(&vault);
-            let open = wiki
-                .list_findings(Some(wiki_live::FindingStatus::Open))
-                .map_err(|e| eyre::eyre!("list_findings: {e}"))?;
-            println!("Open findings: {}", open.len());
-            for f in &open {
-                println!("  {}  [{:?} {:?}] {}", f.id, f.kind, f.severity, f.title);
-                if !f.pages.is_empty() {
-                    println!("      pages: {}", f.pages.join(", "));
+            match route_vault(&vault)? {
+                VaultRoute::Local(vault) => {
+                    let wiki = wiki_live::WikiLive::open(&vault);
+                    let open = wiki
+                        .list_findings(Some(wiki_live::FindingStatus::Open))
+                        .map_err(|e| eyre::eyre!("list_findings: {e}"))?;
+                    println!("Open findings: {}", open.len());
+                    for f in &open {
+                        println!("  {}  [{:?} {:?}] {}", f.id, f.kind, f.severity, f.title);
+                        if !f.pages.is_empty() {
+                            println!("      pages: {}", f.pages.join(", "));
+                        }
+                    }
+                }
+                VaultRoute::Vox(url) => {
+                    // The wire shape names things differently
+                    // (kind→scope, title→message, pages→subjects)
+                    // but carries the same finding.
+                    let c: wiki_proto::service::lint::LintClient = establish_for_url(&url).await?;
+                    let open = c
+                        .list_findings(ORG_WIKI_ID.to_string())
+                        .await
+                        .map_err(|e| eyre::eyre!("list_findings: {e:?}"))?;
+                    println!("Open findings: {}", open.len());
+                    for f in &open {
+                        println!("  {}  [{:?} {:?}] {}", f.id, f.scope, f.severity, f.message);
+                        if !f.subjects.is_empty() {
+                            println!("      pages: {}", f.subjects.join(", "));
+                        }
+                    }
                 }
             }
             Ok(())

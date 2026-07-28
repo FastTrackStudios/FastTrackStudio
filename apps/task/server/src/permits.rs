@@ -332,7 +332,7 @@ table!(WIKI_CATALOG, "wiki-catalog", "wiki/catalog/**", [
 ]);
 table!(WIKI_RAW, "wiki-raw", "wiki/raw/**", [
     wa "import_raw_source", rd "list_raw_sources", rd "read_raw_source",
-    wa "delete_raw_source", wr "rescan_sources",
+    wa "delete_raw_source", wr "rescan_sources", wr "rescan_diff",
 ]);
 table!(WIKI_GRAPH, "wiki-graph", "wiki/graph/**", [
     wr "build_graph", rd "relevance", rd "clusters", rd "gaps",
