@@ -12,10 +12,13 @@
 //!   `CollabSession`) — **armed only while this pane is focused**, so a
 //!   split never runs two live CRDT sessions at once (the unfocused
 //!   pane falls back to the sha autosave, which still persists edits);
-//! - the editor sources (vault decorations + presence cursors, the
-//!   `[[`/`#` completion) and the `type:`-dispatch that renders a
-//!   `type: song` / `type: setlist` player, a `type: video` watch view,
-//!   a `.base` table, or the rich markdown editor;
+//! - the editor sources (vault decorations + presence cursors + the
+//!   registered widget decoration passes, the `[[`/`#` completion) and
+//!   the `type:` dispatch: `type: video` and `.base` stay shell views,
+//!   while every other typed note consults the
+//!   `task_widgets::WidgetRegistry` (the player's song/setlist widgets,
+//!   the section tabs, …) before falling through to the rich markdown
+//!   editor;
 //! - while focused, the shell status line (file · dirty · save · collab
 //!   · vim) and the `window.__taskVault` conformance mirror.
 //!
@@ -33,7 +36,7 @@ use fts_ui::prelude::*;
 use vault_proto::{PageMeta, TagCount};
 
 use crate::document_session::{SaveStatus, use_document_session};
-use crate::pages::vault::{FileMeta, basename_of, setlist_songs_from, song_slug_from};
+use crate::pages::vault::{FileMeta, basename_of};
 use crate::vault_lookup::{self, ClientVaultIndex};
 
 /// One open note. Mount keyed by `"{pane}:{path}"`.
@@ -86,10 +89,12 @@ pub(crate) fn NoteView(
     // tab), so the editor's inline `.md-properties` widget stays
     // collapsed — the class below is always `props-collapsed`.
     let props_open = use_signal(|| false);
-    // Setlist notes open straight into the full-screen Experience; `Esc`
-    // (or the close control) drops back to the embedded view.
-    let mut setlist_fullscreen =
-        use_signal(|| crate::pages::experience::ExperienceKind::Setlist.auto_fullscreen());
+    // A widget experience (the song/setlist player today) opens OVER
+    // this note; the claiming widget decides when to auto-open, and
+    // `Esc` / its close control drops back to the embedded view. Owned
+    // here so the shell can keep the note-body editor unmounted while a
+    // fullscreen experience owns the screen (see `note_body_visible`).
+    let widget_fullscreen = use_signal(|| false);
     let vim = use_signal(VimState::new);
     // Vim is a physical-keyboard idiom — decide once at mount.
     let vim = (!use_hook(editor::editor_view::coarse_pointer)).then_some(vim);
@@ -238,8 +243,18 @@ pub(crate) fn NoteView(
         });
     }
 
-    // Editor sources — created once, capturing the signals above.
-    let decorations = use_hook(|| crate::collab::collab_decoration_source(lookup, collab));
+    // Widget registry (filled once at the app root). The note view only
+    // ever talks to the registry — never to a provider crate.
+    let registry = use_context::<task_widgets::WidgetRegistry>();
+
+    // Editor sources — created once, capturing the signals above. The
+    // widget decoration passes (section tabs, …) ride along: they are
+    // app-lifetime plain fns, so baking them into the once-created
+    // source keeps `DecorationSource`'s Rc-identity equality contract.
+    let decorations = {
+        let passes = registry.decoration_passes();
+        use_hook(move || crate::collab::collab_decoration_source(lookup, collab, passes))
+    };
     let completion = use_hook(|| vault_lookup::vault_completion_source(link_candidates, tag_rows));
 
     // ── `type:` dispatch (from the folder index) ──────────────
@@ -252,162 +267,70 @@ pub(crate) fn NoteView(
             .map(|p| p.page_type.to_lowercase())
     });
     let is_video = current_type.read().as_deref() == Some("video");
-    let is_song = current_type.read().as_deref() == Some("song");
-    // Immersive Experience from `type:` + an optional `experience:`
-    // frontmatter key (`type: setlist` implies the setlist experience;
-    // `experience: <name>` selects one for any note).
-    let note_experience = {
-        let doc = session.state.peek().doc.to_string();
-        let exp = crate::pages::vault::frontmatter_value(&doc, "experience")
-            .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned());
-        crate::pages::experience::experience_of(current_type.read().as_deref(), exp.as_deref())
-    };
-    let is_setlist = note_experience == Some(crate::pages::experience::ExperienceKind::Setlist);
-    // A song note IS its player: once the type resolves, drop straight into
-    // the full-screen experience (this view remounts per note, so `armed`
-    // fires this exactly once — `Esc`/minimize then stays minimized on the
-    // compact streaming card until the next note).
-    {
-        let mut setlist_fullscreen = setlist_fullscreen;
-        let mut armed = use_signal(|| true);
-        use_effect(move || {
-            let is_song_now = current_type.read().as_deref() == Some("song");
-            if is_song_now && *armed.peek() {
-                armed.set(false);
-                setlist_fullscreen.set(true);
-            }
-        });
-    }
     let is_base = path
         .rsplit_once('.')
         .is_some_and(|(_, e)| e.eq_ignore_ascii_case("base"));
-    let (song_slug_value, song_front_value) = if is_song {
-        let doc = session.state.peek().doc.to_string();
-        (
-            song_slug_from(&doc, basename_of(&path)),
-            crate::pages::vault::song_front_from(&doc),
-        )
-    } else {
-        (String::new(), Default::default())
-    };
-    let setlist_songs_value = if is_setlist {
-        setlist_songs_from(&session.state.peek().doc.to_string())
-    } else {
-        Vec::new()
-    };
-    // A non-setlist note (e.g. an event) that EMBEDS a setlist via a
-    // standalone wikilink still gets a headless player so the embed's ▶
-    // buttons work: resolve the first embedded setlist through the vault
-    // index and queue its songs.
-    let embedded_setlist_songs: Vec<String> = if !is_setlist {
-        let doc = session.state.peek().doc.to_string();
-        let links = crate::pages::vault::setlist_song_links_from_body(&doc);
-        let guard = lookup.peek();
-        let kind_of = |target: &str| -> Option<String> {
-            let ix = guard.as_ref()?;
-            let meta = ix.meta(target)?;
-            let raw = ix.content(&meta.path)?;
-            crate::pages::vault::frontmatter_value(&raw, "type")
-                .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
-        };
-        // IMPLICIT setlist: song wikilinks directly in the note (an event
-        // IS its setlist — no separate setlist doc required) …
-        let direct: Vec<String> = links
-            .iter()
-            .filter(|t| kind_of(t).as_deref() == Some("song"))
-            .map(|t| crate::pages::vault::slugify(t))
-            .collect();
-        if !direct.is_empty() {
-            direct
-        } else {
-            // … falling back to the first EMBEDDED setlist note.
-            links
-                .iter()
-                .find_map(|target| {
-                    let ix = guard.as_ref()?;
-                    let meta = ix.meta(target)?;
-                    let raw = ix.content(&meta.path)?;
-                    (crate::pages::vault::frontmatter_value(&raw, "type")
-                        .map(|v| v.trim().trim_matches(['"', '\'']).trim() == "setlist")
-                        .unwrap_or(false))
-                    .then(|| crate::pages::vault::setlist_songs_from(&raw))
-                })
-                .unwrap_or_default()
-        }
-    } else {
-        Vec::new()
-    };
 
-    // Editor link clicks: `song-play:<name>` / `setlist-play:` drive the
-    // GLOBAL Now Playing player (mounted in the app shell, so playback
-    // survives navigation); wikilink targets navigate to the note
-    // (resolved through the vault index when possible).
+    // ── Note widgets (the registry) ───────────────────────────
+    // Everything the hand-wired setlist/song player used to be: build a
+    // `WidgetCtx` (note facts + lazy doc/vault access + nav callbacks —
+    // no shell internals) and ask the registry which specs claim the
+    // note. The first claimant with a render fn mounts below; boolean
+    // flags aggregate (OR) across all claimants.
     let nav_links = use_navigator();
-    let lookup_for_links = lookup;
-    let mut now_playing = use_context::<crate::chrome::NowPlaying>().0;
-    // The queue these strips belong to: the setlist's own songs, or (for a
-    // note that merely embeds a setlist) the embedded queue.
-    let queue_songs = if is_setlist {
-        setlist_songs_value.clone()
-    } else {
-        embedded_setlist_songs.clone()
+    let open_note = use_callback(move |p: String| {
+        nav_links.push(crate::routes::Route::VaultRoute { path: p, org: home() });
+    });
+    let note_href = task_ui_core::nav::use_note_href();
+    let widget_ctx = {
+        let doc_state = session.state;
+        let lookup_for_ctx = lookup;
+        task_widgets::WidgetCtx {
+            org: home.read().clone(),
+            path: path.clone(),
+            title: basename_of(&path).to_string(),
+            target: task_widgets::WidgetTarget::Note {
+                note_type: current_type.read().clone(),
+            },
+            fullscreen: widget_fullscreen,
+            open_note,
+            note_href,
+            doc: Rc::new(move || doc_state.peek().doc.to_string()),
+            resolve: Rc::new(move |name: &str| {
+                let guard = lookup_for_ctx.peek();
+                let ix = guard.as_ref()?;
+                let meta = ix.meta(name)?;
+                let path = meta.path.clone();
+                // A content miss QUEUES the lazy fetch; the editor state
+                // is poked when it lands, so a later ask resolves.
+                let content = ix.content(&path);
+                let note_type = content.as_deref().and_then(|raw| {
+                    crate::pages::vault::frontmatter_value(raw, "type")
+                        .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
+                });
+                Some(task_widgets::ResolvedTarget { path, note_type, content })
+            }),
+        }
     };
-    let queue_title = basename_of(&path).to_string();
+    let note_widgets = registry.note_matches(&widget_ctx);
+    // A claimant's fullscreen experience owns the screen → the note
+    // body must unmount (autosave-sink protection, see below).
+    let is_experience_note = note_widgets.iter().any(|s| s.fullscreen_owns_body);
+    // A claimed note may render its own title (the editor's typed title
+    // widget IS the title) — skip the shell's duplicate header.
+    let hide_note_header = note_widgets.iter().any(|s| s.hide_note_header);
+    let widget_render = note_widgets.iter().find_map(|s| s.render.clone());
+
+    // Editor link clicks: widget hrefs first (`song-play:` /
+    // `setlist-play:` / `event-tab:` … — dispatched through the
+    // registry at CLICK time, so a widget's queue reflects the live
+    // doc), then the shell's own schemes, then wikilink navigation
+    // (resolved through the vault index when possible).
+    let lookup_for_links = lookup;
+    let registry_for_links = registry.clone();
+    let link_ctx = widget_ctx.clone();
     let on_link_click = use_callback(move |href: String| {
-        if let Some(name) = href.strip_prefix("song-play:") {
-            let slug = crate::pages::vault::slugify(name);
-            // Play within the note's queue; a lone strip becomes a 1-song queue.
-            let songs = if queue_songs.is_empty() {
-                vec![slug.clone()]
-            } else {
-                queue_songs.clone()
-            };
-            let start = songs.iter().position(|s| *s == slug).unwrap_or(0);
-            let generation = now_playing.peek().generation + 1;
-            now_playing.set(crate::chrome::NowPlayingRequest {
-                generation,
-                org: home.read().clone(),
-                title: queue_title.clone(),
-                songs,
-                start,
-                toggle: false,
-            });
-            return;
-        }
-        if let Some(name) = href.strip_prefix("song-more:") {
-            // "…" more-actions on a song row → open the song note (its full
-            // action surface). A dedicated inline menu is a follow-up.
-            let page = name.split(['#', '|']).next().unwrap_or(name).trim();
-            let path = lookup_for_links
-                .peek()
-                .as_ref()
-                .and_then(|ix| ix.meta(page).map(|m| m.path.clone()))
-                .unwrap_or_else(|| format!("{page}.md"));
-            nav_links.push(crate::routes::Route::VaultRoute { path, org: home() });
-            return;
-        }
-        if href.starts_with("setlist-open:") {
-            // Open the full-screen setlist experience (the button lives in the
-            // editor's setlist-title widget, so it travels with an embedded
-            // setlist too).
-            setlist_fullscreen.set(true);
-            return;
-        }
-        if href.starts_with("setlist-play:") {
-            // Header ▶: start the whole setlist, or toggle if it's already
-            // the loaded queue.
-            let generation = now_playing.peek().generation + 1;
-            now_playing.set(crate::chrome::NowPlayingRequest {
-                generation,
-                org: home.read().clone(),
-                title: queue_title.clone(),
-                songs: queue_songs.clone(),
-                start: 0,
-                toggle: true,
-            });
-            return;
-        }
-        if crate::event_tabs::handle_tab_href(&href) {
+        if registry_for_links.handle_href(&href, &link_ctx) {
             return;
         }
         if let Some(target) = href.strip_prefix("scripture-open:") {
@@ -564,83 +487,28 @@ pub(crate) fn NoteView(
                         node: format!("video:{}", basename_of(&current)),
                     }
                 } else {
-                    if is_song {
-                        // A song IS its player. Full-screen (default on open):
-                        // the same immersive experience as a one-song set. Esc /
-                        // minimize drops to the compact streaming card below.
-                        if setlist_fullscreen() {
-                            crate::pages::experience::FullscreenExperience {
-                                title: basename_of(&path).to_string(),
-                                on_exit: move |_| setlist_fullscreen.set(false),
-                                task_player_ui::SetlistPlayer {
-                                    songs: vec![song_slug_value.clone()],
-                                    org: home.read().clone(),
-                                    fullscreen: true,
-                                }
-                            }
-                        } else {
-                            SongCard {
-                                title: basename_of(&path).to_string(),
-                                on_play: {
-                                    let slug = song_slug_value.clone();
-                                    let org = home.read().clone();
-                                    let qtitle = basename_of(&path).to_string();
-                                    move |_| {
-                                        let generation = now_playing.peek().generation + 1;
-                                        now_playing.set(crate::chrome::NowPlayingRequest {
-                                            generation,
-                                            org: org.clone(),
-                                            title: qtitle.clone(),
-                                            songs: vec![slug.clone()],
-                                            start: 0,
-                                            toggle: true,
-                                        });
-                                    }
-                                },
-                                on_open: move |_| setlist_fullscreen.set(true),
-                            }
-                        }
-                    }
-                    // Embedded-setlist + setlist playback now flows through the
-                    // GLOBAL Now Playing player (mounted in the app shell) so it
-                    // survives navigation — the strip/header clicks fire a
-                    // `NowPlayingRequest` via `on_link_click`. No per-note player.
-                    if is_setlist {
-                        // Setlist Experience: auto full-screen (an overlay
-                        // that escapes the pane + sidebars), Esc to exit.
-                        // Embedded fallback keeps a re-enter control.
-                        if setlist_fullscreen() {
-                            crate::pages::experience::FullscreenExperience {
-                                title: basename_of(&path).to_string(),
-                                on_exit: move |_| setlist_fullscreen.set(false),
-                                task_player_ui::SetlistPlayer {
-                                    songs: setlist_songs_value.clone(),
-                                    org: home.read().clone(),
-                                    fullscreen: true,
-                                }
-                            }
-                        }
-                        // The visible setlist header + song strips are the
-                        // editor's own widgets (the note's H1). Their ▶ clicks
-                        // route to the global Now Playing player, and the
-                        // header's "Open" button opens the full-screen
-                        // experience — both via `on_link_click`. So the
-                        // embedded (non-fullscreen) view needs nothing mounted
-                        // here, and the Open control travels with an embedded
-                        // setlist.
-                    }
+                    // The note's widget view (registry-matched): the
+                    // song/setlist player experience today. The claiming
+                    // widget decides embedded-vs-fullscreen itself via the
+                    // shared `widget_fullscreen` signal; an embedded setlist's
+                    // visible header + song strips are the editor's own
+                    // decorations, whose ▶/Open clicks arrive as hrefs through
+                    // `on_link_click` → the registry.
+                    {widget_render.as_ref().map(|render| render(widget_ctx.clone()))}
                     // The note body (frontmatter + Markdown editor) is bound to
                     // `session.state`, which autosaves to the note file. A
-                    // fullscreen experience (e.g. the setlist) draws its OWN
-                    // editors on top; if we also kept this one mounted beneath the
-                    // overlay it would still catch stray keystrokes/edits and
-                    // autosave them into the note — which corrupted the setlist's
-                    // frontmatter when the keyflow-source editor was used. So skip
-                    // it entirely while a fullscreen experience owns the screen.
-                    if note_body_visible(is_setlist || is_song, setlist_fullscreen()) {
-                        // Setlists + events: the typed title widget in the
-                        // editor IS the title — skip the duplicate header.
-                        if !is_setlist && current_type.read().as_deref() != Some("event") {
+                    // fullscreen widget experience (e.g. the setlist) draws its
+                    // OWN editors on top; if we also kept this one mounted
+                    // beneath the overlay it would still catch stray
+                    // keystrokes/edits and autosave them into the note — which
+                    // corrupted the setlist's frontmatter when the
+                    // keyflow-source editor was used. So skip it entirely while
+                    // a fullscreen experience owns the screen.
+                    if note_body_visible(is_experience_note, widget_fullscreen()) {
+                        // A claimed note may render its own title (the editor's
+                        // typed title widget IS the title) — skip the shell's
+                        // duplicate header when a claimant says so.
+                        if !hide_note_header {
                             crate::pages::note_header::NoteHeader {
                                 home,
                                 props_open,
@@ -706,56 +574,6 @@ fn raw_body_text(text: &str) -> String {
 /// opening). Not mounting it removes that sink entirely.
 fn note_body_visible(is_experience_note: bool, fullscreen: bool) -> bool {
     !(is_experience_note && fullscreen)
-}
-
-/// The compact, Apple-Music-style card for a song note in its minimized
-/// (embedded) state: artwork tile + title / artist + a Play button (drives the
-/// global Now Playing stream) and an "Open" that launches the full-screen
-/// player experience. The title splits on `" - "` (`Praise - Elevation
-/// Worship` → title `Praise`, artist `Elevation Worship`).
-#[component]
-fn SongCard(title: String, on_play: EventHandler<()>, on_open: EventHandler<()>) -> Element {
-    let (name, artist) = match title.split_once(" - ") {
-        Some((t, a)) => (t.trim().to_string(), a.trim().to_string()),
-        None => (title.clone(), String::new()),
-    };
-    let initial = name
-        .chars()
-        .next()
-        .map(|c| c.to_uppercase().to_string())
-        .unwrap_or_else(|| "♪".to_string());
-    rsx! {
-        div { class: "mx-4 my-4 flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm",
-            // Artwork tile (initial placeholder — real art slots in later).
-            div { class: "flex size-12 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary/70 to-primary text-lg font-bold text-primary-foreground",
-                "{initial}"
-            }
-            div { class: "min-w-0 flex-1",
-                div { class: "truncate text-sm font-semibold text-foreground", "{name}" }
-                if !artist.is_empty() {
-                    div { class: "truncate text-xs text-muted-foreground", "{artist}" }
-                }
-            }
-            // Play → global Now Playing stream.
-            button {
-                class: "flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90",
-                title: "Play",
-                onclick: move |_| on_play.call(()),
-                svg {
-                    view_box: "0 0 24 24",
-                    fill: "currentColor",
-                    class: "size-4 translate-x-[1px]",
-                    path { d: "M8 5v14l11-7z" }
-                }
-            }
-            // Open → the full-screen player experience.
-            button {
-                class: "shrink-0 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                onclick: move |_| on_open.call(()),
-                "Open"
-            }
-        }
-    }
 }
 
 #[cfg(test)]

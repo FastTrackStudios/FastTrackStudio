@@ -90,7 +90,7 @@ pub fn InboxView() -> Element {
     // `handle_esc: false` because ProcessReview binds Esc (and the triage
     // keys) itself.
     rsx! {
-        crate::pages::experience::FullscreenExperience {
+        task_widgets::FullscreenExperience {
             title: "Inbox",
             handle_esc: false,
             on_exit: move |()| {

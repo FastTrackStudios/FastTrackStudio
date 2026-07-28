@@ -17,6 +17,10 @@ fts-ui.workspace = true
 # shape (`SongFront`). Deliberately the ONLY task-shell dependency —
 # everything else here is session/daw domain.
 task-ui-core.workspace = true
+# The note-widget contract: this crate PROVIDES the `type: song` /
+# `type: setlist` note widgets + embed href handling (`src/widgets.rs`)
+# that the shell's note view mounts through the registry.
+task-widgets.workspace = true
 
 # Presentational session components + the global signals the player
 # drives each tick (mixer, transport, progress bars, chart view state).

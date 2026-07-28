@@ -1253,155 +1253,6 @@ pub(crate) fn basename_of(path: &str) -> &str {
     file.strip_suffix(".md").unwrap_or(file)
 }
 
-/// Media slug for a `type: song` note. Prefers a `song_slug:` (or `slug:`)
-/// key in the leading YAML frontmatter block; otherwise slugifies the note
-/// basename. The slug selects `/media/songs/{slug}/…` (served same-origin).
-pub(crate) fn song_slug_from(text: &str, basename: &str) -> String {
-    if let Some(v) = frontmatter_value(text, "song_slug").or_else(|| frontmatter_value(text, "slug"))
-    {
-        let v = v.trim().trim_matches(['"', '\'']).trim();
-        if !v.is_empty() {
-            return v.to_owned();
-        }
-    }
-    slugify(basename)
-}
-
-/// Ordered media slugs for a `type: setlist` note, parsed from the `songs:`
-/// YAML list in the leading frontmatter. Accepts both the block form
-///
-/// ```yaml
-/// songs:
-///   - song-a
-///   - song-b
-/// ```
-///
-/// and the inline flow form `songs: [song-a, song-b]`. Each entry is trimmed
-/// of quotes/whitespace; blanks are dropped.
-/// Songs referenced as standalone `[[SongTitle]]` wikilinks in the note
-/// BODY, in document order — the composable authoring form: one wikilink
-/// per line = one setlist entry, slugified from the link target. Lines may
-/// be plain (`[[Praise]]`) or list items (`- [[Praise]]`, `1. [[Praise]]`).
-pub(crate) fn setlist_songs_from_body(text: &str) -> Vec<String> {
-    // Skip the frontmatter block if present.
-    let body = text
-        .strip_prefix("---")
-        .and_then(|rest| rest.split_once("\n---").map(|(_, b)| b))
-        .unwrap_or(text);
-    let mut out = Vec::new();
-    for line in body.lines() {
-        let t = line.trim();
-        // Allow list markers / numbering before the link.
-        let t = t
-            .trim_start_matches(|c: char| c.is_ascii_digit())
-            .trim_start_matches(['-', '*', '.', ')'])
-            .trim_start();
-        let Some(inner) = t.strip_prefix("[[").and_then(|r| r.strip_suffix("]]")) else {
-            continue;
-        };
-        // `[[Target|alias]]` → target; `[[Target#section]]` → target.
-        let target = inner
-            .split('|')
-            .next()
-            .unwrap_or(inner)
-            .split('#')
-            .next()
-            .unwrap_or(inner)
-            .trim();
-        // Strip a `Songs/` folder prefix if the link is fully qualified.
-        let target = target.strip_prefix("Songs/").unwrap_or(target);
-        if !target.is_empty() {
-            let slug = slugify(target);
-            if !out.contains(&slug) {
-                out.push(slug);
-            }
-        }
-    }
-    out
-}
-
-/// The RAW wikilink target names of a setlist body, in document order
-/// (the un-slugified companion of [`setlist_songs_from_body`]).
-pub(crate) fn setlist_song_links_from_body(text: &str) -> Vec<String> {
-    let body = text
-        .strip_prefix("---")
-        .and_then(|rest| rest.split_once("\n---").map(|(_, b)| b))
-        .unwrap_or(text);
-    let mut out = Vec::new();
-    for line in body.lines() {
-        let t = line.trim();
-        let t = t
-            .trim_start_matches(|c: char| c.is_ascii_digit())
-            .trim_start_matches(['-', '*', '.', ')'])
-            .trim_start();
-        let Some(inner) = t.strip_prefix("[[").and_then(|r| r.strip_suffix("]]")) else {
-            continue;
-        };
-        let target = inner
-            .split(['|', '#'])
-            .next()
-            .unwrap_or(inner)
-            .trim()
-            .trim_start_matches("Songs/");
-        if !target.is_empty() && !out.iter().any(|s: &String| s == target) {
-            out.push(target.to_owned());
-        }
-    }
-    out
-}
-
-pub(crate) fn setlist_songs_from(text: &str) -> Vec<String> {
-    // The composable form wins: standalone [[SongTitle]] wikilinks in the
-    // body, in document order. The frontmatter `songs:` list remains as
-    // the fallback for notes that predate wikilink authoring.
-    let from_body = setlist_songs_from_body(text);
-    if !from_body.is_empty() {
-        return from_body;
-    }
-    setlist_songs_from_frontmatter(text)
-}
-
-fn setlist_songs_from_frontmatter(text: &str) -> Vec<String> {
-    let Some(rest) = text.strip_prefix("---") else {
-        return Vec::new();
-    };
-    let Some((front, _)) = rest.split_once("\n---") else {
-        return Vec::new();
-    };
-    let clean = |s: &str| s.trim().trim_matches(['"', '\'']).trim().to_owned();
-
-    let mut lines = front.lines();
-    let mut out = Vec::new();
-    while let Some(line) = lines.next() {
-        let trimmed = line.trim_start();
-        let Some(after) = trimmed.strip_prefix("songs:") else {
-            continue;
-        };
-        let after = after.trim();
-        // Inline flow list: songs: [a, b, c]
-        if let Some(inner) = after.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            out.extend(inner.split(',').map(clean).filter(|s| !s.is_empty()));
-            return out;
-        }
-        // Block list: subsequent `- item` lines.
-        for l in lines.by_ref() {
-            let t = l.trim_start();
-            if let Some(item) = t.strip_prefix("- ").or_else(|| t.strip_prefix('-')) {
-                let v = clean(item);
-                if !v.is_empty() {
-                    out.push(v);
-                }
-            } else if t.is_empty() {
-                continue;
-            } else {
-                break; // next frontmatter key ends the list
-            }
-        }
-        return out;
-    }
-    out
-}
-
 // ── shared frontmatter readers ───────────────────────────────
 
 // The frontmatter readers (`frontmatter_value`, `front_block_maps`,
@@ -1410,8 +1261,9 @@ fn setlist_songs_from_frontmatter(text: &str) -> Vec<String> {
 // without depending on this shell. Re-exported at the old paths —
 // `crate::pages::vault::SongFront` still resolves.
 pub use task_ui_core::frontmatter::{
-    FrontSection, FrontStem, SongFront, front_block_maps, frontmatter_value, slugify,
-    song_front_from,
+    FrontSection, FrontStem, SongFront, front_block_maps, frontmatter_value,
+    setlist_song_links_from_body, setlist_songs_from, setlist_songs_from_body, slugify,
+    song_front_from, song_slug_from,
 };
 
 /// Starter scaffold for a freshly-created note: an empty-but-present

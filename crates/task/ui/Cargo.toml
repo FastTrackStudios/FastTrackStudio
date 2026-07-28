@@ -44,6 +44,13 @@ task-ui-core.workspace = true
 # `keyflow` (engraver), `editor-keyflow{,-lang}` and — on wasm — `daw`,
 # `daw-standalone` and `session` are all its business now, not ours.
 task-player-ui.workspace = true
+# The note-widget contract: the registry the note view consults, the
+# WidgetCtx it builds, and the shared FullscreenExperience chrome. The
+# provider crates below are named ONLY at the app-root registration
+# site (app.rs).
+task-widgets.workspace = true
+# Widget provider: in-note section tabs (type: event / tabs: true).
+task-note-tabs.workspace = true
 share-proto = { workspace = true }
 # `vox` for the `DayTemplatesClient` the schedule page calls to load
 # the day-plan overlay. Wasm-clean (serde-only client side).

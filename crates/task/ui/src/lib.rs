@@ -22,7 +22,6 @@ pub mod app;
 pub mod app_views;
 pub mod auth;
 pub mod chrome;
-pub mod event_tabs;
 pub mod collab;
 pub mod document_session;
 pub mod feeds;
