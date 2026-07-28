@@ -222,6 +222,7 @@ members = [
     "features/fx/level/level-dsp",
     "features/fx/modulation/modulation",
     "features/fx/modulation/chorus-dsp",
+    "features/fx/multiband",
     "features/fx/modulation/pattern-ui",
     "features/fx/modulation/trem-dsp",
     "features/fx/modulation/wah-dsp",
@@ -584,6 +585,7 @@ comp-dsp = { path = "features/fx/comp/comp-dsp" }
 reverb-dsp = { path = "features/fx/reverb/reverb-dsp" }
 delay-dsp = { path = "features/fx/delay/delay-dsp" }
 chorus-dsp = { path = "features/fx/modulation/chorus-dsp" }
+multiband-dsp = { path = "features/fx/multiband" }
 pattern-ui = { path = "features/fx/modulation/pattern-ui" }
 trem-dsp = { path = "features/fx/modulation/trem-dsp" }
 wah-dsp = { path = "features/fx/modulation/wah-dsp" }
