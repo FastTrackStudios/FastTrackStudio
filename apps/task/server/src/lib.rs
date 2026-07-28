@@ -1463,8 +1463,67 @@ pub fn router(state: AppState) -> Router {
         .merge(server_mgmt)
         .merge(watch_bridge::watch_router())
         .merge(blob_router)
-        .layer(tower_http::cors::CorsLayer::permissive())
+        .layer(cors_layer())
         .with_state(state)
+}
+
+/// CORS policy. **Default is unchanged**: with `TASK_CORS_ALLOWED_ORIGINS`
+/// unset (or `*`) this is the same `CorsLayer::permissive()` the server has
+/// always used — any origin, any method, any header — plus a startup
+/// warning, because "any origin" on an internet-reachable server that
+/// accepts bearer tokens is a policy nobody chose on purpose.
+///
+/// Set it to a comma-separated origin list
+/// (`https://task.example,https://app.example`) to restrict the `Origin`
+/// allowlist; methods and headers stay permissive so nothing else about
+/// the surface changes. Credentials are never allowed automatically —
+/// Task authenticates with bearer tokens in vox metadata, not cookies, so
+/// `Access-Control-Allow-Credentials` is not needed for the app to work.
+fn cors_layer() -> tower_http::cors::CorsLayer {
+    use axum::http::HeaderValue;
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+
+    let raw = std::env::var("TASK_CORS_ALLOWED_ORIGINS").unwrap_or_default();
+    let raw = raw.trim();
+    let permissive = |why: &str| {
+        tracing::warn!(
+            var = "TASK_CORS_ALLOWED_ORIGINS",
+            reason = why,
+            "CORS is PERMISSIVE — every origin may call this server. Set \
+             TASK_CORS_ALLOWED_ORIGINS to a comma-separated origin list on \
+             any internet-reachable deployment.",
+        );
+        CorsLayer::permissive()
+    };
+    if raw.is_empty() {
+        return permissive("unset");
+    }
+    if raw == "*" {
+        return permissive("set to `*`");
+    }
+    let origins: Vec<HeaderValue> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| match HeaderValue::from_str(s) {
+            Ok(v) => Some(v),
+            Err(_) => {
+                tracing::warn!(origin = s, "ignoring unparseable CORS origin");
+                None
+            }
+        })
+        .collect();
+    if origins.is_empty() {
+        // Better a loud fall-back to today's behaviour than a server that
+        // silently refuses every browser after a typo in the var.
+        return permissive("no parseable origins in the list");
+    }
+    tracing::info!(
+        origins = %raw,
+        count = origins.len(),
+        "CORS restricted to the configured origin allowlist",
+    );
+    CorsLayer::permissive().allow_origin(AllowOrigin::list(origins))
 }
 
 /// `GET /server/permissions` — the enforcement dry-run.
