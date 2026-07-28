@@ -1,10 +1,5 @@
 @import "tailwindcss";
-/* Vendored FTS design tokens — see apps/web/fts-theme.css header. The
- * canonical sheet lives in the (workspace-sibling) fts-ui repo, but a
- * relative @import that climbs out of the Task repo breaks the pure-Nix
- * image build (which sees only the Task repo), so it is vendored
- * in-tree — the same workaround ui-lab already uses. */
-@import "./fts-theme.css";
+@import "../fts-theme.css";
 
 /* Paths track the monorepo dissolve (c1c5754ce): the Task crates now
  * live at <root>/crates/task/* and <root>/features/task/*. */
