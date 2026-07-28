@@ -24,9 +24,27 @@ use crate::write::{default_project_path, write_project};
 
 /// File-backed `ProjectService` impl. Built once at server
 /// boot per org, cloned into the vox bridge.
-#[derive(Debug, Clone, architect::HasDispatcher)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct ProjectBackend {
     vault_root: PathBuf,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful mutation publishes the post-write state
+    /// here ([`ProjectEvent::Upserted`] / [`ProjectEvent::Deleted`]).
+    /// Sliding mailbox: a slow subscriber loses its *oldest* queued
+    /// events, which is correct for state-shaped payloads. Clones
+    /// share the hub (it's `Arc` inside), so the service mount and
+    /// the stream mount can each hold a backend clone.
+    #[cfg(feature = "vox")]
+    events: architect::PubSub<crate::service::ProjectEvent>,
+}
+
+// Manual impl: `PubSub` carries no `Debug`.
+impl std::fmt::Debug for ProjectBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProjectBackend")
+            .field("vault_root", &self.vault_root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ProjectBackend {
@@ -34,7 +52,21 @@ impl ProjectBackend {
     pub fn new(vault_root: impl Into<PathBuf>) -> Self {
         Self {
             vault_root: vault_root.into(),
+            #[cfg(feature = "vox")]
+            events: architect::PubSub::sliding(256),
         }
+    }
+
+    /// Publish a project change to every `events` subscriber. Call
+    /// only after the write succeeded — subscribers fold these into
+    /// state fetched via `list()`, so a phantom event would desync
+    /// them. No-op without the `vox` feature (no wire, no
+    /// subscribers).
+    fn publish(&self, event: crate::service::ProjectEvent) {
+        #[cfg(feature = "vox")]
+        self.events.publish(event);
+        #[cfg(not(feature = "vox"))]
+        let _ = event;
     }
 
     /// Vault root this backend reads from.
@@ -92,6 +124,7 @@ impl ProjectService for ProjectBackend {
         }
         write_project(&self.vault_root, &mut project, false)
             .map_err(|e| ProjectError::Io(format!("write: {e}")))?;
+        self.publish(crate::service::ProjectEvent::Upserted(project.clone()));
         Ok(project)
     }
 
@@ -109,6 +142,7 @@ impl ProjectService for ProjectBackend {
         next.date_modified = Some(Utc::now());
         write_project(&self.vault_root, &mut next, true)
             .map_err(|e| ProjectError::Io(format!("write: {e}")))?;
+        self.publish(crate::service::ProjectEvent::Upserted(next.clone()));
         Ok(next)
     }
 
@@ -135,6 +169,7 @@ impl ProjectService for ProjectBackend {
         // Re-serialize so frontmatter mtime tracks the move.
         write_project(&self.vault_root, &mut p, true)
             .map_err(|e| ProjectError::Io(format!("write: {e}")))?;
+        self.publish(crate::service::ProjectEvent::Upserted(p.clone()));
         Ok(p)
     }
 
@@ -156,6 +191,17 @@ impl ProjectService for ProjectBackend {
         let abs = self.vault_root.join(&p.path);
         std::fs::remove_file(&abs)
             .map_err(|e| ProjectError::Io(format!("remove {}: {e}", abs.display())))?;
+        self.publish(crate::service::ProjectEvent::Deleted(id));
         Ok(())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// `ProjectService` impl above, on every successful mutation.
+#[cfg(feature = "vox")]
+impl crate::service::ProjectServiceStreamSource for ProjectBackend {
+    fn events_hub(&self) -> &architect::PubSub<crate::service::ProjectEvent> {
+        &self.events
     }
 }

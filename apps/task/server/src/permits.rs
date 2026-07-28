@@ -216,12 +216,15 @@ table!(AGENT_ROUTINES, "agent-routines", "agent/routines/**", [
 table!(PROJECT, "project", "projects/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "rename", wa "delete",
 ]);
+table!(PROJECT_STREAM, "project-stream", "projects/**", [rd "events"]);
 table!(GOAL, "goal", "goals/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "rename", wa "delete",
 ]);
+table!(GOAL_STREAM, "goal-stream", "goals/**", [rd "events"]);
 table!(MILESTONE, "milestone", "milestones/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "rename", wa "delete",
 ]);
+table!(MILESTONE_STREAM, "milestone-stream", "milestones/**", [rd "events"]);
 table!(WORKSTREAM, "workstream", "workstreams/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update",
     wr "set_status", wa "delete", rd "rollup",
@@ -239,6 +242,7 @@ table!(TIMER, "timer", "timer/**", [
     wa "set_org_member_rate", wa "set_project_member_rate",
     rd "list_org_member_rates", rd "list_project_member_rates",
 ]);
+table!(TIMER_STREAM, "timer-stream", "timer/**", [rd "events"]);
 
 table!(THREADS, "threads", "threads/**", [
     rd "list_threads", rd "get_thread", cm "create_thread", rd "list_messages",
@@ -269,6 +273,10 @@ table!(SLOTS, "slots", "scheduling/slots/**", [rd "list_open_slots"]);
 table!(BOOKINGS, "bookings", "scheduling/bookings/**", [
     rd "list_bookings", rd "get_booking", wr "create_booking", wr "update_booking_status",
 ]);
+// The slice's one stream: attaching is a read over the whole
+// scheduling resource — the event names the sub-resource and
+// subscribers filter client-side.
+table!(SCHEDULING_STREAM, "scheduling-events", "scheduling/**", [rd "events"]);
 
 // ── Knowledge lane ───────────────────────────────────────────────────────
 
@@ -276,13 +284,16 @@ table!(INBOX, "inbox", "inbox/**", [
     rd "list_inbox", rd "review_queue", rd "get_inbox_item",
     wr "upsert_inbox_item", wa "delete_inbox_item",
 ]);
+table!(INBOX_STREAM, "inbox-stream", "inbox/**", [rd "events"]);
 table!(RECALL, "recall", "recall/**", [
     rd "list_cards", rd "review_queue", wr "upsert_card", wa "delete_card",
 ]);
+table!(RECALL_STREAM, "recall-stream", "recall/**", [rd "events"]);
 table!(CONTACTS, "contacts", "contacts/**", [
     rd "list_contacts", rd "get_contact", wr "upsert_contact", wa "delete_contact",
     rd "list_accounts", wr "upsert_account", wa "delete_account", wa "sync_account",
 ]);
+table!(CONTACTS_STREAM, "contacts-stream", "contacts/**", [rd "events"]);
 table!(TAGS, "tags", "tags/**", [
     rd "list_tags", rd "get_tag", wr "upsert_tag", wa "delete_tag",
 ]);
@@ -496,8 +507,11 @@ pub fn mounts() -> Vec<Mount> {
         ),
         // Work
         m(project::project_service_descriptor(), PROJECT),
+        m(project::project_stream_descriptor(), PROJECT_STREAM),
         m(goal::goal_service_descriptor(), GOAL),
+        m(goal::goal_stream_descriptor(), GOAL_STREAM),
         m(milestone::milestone_service_descriptor(), MILESTONE),
+        m(milestone::milestone_stream_descriptor(), MILESTONE_STREAM),
         m(workstream::workstream_service_descriptor(), WORKSTREAM),
         m(workstream::workstream_stream_descriptor(), WORKSTREAM_STREAM),
         m(task::task_service_descriptor(), TASK),
@@ -506,6 +520,7 @@ pub fn mounts() -> Vec<Mount> {
             timer_proto::service::timer_service_rpc_service_descriptor(),
             TIMER,
         ),
+        m(timer_proto::timer_stream_descriptor(), TIMER_STREAM),
         m(
             threads::service::threads_service_rpc_service_descriptor(),
             THREADS,
@@ -540,16 +555,23 @@ pub fn mounts() -> Vec<Mount> {
             scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
             BOOKINGS,
         ),
+        m(
+            scheduling_proto::scheduling_events_stream_descriptor(),
+            SCHEDULING_STREAM,
+        ),
         // Knowledge
         m(inbox_proto::service::inbox::inbox_rpc_service_descriptor(), INBOX),
+        m(inbox_proto::inbox_stream_descriptor(), INBOX_STREAM),
         m(
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             RECALL,
         ),
+        m(recall_proto::recall_stream_descriptor(), RECALL_STREAM),
         m(
             contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
             CONTACTS,
         ),
+        m(contacts_proto::contacts_stream_descriptor(), CONTACTS_STREAM),
         m(tag_proto::service::tags::tag_service_rpc_service_descriptor(), TAGS),
         m(scripture::scripture_service_descriptor(), SCRIPTURE),
         m(links::links_service_descriptor(), LINKS),

@@ -23,7 +23,7 @@ pub mod model;
 pub mod service;
 
 pub use model::{Milestone, Status, Tags};
-pub use service::{MilestoneError, MilestoneService, MilestoneServiceRpc};
+pub use service::{MilestoneError, MilestoneEvent, MilestoneService, MilestoneServiceRpc};
 
 // architect-emitted vox bits: the async client / dispatcher /
 // descriptor / serve helpers. Mount sites stitch the descriptor
@@ -34,4 +34,15 @@ pub use service::{
     Service as MilestoneServiceBridge, layer as milestone_service_layer,
     milestone_service_rpc_service_descriptor as milestone_service_descriptor,
     serve as serve_milestone_service,
+};
+
+// `#[subscribe] fn events` stream sibling — live milestone changes.
+// Mount `milestone_service_stream_layer(backend)` next to the base
+// service; subscribers drive a `MilestoneServiceStreamClient`.
+#[cfg(feature = "vox")]
+pub use service::{
+    MilestoneServiceStream, MilestoneServiceStreamClient, MilestoneServiceStreamSource,
+    milestone_service_stream_service_descriptor as milestone_stream_descriptor,
+    stream_layer as milestone_service_stream_layer,
+    stream_serve as serve_milestone_service_stream,
 };

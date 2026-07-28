@@ -56,7 +56,10 @@ pub use resolve::{
 pub use schedule::{
     AvailabilityRule, AvailabilitySchedule, ScheduleId, SlotQuery, TimeSlot, Weekday,
 };
-pub use service::{Bookings, CalendarEvents, DayPlans, DayTemplates, EventTypes, Schedules, Slots};
+pub use service::{
+    Bookings, CalendarEvents, DayPlans, DayTemplates, EventTypes, Schedules, SchedulingEvent,
+    SchedulingEvents, Slots,
+};
 pub use time_block::{
     BlockCategory, DayTemplate, DayTemplateId, TimeBlock, TimeBlockId, TimeOfDay,
 };
@@ -68,4 +71,15 @@ pub use time_block::{
 pub use service::{
     bookings::prelude::*, calendar_events::prelude::*, day_plans::prelude::*,
     day_templates::prelude::*, event_types::prelude::*, schedules::prelude::*, slots::prelude::*,
+};
+
+// The slice's one `#[subscribe]` stream — live scheduling changes
+// across every sub-resource. Mount
+// `service::events::stream_layer(backend)` next to the capability
+// services; subscribers drive a `SchedulingEventsStreamClient`.
+#[cfg(feature = "vox")]
+pub use service::events::{
+    SchedulingEventsStream, SchedulingEventsStreamClient, SchedulingEventsStreamSource,
+    scheduling_events_stream_service_descriptor as scheduling_events_stream_descriptor,
+    stream_layer as scheduling_events_stream_layer,
 };

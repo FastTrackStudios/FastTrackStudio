@@ -16,6 +16,10 @@ use uuid::Uuid;
 
 use task_ui_core::orgs::{OrgMeta, OrgSelection};
 
+/// Self-fetching `/goals` page — resolves the org selection, fans
+/// out its own `GoalService` calls, and renders [`GoalsScreen`].
+/// Shells that own a live goal store (the app shell's `stores!`
+/// layer) skip this and drive [`GoalsScreen`] directly.
 #[component]
 pub fn GoalsView() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
@@ -25,26 +29,52 @@ pub fn GoalsView() -> Element {
         fetch_goals(&slugs).await
     });
 
+    // While the org list is still being discovered the fetch resolves
+    // to an empty set — show loading rather than an empty hierarchy
+    // (mirrors the projects/home gate).
+    let (rows, error) = if org_list.read().is_empty() {
+        (None, None)
+    } else {
+        match &*goals.read_unchecked() {
+            Some(Ok(rows)) => (Some(rows.clone()), None),
+            Some(Err(e)) => (None, Some(e.clone())),
+            None => (None, None),
+        }
+    };
+    rsx! {
+        GoalsScreen { rows, error }
+    }
+}
+
+/// Props for [`GoalsScreen`] — the presentational goals page.
+#[derive(Props, Clone, PartialEq)]
+pub struct GoalsScreenProps {
+    /// Merged rows across the selected orgs; `None` while loading.
+    pub rows: Option<Vec<Goal>>,
+    /// Fetch error to surface instead of rows.
+    #[props(default)]
+    pub error: Option<String>,
+}
+
+/// The goals page chrome + hierarchy, rendered from caller-owned
+/// rows — the store-driven shell hands its live goal list in here.
+#[component]
+pub fn GoalsScreen(props: GoalsScreenProps) -> Element {
     // Current cycle highlight — drives the "you're here" pill.
     let today = chrono::Local::now().date_naive();
     let now_cycle =
         cycle::cycle_for_date(today, Weekday::Mon, FirstWeekRule::AtLeastFourDaysInYear);
 
-    // While the org list is still being discovered the fetch resolves
-    // to an empty set — show loading rather than an empty hierarchy
-    // (mirrors the projects/home gate).
-    let body = if org_list.read().is_empty() {
-        rsx! { Text { variant: TextVariant::Muted, "Loading goals…" } }
-    } else {
-        match &*goals.read_unchecked() {
-            Some(Ok(rows)) => render_loaded(rows, now_cycle.clone()),
-            Some(Err(e)) => rsx! {
-                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                    "Couldn't reach the goal service: {e}"
-                }
-            },
-            None => rsx! { Text { variant: TextVariant::Muted, "Loading goals…" } },
+    let body = if let Some(e) = &props.error {
+        rsx! {
+            div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                "Couldn't reach the goal service: {e}"
+            }
         }
+    } else if let Some(rows) = &props.rows {
+        render_loaded(rows, now_cycle.clone())
+    } else {
+        rsx! { Text { variant: TextVariant::Muted, "Loading goals…" } }
     };
 
     rsx! {

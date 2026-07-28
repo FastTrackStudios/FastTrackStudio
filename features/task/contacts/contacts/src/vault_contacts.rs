@@ -41,6 +41,13 @@ pub enum VaultContactsError {
 pub struct VaultContacts {
     root: PathBuf,
     write_lock: Arc<Mutex<()>>,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful contact mutation publishes the post-write
+    /// state here ([`contacts_proto::ContactsEvent`]); account edits
+    /// don't stream. Sliding mailbox: a slow subscriber loses its
+    /// *oldest* queued events, which is correct for state-shaped
+    /// payloads. Clones share the hub (`Arc` inside).
+    events: architect::PubSub<contacts_proto::ContactsEvent>,
 }
 
 impl VaultContacts {
@@ -54,6 +61,7 @@ impl VaultContacts {
         Ok(Self {
             root,
             write_lock: Arc::new(Mutex::new(())),
+            events: architect::PubSub::sliding(256),
         })
     }
 
@@ -168,11 +176,21 @@ impl Contacts for VaultContacts {
         let body = serialize_contact(contact).map_err(|e| ContactsError::Backend {
             message: e.to_string(),
         })?;
-        self.write_file(&format!("{CONTACTS_DIR}/{}.md", sanitize(&contact.id)), &body)
+        self.write_file(&format!("{CONTACTS_DIR}/{}.md", sanitize(&contact.id)), &body)?;
+        // Publish only after the write landed — subscribers fold
+        // these into state fetched via `list_contacts()`, so a
+        // phantom event would desync them. `sync_account` funnels
+        // through here, so each pulled contact publishes too.
+        self.events
+            .publish(contacts_proto::ContactsEvent::Upserted(contact.clone()));
+        Ok(())
     }
 
     fn delete_contact(&self, id: &str) -> Result<(), ContactsError> {
-        self.delete_file(&format!("{CONTACTS_DIR}/{}.md", sanitize(id)))
+        self.delete_file(&format!("{CONTACTS_DIR}/{}.md", sanitize(id)))?;
+        self.events
+            .publish(contacts_proto::ContactsEvent::Deleted(id.to_owned()));
+        Ok(())
     }
 
     fn list_accounts(&self) -> Result<Vec<CardDavAccount>, ContactsError> {
@@ -255,6 +273,15 @@ impl Contacts for VaultContacts {
             report.added, report.updated, report.skipped
         );
         Ok(report)
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// [`Contacts`] impl above, on every successful contact mutation.
+impl contacts_proto::ContactsStreamSource for VaultContacts {
+    fn events_hub(&self) -> &architect::PubSub<contacts_proto::ContactsEvent> {
+        &self.events
     }
 }
 

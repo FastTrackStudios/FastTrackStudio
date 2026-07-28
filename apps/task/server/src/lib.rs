@@ -1968,6 +1968,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             timer_proto::service::timer_service_rpc_service_descriptor(),
             timer_proto::service::serve(org.timer.clone()),
         )
+        // Live session changes — `TimerService`'s `#[subscribe]`
+        // stream sibling, served from the hub on the timer `Store`
+        // above. Sessions only; rate edits don't stream.
+        .merge(timer_proto::timer_service_stream_layer(org.timer.clone()))
         .with(
             threads::service::threads_service_rpc_service_descriptor(),
             threads::service::serve(org.threads.clone()),
@@ -2010,18 +2014,36 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
             scheduling_proto::service::bookings::serve(org.scheduling.clone()),
         )
+        // Live scheduling changes — the slice's ONE `#[subscribe]`
+        // stream (day templates / day plans / calendar events /
+        // event types / schedules / bookings), served from the hub
+        // on the `VaultScheduler` above. The event names which
+        // sub-resource changed; subscribers filter client-side.
+        .merge(scheduling_proto::scheduling_events_stream_layer(
+            org.scheduling.clone(),
+        ))
         .with(
             inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
             inbox_proto::service::inbox::serve(org.inbox.clone()),
         )
+        // Live inbox changes — `Inbox`'s `#[subscribe]` stream
+        // sibling, served from the hub on the `VaultInbox` above.
+        .merge(inbox_proto::inbox_stream_layer(org.inbox.clone()))
         .with(
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             recall_proto::service::recall::serve(org.recall.clone()),
         )
+        // Live deck changes — `Recall`'s `#[subscribe]` stream
+        // sibling, served from the hub on the `VaultRecall` above.
+        .merge(recall_proto::recall_stream_layer(org.recall.clone()))
         .with(
             contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
             contacts_proto::service::contacts::serve(org.contacts.clone()),
         )
+        // Live directory changes — `Contacts`' `#[subscribe]` stream
+        // sibling, served from the hub on the `VaultContacts` above
+        // (contacts only; account edits don't stream).
+        .merge(contacts_proto::contacts_stream_layer(org.contacts.clone()))
         .with(
             tag_proto::service::tags::tag_service_rpc_service_descriptor(),
             tag_proto::service::tags::serve(org.tags.clone()),
@@ -2094,14 +2116,27 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             project::project_service_descriptor(),
             project::serve_project_service(org.projects.clone()),
         )
+        // Live project changes — `ProjectService`'s `#[subscribe]`
+        // stream sibling. The hub lives on the `ProjectBackend`
+        // above; every CRUD path publishes into it.
+        .merge(project::project_service_stream_layer(org.projects.clone()))
         .with(
             goal::goal_service_descriptor(),
             goal::serve_goal_service(org.goals.clone()),
         )
+        // Live goal changes — `GoalService`'s `#[subscribe]` stream
+        // sibling, served from the hub on the `GoalBackend` above.
+        .merge(goal::goal_service_stream_layer(org.goals.clone()))
         .with(
             milestone::milestone_service_descriptor(),
             milestone::serve_milestone_service(org.milestones.clone()),
         )
+        // Live milestone changes — `MilestoneService`'s
+        // `#[subscribe]` stream sibling, served from the hub on the
+        // `MilestoneBackend` above.
+        .merge(milestone::milestone_service_stream_layer(
+            org.milestones.clone(),
+        ))
         .with(
             workstream::workstream_service_descriptor(),
             workstream::serve_workstream_service(org.workstreams.clone()),
