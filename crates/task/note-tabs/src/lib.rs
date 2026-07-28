@@ -13,7 +13,7 @@
 //! section, that section becomes active automatically, so editing never
 //! fights the tabs.
 //!
-//! The shell knows none of this: [`widget_specs`] hands the decoration
+//! The shell knows none of this: [`widgets`] hands the decoration
 //! pass + href handler to the `task-widgets` registry at the app root.
 
 use dioxus::prelude::*;
@@ -28,16 +28,18 @@ use task_widgets::{WidgetMatch, WidgetSpec};
 /// *event-type* behavior — the editor's typed title widget IS an event's
 /// header — and must not leak onto arbitrary `tabs: true` notes.
 #[must_use]
-pub fn widget_specs() -> Vec<WidgetSpec> {
+pub fn widgets() -> Vec<WidgetSpec> {
     vec![
         WidgetSpec::new(
             "note-tabs",
             vec![WidgetMatch::NoteType("event"), WidgetMatch::NoteFlag("tabs")],
         )
         .decorations(event_tab_decorations)
-        .on_href(|href, _ctx| handle_tab_href(href)),
+        .on_href(|href, _ctx| handle_tab_href(href))
+        .plugin("core"),
         WidgetSpec::new("note-tabs.event-header", vec![WidgetMatch::NoteType("event")])
-            .hide_note_header(),
+            .hide_note_header()
+            .plugin("core"),
     ]
 }
 

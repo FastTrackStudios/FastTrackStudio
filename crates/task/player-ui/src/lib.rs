@@ -71,7 +71,7 @@ pub use now_playing::{
 pub use setlist_session::SetlistPlayer;
 pub use setlist_stream::SetlistStreamPlayer;
 pub use song_session::SongView;
-pub use widgets::widget_specs;
+pub use self::widgets::widgets;
 
 /// An org's `MediaServiceClient` — content-addressed blob bytes
 /// streamed over the vox lane itself (`Tx<MediaChunk>`), no HTTP

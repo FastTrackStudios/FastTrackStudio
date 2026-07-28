@@ -34,14 +34,16 @@ use task_widgets::{FullscreenExperience, WidgetCtx, WidgetMatch, WidgetSpec, Wid
 
 use crate::context::{NowPlaying, NowPlayingRequest};
 
-/// The player's widget specs — register at the app root.
+/// The player's widget specs — the `fasttrackstudio` plugin's widget
+/// contribution, registered (per provider) at the app root.
 #[must_use]
-pub fn widget_specs() -> Vec<WidgetSpec> {
+pub fn widgets() -> Vec<WidgetSpec> {
     vec![
         WidgetSpec::new("player.song", vec![WidgetMatch::NoteType("song")])
             .render(|ctx| rsx! { SongNoteWidget { ctx } })
             .on_href(player_href)
-            .fullscreen_owns_body(),
+            .fullscreen_owns_body()
+            .plugin("fasttrackstudio"),
         WidgetSpec::new(
             "player.setlist",
             vec![
@@ -53,12 +55,14 @@ pub fn widget_specs() -> Vec<WidgetSpec> {
         .on_href(player_href)
         // The editor's typed setlist-title widget IS the title.
         .hide_note_header()
-        .fullscreen_owns_body(),
+        .fullscreen_owns_body()
+        .plugin("fasttrackstudio"),
         WidgetSpec::new(
             "player.embed",
             vec![WidgetMatch::EmbedType("song"), WidgetMatch::EmbedType("setlist")],
         )
-        .on_href(player_href),
+        .on_href(player_href)
+        .plugin("fasttrackstudio"),
     ]
 }
 

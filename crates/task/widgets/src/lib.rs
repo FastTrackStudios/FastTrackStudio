@@ -16,10 +16,15 @@
 //! 4. forwards editor link clicks through
 //!    [`WidgetRegistry::handle_href`] before its own wikilink fallback.
 //!
-//! Registration is **explicit**: the app root builds the registry and
-//! calls [`WidgetRegistry::register`] with each provider's specs — no
-//! linker magic, no `inventory`, wasm-safe, greppable. That app-root
-//! call is the only place the shell may name a provider crate.
+//! Registration is **explicit**: each provider crate exposes one
+//! `widgets() -> Vec<WidgetSpec>` fn, and the app root builds the
+//! registry and calls [`WidgetRegistry::register`] with each provider's
+//! specs — no linker magic, no `inventory`, wasm-safe, greppable. That
+//! app-root call is the only place the shell may name a provider crate.
+//! Widgets are one contribution type of the Task **plugin** system: a
+//! spec can carry its owning plugin's catalog id
+//! ([`WidgetSpec::plugin`]) so the registry can later gate providers on
+//! an org's enabled plugin set.
 //!
 //! ## Match semantics and precedence
 //!
@@ -222,6 +227,11 @@ pub struct WidgetSpec {
     /// owns the screen and the host must unmount the note-body editor
     /// (autosave-sink protection).
     pub fullscreen_owns_body: bool,
+    /// The owning plugin's id from the `task-plugin` catalog
+    /// (`"fasttrackstudio"`, `"scripture"`, …). A hook only for now:
+    /// the registry will later drop specs whose plugin is disabled for
+    /// the org. `None` (or `"core"`) means always available.
+    pub plugin: Option<&'static str>,
 }
 
 impl WidgetSpec {
@@ -237,6 +247,7 @@ impl WidgetSpec {
             decorations: None,
             hide_note_header: false,
             fullscreen_owns_body: false,
+            plugin: None,
         }
     }
 
@@ -273,6 +284,14 @@ impl WidgetSpec {
     #[must_use]
     pub fn fullscreen_owns_body(mut self) -> Self {
         self.fullscreen_owns_body = true;
+        self
+    }
+
+    /// Name the owning plugin (a `task-plugin` catalog id) so the
+    /// registry can later gate this spec on the org's enabled set.
+    #[must_use]
+    pub fn plugin(mut self, id: &'static str) -> Self {
+        self.plugin = Some(id);
         self
     }
 
