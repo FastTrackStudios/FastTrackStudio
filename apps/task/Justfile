@@ -1,7 +1,15 @@
-# Task workspace recipes
+# Task recipes.
+#
+# Run from `apps/task/` — `just` sets the working directory to this
+# file's directory, so every relative path below is relative to
+# `apps/task/`. Cargo recipes walk up to the ONE root workspace
+# (see the repo-root CLAUDE.md), so `--workspace` here means the whole
+# FastTrackStudio monorepo, not just Task; use `-p <crate>` when you
+# only care about a Task crate.
+#
 # Run commands: just <recipe-name>
 
-# Default: check the core workspace
+# Default: check the workspace
 default: check
 
 # ── CLI ──────────────────────────────────────────────────────────────────
@@ -10,60 +18,56 @@ default: check
 task *args:
     cargo run -p task-cli -- {{args}}
 
-# ── Web (dev) ────────────────────────────────────────────────────────────
-
 # ── Run the app ──────────────────────────────────────────────────────────
 #
-# Three recipes for three terminals (or `just dev` to run them all):
-#   1. `just server` → task-server on :9090, sync relay
+# Two recipes for two terminals (or `just dev` to run them both):
+#   1. `just server` → task-server on :9090
 #   2. `just web`    → Dioxus dev server on :8765
-#   3. `just db`     → run migrations + seed fake data
 #
-# Defaults to in-memory sqlite — `just server` and `just db` populate
-# their own process's database. For persistent data across runs, set
-# `SYNC_DEMO_DATABASE_URL=sqlite://./data.db?mode=rwc` first.
+# There is no separate migrate/seed step. `task-server` resolves its
+# data root from `$TASK_DATA_ROOT` (default `$HOME/.task`), creates
+# `orgs/<slug>/` on demand, and runs each service's sea-orm migrations
+# at boot. Point `TASK_DATA_ROOT` at a throwaway dir for a clean slate.
 
-# Dioxus dev server for apps/web on port 8765. Binds 0.0.0.0 so the
-# starcommand nginx reverse proxy reaches it via the 10G LAN.
-# `--wasm-split` enables route-level lazy chunks.
+# Dioxus dev server for `web/` (package `task-app-web`) on port 8765.
+# Binds 0.0.0.0 so the starcommand nginx reverse proxy reaches it via
+# the 10G LAN.
 #
 # Assumes direnv/.envrc already loaded the `.#ui` dev shell. If you're
 # running outside direnv, prefix with `nix develop .#ui --command`.
+#
+# NOTE: serve WITHOUT hot-patching — `dx serve`'s default hot-patch
+# path breaks wasm builds (LinkError / subsecond panic on edit).
 web:
-    cd apps/web && dx serve --web --addr 0.0.0.0 
+    cd web && dx serve --web --addr 0.0.0.0 --hot-patch false
 
-# Regenerate apps/desktop/assets/tailwind.css from the source
+# Regenerate desktop/assets/tailwind.css from the source
 # `tailwind.css` input. Run after touching `@source` paths or the
 # `@layer components` block. `tailwindcss` comes from the nix
 # devshell — `direnv` already loaded it, no explicit nix call.
 desktop-css:
-    tailwindcss -i apps/desktop/tailwind.css -o apps/desktop/assets/tailwind.css
+    tailwindcss -i desktop/tailwind.css -o desktop/assets/tailwind.css
 
-# Native desktop window — the Logseq-like editor as a real app.
-# Regenerates tailwind first so any new utility classes in
-# touched sources actually exist in the bundled stylesheet, then
-# hot-reloads on subsequent source changes.
+# Native desktop window (package `task-app-desktop`). Regenerates
+# tailwind first so any new utility classes in touched sources
+# actually exist in the bundled stylesheet, then hot-reloads on
+# subsequent source changes.
 desktop: desktop-css
-    cd apps/desktop && dx serve --platform desktop
+    cd desktop && dx serve --platform desktop
 
 # Same as `desktop` but in release mode — slower compile, snappier
 # runtime; use when smoke-testing a vault for actual editing.
 desktop-release: desktop-css
-    cd apps/desktop && dx serve --platform desktop --release
+    cd desktop && dx serve --platform desktop --release
 
-# Canonical server. Defaults: bind 0.0.0.0:9090, in-memory sqlite,
-# seed-on-startup. Override via TASK_SERVER_{BIND,SEED} env vars.
+# Regenerate mobile/assets/tailwind.css (package `task-app-mobile`).
+mobile-css:
+    tailwindcss -i mobile/tailwind.css -o mobile/assets/tailwind.css
+
+# Canonical server. Default bind is 0.0.0.0:9090; override with
+# TASK_SERVER_BIND. See `.env.example` for the full env surface.
 server:
-    TASK_SERVER_SEED=1 TASK_SERVER_BIND="0.0.0.0:9090" \
-        cargo run --release -p task-server
-
-# Run migrations + seed the workspace doc with fake data. Standalone
-# CLI — useful for inspecting what `task-db` does without binding a
-# port. Since the default sqlite is in-memory the snapshot dies when
-# the process exits; set SYNC_DEMO_DATABASE_URL to a file URL for
-# state that survives.
-db:
-    cargo run --release -p task-db -- all
+    TASK_SERVER_BIND="0.0.0.0:9090" cargo run --release -p task-server
 
 # Launch server + web side-by-side; Ctrl+C kills both. Server lines
 # prefixed [srv], web lines [web].
@@ -71,17 +75,21 @@ dev:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'kill 0' EXIT
-    TASK_SERVER_SEED=1 TASK_SERVER_BIND="0.0.0.0:9090" \
+    TASK_SERVER_BIND="0.0.0.0:9090" \
         cargo run --release -p task-server 2>&1 | sed 's/^/[srv] /' &
     just web 2>&1 | sed 's/^/[web] /' &
     wait
 
 # ── Build & Test ─────────────────────────────────────────────────────────
 
-# All recipes assume `.#ui` dev shell is already loaded (direnv handles
-# this automatically on `cd` into the repo). On hosts without direnv,
-# run `nix develop .#ui` once first, or prefix any recipe with
-# `nix develop .#ui --command just <recipe>`.
+# All recipes assume the repo-root dev shell is already loaded (the
+# root `.envrc` does `use flake`, so direnv handles this on `cd`).
+# On hosts without direnv, run `nix develop` at the repo root first,
+# or prefix any recipe with `nix develop <repo-root> --command just
+# <recipe>`. The root flake exposes `default`, `ci`, and
+# `reaper-test` — there is no `.#ui` or `.#playwright` shell; the
+# default shell already carries tailwindcss, dx, and
+# PLAYWRIGHT_BROWSERS_PATH.
 check:
     cargo check --workspace
 
@@ -91,16 +99,18 @@ build:
 test:
     cargo test --workspace
 
-# Browser tests — Playwright. Run inside the playwright dev
-# shell so Chromium + node come from Nix:
+# Browser tests — Playwright. Run inside the repo-root dev shell
+# so Chromium + node come from Nix (it sets
+# PLAYWRIGHT_BROWSERS_PATH):
 #
-#   nix develop .#playwright --command just test-browser
+#   nix develop <repo-root> --command just test-browser
 #
-# First run does an `npm install` for @playwright/test (no
-# browser download — the shell's `PLAYWRIGHT_BROWSERS_PATH`
-# points at nixpkgs's playwright-driver.browsers). Then runs
-# the suite, booting `task-server` (release) + `dx serve`
-# automatically via playwright.config.js's webServer block.
+# First run does a `pnpm install` for @playwright/test (the repo
+# commits pnpm-lock.yaml, not package-lock.json — no browser
+# download either: the shell's `PLAYWRIGHT_BROWSERS_PATH` points
+# at nixpkgs's playwright-driver.browsers). Then runs the suite,
+# booting `dx serve` automatically via playwright.config.js's
+# webServer block.
 #
 # IMPORTANT: `dx serve` hot-patch DOES NOT pick up new RSX
 # attribute additions (id=, data-testid=) — only function-body
@@ -108,18 +118,18 @@ test:
 # after you added a new attribute, use `just test-browser-fresh`
 # below to force a clean dx-serve restart.
 test-browser:
-    cd tests/playwright && npm install --silent && npx playwright test
+    cd tests/playwright && pnpm install --silent && pnpm exec playwright test
 
-# Browser tests with a guaranteed-fresh `dx serve` + `task-server`.
-# Sets `CI=1` so playwright.config.js's `reuseExistingServer` is
-# false; any existing dev servers on :8765 / :9090 are killed
-# first so the new ones boot from scratch. Use this when:
+# Browser tests with a guaranteed-fresh `dx serve`. Sets `CI=1` so
+# playwright.config.js's `reuseExistingServer` is false; any
+# existing dev server (default :9100, override with PW_PORT) is
+# killed first so the new one boots from scratch. Use this when:
 #   - you added a new RSX attribute (`id=`, `data-testid=`) and
 #     `just test-browser` finds the old DOM (hot-patch gotcha)
 #   - you're hunting a sync regression and want a known-clean
 #     server doc per test run
-# Takes ~3 minutes longer than `just test-browser` because it
-# rebuilds task-server (release) + the wasm bundle from cold.
+# Takes several minutes longer than `just test-browser` because it
+# rebuilds the wasm bundle from cold.
 test-browser-fresh:
     pkill -f "dx serve" || true
     pkill -f "target/release/task-server" || true
@@ -134,7 +144,7 @@ test-browser-fresh:
 # :18080. See tests/multiplayer/README.md for the suite status table
 # and the current findings. ~5 min warm, longer on a cold build.
 mp-test *ARGS:
-    nix develop .#playwright --command tests/multiplayer/run.sh {{ARGS}}
+    nix develop ../.. --command tests/multiplayer/run.sh {{ARGS}}
 
 # ── Lint / format / CI ───────────────────────────────────────────────────
 

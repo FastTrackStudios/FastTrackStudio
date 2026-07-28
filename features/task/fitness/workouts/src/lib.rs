@@ -30,6 +30,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod entity;
 pub mod model;
 pub mod parse;
 pub mod scan;
@@ -37,6 +38,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
+pub use entity::{Routines, Sessions};
 pub use model::{LoggedSet, Routine, RoutineDay, RoutineSlot, SessionStatus, WorkoutSession};
 pub use parse::{ParseError, looks_like_routine, looks_like_session, parse_routine, parse_session};
 pub use scan::{scan_routines, scan_sessions, sessions_between, sessions_for_exercise};

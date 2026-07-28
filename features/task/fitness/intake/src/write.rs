@@ -1,45 +1,27 @@
 //! `IntakeLog` → markdown bytes + path helpers.
+//!
+//! Serialization lives in [`crate::entity`]; this module keeps the
+//! historical `intake::write::*` paths working and adds the one thing
+//! the shared store doesn't cover — writing a log straight to a vault
+//! root on disk, without an in-memory `Vault`.
 
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use thiserror::Error;
+use vault_entity::store::VaultEntity;
 
+pub use vault_entity::WriteError;
+
+use crate::entity::IntakeLogs;
 use crate::model::IntakeLog;
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml: {0}")]
-    Yaml(String),
-    #[error("io: {0}")]
-    Io(String),
-    #[error("file exists at {0}; refusing to overwrite (pass overwrite=true)")]
-    Exists(String),
-    #[error("bad path: {0}")]
-    BadPath(String),
-}
-
+/// Render a daily log as a full markdown page.
 pub fn serialize_intake(log: &IntakeLog) -> Result<String, WriteError> {
-    let mut wrapper = serde_yaml::Mapping::new();
-    wrapper.insert("type".into(), "intake-log".into());
-    let body = serde_yaml::to_value(log).map_err(|e| WriteError::Yaml(e.to_string()))?;
-    if let serde_yaml::Value::Mapping(m) = body {
-        for (k, v) in m {
-            wrapper.insert(k, v);
-        }
-    }
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(wrapper))
-        .map_err(|e| WriteError::Yaml(e.to_string()))?;
-    let body = if log.details.is_empty() {
-        String::new()
-    } else if log.details.starts_with('\n') {
-        log.details.clone()
-    } else {
-        format!("\n{}", log.details)
-    };
-    Ok(format!("---\n{yaml}---\n{body}"))
+    IntakeLogs::to_markdown(log)
 }
 
+/// Write `log` to `<vault_root>/<log.path>`, creating parent
+/// directories.
 pub fn write_intake(
     vault_root: &Path,
     log: &mut IntakeLog,
@@ -56,10 +38,8 @@ pub fn write_intake(
         std::fs::create_dir_all(parent).map_err(|e| WriteError::Io(e.to_string()))?;
     }
     let now = Utc::now();
-    if log.date_created.is_none() {
-        log.date_created = Some(now);
-    }
-    log.date_modified = Some(now);
+    IntakeLogs::on_create(log, now);
+    IntakeLogs::on_update(log, now);
     let body = serialize_intake(log)?;
     std::fs::write(&abs, body).map_err(|e| WriteError::Io(e.to_string()))?;
     Ok(abs)
@@ -68,10 +48,14 @@ pub fn write_intake(
 /// Default layout: `intake/<YYYY-MM-DD>.md`. One page per
 /// day; the date is the filename so directory listings
 /// sort chronologically.
+///
+/// Keyed on the date rather than the log's name, so this can't go
+/// through [`VaultEntity::default_path`] — [`crate::store::Store`]
+/// applies it before handing the log to the shared store.
 pub fn default_intake_path(date: chrono::NaiveDate, folder: Option<&str>) -> String {
     let date_str = date.format("%Y-%m-%d");
-    match folder {
-        Some(f) => format!("{}/{date_str}.md", f.trim_end_matches('/')),
-        None => format!("intake/{date_str}.md"),
-    }
+    let dir = folder
+        .unwrap_or(IntakeLogs::DEFAULT_FOLDER)
+        .trim_end_matches('/');
+    format!("{dir}/{date_str}.md")
 }

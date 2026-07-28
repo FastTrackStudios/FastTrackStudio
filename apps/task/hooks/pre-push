@@ -4,7 +4,7 @@ set -euo pipefail
 # Pre-push wrapper around `capn pre-push`. Capn builds the workspace
 # before letting the push through, which requires every system lib
 # the workspace touches — notably `pango`, `webkitgtk_4_1`, and the
-# rest of the Dioxus desktop stack pulled in by `apps/desktop`.
+# rest of the Dioxus desktop stack pulled in by `apps/task/desktop`.
 #
 # Outside a nix shell the host's `PKG_CONFIG_PATH` probably doesn't
 # carry those libs, so capn fails with `No package 'pango' found`.
@@ -22,7 +22,13 @@ if [ "${NO_CAPN:-0}" = "1" ]; then
   exit 0
 fi
 
-CAPN_BIN="${CAPN_BIN:-$(command -v capn 2>/dev/null || printf '%s' /home/cody/Development/capn/target/debug/capn)}"
+CAPN_BIN="${CAPN_BIN:-$(command -v capn 2>/dev/null || true)}"
+
+if [ -z "$CAPN_BIN" ]; then
+  echo >&2 "pre-push: capn not found on PATH — skipping pre-push checks."
+  echo >&2 "          install capn or set CAPN_BIN to its path."
+  exit 0
+fi
 
 # Probe the current env. If `pkg-config` already sees the desktop
 # libs capn needs (pango, libsoup-3.0), we're in a shell that has

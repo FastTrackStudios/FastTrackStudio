@@ -12,6 +12,7 @@
 //! — checkbox clicks are optimistic `TaskMutations` against the shared
 //! task store, so the board and the dashboard can't disagree.
 
+use crate::format::status_variant;
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{CalendarDays, CircleCheck};
 use fts_ui::prelude::*;
@@ -318,13 +319,4 @@ fn parse_due(s: &str) -> Option<(String, &'static str)> {
         std::cmp::Ordering::Greater => "border border-border bg-muted/40 text-muted-foreground",
     };
     Some((label, cls))
-}
-
-fn status_variant(status: &str) -> StatusBadgeVariant {
-    match status {
-        "active" | "open" | "in_progress" => StatusBadgeVariant::Success,
-        "on_hold" | "on-hold" | "paused" | "waiting" => StatusBadgeVariant::Warning,
-        "cancelled" | "canceled" | "abandoned" | "blocked" => StatusBadgeVariant::Danger,
-        _ => StatusBadgeVariant::Neutral,
-    }
 }

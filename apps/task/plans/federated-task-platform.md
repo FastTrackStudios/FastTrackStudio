@@ -1,5 +1,7 @@
 # Federated Task Platform
 
+**Status:** in progress — needs triage (2026-07-27). Multi-phase; per-phase state is not determinable from the tree alone. Phase 3 (one account across servers) is the open head.
+
 Restructure Task from a single-machine PKM with one vault into a **federated multi-org platform** where:
 
 - Every user account has a **personal org** that serves as their identity home.

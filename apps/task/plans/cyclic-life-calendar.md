@@ -1,5 +1,7 @@
 # Cyclic Life Calendar
 
+**Status:** shipped — `features/task/cycle/cycle` implements the model and cites this file as its design rationale. Kept as the rationale doc.
+
 A planning system that reshapes the year into uniform 28-day cycles
 instead of the calendar's irregular 28/30/31-day months. Built around
 Cody's stated preferences but applicable to anyone who wants

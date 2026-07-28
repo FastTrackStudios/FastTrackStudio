@@ -1,5 +1,7 @@
 # wiki-needs-research-lint — surface `needs_research` markers as lint findings
 
+**Status:** not started. Nothing in the tree reads `needs_research` — a repo-wide grep over `features/task/wiki/**/*.rs` returns zero hits.
+
 **Target:** make the `needs_research:` frontmatter array and the `> [!research]` inline callout first-class signals in the wiki lint loop, so an agent (or the human curator) can drain them via the existing `task wiki lint-findings` queue.
 
 Today the convention exists in pages (see `Knowledge/wiki/concepts/needs-research-tag.md`) but no code scans for it. The markers are greppable but invisible to the standard maintenance loop.

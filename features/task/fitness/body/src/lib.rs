@@ -23,6 +23,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod entity;
 pub mod model;
 pub mod parse;
 pub mod scan;
@@ -30,6 +31,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
+pub use entity::BodyMetrics;
 pub use model::{BodyEntry, BodyMetric, MetricKind};
 pub use parse::{ParseError, looks_like_body_metric, parse_page};
 pub use scan::{by_kind, scan_vault};

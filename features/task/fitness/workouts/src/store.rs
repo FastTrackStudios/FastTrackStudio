@@ -1,181 +1,92 @@
 //! File-backed [`WorkoutsService`] impl.
+//!
+//! CRUD for both page types is [`vault_entity::VaultEntityStore`] —
+//! one instance per entity, sharing a single vault. Only `log_set` and
+//! `start_from_routine`, the parts specific to workouts, live here.
 
 use std::sync::{Arc, Mutex};
 
 use chrono::NaiveDate;
 use uuid::Uuid;
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::{Routines, Sessions};
 use crate::model::{LoggedSet, Routine, WorkoutSession};
-use crate::parse::{looks_like_routine, looks_like_session, parse_routine, parse_session};
-use crate::scan::{scan_routines, scan_sessions};
 use crate::service::{WorkoutsError, WorkoutsService};
-use crate::write::{
-    default_routine_path, default_session_path, serialize_routine, serialize_session,
-};
+use crate::write::default_session_path;
+
+vault_entity::entity_error_bridge!(WorkoutsError);
 
 #[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
-    inner: Arc<Mutex<Vault>>,
+    routines: VaultEntityStore<Routines>,
+    sessions: VaultEntityStore<Sessions>,
 }
 
 impl Store {
     pub fn new(vault: Vault) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(vault)),
-        }
+        Self::from_shared(Arc::new(Mutex::new(vault)))
     }
 
     pub fn from_shared(inner: Arc<Mutex<Vault>>) -> Self {
-        Self { inner }
+        Self {
+            routines: VaultEntityStore::from_shared(inner.clone()),
+            sessions: VaultEntityStore::from_shared(inner),
+        }
     }
 
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
-        self.inner.clone()
+        self.routines.shared()
     }
-}
-
-fn map_io(e: impl std::fmt::Display) -> WorkoutsError {
-    WorkoutsError::Io(e.to_string())
-}
-
-fn find_routine_idx(vault: &Vault, id: Uuid) -> Option<usize> {
-    vault.pages.iter().position(|p| {
-        looks_like_routine(p) && parse_routine(p).map(|r| r.id == id).unwrap_or(false)
-    })
-}
-
-fn find_session_idx(vault: &Vault, id: Uuid) -> Option<usize> {
-    vault.pages.iter().position(|p| {
-        looks_like_session(p) && parse_session(p).map(|s| s.id == id).unwrap_or(false)
-    })
 }
 
 impl WorkoutsService for Store {
     // ── Routines ────────────────────────────────────────
     fn list_routines(&self) -> Result<Vec<Routine>, WorkoutsError> {
-        let guard = self.inner.lock().expect("workouts store poisoned");
-        Ok(scan_routines(&guard))
+        Ok(self.routines.list())
     }
 
     fn get_routine(&self, id: &str) -> Result<Routine, WorkoutsError> {
-        let uuid =
-            Uuid::parse_str(id).map_err(|e| WorkoutsError::BadRequest(format!("id: {e}")))?;
-        let guard = self.inner.lock().expect("workouts store poisoned");
-        for p in guard.pages.iter().filter(|p| looks_like_routine(p)) {
-            if let Ok(r) = parse_routine(p) {
-                if r.id == uuid {
-                    return Ok(r);
-                }
-            }
-        }
-        Err(WorkoutsError::NotFound(id.to_string()))
+        self.routines.get(id).map_err(from_entity_error)
     }
 
-    fn create_routine(&self, mut routine: Routine) -> Result<Routine, WorkoutsError> {
-        if routine.id.is_nil() {
-            routine.id = Uuid::new_v4();
-        }
-        if routine.path.is_empty() {
-            routine.path = default_routine_path(&routine.name, None);
-        }
-        let now = chrono::Utc::now();
-        routine.date_created.get_or_insert(now);
-        routine.date_modified = Some(now);
-        let body = serialize_routine(&routine).map_err(map_io)?;
-        let mut guard = self.inner.lock().expect("workouts store poisoned");
-        if guard.pages.iter().any(|p| p.rel_path == routine.path) {
-            return Err(WorkoutsError::AlreadyExists(routine.path));
-        }
-        vault::create_page(&mut guard, &routine.path, body).map_err(map_io)?;
-        Ok(routine)
+    fn create_routine(&self, routine: Routine) -> Result<Routine, WorkoutsError> {
+        self.routines.create(routine).map_err(from_entity_error)
     }
 
-    fn update_routine(&self, mut routine: Routine) -> Result<Routine, WorkoutsError> {
-        let mut guard = self.inner.lock().expect("workouts store poisoned");
-        let idx = find_routine_idx(&guard, routine.id)
-            .ok_or_else(|| WorkoutsError::NotFound(routine.id.to_string()))?;
-        routine.path = guard.pages[idx].rel_path.clone();
-        routine.date_modified = Some(chrono::Utc::now());
-        let body = serialize_routine(&routine).map_err(map_io)?;
-        guard.pages[idx].raw = body;
-        let path = routine.path.clone();
-        vault::save_page(&mut guard, &path).map_err(map_io)?;
-        Ok(routine)
+    fn update_routine(&self, routine: Routine) -> Result<Routine, WorkoutsError> {
+        self.routines.update(routine).map_err(from_entity_error)
     }
 
     fn delete_routine(&self, id: &str) -> Result<(), WorkoutsError> {
-        let uuid =
-            Uuid::parse_str(id).map_err(|e| WorkoutsError::BadRequest(format!("id: {e}")))?;
-        let mut guard = self.inner.lock().expect("workouts store poisoned");
-        let idx = find_routine_idx(&guard, uuid)
-            .ok_or_else(|| WorkoutsError::NotFound(id.to_string()))?;
-        let path = guard.pages[idx].rel_path.clone();
-        vault::delete_page(&mut guard, &path).map_err(map_io)?;
-        Ok(())
+        self.routines.delete(id).map_err(from_entity_error)
     }
 
     // ── Sessions ────────────────────────────────────────
     fn list_sessions(&self) -> Result<Vec<WorkoutSession>, WorkoutsError> {
-        let guard = self.inner.lock().expect("workouts store poisoned");
-        Ok(scan_sessions(&guard))
+        Ok(self.sessions.list())
     }
 
     fn get_session(&self, id: &str) -> Result<WorkoutSession, WorkoutsError> {
-        let uuid =
-            Uuid::parse_str(id).map_err(|e| WorkoutsError::BadRequest(format!("id: {e}")))?;
-        let guard = self.inner.lock().expect("workouts store poisoned");
-        for p in guard.pages.iter().filter(|p| looks_like_session(p)) {
-            if let Ok(s) = parse_session(p) {
-                if s.id == uuid {
-                    return Ok(s);
-                }
-            }
-        }
-        Err(WorkoutsError::NotFound(id.to_string()))
+        self.sessions.get(id).map_err(from_entity_error)
     }
 
     fn create_session(&self, mut session: WorkoutSession) -> Result<WorkoutSession, WorkoutsError> {
-        if session.id.is_nil() {
-            session.id = Uuid::new_v4();
-        }
+        // The filename carries the session date as a prefix, so the
+        // path is resolved here rather than by the shared store.
         if session.path.is_empty() {
             session.path = default_session_path(session.date, &session.name, None);
         }
-        let now = chrono::Utc::now();
-        session.date_created.get_or_insert(now);
-        session.date_modified = Some(now);
-        let body = serialize_session(&session).map_err(map_io)?;
-        let mut guard = self.inner.lock().expect("workouts store poisoned");
-        if guard.pages.iter().any(|p| p.rel_path == session.path) {
-            return Err(WorkoutsError::AlreadyExists(session.path));
-        }
-        vault::create_page(&mut guard, &session.path, body).map_err(map_io)?;
-        Ok(session)
+        self.sessions.create(session).map_err(from_entity_error)
     }
 
-    fn update_session(&self, mut session: WorkoutSession) -> Result<WorkoutSession, WorkoutsError> {
-        let mut guard = self.inner.lock().expect("workouts store poisoned");
-        let idx = find_session_idx(&guard, session.id)
-            .ok_or_else(|| WorkoutsError::NotFound(session.id.to_string()))?;
-        session.path = guard.pages[idx].rel_path.clone();
-        session.date_modified = Some(chrono::Utc::now());
-        let body = serialize_session(&session).map_err(map_io)?;
-        guard.pages[idx].raw = body;
-        let path = session.path.clone();
-        vault::save_page(&mut guard, &path).map_err(map_io)?;
-        Ok(session)
+    fn update_session(&self, session: WorkoutSession) -> Result<WorkoutSession, WorkoutsError> {
+        self.sessions.update(session).map_err(from_entity_error)
     }
 
     fn delete_session(&self, id: &str) -> Result<(), WorkoutsError> {
-        let uuid =
-            Uuid::parse_str(id).map_err(|e| WorkoutsError::BadRequest(format!("id: {e}")))?;
-        let mut guard = self.inner.lock().expect("workouts store poisoned");
-        let idx = find_session_idx(&guard, uuid)
-            .ok_or_else(|| WorkoutsError::NotFound(id.to_string()))?;
-        let path = guard.pages[idx].rel_path.clone();
-        vault::delete_page(&mut guard, &path).map_err(map_io)?;
-        Ok(())
+        self.sessions.delete(id).map_err(from_entity_error)
     }
 
     fn log_set(

@@ -1,25 +1,31 @@
 //! File-backed [`IntakeService`] impl. Holds shared
 //! `mealplan` stores so recipe / pantry nutrition can
 //! resolve.
+//!
+//! CRUD is [`vault_entity::VaultEntityStore`]; the day-keyed upsert
+//! (`for_day`) and the nutrition-resolving `log_*` helpers — the parts
+//! specific to intake — live here.
 
 use std::sync::{Arc, Mutex};
 
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use mealplan::MealNutrition;
 use mealplan::cookbook::{CookbookService, Nutrition};
 use mealplan::pantry::PantryService;
 use uuid::Uuid;
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::IntakeLogs;
 use crate::model::{IntakeEntry, IntakeLog, IntakeSource, scale_nutrition};
-use crate::parse::{looks_like_intake, parse_page};
-use crate::scan::scan_vault;
 use crate::service::{IntakeError, IntakeService};
-use crate::write::{default_intake_path, serialize_intake};
+use crate::write::default_intake_path;
+
+vault_entity::entity_error_bridge!(IntakeError);
 
 #[derive(Clone, architect::HasDispatcher)]
 pub struct Store {
-    inner: Arc<Mutex<Vault>>,
+    inner: VaultEntityStore<IntakeLogs>,
     cookbook: mealplan::cookbook::Store,
     pantry: mealplan::pantry::Store,
 }
@@ -28,7 +34,7 @@ impl Store {
     pub fn new(vault: Vault) -> Self {
         let root = vault.root.clone();
         let pantry = mealplan::pantry::Store::new(vault);
-        let inner = pantry.shared();
+        let inner = VaultEntityStore::from_shared(pantry.shared());
         let cookbook = mealplan::cookbook::Store::new(root);
         Self {
             inner,
@@ -42,26 +48,15 @@ impl Store {
         let cookbook = mealplan::cookbook::Store::new(root);
         let pantry = mealplan::pantry::Store::from_shared(inner.clone());
         Self {
-            inner,
+            inner: VaultEntityStore::from_shared(inner),
             cookbook,
             pantry,
         }
     }
 
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
-        self.inner.clone()
+        self.inner.shared()
     }
-}
-
-fn map_io(e: impl std::fmt::Display) -> IntakeError {
-    IntakeError::Io(e.to_string())
-}
-
-fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
-    vault
-        .pages
-        .iter()
-        .position(|p| looks_like_intake(p) && parse_page(p).map(|l| l.id == id).unwrap_or(false))
 }
 
 fn parse_date(s: &str) -> Result<NaiveDate, IntakeError> {
@@ -79,34 +74,17 @@ fn slot_to_opt(slot: &str) -> Option<String> {
 
 impl IntakeService for Store {
     fn list(&self) -> Result<Vec<IntakeLog>, IntakeError> {
-        let guard = self.inner.lock().expect("intake store poisoned");
-        Ok(scan_vault(&guard))
+        Ok(self.inner.list())
     }
 
     fn get(&self, id: &str) -> Result<IntakeLog, IntakeError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| IntakeError::BadRequest(format!("id: {e}")))?;
-        let guard = self.inner.lock().expect("intake store poisoned");
-        for page in guard.pages.iter().filter(|p| looks_like_intake(p)) {
-            if let Ok(l) = parse_page(page) {
-                if l.id == uuid {
-                    return Ok(l);
-                }
-            }
-        }
-        Err(IntakeError::NotFound(id.to_string()))
+        self.inner.get(id).map_err(from_entity_error)
     }
 
     fn for_day(&self, date: &str) -> Result<IntakeLog, IntakeError> {
         let day = parse_date(date)?;
-        {
-            let guard = self.inner.lock().expect("intake store poisoned");
-            for page in guard.pages.iter().filter(|p| looks_like_intake(p)) {
-                if let Ok(l) = parse_page(page) {
-                    if l.date == day {
-                        return Ok(l);
-                    }
-                }
-            }
+        if let Some(log) = self.inner.find(|l| l.date == day) {
+            return Ok(log);
         }
         // No log for `date` — create one.
         let log = IntakeLog {
@@ -125,44 +103,20 @@ impl IntakeService for Store {
     }
 
     fn create(&self, mut log: IntakeLog) -> Result<IntakeLog, IntakeError> {
-        if log.id.is_nil() {
-            log.id = Uuid::new_v4();
-        }
+        // The filename is the ISO date, not a slug of the name, so the
+        // path is resolved here rather than by the shared store.
         if log.path.is_empty() {
             log.path = default_intake_path(log.date, None);
         }
-        let now = Utc::now();
-        log.date_created.get_or_insert(now);
-        log.date_modified = Some(now);
-        let body = serialize_intake(&log).map_err(map_io)?;
-        let mut guard = self.inner.lock().expect("intake store poisoned");
-        if guard.pages.iter().any(|p| p.rel_path == log.path) {
-            return Err(IntakeError::AlreadyExists(log.path));
-        }
-        vault::create_page(&mut guard, &log.path, body).map_err(map_io)?;
-        Ok(log)
+        self.inner.create(log).map_err(from_entity_error)
     }
 
-    fn update(&self, mut log: IntakeLog) -> Result<IntakeLog, IntakeError> {
-        let mut guard = self.inner.lock().expect("intake store poisoned");
-        let idx =
-            find_idx(&guard, log.id).ok_or_else(|| IntakeError::NotFound(log.id.to_string()))?;
-        log.path = guard.pages[idx].rel_path.clone();
-        log.date_modified = Some(Utc::now());
-        let body = serialize_intake(&log).map_err(map_io)?;
-        guard.pages[idx].raw = body;
-        let path = log.path.clone();
-        vault::save_page(&mut guard, &path).map_err(map_io)?;
-        Ok(log)
+    fn update(&self, log: IntakeLog) -> Result<IntakeLog, IntakeError> {
+        self.inner.update(log).map_err(from_entity_error)
     }
 
     fn delete(&self, id: &str) -> Result<(), IntakeError> {
-        let uuid = Uuid::parse_str(id).map_err(|e| IntakeError::BadRequest(format!("id: {e}")))?;
-        let mut guard = self.inner.lock().expect("intake store poisoned");
-        let idx = find_idx(&guard, uuid).ok_or_else(|| IntakeError::NotFound(id.to_string()))?;
-        let path = guard.pages[idx].rel_path.clone();
-        vault::delete_page(&mut guard, &path).map_err(map_io)?;
-        Ok(())
+        self.inner.delete(id).map_err(from_entity_error)
     }
 
     fn log_recipe(

@@ -15,6 +15,8 @@
 //! Surface:
 //! - [`Item`] / [`Condition`] / [`Status`] — parsed model
 //!   + canonical enums.
+//! - [`Items`] — the `vault_entity::VaultEntity` mapping
+//!   (frontmatter keys ↔ `Item` fields).
 //! - [`parse_page`] / [`looks_like_item`] — `VaultPage` →
 //!   `Item`.
 //! - [`serialize_item`] / [`write_item`] — `Item` → markdown
@@ -28,6 +30,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod entity;
 pub mod model;
 pub mod parse;
 pub mod scan;
@@ -35,6 +38,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
+pub use entity::Items;
 pub use model::{Condition, Item, Status};
 pub use parse::{ParseError, looks_like_item, parse_page};
 pub use scan::{items_at, items_needing_attention, scan_vault};

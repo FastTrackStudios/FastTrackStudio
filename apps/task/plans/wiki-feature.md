@@ -1,5 +1,7 @@
 # wiki feature
 
+**Status:** partially shipped — needs triage (2026-07-27). `wiki-{proto,archive,extract,graph,live,search}` all exist under `features/task/wiki/`; per-slice completion was not verified.
+
 Task's port of [Karpathy's LLM-Wiki pattern][karpathy-wiki],
 modeled on [`nashsu/llm_wiki`][llm-wiki]. A vault's `Wiki/`
 folder becomes an LLM-maintained knowledge base — the agent

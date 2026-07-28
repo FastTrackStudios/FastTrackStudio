@@ -17,6 +17,7 @@
 //! so who you bill renders the same here as on `/contacts` and
 //! `/members`.
 
+use crate::format::money;
 use std::collections::HashMap;
 
 use chrono::Utc;
@@ -31,12 +32,6 @@ use finance_proto::invoice::{Invoice, InvoiceStatus};
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::pages::contacts::PersonChip;
 use crate::stores;
-
-fn money(cents: i64) -> String {
-    let neg = cents < 0;
-    let v = cents.unsigned_abs();
-    format!("{}${}.{:02}", if neg { "-" } else { "" }, v / 100, v % 100)
-}
 
 /// `(variant, label)` for an invoice status badge.
 fn status_badge(s: &InvoiceStatus) -> (StatusBadgeVariant, &'static str) {

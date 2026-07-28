@@ -84,7 +84,7 @@ A 200 means merged. Forgejo will *not* let you self-approve your own PR (HTTP 42
 
 ### Client-side (capn pre-push)
 
-`.git/hooks/pre-push` runs [`capn pre-push`](https://github.com/anthropics/capn), which builds the workspace before letting the push through. Capn needs the system libs every workspace member pulls in — `pango`, `webkitgtk_4_1`, `gtk3`, `libsoup_3`, the gstreamer stack — because `apps/desktop` depends on `dioxus-desktop`.
+`apps/task/hooks/pre-push` (installed via `just install-hooks`, which sets `core.hooksPath`) runs [`capn pre-push`](https://github.com/anthropics/capn), which builds the workspace before letting the push through. Capn needs the system libs every workspace member pulls in — `pango`, `webkitgtk_4_1`, `gtk3`, `libsoup_3`, the gstreamer stack — because `apps/task/desktop` depends on `dioxus-desktop`.
 
 The hook handles this for you: outside a nix shell it re-enters `nix develop` before invoking capn, so the GTK + WebView dep list is on `PKG_CONFIG_PATH` automatically. Inside a nix shell (`IN_NIX_SHELL` set) it runs capn directly in the current env.
 

@@ -1,5 +1,7 @@
 # Desktop: multi-server vault wiring
 
+**Status:** not started. The client crate + server endpoints are done and e2e-covered; the desktop wiring this plan describes is the open part.
+
 Follow-up to the vault-sync slice
 (`apps/server/src/vault_sync.rs`, `crates/vault-sync`). The
 client crate and server endpoints are done and covered by

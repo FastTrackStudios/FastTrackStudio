@@ -1,15 +1,49 @@
 # Claude
 
-This project's agent instructions live in [AGENTS.md](AGENTS.md). Read it first.
+This project's agent instructions live in [AGENTS.md](AGENTS.md). Read
+it first. Also read the repo-root `CLAUDE.md` — Task is a subtree of
+the FastTrackStudio monorepo, not a standalone repo.
 
 Key callouts (all detailed in AGENTS.md):
 
-- **Architecture**: feature trios (`proto` / `crdt` / `db` / `ui` / facade) on Loro CRDT + Dioxus + fts-ui design system.
-- **UI rules**: fts-ui primitives only, theme tokens never hex, dark mode default, dumb components.
-- **Common gotchas**: lucide names (`CircleCheck` not `CheckCircle2`), `StatusBadgeVariant` only `Success`/`Warning`/`Danger`/`Neutral`, `.peek()` vs `.read()` in `use_effect` to avoid update loops, contenteditable prefix-in-textContent bug.
-- **Tracking**: no external tracker. `plans/<topic>.md` for big follow-ups, `// FUTURE:` comments in code for narrow ones, commit messages as the activity log.
-- **Plans**: open architectural follow-ups in `plans/*.md`. Current top of stack: `plans/loro-text-editor-upgrade.md`.
-- **Verify before done**: `cargo check -p task-ui` + `cargo check -p task-app-web --target wasm32-unknown-unknown` clean.
-- **Research checkouts** (read-only references): `~/Development/research/{logseq,obsidian-api,obsidian-developer-docs,obsidian-sample-plugin}`.
+- **Layout**: `apps/task/{cli,server,web,desktop,mobile}`,
+  `crates/task/{ui,telemetry,store-proto,xtask}`,
+  `features/task/<slice>/*`. The app shell is `crates/task/ui`
+  (package `ui`); `task-ui` is a *different* crate
+  (`features/task/task/task-ui`, the task-list components).
+- **Slices are not uniform**: `<slice>-proto` + facade `<slice>` is
+  the common shape, with optional `-db` / `-ui` / `-live` crates —
+  but several slices are proto-only, and several (`task`, `project`,
+  `goal`, `cycle`) carry their `#[architect::rpc]` trait inside the
+  facade crate. Read the neighbour before copying it.
+- **Storage**: markdown + YAML frontmatter in a `vault::Vault` is the
+  default and the source of truth. sea-orm backs a minority
+  (agent-task queue, timer, threads, prefs, finance) plus architect's
+  auth / permissions / share tables. **Loro is used only for
+  collaborative editing of vault markdown files** — there is no entity
+  CRDT layer; `EntityCrdt` and `*RepoLoro` do not exist.
+- **RPC**: `#[architect::rpc]` traits, dispatched by
+  `architect::LayerRouter` per org at `/org/{slug}/vox`.
+  `#[subscribe]` streams are the target idiom, but only `task` and
+  `workstream` have migrated — the rest still use the older
+  `tx: Tx<T>` parameter form. Migration in progress.
+- **UI rules**: fts-ui primitives only (in-tree at
+  `libs/fts-ui/fts-ui`), theme tokens never hex, dark mode default,
+  dumb components.
+- **Gotchas**: touching a proto changes vox method ids — rebuild
+  task-server before trusting live behavior. `dx serve --hot-patch
+  false` for wasm. Lucide names (`CircleCheck`, not `CheckCircle2`).
+  `StatusBadgeVariant` is only `Success`/`Warning`/`Danger`/`Neutral`.
+  `.peek()` vs `.read()` in `use_effect` to avoid update loops.
+- **Tracking**: no external tracker, no bd/beads. `plans/<topic>.md`
+  with a status header for big follow-ups (see `plans/README.md`),
+  `// FUTURE:` comments for narrow ones, commit messages as the
+  activity log.
+- **Verify before done**: `cargo check -p ui` (the shell — *not*
+  `-p task-ui`) and `cargo check -p task-app-web --target
+  wasm32-unknown-unknown` clean. One cargo command at a time per
+  worktree.
 
-Everything else — workflow, hard rules, gotchas, where things live — is in [AGENTS.md](AGENTS.md).
+Everything else — workflow, hard rules, gotchas, the request path,
+where things live, and what's known-stale — is in
+[AGENTS.md](AGENTS.md) and [ARCHITECTURE.md](ARCHITECTURE.md).

@@ -1,5 +1,17 @@
-# `cargo xtask <command>` is the entry point for build / test /
-# docs orchestration. Implementation lives in `xtask/`.
+# Cargo config for cargo invocations made from `apps/task/`. Cargo
+# merges this with the repo-root `.cargo/config.toml` (if any); it is
+# NOT picked up when you run cargo from the repo root.
+#
+# `cargo xtask <command>` runs the Task xtask binary. Implementation
+# lives in `crates/task/xtask/` — the package is a plain root-workspace
+# member named `xtask`, so `--package xtask` resolves from anywhere in
+# the tree and this alias is only a typing shortcut.
+#
+# KNOWN STALE: `cargo xtask build` (Obsidian plugin) targets
+# `integrations/obsidian/plugin`, which was deleted; and `cargo xtask
+# codegen` writes to `<xtask-manifest-dir>/../ui-lab/src/generated`,
+# which now resolves to `crates/task/ui-lab` rather than the real
+# `apps/task/ui-lab`. Both need a fix in crates/task/xtask/src/main.rs.
 
 [alias]
 xtask = "run --package xtask --release --"
@@ -11,8 +23,8 @@ git-fetch-with-cli = true
 
 # getrandom 0.3 (transitive via fake → rand) needs its backend
 # selected explicitly on wasm. Paired with the `wasm_js` feature
-# enabled in apps/web/Cargo.toml. `dx` sets the same cfg on its own
-# builds; declaring it here makes plain `cargo check --target
+# enabled in apps/task/web/Cargo.toml. `dx` sets the same cfg on its
+# own builds; declaring it here makes plain `cargo check --target
 # wasm32-unknown-unknown` agree. See docs.rs/getrandom/#webassembly-support.
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

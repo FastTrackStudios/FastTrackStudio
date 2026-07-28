@@ -1,5 +1,7 @@
 # agent feature
 
+**Status:** partially shipped — needs triage (2026-07-27). `agent-{proto,wiki,tasks,hermes,codex,inbox,dispatch}` all exist under `features/task/agent/`; which of this doc's slices are actually closed was not verified.
+
 LLM-agent integration. Models projects, sessions, threads,
 messages, tools, approvals, kanban, and the streaming
 `AgentEvent` union over an `#[architect::rpc] trait

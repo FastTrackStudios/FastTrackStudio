@@ -1,23 +1,14 @@
 //! Walk the vault for body metrics.
 
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::BodyMetrics;
 use crate::model::BodyMetric;
-use crate::parse::{looks_like_body_metric, parse_page};
 
+/// Every body-metric page, parse failures logged and skipped.
 pub fn scan_vault(vault: &Vault) -> Vec<BodyMetric> {
-    vault
-        .pages
-        .iter()
-        .filter(|p| looks_like_body_metric(p))
-        .filter_map(|p| match parse_page(p) {
-            Ok(m) => Some(m),
-            Err(e) => {
-                tracing::warn!(path = %p.rel_path, ?e, "body-metric parse failed");
-                None
-            }
-        })
-        .collect()
+    VaultEntityStore::<BodyMetrics>::scan(vault)
 }
 
 /// Convenience: metric whose `kind` matches (case-insensitive).

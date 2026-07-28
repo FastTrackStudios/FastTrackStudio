@@ -1,5 +1,7 @@
 # Web SSR / fullstack — feasibility & cost/benefit
 
+**Status:** decision record. Conclusion reached (SSR is the wrong first lever); no work queued from it.
+
 Investigation triggered by "the project UI is slow — maybe SSR the web so all
 data is ready at all times." Conclusion up front: **SSR is the wrong first
 lever for this app, and it's blocked on a prerequisite we don't have today.**

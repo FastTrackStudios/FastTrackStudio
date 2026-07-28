@@ -1,5 +1,7 @@
 # Git feature
 
+**Status:** partially shipped — needs triage (2026-07-27). `git-{proto,config,github,forgejo}` all exist under `features/task/git/`; the later git-plumbing phases were not verified.
+
 Issue + PR style workflow on top of forges (GitHub, Forgejo, eventually others). Wire contract first; actual git plumbing (status/diff/commit) lives in a later phase.
 
 ## Why

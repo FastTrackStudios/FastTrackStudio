@@ -1,5 +1,7 @@
 # Wiki archive — URL front door for the raw→ingest pipeline
 
+**Status:** shipped — `features/task/wiki/wiki-archive` exists and `task wiki archive` is live.
+
 `task wiki archive <url|file>` routes a URL through a
 content-type router to an extractor, stamps the extracted
 markdown with provenance frontmatter (`source_url`,

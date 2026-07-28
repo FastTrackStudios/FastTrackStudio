@@ -14,6 +14,7 @@
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod imp {
+    use crate::format::duration_mmss;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -102,11 +103,6 @@ pub(crate) mod imp {
         el.set_preload("auto");
         el.set_src(&format!("/org/{org}/media/songs/{slug}/{file}"));
         Ok(el)
-    }
-
-    pub(crate) fn fmt_time(sec: f64) -> String {
-        let s = sec.max(0.0) as u64;
-        format!("{}:{:02}", s / 60, s % 60)
     }
 
     #[component]
@@ -322,9 +318,9 @@ pub(crate) mod imp {
                                             }
                                             span { class: "w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground",
                                                 if is_current {
-                                                    "{fmt_time(pos)}"
+                                                    "{duration_mmss(pos)}"
                                                 } else {
-                                                    "{fmt_time(track.duration_sec)}"
+                                                    "{duration_mmss(track.duration_sec)}"
                                                 }
                                             }
                                         }

@@ -1,5 +1,7 @@
 # mealplan ↔ grocy parity
 
+**Status:** parity tracker — ongoing. Living scoreboard, never "done".
+
 Track our `features/mealplan/` slice toward feature parity
 with [grocy](https://github.com/grocy/grocy) — the canonical
 self-hosted household-management app. The goal: **scan a

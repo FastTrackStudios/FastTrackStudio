@@ -1,6 +1,6 @@
 # Task webapp baseline
 
-The first Task webapp slice lives in `apps/web` and reuses the shared Dioxus UI crate in `crates/task-ui`. It is intentionally a shell/status/navigation baseline: the data is in-memory demo data and does not read or mutate production Task state.
+The first Task webapp slice lives in `apps/task/web` (package `task-app-web`) and reuses the shared Dioxus UI crate at `crates/task/ui` (package `ui`). It is intentionally a shell/status/navigation baseline: the data is in-memory demo data and does not read or mutate production Task state.
 
 ## Stable package build
 
@@ -19,8 +19,8 @@ result/www/
 The Nix build runs the Tailwind pipeline before the Dioxus build:
 
 ```bash
-tailwindcss -i apps/web/tailwind.css -o apps/web/assets/tailwind.css
-cd apps/web
+tailwindcss -i apps/task/web/tailwind.css -o apps/task/web/assets/tailwind.css
+cd apps/task/web
 dx build --release --platform web
 ```
 
@@ -30,8 +30,8 @@ Use the Dioxus flake dev shell and keep preview data isolated from stable Task s
 
 ```bash
 nix --extra-experimental-features 'nix-command flakes' develop .#ui -c sh -lc '
-  tailwindcss -i apps/web/tailwind.css -o apps/web/assets/tailwind.css
-  cd apps/web
+  tailwindcss -i apps/task/web/tailwind.css -o apps/task/web/assets/tailwind.css
+  cd apps/task/web
   dx serve --platform web
 '
 ```

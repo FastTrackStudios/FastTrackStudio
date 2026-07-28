@@ -12,6 +12,8 @@
 //! Surface:
 //! - [`Location`] / [`Kind`] — the parsed model + canonical
 //!   `kind` enum.
+//! - [`Locations`] — the `vault_entity::VaultEntity` mapping
+//!   (frontmatter keys ↔ `Location` fields).
 //! - [`parse_page`] / [`looks_like_location`] — `VaultPage`
 //!   → `Location`.
 //! - [`serialize_location`] / [`write_location`] —
@@ -25,6 +27,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod entity;
 pub mod model;
 pub mod parse;
 pub mod scan;
@@ -32,6 +35,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
+pub use entity::Locations;
 pub use model::{Kind, Location};
 pub use parse::{ParseError, looks_like_location, parse_page};
 pub use scan::scan_vault;

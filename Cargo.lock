@@ -513,7 +513,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "710e8eae58854cdc1790fcb56cca04d712a17be849eeb81da2a724bf4bae2bc4"
 dependencies = [
  "anstyle",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -1122,7 +1122,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8454c8a44ce2cb9cc7e7fae67fc6128465b343b92c6631e94beca3c8d1524ea5"
 dependencies = [
- "unicode-width 0.2.2",
+ "unicode-width",
  "yansi",
 ]
 
@@ -2695,6 +2695,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vox",
  "vox-types",
 ]
@@ -3649,7 +3650,7 @@ checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -3820,7 +3821,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "958c5d6ecf1f214b4c2bbbbf6ab9523a864bd136dcf71a7e8904799acfe1ad47"
 dependencies = [
  "unicode-segmentation",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -3934,7 +3935,7 @@ dependencies = [
  "encode_unicode",
  "libc",
  "once_cell",
- "unicode-width 0.2.2",
+ "unicode-width",
  "windows-sys 0.59.0",
 ]
 
@@ -4280,7 +4281,7 @@ dependencies = [
  "toml 0.8.2",
  "tracing",
  "unicase",
- "unicode-width 0.2.2",
+ "unicode-width",
  "yansi",
 ]
 
@@ -7885,41 +7886,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "editor-types"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9e9e99679670f67825fcd24a23cb4eb655a0f92c82bd4d1c1a1357c0cd71e87"
-dependencies = [
- "bitflags 2.13.0",
- "editor-types-macros",
- "keybindings",
- "regex",
-]
-
-[[package]]
-name = "editor-types-macros"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42680de76cf91f231abd90cc623750d39077f7d2fadb7962325fb082871f4c66"
-dependencies = [
- "editor-types-parser",
- "nom 7.1.3",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
-name = "editor-types-parser"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cac4b91fe830fbbe0a60c37ba0264b6e9ffc70e3664c028234dac59e79299ad4"
-dependencies = [
- "nom 7.1.3",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "editor-typst"
 version = "0.1.0"
 dependencies = [
@@ -8095,16 +8061,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
-]
-
-[[package]]
-name = "email-nextcloud"
-version = "0.1.0"
-dependencies = [
- "architect",
- "email-proto",
- "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -8715,6 +8671,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vox",
  "vox-types",
 ]
@@ -9375,7 +9332,7 @@ dependencies = [
  "strsim 0.11.1",
  "supports-color 3.0.2",
  "tracing",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -9466,20 +9423,6 @@ dependencies = [
  "uuid 1.23.4",
  "vox",
  "vox-types",
-]
-
-[[package]]
-name = "finance-ui"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dioxus",
- "finance-proto",
- "fts-ui",
- "rust_decimal",
- "serde",
- "timer-proto",
- "tracing",
 ]
 
 [[package]]
@@ -10806,7 +10749,7 @@ version = "0.2.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfe4fbac503b8d1f88e6676011885f34b7174f46e59956bba534ba83abded4df"
 dependencies = [
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -12768,7 +12711,7 @@ dependencies = [
  "console 0.15.11",
  "number_prefix",
  "portable-atomic",
- "unicode-width 0.2.2",
+ "unicode-width",
  "web-time",
 ]
 
@@ -12970,6 +12913,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vox",
  "vox-types",
 ]
@@ -13003,6 +12947,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vox",
  "vox-types",
 ]
@@ -13645,17 +13590,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "portable-atomic",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "keybindings"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19a726307ed87e05155c31329676130e6a237e62dda80211f7e1ed811e47630f"
-dependencies = [
- "textwrap",
- "unicode-segmentation",
- "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -15317,6 +15251,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vox",
  "vox-types",
 ]
@@ -16034,7 +15969,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5d74bb14c1949b60793bc50fa36cd8bca73705c2164ac7b12540da8a38321fa"
 dependencies = [
  "facet 0.50.0-rc.5",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -16045,7 +15980,7 @@ checksum = "681f9da7dbb6ce152c4bf54fb6a584be6159229f5a38b1cf7a11f241fe6d3649"
 dependencies = [
  "arborium-theme",
  "margin",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -19011,20 +18946,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df202b0b0f5b8e389955afd5f27b007b00fb948162953f1db9c70d2c7e3157d7"
 
 [[package]]
-name = "persistence-sqlite"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "crdt",
- "rusqlite",
- "tempfile",
- "tokio",
- "tracing",
- "uuid 1.23.4",
-]
-
-[[package]]
 name = "pest"
 version = "2.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -20673,7 +20594,7 @@ dependencies = [
  "thiserror 2.0.18",
  "unicode-segmentation",
  "unicode-truncate",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -20724,7 +20645,7 @@ dependencies = [
  "strum 0.27.2",
  "time",
  "unicode-segmentation",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -23984,12 +23905,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51d44cfb396c3caf6fbfd0ab422af02631b69ddd96d2eff0b0f0724f9024051b"
 
 [[package]]
-name = "smawk"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
-
-[[package]]
 name = "smithay-client-toolkit"
 version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -26111,17 +26026,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
 
 [[package]]
-name = "textwrap"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057"
-dependencies = [
- "smawk",
- "unicode-linebreak",
- "unicode-width 0.2.2",
-]
-
-[[package]]
 name = "thin-slice"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -27941,12 +27845,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8d00a78170970967fdb83f9d49b92f959ab2bb829186b113e4f4604ad98e180"
 
 [[package]]
-name = "unicode-linebreak"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
-
-[[package]]
 name = "unicode-math-class"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -27996,7 +27894,7 @@ checksum = "16b380a1238663e5f8a691f9039c73e1cdae598a30e9855f541d29b08b53e9a5"
 dependencies = [
  "itertools 0.14.0",
  "unicode-segmentation",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -28004,12 +27902,6 @@ name = "unicode-vo"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1d386ff53b415b7fe27b50bb44679e2cc4660272694b7b6f3326d8480823a94"
-
-[[package]]
-name = "unicode-width"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "unicode-width"
@@ -28342,6 +28234,20 @@ dependencies = [
  "uuid 1.23.4",
  "vault-live",
  "vault-proto",
+]
+
+[[package]]
+name = "vault-entity"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "serde",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid 1.23.4",
+ "vault",
 ]
 
 [[package]]
@@ -28690,16 +28596,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "uuid 1.23.4",
-]
-
-[[package]]
-name = "vim"
-version = "0.1.0"
-dependencies = [
- "dioxus",
- "editor-types",
- "keybindings",
  "uuid 1.23.4",
 ]
 
@@ -30947,6 +30843,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vox",
  "vox-types",
 ]

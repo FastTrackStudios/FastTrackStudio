@@ -1,5 +1,7 @@
 # issue-tracker-integration — Linear-style work model + GitHub/Forgejo sync
 
+**Status:** partially shipped — needs triage (2026-07-27). `task issue` exists in the CLI and the workstream / cycle / milestone / label slices are built; bidirectional forge sync completeness was not verified.
+
 **Target:** extend `TaskInfo` with Linear-style work attributes (workspace / cycle / project / estimate / blockers / agent-attribution), finish the partially-built `git-{proto,config,github}` stack, and add a `git-forgejo` backend. Underpins the `task code` (workflow-coding) work; ships as a usable bidirectional issue tracker first.
 
 ## What we have today

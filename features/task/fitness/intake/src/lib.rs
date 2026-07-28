@@ -21,6 +21,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod entity;
 pub mod model;
 pub mod parse;
 pub mod scan;
@@ -28,6 +29,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
+pub use entity::IntakeLogs;
 pub use model::{IntakeEntry, IntakeLog, IntakeSource, scale_nutrition};
 pub use parse::{ParseError, looks_like_intake, parse_page};
 pub use scan::{between, for_day, scan_vault};

@@ -19,6 +19,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 architect = { workspace = true }
 vault = { workspace = true }
+vault-entity = { workspace = true }
 inventory-proto = { workspace = true }
 
 vox = { workspace = true, optional = true }

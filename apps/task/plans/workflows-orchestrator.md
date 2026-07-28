@@ -1,5 +1,7 @@
 # workflows-orchestrator — shared agent-workflow primitives
 
+**Status:** partially shipped — needs triage (2026-07-27). `features/task/workflows/{workflows-proto,workflows-orchestrator}` exist; scope completion was not verified.
+
 **Target:** define the cross-domain primitives every concrete workflow uses (coding, writing, music, research, …). Provides the state machine, the agent attribution model, and the handoff/resume primitive that lets one agent pick up another's incomplete work without losing context.
 
 Depends on `plans/issue-tracker-integration.md` for the `AgentRef` type — defined on `TaskInfo`'s `WorkflowAttrs` to avoid a circular dep (re-exported here).

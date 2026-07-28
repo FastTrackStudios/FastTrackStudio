@@ -1,5 +1,7 @@
 # wiki-graph — feature parity with LLM-Wiki + Graphify
 
+**Status:** parity tracker — ongoing. Living scoreboard, never "done".
+
 **Target:** make `wiki-graph` feature-complete with both nashsu/llm_wiki and safishamsi/graphify, but for the **entire wiki** (code + markdown + mixed), not just code projects.
 
 ## What we have today

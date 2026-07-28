@@ -1,0 +1,22 @@
+[package]
+name = "vault-entity"
+description = "Shared support layer for vault-backed markdown entities. Frontmatter split/parse/serialize, YAML accessors, slugs, a generic `VaultEntityStore<T>` over `vault::Vault`, and one error vocabulary — the pattern every entity slice (task, project, goal, inventory, locations, milestone, fitness/*, mealplan/*, workstream, …) used to hand-copy."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+vault = { workspace = true }
+architect = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

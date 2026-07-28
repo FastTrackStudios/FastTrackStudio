@@ -2,23 +2,14 @@
 //! looks like an exercise.
 
 use vault::Vault;
+use vault_entity::VaultEntityStore;
 
+use crate::entity::Exercises;
 use crate::model::Exercise;
-use crate::parse::{looks_like_exercise, parse_page};
 
+/// Every exercise page, parse failures logged and skipped.
 pub fn scan_vault(vault: &Vault) -> Vec<Exercise> {
-    vault
-        .pages
-        .iter()
-        .filter(|p| looks_like_exercise(p))
-        .filter_map(|p| match parse_page(p) {
-            Ok(e) => Some(e),
-            Err(e) => {
-                tracing::warn!(path = %p.rel_path, ?e, "exercise parse failed");
-                None
-            }
-        })
-        .collect()
+    VaultEntityStore::<Exercises>::scan(vault)
 }
 
 /// Convenience: every exercise in a given category.
