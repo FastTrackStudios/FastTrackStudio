@@ -287,6 +287,18 @@ pub struct AppState {
     /// the server-management `create_org` RPC. `RwLock` so
     /// reads on the request hot path stay parallel; writes
     /// happen only when an admin scaffolds a new org.
+    ///
+    /// **Deliberately `std::sync`, not `tokio::sync`.** Every
+    /// accessor below is a *sync* fn that clones what it needs and
+    /// drops the guard before returning, so no guard ever spans an
+    /// `.await` — the case where a blocking lock is correct (and the
+    /// compiler enforces it: `RwLockReadGuard` is `!Send`, so a guard
+    /// held across an await in any handler or spawned task would fail
+    /// to satisfy axum's / tokio's `Send` bound). A `tokio::RwLock`
+    /// here would only make these accessors async and infect the sync
+    /// `#[architect::rpc]` backends that call them. Callers must keep
+    /// it that way: clone the `OrgAppState` (see [`AppState::org`])
+    /// rather than working under the guard.
     pub orgs: Arc<std::sync::RwLock<std::collections::HashMap<String, OrgAppState>>>,
     /// Source data root. Held for `.well-known/task-server.json`
     /// discovery, manifest re-scans, and the keypair path.
@@ -308,6 +320,11 @@ pub struct AppState {
     /// Last (or in-flight) async snapshot's status — polled via
     /// `GET /server/snapshot/status` after a `POST /server/snapshot?wait=0`
     /// kick-off. The synchronous trigger doesn't touch it.
+    ///
+    /// `std::sync` for the same reason as [`Self::orgs`]: every use
+    /// is a read-clone or a field assignment inside its own block,
+    /// never across an `.await` (the cycle is awaited *before* the
+    /// guard is taken).
     pub snapshot_status: Arc<std::sync::RwLock<snapshot::SnapshotStatus>>,
 }
 
@@ -388,13 +405,16 @@ impl AppState {
     /// can mint new federated orgs.
     #[must_use]
     pub fn home_slug(&self) -> Option<String> {
-        let guard = self.orgs.read().ok()?;
-        for slug in guard.keys() {
+        // Snapshot the slugs and drop the guard before touching the
+        // disk — the manifest reads below must not run under the
+        // registry lock.
+        let slugs = self.org_slugs();
+        for slug in slugs {
             // `is_home` lives in the manifest, not the runtime
             // state — re-read from disk.
             if let Ok(manifest) = self.data_root.org(slug.as_str()).manifest() {
                 if manifest.is_home {
-                    return Some(slug.clone());
+                    return Some(slug);
                 }
             }
         }

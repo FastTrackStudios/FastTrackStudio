@@ -197,10 +197,13 @@ fn apply_event(
         return Ok(None); // forge issue we don't track locally
     };
 
-    // Mutate the TaskInfo through the org's task backend.
-    let orgs = state.orgs.read().map_err(|_| "orgs lock poisoned")?;
-    let org = orgs
-        .get(slug)
+    // Mutate the TaskInfo through the org's task backend. Take a
+    // *clone* of the org state (`AppState::org` drops the registry
+    // guard before returning) — the task get/update below is disk
+    // IO, and holding the global orgs lock across it would stall
+    // every other org's boot-time writes for no reason.
+    let org = state
+        .org(slug)
         .ok_or_else(|| format!("org `{slug}` not hosted"))?;
     let mut t = org
         .tasks
