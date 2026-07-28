@@ -22,94 +22,16 @@ fn main() {
     LaunchBuilder::desktop().with_cfg(cfg).launch(Root);
 }
 
+// The three Task app mains (desktop / mobile / web) are deliberately
+// thin: a stylesheet plus `ui::App`. Application behaviour belongs in
+// the `ui` crate so every platform gets it. This file used to carry ~90
+// lines of injected JS that no other platform had; all of it was either
+// dead or superseded by Rust in `ui` — see the commit that removed it
+// before adding anything like it back here.
 #[component]
 fn Root() -> Element {
     rsx! {
         document::Stylesheet { href: TAILWIND_CSS }
-        // KaTeX (CDN) — upgrades `.math-inline` / `.math-block`
-        // spans emitted by the inline parser into rendered math.
-        // Auto-render extension scans the DOM for `$…$` and
-        // `$$…$$` *text* delimiters at load time; we emit the raw
-        // source inside the math spans so this Just Works.
-        document::Stylesheet {
-            href: "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
-        }
-        document::Script {
-            src: "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js",
-            defer: true,
-        }
-        document::Script {
-            src: "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js",
-            defer: true,
-        }
-        // After auto-render loads, scan the body for math delimiters
-        // and upgrade them in place. Re-runs every 2s so blocks edited
-        // after load also pick up rendering — cheap because KaTeX
-        // skips nodes it has already rendered.
-        document::Script {
-            r#"
-            window.addEventListener('load', function() {{
-              function render() {{
-                if (window.renderMathInElement) {{
-                  renderMathInElement(document.body, {{
-                    delimiters: [
-                      {{left: '$$', right: '$$', display: true}},
-                      {{left: '$', right: '$', display: false}}
-                    ],
-                    throwOnError: false
-                  }});
-                }}
-              }}
-              render();
-              setInterval(render, 2000);
-            }});
-            "#
-        }
-        // Global click delegate for `.pdf-macro` chips — open the
-        // referenced PDF in the dedicated reader view. We can't
-        // mutate Dioxus signals from raw JS, so we re-emit the URL
-        // as a custom event the Rust side listens for via the
-        // shell's onmounted hook. The event payload is the data-
-        // attribute string verbatim.
-        document::Script {
-            r#"
-            document.addEventListener('click', function(e) {{
-              const btn = e.target.closest('.pdf-macro[data-pdf-url]');
-              if (!btn) return;
-              e.preventDefault();
-              const url = btn.getAttribute('data-pdf-url');
-              window.dispatchEvent(new CustomEvent('task:open-pdf', {{ detail: url }}));
-            }});
-            "#
-        }
-        // Global click delegate for `.video-timestamp` chips. When
-        // a chip is clicked, walk up to the nearest block and seek
-        // the first <video> or YouTube iframe to the chip's
-        // data-ts-seconds value.
-        document::Script {
-            r#"
-            document.addEventListener('click', function(e) {{
-              const btn = e.target.closest('.video-timestamp[data-ts-seconds]');
-              if (!btn) return;
-              e.preventDefault();
-              const secs = parseInt(btn.getAttribute('data-ts-seconds'), 10);
-              if (Number.isNaN(secs)) return;
-              const host = btn.closest('[data-block-id]') || document.body;
-              const v = host.querySelector('video');
-              if (v) {{ v.currentTime = secs; v.play && v.play(); return; }}
-              const yt = host.querySelector('iframe.media-youtube, iframe[src*="youtube.com/embed"]');
-              if (yt) {{
-                const url = new URL(yt.src);
-                url.searchParams.set('start', secs);
-                url.searchParams.set('autoplay', '1');
-                yt.src = url.toString();
-                return;
-              }}
-              const fallback = document.querySelector('video');
-              if (fallback) {{ fallback.currentTime = secs; fallback.play && fallback.play(); }}
-            }});
-            "#
-        }
         App {}
     }
 }
