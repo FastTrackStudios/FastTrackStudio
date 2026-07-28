@@ -25,6 +25,7 @@
 
 mod admin;
 mod agent;
+mod api;
 mod auth;
 mod body;
 mod brief;
@@ -67,6 +68,7 @@ mod workstream;
 
 use crate::admin::{AdminCmd, run_admin};
 use crate::agent::{AgentCmd, run_agent};
+use crate::api::{ApiArgs, run_api};
 use crate::auth::{AuthCmd, run_auth, ws_base_to_http};
 use crate::body::{BodyCmd, run_body};
 use crate::code::{CodeCmd, run_code};
@@ -128,6 +130,14 @@ struct Cli {
 enum Commands {
     /// Probe the configured vox endpoint.
     Doctor,
+    /// The API reference, rendered from the live registry
+    /// (`task_server::permits::mounts()`): every mounted service,
+    /// its methods + arg names, the permit action/resource per
+    /// method, stream vs rpc, and the schema stamp. `task api
+    /// <service>` for one service; `--markdown` regenerates
+    /// `apps/task/docs/api-reference.md`; `--json` mirrors
+    /// `GET /org/{slug}/api`.
+    Api(ApiArgs),
     /// FS-native vault queries — no server, no CRDT.
     Vault {
         #[command(subcommand)]
@@ -464,6 +474,9 @@ async fn run(cli: Cli) -> eyre::Result<()> {
             println!("Vox endpoint: {}", remote.display_url);
             doctor_check_schema(&server).await?;
             doctor_check_permissions();
+        }
+        Commands::Api(args) => {
+            return run_api(args);
         }
         Commands::Vault { cmd } => match cmd {
             // Sync ops touch vox and need async; everything

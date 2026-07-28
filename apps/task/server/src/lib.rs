@@ -18,6 +18,7 @@
 //! editor layer (future); vault is the sole storage path.
 
 pub mod agent_router;
+pub mod api_ref;
 pub mod attachments;
 pub mod capability;
 pub mod connections;
@@ -1441,6 +1442,7 @@ pub fn router(state: AppState) -> Router {
         .with_state(state.clone());
     let per_org = Router::new()
         .route("/org/{slug}/health", get(per_org_health_handler))
+        .route("/org/{slug}/api", get(per_org_api_handler))
         .route("/org/{slug}/vox", any(per_org_vox_handler))
         .route(
             "/org/{slug}/webhooks/forge",
@@ -1631,6 +1633,35 @@ async fn per_org_health_handler(
             format!("org `{slug}` not hosted"),
         ))
     }
+}
+
+/// `/org/<slug>/api` — the self-describing API reference:
+/// [`permits::mounts()`] serialized (every service, its methods + arg
+/// names, the permit action/resource per method, stream-ness, and the
+/// per-service schema stamp). See [`api_ref`].
+///
+/// **Auth posture**: public, exactly like `/org/{slug}/health` and
+/// `/.well-known/task-server.json` — the precedent. The well-known
+/// document already publishes the per-service `schema_stamps` without
+/// auth (federation discovery), and this endpoint adds only more
+/// build-static metadata of the same kind (names + permit templates —
+/// no org data, no tokens, nothing runtime). `404` when the slug is
+/// not hosted, mirroring the health probe.
+async fn per_org_api_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+) -> axum::response::Response {
+    if state.org(&slug).is_none() {
+        return axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::NOT_FOUND,
+            format!("org `{slug}` not hosted"),
+        ));
+    }
+    let mut body = api_ref::reference_json();
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("org".to_owned(), serde_json::Value::String(slug));
+    }
+    axum::Json(body).into_response()
 }
 
 /// `/org/<slug>/vox` — per-org vox WebSocket. Looks up the
