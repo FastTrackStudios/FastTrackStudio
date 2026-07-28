@@ -18860,6 +18860,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pattern-ui"
+version = "0.1.0"
+dependencies = [
+ "fts-modulation",
+]
+
+[[package]]
 name = "pbkdf2"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21434,6 +21441,7 @@ version = "0.1.0"
 dependencies = [
  "audiocore-dsp",
  "crossbeam-channel",
+ "fts-modulation",
  "pitch-dsp",
  "realfft",
  "symphonium",
@@ -23458,6 +23466,7 @@ name = "signal-macromod"
 version = "0.1.0"
 dependencies = [
  "facet 0.50.0-rc.5",
+ "fts-modulation",
  "serde",
  "serde_json",
 ]
@@ -23738,11 +23747,13 @@ dependencies = [
  "dioxus",
  "dock-dioxus",
  "dock-proto",
+ "fts-modulation",
  "fts-ui",
  "getrandom 0.3.4",
  "lumen-blocks",
  "midicore",
  "nice-plug-dioxus",
+ "pattern-ui",
  "signal",
  "signal-browser",
  "signal-controller",
