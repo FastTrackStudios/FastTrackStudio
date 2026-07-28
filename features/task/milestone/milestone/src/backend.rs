@@ -52,8 +52,7 @@ impl MilestoneBackend {
     /// Resolve the owning project's vault-relative path
     /// (e.g. `Projects/Health/Health.md`). Used by `create`
     /// to derive the default milestone path. Walks the vault
-    /// for the one `type: project` page whose frontmatter
-    /// `id` matches.
+    /// for the one project page whose frontmatter `id` matches.
     fn project_path(&self, project_id: Uuid) -> Result<String, MilestoneError> {
         let vault = Vault::open(&self.vault_root).map_err(|e| {
             MilestoneError::Io(format!("open vault {}: {e}", self.vault_root.display()))
@@ -62,7 +61,7 @@ impl MilestoneBackend {
             let Some((map, _)) = vault_entity::frontmatter::mapping(&page.raw) else {
                 continue;
             };
-            if vault_entity::yaml::str_at(&map, "type").as_deref() != Some("project") {
+            if !looks_like_project(&map) {
                 continue;
             }
             let id_match = vault_entity::yaml::str_at(&map, "id")
@@ -76,6 +75,27 @@ impl MilestoneBackend {
             "no project with id {project_id} in this vault"
         )))
     }
+}
+
+/// Mirrors `project::looks_like_project`: `type:` or a tag, matched
+/// case-insensitively because `type: Project` occurs in real vaults.
+///
+/// This used to be an exact `== Some("project")` on `type:` alone, so a
+/// milestone could not find its owner on any page the project slice
+/// itself happily recognised.
+///
+/// Duplicated rather than called: `milestone` does not depend on
+/// `project`, and adding an edge to a peer slice's impl crate to reach
+/// one predicate is the wrong trade. It collapses into one definition
+/// when `project-proto` is extracted.
+fn looks_like_project(map: &serde_yaml::Mapping) -> bool {
+    const PROJECT: &str = "project";
+    if vault_entity::yaml::str_at(map, "type").is_some_and(|t| t.eq_ignore_ascii_case(PROJECT)) {
+        return true;
+    }
+    vault_entity::yaml::string_list_at(map, "tags")
+        .iter()
+        .any(|t| t.eq_ignore_ascii_case(PROJECT))
 }
 
 impl MilestoneService for MilestoneBackend {
@@ -193,5 +213,38 @@ impl MilestoneService for MilestoneBackend {
         std::fs::remove_file(&abs)
             .map_err(|e| MilestoneError::Io(format!("remove {}: {e}", abs.display())))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_project;
+
+    fn map(src: &str) -> serde_yaml::Mapping {
+        serde_yaml::from_str(src).unwrap()
+    }
+
+    /// `type: Project` occurs in real vaults and the project slice
+    /// accepts it. An exact match here meant a milestone could not find
+    /// an owner the rest of the system could see.
+    #[test]
+    fn project_type_is_case_insensitive() {
+        assert!(looks_like_project(&map("type: project")));
+        assert!(looks_like_project(&map("type: Project")));
+        assert!(looks_like_project(&map("type: PROJECT")));
+    }
+
+    /// The tag form counts too, same as `project::looks_like_project`.
+    #[test]
+    fn the_tag_form_counts() {
+        assert!(looks_like_project(&map("tags:\n  - Project")));
+        assert!(looks_like_project(&map("tags: project")));
+    }
+
+    #[test]
+    fn other_pages_are_not_projects() {
+        assert!(!looks_like_project(&map("type: task")));
+        assert!(!looks_like_project(&map("tags:\n  - milestone")));
+        assert!(!looks_like_project(&map("name: nope")));
     }
 }
