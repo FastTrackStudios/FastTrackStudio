@@ -93,6 +93,9 @@ intake = { workspace = true, features = ["vox"] }
 # and routes all its sqlites + vault through OrgRoot. PR 4
 # will scan + serve every org under <data_root>/orgs/.
 org-proto = { workspace = true }
+# Plugin vocabulary: mount ownership (`permits::Mount::plugin`) + the
+# per-org enabled-set resolution from `OrgManifest.disabled_plugins`.
+task-plugin = { workspace = true }
 # Server-native git snapshots over the data root — the engine
 # behind the `SnapshotService` verbs + `POST /server/snapshot`.
 org-snapshot = { workspace = true }

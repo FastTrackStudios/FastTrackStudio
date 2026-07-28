@@ -434,241 +434,308 @@ table!(FORGE_REVIEWS_STREAM, "forge-reviews-stream", "forge/reviews/**", [rd "re
 
 // ── The mount list ───────────────────────────────────────────────────────
 
-/// One service as [`crate::org_layer_router`] mounts it: its descriptor and
-/// the permit table the gate installs for it.
+/// One service as [`crate::org_layer_router`] mounts it: its descriptor,
+/// the permit table the gate installs for it, and the plugin that owns it.
 ///
 /// `permits: None` means "mounted, deliberately ungated" — it would show up
 /// in [`coverage`] as untabled. Nothing uses it today (every mounted
 /// service has a table); it exists so a future mount that genuinely cannot
 /// be tabled is recorded as a decision instead of an omission.
+///
+/// `plugin` is a `task_plugin::CATALOG` id (`"core"` for platform
+/// services); the grouping follows the table in
+/// `apps/task/plans/plugin-system.md`. [`mounts_for`] filters on it —
+/// that filtered view is what [`crate::org_layer_router`] must match for
+/// an org with a deny-list.
 pub struct Mount {
     pub descriptor: &'static ServiceDescriptor,
     pub permits: Option<ServicePermits>,
+    /// Owning plugin's catalog id (`task_plugin::CATALOG`).
+    pub plugin: &'static str,
 }
 
-const fn m(descriptor: &'static ServiceDescriptor, permits: ServicePermits) -> Mount {
+const fn m(
+    plugin: &'static str,
+    descriptor: &'static ServiceDescriptor,
+    permits: ServicePermits,
+) -> Mount {
     Mount {
         descriptor,
         permits: Some(permits),
+        plugin,
     }
 }
 
-/// Every service [`crate::org_layer_router`] mounts, paired with its permit
-/// table. **Keep in lockstep with that function** — `permits_cover_router`
-/// (in `tests/`) fails the build if the counts diverge.
+/// Every service this build knows how to mount, paired with its permit
+/// table and owning plugin — the CATALOG, independent of any org's
+/// deny-list. **Keep in lockstep with [`crate::org_layer_router`]** —
+/// `permits_cover_router` (in `tests/`) fails the build if the
+/// plugin-filtered views diverge. [`crate::schema_stamps`] folds this
+/// full list on purpose: a disabled service's stamp is still this
+/// build's stamp (skew detection is build-level, not org-level).
 #[must_use]
 pub fn mounts() -> Vec<Mount> {
     vec![
         // Platform
-        m(architect_auth::auth_service_service_descriptor(), AUTH),
+        m("core", architect_auth::auth_service_service_descriptor(), AUTH),
         m(
+            "core",
             architect_permissions_proto::permissions_service_service_descriptor(),
             PERMISSIONS,
         ),
         m(
+            "core",
             attachments_proto::attachment_service_service_descriptor(),
             ATTACHMENTS,
         ),
-        m(media_proto::media_service_service_descriptor(), MEDIA),
-        m(vault_proto::descriptor(), VAULT),
-        m(vault_proto::stream_descriptor(), VAULT_STREAM),
-        m(vault_proto::vault_graph_rpc_service_descriptor(), VAULT_GRAPH),
-        m(share_proto::share_service_service_descriptor(), SHARE),
-        m(crdt::sync::doc_sync_service_descriptor(), DOC_SYNC),
-        m(crdt::sync::doc_presence_service_descriptor(), DOC_PRESENCE),
+        m("core", media_proto::media_service_service_descriptor(), MEDIA),
+        m("core", vault_proto::descriptor(), VAULT),
+        m("core", vault_proto::stream_descriptor(), VAULT_STREAM),
+        m("core", vault_proto::vault_graph_rpc_service_descriptor(), VAULT_GRAPH),
+        m("core", share_proto::share_service_service_descriptor(), SHARE),
+        m("core", crdt::sync::doc_sync_service_descriptor(), DOC_SYNC),
+        m("core", crdt::sync::doc_presence_service_descriptor(), DOC_PRESENCE),
         // Agent
         m(
+            "agent",
             agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
             AGENT_TASKS,
         ),
         m(
+            "agent",
             agent_proto::service::sessions::sessions_rpc_service_descriptor(),
             AGENT_SESSIONS,
         ),
         m(
+            "agent",
             agent_proto::service::turn_dispatch::turn_dispatch_rpc_service_descriptor(),
             AGENT_TURNS,
         ),
         m(
+            "agent",
             agent_proto::service::threads::threads_rpc_service_descriptor(),
             AGENT_THREADS,
         ),
         m(
+            "agent",
             agent_proto::service::subscriptions::subscriptions_stream_service_descriptor(),
             AGENT_SUBSCRIPTIONS,
         ),
         m(
+            "agent",
             agent_proto::service::discovery::discovery_rpc_service_descriptor(),
             AGENT_DISCOVERY,
         ),
         m(
+            "agent",
             agent_proto::service::routines::routines_rpc_service_descriptor(),
             AGENT_ROUTINES,
         ),
         // Work
-        m(project::project_service_descriptor(), PROJECT),
-        m(project::project_stream_descriptor(), PROJECT_STREAM),
-        m(goal::goal_service_descriptor(), GOAL),
-        m(goal::goal_stream_descriptor(), GOAL_STREAM),
-        m(milestone::milestone_service_descriptor(), MILESTONE),
-        m(milestone::milestone_stream_descriptor(), MILESTONE_STREAM),
-        m(workstream::workstream_service_descriptor(), WORKSTREAM),
-        m(workstream::workstream_stream_descriptor(), WORKSTREAM_STREAM),
-        m(task::task_service_descriptor(), TASK),
-        m(task::task_stream_descriptor(), TASK_STREAM),
+        m("core", project::project_service_descriptor(), PROJECT),
+        m("core", project::project_stream_descriptor(), PROJECT_STREAM),
+        m("core", goal::goal_service_descriptor(), GOAL),
+        m("core", goal::goal_stream_descriptor(), GOAL_STREAM),
+        m("core", milestone::milestone_service_descriptor(), MILESTONE),
+        m("core", milestone::milestone_stream_descriptor(), MILESTONE_STREAM),
+        m("core", workstream::workstream_service_descriptor(), WORKSTREAM),
+        m("core", workstream::workstream_stream_descriptor(), WORKSTREAM_STREAM),
+        m("core", task::task_service_descriptor(), TASK),
+        m("core", task::task_stream_descriptor(), TASK_STREAM),
         m(
+            "core",
             timer_proto::service::timer_service_rpc_service_descriptor(),
             TIMER,
         ),
-        m(timer_proto::timer_stream_descriptor(), TIMER_STREAM),
+        m("core", timer_proto::timer_stream_descriptor(), TIMER_STREAM),
         m(
+            "core",
             threads::service::threads_service_rpc_service_descriptor(),
             THREADS,
         ),
-        m(prefs_proto::service::prefs_service_rpc_service_descriptor(), PREFS),
+        m("core", prefs_proto::service::prefs_service_rpc_service_descriptor(), PREFS),
         // Scheduling
         m(
+            "scheduling",
             scheduling_proto::service::day_templates::day_templates_rpc_service_descriptor(),
             DAY_TEMPLATES,
         ),
         m(
+            "scheduling",
             scheduling_proto::service::day_plans::day_plans_rpc_service_descriptor(),
             DAY_PLANS,
         ),
         m(
+            "scheduling",
             scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
             CALENDAR_EVENTS,
         ),
         m(
+            "scheduling",
             scheduling_proto::service::event_types::event_types_rpc_service_descriptor(),
             EVENT_TYPES,
         ),
         m(
+            "scheduling",
             scheduling_proto::service::schedules::schedules_rpc_service_descriptor(),
             SCHEDULES,
         ),
         m(
+            "scheduling",
             scheduling_proto::service::slots::slots_rpc_service_descriptor(),
             SLOTS,
         ),
         m(
+            "scheduling",
             scheduling_proto::service::bookings::bookings_rpc_service_descriptor(),
             BOOKINGS,
         ),
         m(
+            "scheduling",
             scheduling_proto::scheduling_events_stream_descriptor(),
             SCHEDULING_STREAM,
         ),
         // Knowledge
-        m(inbox_proto::service::inbox::inbox_rpc_service_descriptor(), INBOX),
-        m(inbox_proto::inbox_stream_descriptor(), INBOX_STREAM),
+        m("core", inbox_proto::service::inbox::inbox_rpc_service_descriptor(), INBOX),
+        m("core", inbox_proto::inbox_stream_descriptor(), INBOX_STREAM),
         m(
+            "recall",
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             RECALL,
         ),
-        m(recall_proto::recall_stream_descriptor(), RECALL_STREAM),
+        m("recall", recall_proto::recall_stream_descriptor(), RECALL_STREAM),
         m(
+            "contacts",
             contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
             CONTACTS,
         ),
-        m(contacts_proto::contacts_stream_descriptor(), CONTACTS_STREAM),
-        m(tag_proto::service::tags::tag_service_rpc_service_descriptor(), TAGS),
-        m(scripture::scripture_service_descriptor(), SCRIPTURE),
-        m(links::links_service_descriptor(), LINKS),
-        m(collection::collection_service_descriptor(), COLLECTION),
+        m("contacts", contacts_proto::contacts_stream_descriptor(), CONTACTS_STREAM),
+        m("core", tag_proto::service::tags::tag_service_rpc_service_descriptor(), TAGS),
+        m("scripture", scripture::scripture_service_descriptor(), SCRIPTURE),
+        m("core", links::links_service_descriptor(), LINKS),
+        m("fasttrackstudio", collection::collection_service_descriptor(), COLLECTION),
         m(
+            "core",
             resources_proto::resources_service_rpc_service_descriptor(),
             RESOURCES,
         ),
         // Finance
         m(
+            "finance",
             finance_proto::service::invoicing::invoicing_rpc_service_descriptor(),
             INVOICING,
         ),
         m(
+            "finance",
             finance_proto::service::ledger::ledger_rpc_service_descriptor(),
             LEDGER,
         ),
         // Wiki
-        m(wiki_proto::service::schema::schema_rpc_service_descriptor(), WIKI_SCHEMA),
+        m("wiki", wiki_proto::service::schema::schema_rpc_service_descriptor(), WIKI_SCHEMA),
         m(
+            "wiki",
             wiki_proto::service::catalog::catalog_rpc_service_descriptor(),
             WIKI_CATALOG,
         ),
         m(
+            "wiki",
             wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor(),
             WIKI_RAW,
         ),
-        m(wiki_proto::service::graph::graph_rpc_service_descriptor(), WIKI_GRAPH),
-        m(wiki_proto::service::pages::pages_rpc_service_descriptor(), WIKI_PAGES),
+        m("wiki", wiki_proto::service::graph::graph_rpc_service_descriptor(), WIKI_GRAPH),
+        m("wiki", wiki_proto::service::pages::pages_rpc_service_descriptor(), WIKI_PAGES),
         m(
+            "wiki",
             wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
             WIKI_INGEST,
         ),
-        m(wiki_proto::service::lint::lint_rpc_service_descriptor(), WIKI_LINT),
+        m("wiki", wiki_proto::service::lint::lint_rpc_service_descriptor(), WIKI_LINT),
         m(
+            "wiki",
             wiki_proto::service::search::search_rpc_service_descriptor(),
             WIKI_SEARCH,
         ),
         m(
+            "wiki",
             wiki_proto::service::events::events_stream_service_descriptor(),
             WIKI_STREAM,
         ),
         m(
+            "wiki",
             wiki_proto::service::watcher::watcher_rpc_service_descriptor(),
             WIKI_WATCHER,
         ),
         m(
+            "wiki",
             wiki_proto::service::multimodal::multimodal_rpc_service_descriptor(),
             WIKI_MULTIMODAL,
         ),
         m(
+            "wiki",
             wiki_proto::service::review::review_rpc_service_descriptor(),
             WIKI_REVIEW,
         ),
         // Home
-        m(locations::locations_service_descriptor(), LOCATIONS),
-        m(inventory::inventory_service_descriptor(), INVENTORY),
-        m(cookbook::cookbook_service_descriptor(), COOKBOOK),
-        m(mealplan::mealplan_service_descriptor(), MEALPLAN),
-        m(pantry::pantry_service_descriptor(), PANTRY),
+        m("home", locations::locations_service_descriptor(), LOCATIONS),
+        m("home", inventory::inventory_service_descriptor(), INVENTORY),
+        m("mealplan", cookbook::cookbook_service_descriptor(), COOKBOOK),
+        m("mealplan", mealplan::mealplan_service_descriptor(), MEALPLAN),
+        m("mealplan", pantry::pantry_service_descriptor(), PANTRY),
         m(
+            "mealplan",
             mealplan::shopping::shopping_service_rpc_service_descriptor(),
             SHOPPING,
         ),
         m(
+            "mealplan",
             mealplan::substitutions::substitution_service_rpc_service_descriptor(),
             SUBSTITUTIONS,
         ),
-        m(body::body_service_descriptor(), BODY),
-        m(exercises::exercises_service_descriptor(), EXERCISES),
-        m(workouts::workouts_service_descriptor(), WORKOUTS),
-        m(intake::intake_service_descriptor(), INTAKE),
+        m("fitness", body::body_service_descriptor(), BODY),
+        m("fitness", exercises::exercises_service_descriptor(), EXERCISES),
+        m("fitness", workouts::workouts_service_descriptor(), WORKOUTS),
+        m("fitness", intake::intake_service_descriptor(), INTAKE),
         // Outside world
-        m(email_proto::descriptor(), EMAIL),
-        m(email_proto::stream_descriptor(), EMAIL_STREAM),
-        m(git_proto::repo::repo_catalog_rpc_service_descriptor(), FORGE_REPOS),
+        m("email", email_proto::descriptor(), EMAIL),
+        m("email", email_proto::stream_descriptor(), EMAIL_STREAM),
+        m("forge", git_proto::repo::repo_catalog_rpc_service_descriptor(), FORGE_REPOS),
         m(
+            "forge",
             git_proto::issues::issue_tracker_rpc_service_descriptor(),
             FORGE_ISSUES,
         ),
         m(
+            "forge",
             git_proto::reviews::review_surface_rpc_service_descriptor(),
             FORGE_REVIEWS,
         ),
         m(
+            "forge",
             git_proto::issues::issue_tracker_stream_service_descriptor(),
             FORGE_ISSUES_STREAM,
         ),
         m(
+            "forge",
             git_proto::reviews::review_surface_stream_service_descriptor(),
             FORGE_REVIEWS_STREAM,
         ),
         m(
+            "forge",
             git_proto::connections::repo_connections_rpc_service_descriptor(),
             FORGE_CONNECTIONS,
         ),
     ]
+}
+
+/// The mounts an org with plugin set `set` actually serves — what
+/// [`crate::org_layer_router`] mounts and the permit gate installs
+/// tables for. [`mounts`] stays the full catalog; this is the org view.
+#[must_use]
+pub fn mounts_for(set: &task_plugin::PluginSet) -> Vec<Mount> {
+    mounts()
+        .into_iter()
+        .filter(|m| set.contains(m.plugin))
+        .collect()
 }
 
 /// Every mounted service's descriptor — the single list
@@ -678,21 +745,33 @@ pub fn mounted_descriptors() -> Vec<&'static ServiceDescriptor> {
     mounts().into_iter().map(|m| m.descriptor).collect()
 }
 
-/// Install every permit table on `gate`.
+/// Install the permit tables for every service mounted under `set` on
+/// `gate` — permits exist only for services that are actually served, so
+/// a disabled plugin's tables are not registered (its services aren't
+/// dispatchable either; the router refuses them before the gate would).
 ///
 /// Registering a table makes that service's UNLISTED methods fail-closed,
 /// which is why [`coverage`] must stay clean — and why it is logged at
 /// boot.
 #[must_use]
-pub fn install(
+pub fn install_for(
     mut gate: architect::permissions_gate::PermissionsGate,
+    set: &task_plugin::PluginSet,
 ) -> architect::permissions_gate::PermissionsGate {
-    for mount in mounts() {
+    for mount in mounts_for(set) {
         if let Some(table) = mount.permits {
             gate = gate.permit(mount.descriptor, table);
         }
     }
     gate
+}
+
+/// [`install_for`] with everything enabled — the pre-plugin behaviour.
+#[must_use]
+pub fn install(
+    gate: architect::permissions_gate::PermissionsGate,
+) -> architect::permissions_gate::PermissionsGate {
+    install_for(gate, &task_plugin::PluginSet::resolve(None))
 }
 
 // ── Coverage ─────────────────────────────────────────────────────────────
@@ -1180,6 +1259,41 @@ mod tests {
             "the anonymous surface changed — every entry must be a service \
              that authenticates its own callers",
         );
+    }
+
+    /// Every mount's `plugin` is a real `task_plugin::CATALOG` id — a
+    /// typo here would silently unmount the service for every org (an
+    /// unknown id is never in a resolved `PluginSet`).
+    #[test]
+    fn every_mount_plugin_is_a_known_catalog_id() {
+        for mount in mounts() {
+            assert!(
+                task_plugin::find(mount.plugin).is_some(),
+                "{} names unknown plugin `{}`",
+                mount.descriptor.service_name,
+                mount.plugin
+            );
+        }
+    }
+
+    /// The filtered view: everything with no deny-list; core survives
+    /// any deny-list; a denied plugin's mounts (and only those) drop.
+    #[test]
+    fn mounts_for_filters_by_plugin() {
+        use task_plugin::{PluginChoice, PluginSet};
+        let all = PluginSet::resolve(None);
+        assert_eq!(mounts_for(&all).len(), mounts().len());
+
+        let no_mealplan =
+            PluginSet::resolve(Some(&PluginChoice::Disabled(vec!["mealplan".into()])));
+        let filtered = mounts_for(&no_mealplan);
+        assert!(filtered.iter().all(|m| m.plugin != "mealplan"));
+        let dropped = mounts()
+            .iter()
+            .filter(|m| m.plugin == "mealplan")
+            .count();
+        assert!(dropped > 0, "the mealplan plugin owns mounts");
+        assert_eq!(filtered.len(), mounts().len() - dropped);
     }
 
     /// No `admin` permits: nobody holds the `owner` role on the org lane
