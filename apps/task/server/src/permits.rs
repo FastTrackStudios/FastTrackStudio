@@ -288,10 +288,12 @@ table!(INBOX_STREAM, "inbox-stream", "inbox/**", [rd "events"]);
 table!(RECALL, "recall", "recall/**", [
     rd "list_cards", rd "review_queue", wr "upsert_card", wa "delete_card",
 ]);
+table!(RECALL_STREAM, "recall-stream", "recall/**", [rd "events"]);
 table!(CONTACTS, "contacts", "contacts/**", [
     rd "list_contacts", rd "get_contact", wr "upsert_contact", wa "delete_contact",
     rd "list_accounts", wr "upsert_account", wa "delete_account", wa "sync_account",
 ]);
+table!(CONTACTS_STREAM, "contacts-stream", "contacts/**", [rd "events"]);
 table!(TAGS, "tags", "tags/**", [
     rd "list_tags", rd "get_tag", wr "upsert_tag", wa "delete_tag",
 ]);
@@ -564,10 +566,12 @@ pub fn mounts() -> Vec<Mount> {
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             RECALL,
         ),
+        m(recall_proto::recall_stream_descriptor(), RECALL_STREAM),
         m(
             contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
             CONTACTS,
         ),
+        m(contacts_proto::contacts_stream_descriptor(), CONTACTS_STREAM),
         m(tag_proto::service::tags::tag_service_rpc_service_descriptor(), TAGS),
         m(scripture::scripture_service_descriptor(), SCRIPTURE),
         m(links::links_service_descriptor(), LINKS),

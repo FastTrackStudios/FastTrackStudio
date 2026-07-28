@@ -30,6 +30,13 @@ pub enum VaultRecallError {
 pub struct VaultRecall {
     root: PathBuf,
     write_lock: Arc<Mutex<()>>,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful mutation publishes the post-write state here
+    /// ([`recall_proto::RecallEvent`]). Sliding mailbox: a slow
+    /// subscriber loses its *oldest* queued events, which is correct
+    /// for state-shaped payloads. Clones share the hub (`Arc`
+    /// inside).
+    events: architect::PubSub<recall_proto::RecallEvent>,
 }
 
 impl VaultRecall {
@@ -44,6 +51,7 @@ impl VaultRecall {
         Ok(Self {
             root,
             write_lock: Arc::new(Mutex::new(())),
+            events: architect::PubSub::sliding(256),
         })
     }
 
@@ -128,11 +136,29 @@ impl Recall for VaultRecall {
         let body = serialize_recall_card(card).map_err(|e| RecallError::Backend {
             message: e.to_string(),
         })?;
-        self.write_file(&format!("{RECALL_DIR}/{}.md", sanitize(&card.id)), &body)
+        self.write_file(&format!("{RECALL_DIR}/{}.md", sanitize(&card.id)), &body)?;
+        // Publish only after the write landed — subscribers fold
+        // these into state fetched via `list_cards()`, so a phantom
+        // event would desync them.
+        self.events
+            .publish(recall_proto::RecallEvent::Upserted(card.clone()));
+        Ok(())
     }
 
     fn delete_card(&self, id: &str) -> Result<(), RecallError> {
-        self.delete_file(&format!("{RECALL_DIR}/{}.md", sanitize(id)))
+        self.delete_file(&format!("{RECALL_DIR}/{}.md", sanitize(id)))?;
+        self.events
+            .publish(recall_proto::RecallEvent::Deleted(id.to_owned()));
+        Ok(())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// [`Recall`] impl above, on every successful mutation.
+impl recall_proto::RecallStreamSource for VaultRecall {
+    fn events_hub(&self) -> &architect::PubSub<recall_proto::RecallEvent> {
+        &self.events
     }
 }
 

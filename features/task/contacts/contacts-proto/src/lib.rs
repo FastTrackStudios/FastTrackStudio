@@ -32,6 +32,7 @@ pub use account::{CardDavAccount, CardDavProvider, SyncReport};
 pub use contact::{Contact, ContactSource};
 pub use error::ContactsError;
 pub use service::Contacts;
+pub use service::contacts::ContactsEvent;
 
 // architect-emitted vox bits: the async client / dispatcher /
 // descriptor for the one capability.
@@ -39,4 +40,14 @@ pub use service::Contacts;
 pub use service::contacts::{
     ContactsClient, ContactsRpc, ContactsRpcDispatcher, Service as ContactsService,
     layer as contacts_layer, serve as contacts_serve,
+};
+
+// `#[subscribe] fn events` stream sibling — live directory changes.
+// Mount `contacts_stream_layer(backend)` next to the base service;
+// subscribers drive a `ContactsStreamClient`.
+#[cfg(feature = "vox")]
+pub use service::contacts::{
+    ContactsStream, ContactsStreamClient, ContactsStreamSource,
+    contacts_stream_service_descriptor as contacts_stream_descriptor,
+    stream_layer as contacts_stream_layer, stream_serve as contacts_stream_serve,
 };

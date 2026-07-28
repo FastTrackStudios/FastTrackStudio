@@ -2002,10 +2002,17 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             recall_proto::service::recall::serve(org.recall.clone()),
         )
+        // Live deck changes — `Recall`'s `#[subscribe]` stream
+        // sibling, served from the hub on the `VaultRecall` above.
+        .merge(recall_proto::recall_stream_layer(org.recall.clone()))
         .with(
             contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
             contacts_proto::service::contacts::serve(org.contacts.clone()),
         )
+        // Live directory changes — `Contacts`' `#[subscribe]` stream
+        // sibling, served from the hub on the `VaultContacts` above
+        // (contacts only; account edits don't stream).
+        .merge(contacts_proto::contacts_stream_layer(org.contacts.clone()))
         .with(
             tag_proto::service::tags::tag_service_rpc_service_descriptor(),
             tag_proto::service::tags::serve(org.tags.clone()),
