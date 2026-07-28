@@ -41,6 +41,7 @@ mod org;
 mod org_ctx;
 mod plan;
 mod project;
+mod recipe;
 mod recipe_import;
 mod session_store;
 mod setup;
@@ -52,6 +53,7 @@ mod wiki;
 mod workstream;
 
 use clap::{Parser, Subcommand};
+use crate::recipe::{RecipeCmd, run_recipe};
 use crate::location::{LocationCmd, connect_locations_client, resolve_location_target, run_location};
 use crate::inbox::{InboxCmd, run_inbox};
 use crate::threads::{ThreadsCmd, run_threads};
@@ -567,57 +569,6 @@ enum IntakeCmd {
     },
     Delete {
         target: String,
-        #[arg(long, short = 'y')]
-        yes: bool,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
-enum RecipeCmd {
-    /// List every recipe in the active org's cookbook.
-    List {
-        /// Substring filter on title.
-        #[arg(long)]
-        query: Option<String>,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    Get {
-        /// Recipe path (e.g. `Wiki/Cookbook/Oatmeal.cook`).
-        path: String,
-        #[arg(long)]
-        org: Option<String>,
-        #[arg(long)]
-        server: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Author a new `.cook` recipe (validates the cooklang by
-    /// parsing before anything is written).
-    Create(mealprep::RecipeCreateArgs),
-    /// Import a recipe from a webpage (schema.org/Recipe → cooklang;
-    /// LLM-synthesized, `--offline` for the deterministic converter,
-    /// `--from-file` for bot-protected sites).
-    Import(recipe_import::RecipeImportArgs),
-    /// Replace an existing recipe's cooklang source (validates
-    /// by parsing first).
-    Update(mealprep::RecipeUpdateArgs),
-    /// Rendered view — ingredients / cookware / steps /
-    /// servings (`--json` for the wire shape).
-    Show(mealprep::RecipeShowArgs),
-    /// Fulfillment check against the pantry: have / missing /
-    /// substitution suggestions.
-    CanCook(mealprep::CanCookArgs),
-    Delete {
-        path: String,
         #[arg(long, short = 'y')]
         yes: bool,
         #[arg(long)]
@@ -1651,108 +1602,6 @@ fn normalize_server_vox(raw: &str) -> String {
 //   skip → offer `archived`.
 
 // ── Recipe (cookbook::Store) — read + delete only ─────────────────────
-
-async fn connect_cookbook_client(url: &str) -> eyre::Result<cookbook::CookbookServiceClient> {
-    establish_for_url(url).await
-}
-
-async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
-    match cmd {
-        RecipeCmd::List {
-            query,
-            org,
-            server,
-            json,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_cookbook_client(&u).await?;
-            let rows: Vec<_> = client
-                .list()
-                .await
-                .map_err(|e| eyre::eyre!("list: {e:?}"))?
-                .into_iter()
-                .filter(|r| {
-                    query
-                        .as_deref()
-                        .is_none_or(|q| r.name.to_lowercase().contains(&q.to_lowercase()))
-                })
-                .collect();
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
-                );
-                return Ok(());
-            }
-            println!("{} recipes\n", rows.len());
-            for r in &rows {
-                let s = r
-                    .servings
-                    .map(|n| format!("  ({n} srv)"))
-                    .unwrap_or_default();
-                println!("{:<40}{s}    {}", r.name, r.path);
-            }
-        }
-        RecipeCmd::Get {
-            path,
-            org,
-            server,
-            json,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_cookbook_client(&u).await?;
-            let r = client
-                .get(path)
-                .await
-                .map_err(|e| eyre::eyre!("get: {e:?}"))?;
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&r).map_err(|e| eyre::eyre!("json: {e}"))?
-                );
-                return Ok(());
-            }
-            println!("{}\n", r.name);
-            println!("  path:     {}", r.path);
-            if let Some(s) = r.servings {
-                println!("  servings: {s}");
-            }
-            if !r.ingredients.0.is_empty() {
-                println!("  ingredients ({} items):", r.ingredients.0.len());
-                for i in r.ingredients.0.iter().take(20) {
-                    println!("    - {} {} {}", i.qty.unwrap_or(0.0), i.unit, i.name);
-                }
-            }
-        }
-        RecipeCmd::Create(a) => return mealprep::recipe_create(a).await,
-        RecipeCmd::Import(a) => return recipe_import::recipe_import(a).await,
-        RecipeCmd::Update(a) => return mealprep::recipe_update(a).await,
-        RecipeCmd::Show(a) => return mealprep::recipe_show(a).await,
-        RecipeCmd::CanCook(a) => return mealprep::recipe_can_cook(a).await,
-        RecipeCmd::Delete {
-            path,
-            yes,
-            org,
-            server,
-        } => {
-            let slug = resolve_active_org(org)?;
-            let u = resolve_org_vox_url(server, &slug);
-            let client = connect_cookbook_client(&u).await?;
-            if !yes && !confirm(&format!("delete `{path}`?"))? {
-                println!("aborted");
-                return Ok(());
-            }
-            client
-                .delete(path.clone())
-                .await
-                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
-            println!("deleted {path}");
-        }
-    }
-    Ok(())
-}
 
 // ── Meal (mealplan::Store) ───────────────────────────────────────────
 
