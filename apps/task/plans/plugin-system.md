@@ -119,13 +119,15 @@ Done (this branch):
   `PluginDisabledPanel`).
 - `task org plugins list|enable|disable`.
 
-Route-gate rollout: `PluginGate` is wired for **mealplan** (plan /
-cook / edit-recipe) and **fitness** as the proof. Mechanical follow-up
-(one-line wrap per shim in `crates/task/ui/src/routes.rs`): recall,
-contacts, email, scripture, wiki (+ page/sources routes), agents,
+Route-gate rollout: DONE — every non-core route shim in
+`crates/task/ui/src/routes.rs` wraps its page in `PluginGate`:
+mealplan (plan / cook / edit-recipe), fitness, recall, contacts,
+email, scripture, wiki (+ page / sources / source routes), agents,
 repos + connections (forge), schedule + bookings (scheduling),
 finances + invoices + ledger (finance), locations + inventory (home),
-watch-adjacent fasttrackstudio surfaces.
+and watch (fasttrackstudio — the setlist/song session surfaces are
+vault-note embeds and widgets, already gated via the widget registry;
+the Watch nav tab retagged from core to fasttrackstudio to match).
 
 Other remaining work:
 

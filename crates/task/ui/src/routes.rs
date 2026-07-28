@@ -169,17 +169,23 @@ fn InboxRoute() -> Element {
 
 #[component]
 fn RecallRoute() -> Element {
-    rsx! { pages::recall::RecallView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "recall", pages::recall::RecallView {} }
+    }
 }
 
 #[component]
 fn ContactsRoute() -> Element {
-    rsx! { pages::contacts::ContactsView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "contacts", pages::contacts::ContactsView {} }
+    }
 }
 
 #[component]
 fn EmailRoute() -> Element {
-    rsx! { email_ui::EmailView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "email", email_ui::EmailView {} }
+    }
 }
 
 #[component]
@@ -223,22 +229,30 @@ fn VaultRoute(path: String, org: String) -> Element {
 
 #[component]
 fn LocationsRoute() -> Element {
-    rsx! { pages::locations::LocationsView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "home", pages::locations::LocationsView {} }
+    }
 }
 
 #[component]
 fn InventoryRoute() -> Element {
-    rsx! { pages::inventory::InventoryView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "home", pages::inventory::InventoryView {} }
+    }
 }
 
 #[component]
 fn ScriptureRoute(reference: String) -> Element {
-    rsx! { scripture_ui::ScriptureView { reference } }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "scripture", scripture_ui::ScriptureView { reference } }
+    }
 }
 
 #[component]
 fn ConnectionsRoute() -> Element {
-    rsx! { links_ui::ConnectionsView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "forge", links_ui::ConnectionsView {} }
+    }
 }
 
 #[component]
@@ -248,7 +262,9 @@ fn BasesRoute() -> Element {
 
 #[component]
 fn WatchRoute(v: String, node: String) -> Element {
-    rsx! { pages::watch::WatchView { v, node } }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "fasttrackstudio", pages::watch::WatchView { v, node } }
+    }
 }
 
 #[component]
@@ -286,12 +302,16 @@ fn RecipeEditRoute(path: String) -> Element {
 
 #[component]
 fn ScheduleRoute() -> Element {
-    rsx! { pages::schedule::ScheduleView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "scheduling", pages::schedule::ScheduleView {} }
+    }
 }
 
 #[component]
 fn BookingsRoute() -> Element {
-    rsx! { pages::bookings::BookingsView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "scheduling", pages::bookings::BookingsView {} }
+    }
 }
 
 #[component]
@@ -306,12 +326,16 @@ fn TimerRoute() -> Element {
 
 #[component]
 fn FinancesRoute() -> Element {
-    rsx! { pages::finances::FinancesView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "finance", pages::finances::FinancesView {} }
+    }
 }
 
 #[component]
 fn InvoicesRoute() -> Element {
-    rsx! { pages::invoices::InvoicesView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "finance", pages::invoices::InvoicesView {} }
+    }
 }
 
 #[component]
@@ -321,37 +345,51 @@ fn MembersRoute() -> Element {
 
 #[component]
 fn LedgerRoute() -> Element {
-    rsx! { pages::ledger::LedgerView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "finance", pages::ledger::LedgerView {} }
+    }
 }
 
 #[component]
 fn ReposRoute() -> Element {
-    rsx! { pages::repos::ReposView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "forge", pages::repos::ReposView {} }
+    }
 }
 
 #[component]
 fn WikiRoute() -> Element {
-    rsx! { pages::wiki::WikiView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "wiki", pages::wiki::WikiView {} }
+    }
 }
 
 #[component]
 fn WikiPageRoute(path: String) -> Element {
-    rsx! { pages::wiki_page::WikiPageView { path } }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "wiki", pages::wiki_page::WikiPageView { path } }
+    }
 }
 
 #[component]
 fn WikiSourcesRoute() -> Element {
-    rsx! { pages::wiki_source::WikiSourcesView {} }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "wiki", pages::wiki_source::WikiSourcesView {} }
+    }
 }
 
 #[component]
 fn WikiSourceRoute(name: String) -> Element {
-    rsx! { pages::wiki_source::WikiSourceView { name } }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "wiki", pages::wiki_source::WikiSourceView { name } }
+    }
 }
 
 #[component]
 fn AgentsRoute(session: String) -> Element {
-    rsx! { pages::agents::AgentsView { session } }
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "agent", pages::agents::AgentsView { session } }
+    }
 }
 
 #[component]
