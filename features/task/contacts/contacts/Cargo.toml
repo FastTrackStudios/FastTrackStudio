@@ -21,6 +21,7 @@ contacts-proto = { workspace = true, features = ["vox"] }
 architect = { workspace = true, features = ["dispatch-tokio"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
+vault-entity = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
