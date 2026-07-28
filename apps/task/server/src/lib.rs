@@ -1780,6 +1780,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         workouts::workouts_service_descriptor(),
         intake::intake_service_descriptor(),
         email_proto::descriptor(),
+        email_proto::stream_descriptor(),
         git_proto::repo::repo_catalog_rpc_service_descriptor(),
         git_proto::issues::issue_tracker_rpc_service_descriptor(),
         git_proto::issues::issue_tracker_stream_service_descriptor(),
@@ -2141,6 +2142,9 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             email_proto::descriptor(),
             email_proto::serve(org.email.clone()),
         )
+        // Live mailbox changes — `EmailSync`'s `#[subscribe]`
+        // stream sibling, served from the backend's hub.
+        .merge(email_proto::stream_layer(org.email.clone()))
         .with(
             git_proto::repo::repo_catalog_rpc_service_descriptor(),
             git_proto::repo::serve(org.forge.clone()),

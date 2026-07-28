@@ -32,6 +32,14 @@ struct AccountState {
 pub struct Backend {
     accounts: Arc<HashMap<String, AccountState>>,
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<EmailEvent>>>>,
+    /// Fan-out hub behind the `#[subscribe] fn changes` stream.
+    /// Every event that goes onto a per-account broadcast channel
+    /// is published here too, wrapped with its `account` so
+    /// subscribers — who see every account this backend serves —
+    /// can filter. Sliding mailbox: a slow subscriber loses its
+    /// oldest queued events and re-pulls on reconnect, which is
+    /// what `EmailEvent::Resync` asks for anyway.
+    changes: architect::PubSub<email_proto::EmailChange>,
     runtime: tokio::runtime::Handle,
 }
 
@@ -69,6 +77,7 @@ impl Backend {
         Ok(Self {
             accounts: Arc::new(accounts),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            changes: architect::PubSub::sliding(256),
             runtime,
         })
     }
@@ -90,6 +99,17 @@ impl Backend {
         let (tx, _rx) = broadcast::channel::<EmailEvent>(256);
         chans.insert(account.to_string(), tx.clone());
         tx
+    }
+
+    /// Announce a change on both paths: `account`'s in-process
+    /// broadcast channel and the wire hub. Call only once the
+    /// mailbox actually changed — subscribers re-read on the event.
+    pub async fn emit(&self, account: &str, event: EmailEvent) {
+        let _ = self.channel(account).await.send(event.clone());
+        self.changes.publish(email_proto::EmailChange {
+            account: account.to_string(),
+            event,
+        });
     }
 
     async fn open(&self, state: &AccountState) -> Result<Client, EmailSyncError> {
@@ -240,28 +260,14 @@ impl EmailSync for Backend {
             "jmap: send lands in phase 3 (EmailSubmission/set)".into(),
         ))
     }
+}
 
-    async fn subscribe(&self, account: String, tx: vox::Tx<EmailEvent>) {
-        if self.state(&account).is_err() {
-            let _ = tx.close(vox::Metadata::default()).await;
-            return;
-        }
-        let sender = self.channel(&account).await;
-        let mut rx = sender.subscribe();
-        loop {
-            match rx.recv().await {
-                Ok(evt) => {
-                    if tx.send(evt).await.is_err() {
-                        return;
-                    }
-                }
-                Err(broadcast::error::RecvError::Closed) => return,
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    if tx.send(EmailEvent::Resync).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
+/// The `#[subscribe]` backend contract: the hub the stream host
+/// attaches subscriber sinks to. Nothing publishes yet — JMAP push
+/// (EventSource / WebSocket `StateChange`) is still unwired, so the
+/// stream is correct and silent until that lands.
+impl email_proto::EmailSyncStreamSource for Backend {
+    fn changes_hub(&self) -> &architect::PubSub<email_proto::EmailChange> {
+        &self.changes
     }
 }
