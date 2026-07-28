@@ -1,271 +1,461 @@
 # Agent Guide
 
-Canonical instructions for AI agents working on this repository. Read this first.
+Canonical instructions for AI agents working on **Task** — the
+local-first, collaborative work-management product that lives inside
+the FastTrackStudio monorepo. Read this first.
 
-This project is **Local-first, Realtime, Collaborative, Multiplayer, Extensible** — a workspace of feature crates built on Rust + Dioxus + Loro CRDTs + the `architect` framework. See `README.md` for the product story; this document covers the *how*.
-
----
-
-## TL;DR — what to do in the first 60 seconds
-
-1. **Read `README.md`** for the project's identity and UI rules.
-2. **Skim `plans/`** — any open plans here are the next-arc roadmap. Don't duplicate work.
-3. **Survey `features/`** to see what already exists before adding anything.
-4. **Run `just check`** (or `cargo check --workspace`) to confirm a clean baseline before making changes.
-5. **Match patterns**. Every feature trio is shaped identically; copy from the most recent one (currently `features/knowledge/`).
+Task is Rust + Dioxus on the **architect** framework, with a
+**markdown vault** as its primary store. Read `README.md` for the
+product story and `VISION.md` for where it's going; this document
+covers the *how*, and the repo-root `CLAUDE.md` covers monorepo-wide
+rules that also apply here.
 
 ---
 
-## Architecture in 90 seconds
+## TL;DR — the first 60 seconds
+
+1. **Read the repo-root `CLAUDE.md`.** Task is not a standalone repo:
+   ONE root Cargo workspace, path deps only, one `target/`, one flake.
+2. **Skim `plans/`** — top-level files are active or reference work,
+   and every one carries a status header. `plans/done/` is the
+   terminal directory; do NOT read it to learn what Task is today.
+3. **Survey `features/task/`** before adding anything. 37 slices
+   already exist.
+4. **Match the nearest slice** — but read it first. The slice shapes
+   are *not* uniform (see below); there is no single template.
+5. **Verify with `cargo check`**, native and wasm, before claiming
+   done.
+
+---
+
+## Layout
+
+Task's code is spread across three top-level directories of the
+monorepo. There is no `apps/db`, no `task-db` crate, no
+`crates/task-ui`, and no `crates/task-core`.
 
 ```
-features/<name>/
-  <name>-proto/    architect-derive wire types (#[derive(Entity)])
-  <name>-crdt/     EntityCrdt impl + <Name>RepoLoro newtype (Loro source of truth)
-  <name>-db/       SeaORM persistence (crdt-seaorm tables + projections)
-  <name>-ui/       dumb Dioxus components — fts-ui only, theme-aware
-  <name>/          facade crate with feature gates (vox / server / fake / full)
-  spec/<name>.md   tracey spec rules (when present)
-  tests/native/    Repo trait + replica-convergence tests
+apps/task/
+  cli/          package `task-cli` → binary `task`
+  server/       package `task-server` — axum + architect LayerRouter
+  web/          package `task-app-web` — dx web build (wasm)
+  desktop/      package `task-app-desktop`
+  mobile/       package `task-app-mobile` (+ ios/)
+  watchos/      SwiftUI watch app over the server's /watch/v1 bridge
+  ui-lab/       TS/vite component lab (pnpm)
+  deploy/       helm chart + docker compose
+  tests/        playwright/ (smoke) and multiplayer/ (conformance)
+  plans/ docs/ skills/ hooks/ nix/ scripts/
 
-apps/server         WebSocket sync relay, webhook receivers, integration registry boot
-apps/web/desktop    Dioxus platform launchers; thin shells over task-ui
-apps/db             standalone migrator + seeder
+crates/task/
+  ui/           package `ui` — THE Dioxus app shell: router, pages/,
+                theming, stores, vox session. NOT `task-ui`.
+  telemetry/    package `task-telemetry` — sentry + tracing layer
+  store-proto/  shared store wire types
+  xtask/        package `xtask` — TS codegen (see "Known stale" below)
 
-crates/task-ui      Dioxus app shell, AppShell/Sidebar/router, per-feature routes
-crates/task-cli     CLI commands
+features/task/<slice>/
+  37 slices: agent attachments collection contacts cycle email finance
+  fitness git goal identity inbox inventory label links locations
+  mealplan media milestone mount org prefs project recall resources
+  scheduling scripture share tag task threads timer vault view wiki
+  workflows workstream
 ```
 
-**Data flow**: every domain entity lives in a Loro CRDT document. UI components are *dumb* — data in via props, events out via `EventHandler<T>`. The route layer in `task-ui` mounts repos and threads them into components. WebSocket relay propagates Loro doc updates across peers; SeaORM stores opaque snapshots + update log.
+**Naming trap**: `task-ui` is `features/task/task/task-ui` — the
+*task-list* component crate. The application shell is `crates/task/ui`,
+whose package name is plain `ui`. `cargo check -p ui` and
+`cargo check -p task-ui` are different things.
 
-**External integrations** sit behind trait seams in `agent-proto`:
-- `AgentIntegration` (`hermes`, `mock`) for task dispatch + agent runs
-- `ChatModel` (`mock`, future Anthropic/OpenAI/Ollama) for conversational completion
-- GitHub webhooks for PR↔task linking
-- CalDAV bidirectional sync for the calendar feature
+## Slice shapes (there is more than one)
 
-Auth (`features/auth/`) is the only server-authoritative state — everything else is local-first.
+A slice is a directory under `features/task/`. Crate roles, by how
+often they actually appear:
+
+| Role | Contains | Example |
+|---|---|---|
+| `<slice>-proto` | Wire contract: entity types + `#[architect::rpc]` traits. Under the `vox` feature architect emits the client, dispatcher, and `*_descriptor()`. | `timer-proto`, `vault-proto` |
+| `<slice>` | Facade + backend implementation. Re-exports the proto's public surface behind feature gates. | `timer`, `contacts` |
+| `<slice>-db` | sea-orm entities + migrations, when the slice is DB-backed. **Rare** — only `threads-db` and `finance-db` exist. | `threads-db` |
+| `<slice>-ui` | Dumb Dioxus components. **Rare** — `task-ui`, `threads-ui`, `scheduling-ui`. | `threads-ui` |
+| `<slice>-live` | Live filesystem/watcher backend. | `vault-live`, `wiki-live` |
+
+Real variations you will hit, all of them legitimate:
+
+- **Proto only** — `attachments`, `label`, `media`, `share`, `org`,
+  `workflows`. The impl lives in the server or a sibling.
+- **No proto at all** — `task`, `project`, `goal`, `cycle`. The
+  `#[architect::rpc]` trait lives *inside* the facade crate (e.g.
+  `features/task/task/task/src/service.rs`). `xtask` calls
+  `task::task_service_descriptor()` and
+  `project::project_service_descriptor()` directly.
+- **Many crates** — `email` (13), `wiki` (7), `agent` (7), `vault` (6),
+  `fitness` (6), `view` (7).
+
+**Do not invent a shape.** Copy whichever neighbouring slice is
+closest to what you're building, and say so in the commit message.
+
+---
+
+## Where data actually lives
+
+Three stores. Knowing which one a slice uses is the single most
+important thing to establish before you write code.
+
+### 1. The markdown vault — the default, and the source of truth
+
+Most slices store entities as **markdown files with YAML frontmatter**
+under the org's vault root (`$TASK_DATA_ROOT/orgs/<slug>/vault`,
+overridable with `TASK_SERVER_VAULT_ROOT`). The backend walks the
+vault on each call; the file is authoritative and any index is
+disposable.
+
+Vault-backed at the server (`apps/task/server/src/lib.rs`): `task`,
+`project`, `goal`, `milestone`, `workstream`, `inbox`, `recall`,
+`contacts`, `tag`, `locations`, `inventory`, `mealplan` (cookbook /
+shopping / substitutions / pantry), `fitness` (body / exercises /
+workouts / intake), `scheduling`, `wiki`, plus the `vault` slice
+itself.
+
+Entity discrimination is by frontmatter: `type: task` **or** a `task`
+entry in `tags`. Entities carry a UUID `id` in frontmatter — **the
+filename is not the identifier**, and rename preserves `id`.
+
+### 2. sea-orm — server-private and per-service tables
+
+A minority of slices are database-backed. Their DB URL is
+configurable per service and defaults to an org-local sqlite file:
+
+| Slice | Env override |
+|---|---|
+| agent task queue | `TASK_SERVER_AGENT_TASKS_URL` |
+| timer | `TASK_SERVER_TIMER_URL` |
+| threads | `TASK_SERVER_THREADS_URL` |
+| prefs | `TASK_SERVER_PREFS_URL` |
+| finance | `TASK_SERVER_FINANCE_URL` |
+
+Plus architect's own schemas: auth, permissions, and the share-link
+registry.
+
+Note that ~48 crates *depend on* sea-orm without being DB-backed:
+`#[derive(architect::Entity)]` emits a sea-orm Model under a `server`
+feature, and the dep comes along for the ride. Depending on sea-orm
+proves nothing — check whether anything enables that feature. (For
+`task`, nothing does; every consumer takes `features = ["vox"]`.)
+
+### 3. Loro CRDT — collaborative text editing of vault files, only
+
+Loro is used in exactly one place: real-time collaborative editing of
+markdown files in the vault.
+
+- Server: `features/task/vault/vault-collab` — one `VaultCollab` per
+  org over a `crdt::DocRegistry`; doc id = UUIDv5 of `(vault_id,
+  path)`; docs persist under the org's `crdt/` root
+  (`TASK_SERVER_CRDT_ROOT`).
+- Client: `crates/task/ui/src/{collab,presence}.rs`,
+  `pages/note_view.rs`.
+- Design doc: `docs/architecture/vault-crdt-reconciliation.md`.
+
+The write-behind loop projects doc text back into the vault file, so
+the **file stays the source of truth**; the CRDT is a live editing
+layer over it, not a replacement.
+
+**There is no entity CRDT layer.** `EntityCrdt`, `*RepoLoro`, and
+per-slice `-crdt` crates do not exist — that architecture was removed
+(`plans/done/project-crdt-rip.md`, `plans/done/knowledge-rip.md`).
+Any doc telling you "Loro is the source of truth, never write to
+SeaORM" is describing a design that was ripped out. Ignore it and fix
+it.
+
+---
+
+## The request path
+
+```
+client (web / desktop / mobile / CLI)
+  │  vox_core::initiator_on(link).establish::<Client>()
+  ▼
+WebSocket  /org/{slug}/vox        (also /server/vox, and /vox as a
+  │                                legacy alias into the first org)
+  ▼
+architect::axum_ws::serve_router
+  ▼
+snapshot::GatedRouter  ── parks requests during snapshot/restore
+  ▼
+architect::LayerRouter  ── org_layer_router(&OrgAppState)
+  │  one dispatcher per service descriptor:
+  │    .with(<slice>_proto::<svc>_descriptor(), <Svc>Dispatcher::new(impl))
+  ▼
+per-org service impl
+  ▼
+vault markdown  ·  sea-orm  ·  Loro doc registry
+```
+
+Every org gets its own `OrgAppState` + `LayerRouter`. Server-management
+services (org lifecycle, identity, snapshot) live on a separate
+`/server/vox` router. Non-vox HTTP surfaces are deliberate exceptions:
+`/health`, `/.well-known/task-server.json`, `/org/{slug}/mcp`,
+`/org/{slug}/share/{token}`, `/watch/v1/*`, and the `/media` file
+routes.
 
 ---
 
 ## Hard rules
 
-These are non-negotiable. Violating them will require rework.
+### RPC / services
 
-### UI rules
+1. **Services are `#[architect::rpc]` traits.** Not `#[vox::service]`
+   — that macro is still used elsewhere in the monorepo (signal,
+   input) but nothing in the Task tree uses it. Max 4 params per
+   method (Facet constraint).
 
-1. **fts-ui primitives only**. Don't hand-roll Buttons / Cards / Sheets / Dialogs / Comboboxes / Sidebars. If a primitive doesn't exist or is missing a feature, fix it in the upstream sibling repo at `../FastTrackStudio/fts-ui/` (the workspace dep is a path checkout — edits propagate immediately).
+2. **`#[subscribe]` streams are the target idiom; most services have
+   not migrated.** Today only `task` and `workstream` use
+   `#[subscribe]` (with a `PubSub` fan-out hub in `backend.rs`); about
+   a dozen crates still use the older `tx: Tx<T>` parameter form.
+   **This is a migration in progress.** Write new subscriptions as
+   `#[subscribe]` streams, following
+   `features/task/task/task/src/{service.rs,backend.rs}`. Don't
+   convert an existing one as a drive-by — it changes method ids (see
+   the schema-skew gotcha below).
 
-2. **Theme tokens, never hex**. `bg-background` / `text-foreground` / `bg-card` / `border-border` / `bg-primary` / `text-muted-foreground` / `bg-muted` / `bg-accent`. Never `bg-slate-900` or `#1a1a1a`. The CSS variables flip per dark/light mode and per org/project theme override — a component that hardcodes color breaks every theme preset.
+3. **Cross-slice references go through ids, not value types.** A
+   `TaskInfo.project_id: Option<Uuid>` is fine; a `TaskInfo` holding a
+   `ProjectInfo` is not. Each proto stays an acyclic leaf.
 
-3. **Dark mode is the default**. Both modes must look correct with no `dark:` overrides. If you need a different palette per mode, that's a theme token concern, not a component concern.
+4. **Server-only crates must not leak into the wasm graph.** Gate
+   native-only code with `#[cfg(not(target_arch = "wasm32"))]` at the
+   `lib.rs` level.
 
-4. **Two-tier theming**. Organization picks a preset; project can override. `fts_ui::ThemeProvider` wraps the App root; `ThemeScope` wraps a project route's content when override active. Don't bypass — read from / write through the contexts in `crates/task-ui/src/theming.rs`.
+### UI
 
-5. **Dumb components**. Feature `*-ui` crates own no state. Data in via props, events out via `EventHandler<T>`. The route is where signals + repos live. This keeps components portable across web/desktop/mobile and reusable in storybooks.
+1. **fts-ui primitives only.** Don't hand-roll Buttons / Cards /
+   Sheets / Dialogs / Comboboxes / Sidebars. fts-ui is **in-tree** at
+   `libs/fts-ui/fts-ui` (a path dep) — if a primitive is missing a
+   feature, fix it there; the edit propagates on the next
+   `cargo check`. Prelude:
+   `libs/fts-ui/fts-ui/src/prelude.rs`.
 
-6. **No `.to_string()` on Dioxus prop literals**. Props accepting `Into<String>` take `&str` directly in Dioxus 0.7. `class: "foo bar"`, not `class: "foo bar".to_string()`. Same for ternary arms. The cleanup pass in commit `625c3d1` ripped out 259 of these — don't reintroduce.
+2. **Theme tokens, never hex.** `bg-background` / `text-foreground` /
+   `bg-card` / `border-border` / `bg-primary` / `text-muted-foreground`
+   / `bg-muted` / `bg-accent`. Never `bg-slate-900` or `#1a1a1a`. The
+   CSS variables flip per light/dark and per org/project theme
+   override; a hardcoded color breaks every preset.
 
-### Feature rules
+3. **Dark mode is the default.** Both modes must look correct with no
+   `dark:` overrides. A different palette per mode is a theme-token
+   concern, not a component concern.
 
-1. **Every domain is a self-contained trio** (proto / crdt / db) plus an optional ui crate and a facade. Adding a new feature is mechanical; don't invent new layouts.
+4. **Two-tier theming.** Organization picks a preset; a project can
+   override. `fts_ui::ThemeProvider` wraps the App root; `ThemeScope`
+   wraps a project route when an override is active. Read from and
+   write through the contexts in `crates/task/ui/src/theming.rs` —
+   don't bypass them.
 
-2. **Loro is the source of truth**. Never write directly to SeaORM tables for domain data — that desyncs every connected client. The only DB-direct writes are server-private (`webhook_inbox`, `integration_state`, `git_repo_connections`, the auth schema).
+5. **Dumb components.** Feature `*-ui` crates own no state: data in
+   via props, events out via `EventHandler<T>`. Signals and clients
+   live in the page (`crates/task/ui/src/pages/`). This keeps
+   components portable across web/desktop/mobile and usable in
+   ui-lab.
 
-3. **Cross-feature references go through proto types**. A `Task.agent_run_id: Option<Uuid>` is fine; a `Task` holding an `AgentRun` value type is not. Each feature's proto stays a strict acyclic leaf.
+6. **No `.to_string()` on Dioxus prop literals.** Props taking
+   `Into<String>` accept `&str` directly in Dioxus 0.7+.
+   `class: "foo bar"`, not `class: "foo bar".to_string()`. Same for
+   ternary arms.
 
-4. **Embeddable knowledge**. For rich text on any entity (Task notes, Project descriptions), use `knowledge_proto::shadow_page_id("kind", entity_id)` to derive a deterministic Page UUID. Drop `OutlinerEmbed { page_id: shadow_id, ... }` in the detail sheet. No proto migration needed on the consumer side.
+### Engineering
 
-### Engineering rules
-
-1. **`cargo check` before claiming done**. Both native and `cargo check -p task-app-web --target wasm32-unknown-unknown`. Warnings ok, errors aren't.
-
-2. **server-only crates must not leak into the wasm graph**. `apps/server`, `knowledge-sync`, `agent-hermes` are native-only. If `cargo check -p task-app-web --target wasm32-unknown-unknown` starts pulling them in, something is misconfigured.
-
-3. **Demo data only**. Anything seeded by `apps/db/src/seed.rs` is throwaway — feel free to break wire compatibility when iterating schemas. No backwards-compat shims required.
-
-4. **Don't fabricate APIs**. Read the upstream source first: `~/Development/FastTrackStudio/fts-ui/crates/fts-ui/src/prelude.rs` for fts-ui exports, `../architect/macros/architect/` for the entity macro, `../architect/libs/crdt/src/codec.rs` for codec helpers. The actual function signatures matter more than what's "obvious".
-
-5. **Server-only code uses `#[cfg(not(target_arch = "wasm32"))]` on the lib.rs**. See `features/knowledge/knowledge-sync/src/lib.rs` for the pattern.
+1. **`cargo check` before claiming done** — native *and* wasm. See
+   "Verify before done" below.
+2. **One cargo command at a time per worktree.** The target-dir lock
+   is shared; concurrent builds clobber fingerprints. Always set an
+   explicit timeout on build/test invocations.
+3. **Don't fabricate APIs.** Read the source: fts-ui's prelude,
+   `libs/architect/macros/architect-derive/` for the Entity macro,
+   `libs/architect/crdt/crdt/src/codec.rs` for codec helpers.
 
 ---
 
-## Common gotchas (learned the hard way)
+## Verify before done
 
-These keep tripping up new agents. Read them before writing your first line.
+```bash
+# native — the crates you touched
+cargo check -p task-server
+cargo check -p ui                 # the app shell (NOT -p task-ui)
+cargo check -p task-cli
+
+# wasm — the browser build
+cargo check -p task-app-web --target wasm32-unknown-unknown
+
+# tests for the slice you touched
+cargo test -p <crate>
+```
+
+Warnings are acceptable; errors are not. Full gates: `just ci` from
+`apps/task/` (fmt + clippy `-D warnings` + nextest).
+
+**Never run cargo while a `dx serve` is running in the same worktree**
+— they fight over the target lock.
+
+---
+
+## Common gotchas
+
+### Proto changes require a task-server rebuild (schema skew)
+
+Changing any proto changes vox method ids (they hash the method's name
++ payload shapes), so a **running `task-server` built before the change
+can't talk to freshly built clients**. The failure mode is opaque:
+`structural mismatch` / `InvalidPayload` / `Unknown method`.
+
+**Rule: after touching a proto, rebuild + restart task-server before
+trusting any live behavior.**
+
+The guard: the server publishes per-service schema stamps at
+`/.well-known/task-server.json` (`task_server::schema_stamps`,
+`org_proto::schema_stamp`). `task doctor` compares your CLI build
+against the running server and exits non-zero on mismatch; ui-lab's
+`pnpm smoke` does the same for the generated TS bundle and downgrades
+skew-shaped failures to loud `SKEW SKIP` warnings.
+
+### Mixed-target cargo check false alarms
+
+`error: This wasm target is unsupported by mio` while running
+`cargo check -p task-server -p task-app-web --target
+wasm32-unknown-unknown` is **not a real error** — it's mio (a
+native-only dep of task-server) being asked to compile for wasm. Check
+the two separately.
+
+### dx serve
+
+- Serve the web build with `--hot-patch false`. The default
+  hot-patching path produces `LinkError` / subsecond panics on edit.
+- Hot-patch does not pick up new RSX *attributes* (`id=`,
+  `data-testid=`), only function-body changes. If a selector test
+  can't find an element you just added, use `just test-browser-fresh`.
 
 ### fts-ui
 
-- `StatusBadgeVariant` is **`Success / Warning / Danger / Neutral` only**. No `Error`, no `Info`. Map carefully.
-- `ButtonVariant` has **no `Default`**. Use `Primary`.
-- `ButtonSize` has **no `Default`**. Use `Medium`.
-- `PopoverContent` and `DropdownContent` take a `side` prop (`top` / `right` / `bottom` / `left`). For triggers near the bottom of a scroll container (e.g. sidebar footer), use `side="top"` or the menu falls below the viewport. We fixed the positioning math upstream — `data-side` now produces correct anchor classes.
-- `Slider`'s value is `Signal<f64>` only — no `on_change` callback. Use the signal directly.
-- `Textarea` has **no `on_keydown` prop**. Workarounds: a sibling `tabindex=-1` capture div, or upstream a prop.
-- `Combobox` / `ComboboxTrigger` don't take rich children; trigger renders the raw value. Render extras (badges, icons) as siblings.
-- `Checkbox` and `Switch` need `Signal<bool>`, not `bool`. Inside a `for` loop, materialize with `use_signal` per row.
+- `StatusBadgeVariant` is **`Success / Warning / Danger / Neutral`
+  only**. No `Error`, no `Info`.
+- `ButtonVariant` has **no `Default`** — use `Primary`.
+- `ButtonSize` has **no `Default`** — use `Medium`.
+- `PopoverContent` / `DropdownContent` take a `side` prop
+  (`top`/`right`/`bottom`/`left`). Near the bottom of a scroll
+  container (sidebar footer), use `side="top"` or the menu falls below
+  the viewport.
+- `Slider`'s value is `Signal<f64>` only — no `on_change`. Use the
+  signal.
+- `Textarea` has **no `on_keydown`**. Workarounds: a sibling
+  `tabindex=-1` capture div, or upstream a prop.
+- `Combobox` / `ComboboxTrigger` don't take rich children; the trigger
+  renders the raw value. Render badges/icons as siblings.
+- `Checkbox` and `Switch` need `Signal<bool>`, not `bool`. Inside a
+  `for` loop, materialize with `use_signal` per row.
 
-### Lucide icons (re-exported via `fts_ui::lucide_dioxus::*`)
+### Lucide icons (via `fts_ui::lucide_dioxus::*`)
 
 - `CircleCheck` — not `CheckCircle2`
 - `TriangleAlert` — not `AlertTriangle`
 - `House` — not `Home`
 - `Ellipsis` — not `MoreHorizontal`
-- `CircleStop` — for the stop button
-- `CornerDownLeft` / `SendHorizontal` — for the send button
-- `BookOpen` — knowledge route icon
-- Icon size is `usize`, not `u32` or `i32`.
+- `CircleStop` — the stop button
+- `CornerDownLeft` / `SendHorizontal` — the send button
+- Icon size is `usize`, not `u32`/`i32`.
 
-### Dioxus 0.7
+### Dioxus
 
-- Use `use_signal(|| init)` for state. Inside `use_effect`, `.read()` subscribes — use `.peek()` to read without subscribing (critical when avoiding update-loops between bridging effects).
-- `spawn(...)` ties the task to the current component's scope — a task spawned from inside a sheet/dropdown/modal that closes (unmounts) on selection is **silently cancelled mid-flight**. For actions triggered from self-closing UI, don't spawn in the leaf at all: run a root-owned `use_coroutine` service and have every surface `send()` it a message (see `crates/ui/src/auth.rs` — the mobile account-sheet bug). Sequential consumption also kills concurrent-action races for free; coalesce queued messages to the newest when only the last one matters.
-- `Event<FormData>::value()` on contenteditable returns `textContent` of the element. Anything rendered inside that contenteditable becomes part of `value()`. Keep non-editable chrome (list bullets, heading hash, blockquote `>`) OUTSIDE the contenteditable as a flex sibling — otherwise every keystroke duplicates the prefix.
-- `use_memo(use_reactive!(...))` for derived values that should re-run when inputs change.
-- Raw strings with embedded `"#` need `r##"..."##` (we have this in `knowledge-proto::canvas::tests`).
-- `wasm-split` is experimental and requires `lto = true` + `debug = true`. Disabled by default; the dev profile uses `debug = false` + `strip = "debuginfo"` to keep the bundle ~26 MB.
-
-### Loro CRDT
-
-- `Block.content`, `Message.body`, and similar text fields are currently stored as plain string LWW per-write. This is **wrong** for true collaborative editing — concurrent edits lose data. See `plans/loro-text-editor-upgrade.md` for the planned fix.
-- The codec helpers in `crdt::codec` cover `read_str` / `write_str` / `read_bool` / `read_uuid` / `read_dt` / `read_string_list` etc. — for `Option<i32>` and similar gaps, define a local helper inside your `*-crdt` crate that sentinel-encodes through `write_i64`.
-- Cross-feature codec gotcha: when reading optional fields that may be absent in pre-extension snapshots, use `read_opt_*(...).unwrap_or(None)` so old data decodes cleanly.
-- Loro `LoroValue` doesn't natively store `NaiveDate` — keep `journal_day` and similar as `Option<String>` (ISO `YYYY-MM-DD`).
+- `use_signal(|| init)` for state. Inside `use_effect`, `.read()`
+  subscribes — use `.peek()` to read without subscribing (critical
+  when avoiding update loops between bridging effects).
+- `spawn(...)` ties the task to the current component's scope. A task
+  spawned inside a sheet/dropdown/modal that closes on selection is
+  **silently cancelled mid-flight**. For actions triggered from
+  self-closing UI, run a root-owned `use_coroutine` service and
+  `send()` it a message from every surface — see
+  `crates/task/ui/src/auth.rs`. Sequential consumption also kills
+  concurrent-action races for free.
+- `Event<FormData>::value()` on contenteditable returns the element's
+  `textContent`. Anything rendered inside becomes part of `value()`.
+  Keep non-editable chrome (list bullets, heading hash, blockquote
+  `>`) OUTSIDE the contenteditable as a flex sibling, or every
+  keystroke duplicates the prefix.
+- `use_memo(use_reactive!(...))` for derived values that must re-run
+  when inputs change.
+- `wasm-split` is experimental and needs `lto = true` + `debug = true`;
+  disabled by default.
 
 ### Build / dev shell
 
-- This repo uses **direnv** for the `.#ui` dev shell. Recipes call `cargo` / `dx` directly — no `nix develop` wrapping. On hosts without direnv, prefix recipes with `nix develop .#ui --command just <recipe>`.
-- The Hermes dashboard at `hermes.starcommand.live` rejects external Host headers; SSH-tunnel to `localhost:9119` for live integration testing (documented in `IntegrationSettings`).
-
-### Proto changes require a task-server rebuild (schema skew)
-
-Changing any `*-proto` crate changes vox method ids (they hash the
-method's name + payload shapes), so a **running `task-server` built
-before the change can't talk to freshly built clients** — the failure
-mode is opaque `structural mismatch` / `InvalidPayload` / `Unknown
-method` errors. The rule: **after touching a `*-proto`, rebuild +
-restart task-server before trusting any live behavior.**
-
-The guard: the server publishes per-service schema stamps in
-`/.well-known/task-server.json` (`schema_stamps`, see
-`task_server::schema_stamps` / `org_proto::schema_stamp`). Run
-`task doctor` to compare your CLI build against the running server
-(exits non-zero on mismatch); ui-lab's `pnpm smoke` does the same for
-the generated TS bundle and downgrades skew-shaped failures to loud
-`SKEW SKIP` warnings instead of red herrings.
-
-### Mixed-target cargo check false alarms
-
-When you see `error: This wasm target is unsupported by mio` while running `cargo check -p task-server -p task-app-web --target wasm32-unknown-unknown`, that's **not a real error** — it's mio (a native-only dep of `task-server`) being asked to compile for wasm. Check them separately:
-```bash
-cargo check -p task-server                                            # native
-cargo check -p task-app-web --target wasm32-unknown-unknown           # wasm
-```
+- The repo-root `.envrc` is `use flake`; direnv loads the dev shell on
+  `cd`. The root flake exposes `default`, `ci`, and `reaper-test` —
+  **there is no `.#ui` or `.#playwright` shell**. The default shell
+  carries the toolchain, `dx`, tailwindcss, and
+  `PLAYWRIGHT_BROWSERS_PATH`.
+- `cargo check --workspace` from `apps/task/` checks the entire
+  ~160-member monorepo, not just Task. Use `-p` when you mean Task.
 
 ### rust-analyzer staleness
 
-rust-analyzer often reports "file not found" / "missing field" diagnostics that don't reflect actual compile state. **Trust `cargo check`, not the LSP**. Restart rust-analyzer (Ctrl+Shift+P → "rust-analyzer: Restart Server") to clear stale views after large file moves.
-
----
-
-## Workflow
-
-### Multi-step features
-
-For anything bigger than one file, use the **research → plan → build → wire** pattern:
-
-1. **Research agent** (with WebSearch/WebFetch + local repo reads) produces a concrete build spec — entities, components, interactions, file paths, exact prop shapes.
-2. **Schema phase** (single agent, sequential) lands proto + crdt + db + seed data + tests.
-3. **UI phase** (parallel agents) build dumb components. Often split: editor / canvas / surrounding-views.
-4. **Wire phase** (you, integration) mounts the route, embeds in other features, verifies.
-
-Past arcs that followed this pattern: knowledge, agent+git+Hermes, chat+Hermes-webui, project-management. Their commit messages are good references.
-
-### Use subagents for parallel + breadth work
-
-- 4 parallel agents wrote the per-feature dashboards in one pass (commit `e749ec8`).
-- A research agent + parallel UI agents shipped the agent+git+Hermes arc (commit `c2974b8`).
-- Don't run an agent for one-line changes; do those directly.
-
-### Plans live in `plans/`
-
-Open architectural follow-ups go in `plans/<topic>.md`. Each plan has: status, scope, background, what changes, sequencing into phases, acceptance criteria, risk register. See `plans/loro-text-editor-upgrade.md` for the canonical shape.
-
-### Commit messages
-
-Heredoc style, descriptive subject + body grouped by phase or layer. See `git log --oneline` for the prevailing format. Every arc commit includes:
-- What landed per phase
-- Verify status (cargo check / test results)
-- v1 limitations documented in-line
-
-### When changing fts-ui
-
-The workspace dep is `path = "../FastTrackStudio/fts-ui/crates/fts-ui"`. Edits propagate on next `cargo check`. Commit the fts-ui change in its own repo (separate from Task-architect commits). Keep the API additive when possible — many features depend on the prelude shape.
+rust-analyzer often reports "file not found" / "missing field"
+diagnostics that don't reflect actual compile state. **Trust `cargo
+check`, not the LSP.** Restart the server after large file moves.
 
 ---
 
 ## Tracking
 
-This project does NOT use bd/beads or any external ticket tracker. The conventions we actually rely on:
+This project does NOT use bd/beads or any external ticket tracker. Do
+not add a `bd hooks run` call to the git hooks. What we rely on:
 
-- **`plans/<topic>.md`** — open architectural follow-ups. Each plan carries status, scope, background, what changes, sequenced phases, acceptance criteria, risk register. See `plans/loro-text-editor-upgrade.md` for the canonical shape. When you spot work that's bigger than a one-file fix, write the plan first.
+- **`plans/<topic>.md`** — architectural follow-ups. Every plan
+  carries a status header; see `plans/README.md` for the vocabulary
+  and for where finished plans go (`plans/done/`). Write the plan
+  before the second commit of any multi-slice arc.
+- **`task issue` / `task code`** — the in-repo issue + git workflow
+  (see the `task` skill and `docs/task-code-workflow.md`).
+- **Commit messages** — the activity log. Descriptive subject,
+  phase-grouped body, verify status.
+- **`// FUTURE:` comments** for narrow follow-ups too small to be a
+  plan. Visible via `rg -t rust 'FUTURE:'`.
+- **README.md / AGENTS.md** — slowly-changing canonical guidance.
+  Update when conventions shift. If you find a claim in here that the
+  code contradicts, **fix the doc in the same PR** — that's how this
+  file rotted the first time.
 
-- **Commit messages** — the activity log. Heredoc-style, descriptive subject + phase-grouped body. `git log --oneline` is your worklog. Past arcs (see commits `e749ec8` ui adoption, `c2974b8` agent+git, `66fe21d` chat+Hermes-webui, `b527715` knowledge) follow this shape — copy them.
-
-- **In-line FUTURE comments** in code for narrow follow-ups too small to be a plan. Pattern: `// FUTURE: <one-line description of what's missing>`. Visible via `rg -t rust 'FUTURE:'`.
-
-- **README.md / AGENTS.md** — slowly-changing canonical guidance. Update when conventions shift.
-
-Don't introduce new tracking systems (markdown TODO files, scratchpads, GitHub Issues without explicit user request). The combination above has handled every multi-phase arc cleanly.
-
----
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, complete ALL steps below.
-
-1. **Write up loose ends**:
-   - Big architectural follow-ups → new file in `plans/<topic>.md`
-   - Narrow gaps → `// FUTURE:` comment at the call site
-2. **Run quality gates** if code changed:
-   - `cargo check -p task-ui` clean
-   - `cargo check -p task-app-web --target wasm32-unknown-unknown` clean
-   - `cargo test -p <touched-crate>` clean
-3. **Update issue status** — close finished work, update in-progress items.
-4. **Commit** — heredoc-style descriptive message; see `git log --oneline` for the format.
-5. **Push** (if the user asked you to):
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-6. **Clean up** — clear stashes, prune remote branches.
-7. **Hand off** — write a short summary of state for the next session.
-
-**Critical**: only push when explicitly authorized. Code review > impatience.
+Don't introduce new tracking systems (markdown TODO files,
+scratchpads, GitHub Issues without explicit user request).
 
 ---
 
-## Non-Interactive Shell Commands
+## Landing the plane (session completion)
 
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts. Shell commands like `cp`, `mv`, and `rm` may be aliased to `-i` mode on some systems.
+1. **Write up loose ends** — architectural follow-ups to
+   `plans/<topic>.md` (with a status header); narrow gaps to a
+   `// FUTURE:` comment at the call site.
+2. **Run quality gates** if code changed — see "Verify before done".
+3. **Update issue status** — close finished work.
+4. **Commit** — descriptive message; don't commit code that doesn't
+   compile.
+5. **Push only if the user asked.** `git pull --rebase && git push`,
+   then confirm `git status` shows up to date.
+6. **Hand off** — a short summary of state for the next session; if
+   the arc is mid-flight, a note in `plans/handoff/`.
+
+---
+
+## Non-interactive shell commands
+
+Always use non-interactive flags — `cp`/`mv`/`rm` may be aliased to
+`-i`:
 
 ```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
-
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
+cp -f source dest      rm -f file       rm -rf directory
+mv -f source dest      cp -rf source dest
 ```
 
-**Other commands that may prompt:**
-- `scp` - use `-o BatchMode=yes`
-- `ssh` - use `-o BatchMode=yes`
-- `apt-get` - use `-y`
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1`
+Others that may prompt: `scp`/`ssh` (`-o BatchMode=yes`), `apt-get`
+(`-y`), `brew` (`HOMEBREW_NO_AUTO_UPDATE=1`).
 
 ---
 
@@ -273,24 +463,41 @@ cp -rf source dest          # NOT: cp -r source dest
 
 | Need | Path |
 |---|---|
-| Add a new feature | `xtask new-feature <name>` (scaffolder) or copy `features/knowledge/` |
-| fts-ui prelude reference | `~/Development/FastTrackStudio/fts-ui/crates/fts-ui/src/prelude.rs` |
-| architect entity macro | `../architect/macros/architect/` |
-| crdt codec helpers | `../architect/libs/crdt/src/codec.rs` |
-| App shell + router | `crates/task-ui/src/app.rs` |
-| Theming contexts | `crates/task-ui/src/theming.rs` |
-| Per-feature routes | `crates/task-ui/src/feature_routes/<name>.rs` |
-| Server entry + integrations | `apps/server/src/main.rs`, `apps/server/src/lib.rs` |
-| Seed data | `apps/db/src/seed.rs` |
-| Open plans / next-arc roadmap | `plans/*.md` |
-| Research checkouts (read-only) | `~/Development/research/{logseq,obsidian-api,obsidian-developer-docs,obsidian-sample-plugin}` |
-| Hermes deployment | `~/.starcommand/modules/selfhost/services/` — Hermes runs on `hermes.starcommand.live` (Host-rejected; SSH-tunnel to `localhost:9119`) |
+| App shell + router | `crates/task/ui/src/app.rs`, `.../routes.rs` |
+| Pages (where state + clients live) | `crates/task/ui/src/pages/` |
+| Theming contexts | `crates/task/ui/src/theming.rs` |
+| vox session / URL resolution | `crates/task/ui/src/vox_session.rs` |
+| Server entry + org router | `apps/task/server/src/main.rs`, `.../lib.rs` (`router`, `org_layer_router`) |
+| CLI | `apps/task/cli/src/main.rs` |
+| A slice's wire contract | `features/task/<slice>/<slice>-proto/src/` — or `<slice>/src/service.rs` when there's no proto crate |
+| fts-ui prelude | `libs/fts-ui/fts-ui/src/prelude.rs` |
+| architect Entity macro | `libs/architect/macros/architect-derive/` |
+| architect crdt codec helpers | `libs/architect/crdt/crdt/src/codec.rs` |
+| Env var reference | `.env.example` (complete inventory) |
+| Vault ⇄ CRDT design | `docs/architecture/vault-crdt-reconciliation.md` |
+| Crate topology + request path | `ARCHITECTURE.md` |
+| Plans + their status convention | `plans/README.md` |
 
----
+## Known stale (do not trust, fix if you touch)
+
+- **`crates/task/xtask`** — `cargo xtask build` targets
+  `integrations/obsidian/plugin`, deleted; `cargo xtask codegen`
+  resolves its out-dir to `crates/task/ui-lab/` instead of
+  `apps/task/ui-lab/`.
+- **`apps/task/nix/module.nix`** — an orphan NixOS module (nothing in
+  the flake imports it) that sets `TASK_VAULT`, `TASK_DB_PATH`,
+  `TASK_SEED_DEMO`, and `NEXTCLOUD_*`. The server reads none of them.
+  The live deploy path is `apps/task/deploy/chart/`.
+- **`docs/self-host.md`** — describes the same dead env vars and CLI
+  commands (`task sync`, `task people`, `task invoice`, `task server`)
+  that no longer exist.
 
 ## When in doubt
 
-1. Match the most recent precedent. Last-shipped feature is `knowledge/`; before that was `agent + git + Hermes`. Both have heavily-commented protos and route handlers.
-2. Don't invent — search. `rg -t rust "thing_you're_looking_for"` is your friend.
-3. Trust `cargo check`, not rust-analyzer. Native and wasm32 are separate; check both.
-4. When stuck, write the plan first in `plans/` and ask the user to review before launching agents.
+1. **Search, don't assume.** `rg -t rust "thing"` beats a guess, and
+   beats this document if the two disagree — the code is the truth.
+2. Read the nearest slice before copying it; the shapes vary.
+3. Trust `cargo check`, not rust-analyzer. Native and wasm are
+   separate targets; check both.
+4. When stuck, write the plan first in `plans/` and ask the user to
+   review before launching agents.

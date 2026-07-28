@@ -1,5 +1,7 @@
 # workflow-coding — the agent dev loop (`task code *` / `task work *`)
 
+**Status:** partially shipped — needs triage (2026-07-27). The `task code` command group exists in `apps/task/cli`; how much of the loop this doc describes is wired was not verified.
+
 **Target:** ship the concrete coding workflow — the loop an agent (or human) follows from "what should I work on?" through commit / push / PR / review / merge / close. Replaces `beads`. Primary CLI is `task code *`; `task work *` is a stable alias for ergonomic typing.
 
 Depends on `plans/issue-tracker-integration.md` (TaskInfo + `WorkflowAttrs` + completed `git-{proto,github,forgejo,config}` stack) and `plans/workflows-orchestrator.md` (Workflow trait + Orchestrator runtime).

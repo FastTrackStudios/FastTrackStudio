@@ -1,5 +1,7 @@
 # Knowledge graph slice — design notes
 
+**Status:** research — folded into `wiki-feature.md` slice 3. Kept for the algorithm detail, not as a work item.
+
 Research-only doc. Distills what to crib from `nashsu/llm_wiki`
 (cloned at `~/Development/research/llm_wiki/`) for Task's graph
 view, plus our own constraints.

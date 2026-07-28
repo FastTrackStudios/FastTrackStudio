@@ -1,8 +1,9 @@
 # Vault-file ⇄ CRDT reconciliation
 
 How a plain-markdown vault and real-time collaborative editing share
-one source of truth. Code: `features/vault/vault-collab` (server),
-`crates/ui/src/collab.rs` (client), `vault-proto/src/collab.rs`
+one source of truth. Code: `features/task/vault/vault-collab` (server),
+`crates/task/ui/src/collab.rs` (client),
+`features/task/vault/vault-proto/src/collab.rs`
 (identity scheme). Tracked issue: `cfa1c33b`.
 
 ## Identity: one doc per (vault, path)
@@ -88,10 +89,10 @@ Known crash windows (accepted v1, documented in code):
 
 ## Client
 
-The vault page (`crates/ui/src/pages/vault.rs`) stays sha-first; the
+The vault page (`crates/task/ui/src/pages/vault.rs`) stays sha-first; the
 collab path layers on top per open file:
 
-- `open_collab` → keyed `CollabSession` (`crates/ui/src/collab.rs`):
+- `open_collab` → keyed `CollabSession` (`crates/task/ui/src/collab.rs`):
   `use_synced_doc_keyed(doc_id)` + `use_presence_channel_keyed(doc_id,
   30_000)`.
 - **Takeover**: on the first synced revision the session reconciles

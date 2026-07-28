@@ -1,5 +1,7 @@
 # Day-by-day scheduling — editable per-day plan with assignable blocks
 
+**Status:** partially shipped — needs triage (2026-07-27). `DayPlan` / `DayTemplate` parse + write + `vault_scheduler` exist in `features/task/scheduling/`; the drag/resize editing UX this doc asks for was not verified.
+
 **Goal:** the recurring daily-plan template (`weekday` / `weekend`
 `DayTemplate`s, rendered today as read-only ghost outlines on the
 calendar) becomes a **live, per-day plan** the user can rearrange and

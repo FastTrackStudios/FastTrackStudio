@@ -1,5 +1,7 @@
 # Agent Dispatch
 
+**Status:** partially shipped — needs triage (2026-07-27). `features/task/agent/agent-dispatch` and `agent-tasks` exist; per-phase completion against this doc was not verified.
+
 Dispatch any task note as an *agent task* — a unit of work an AI agent
 picks up, runs, and reports back on. Modeled on
 [`nousresearch/hermes-webui`](https://github.com/nousresearch/hermes-webui)'s

@@ -1,5 +1,7 @@
 # UI anti-pattern audit — 2026-07-02
 
+**Status:** historical audit (2026-07-02). Point-in-time lint sweep, not a work item. Re-run the sweep rather than trusting these counts.
+
 Full dioxus-mcp lint sweep over every UI crate (crates/ui, task-ui,
 finance-ui, scheduling-ui, threads-ui, view-*). 243 raw findings in
 crates/ui; most were cross-crate false positives. What was real, what

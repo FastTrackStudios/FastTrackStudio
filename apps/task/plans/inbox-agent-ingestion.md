@@ -1,5 +1,7 @@
 # Inbox agent ingestion — email / text → the single trusted system
 
+**Status:** partially shipped — needs triage (2026-07-27). `features/task/agent/agent-inbox` (parsers / bridge / prompts / templates) exists; the watcher + end-to-end loop was not verified.
+
 **Goal:** let an AI agent watch external streams (email first, texts later) and
 drop *noteworthy* items into the inbox as `InboxItem`s, so they flow through the
 same capture → process → write loop as everything else. The inbox stays the one

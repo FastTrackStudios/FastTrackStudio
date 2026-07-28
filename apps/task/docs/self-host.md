@@ -1,8 +1,28 @@
 # Self-Hosting Task
 
-Task can run as a normal Rust service with a markdown vault, SQLite database,
-and optional Nextcloud provider integrations. The core server exposes Vox RPC on
-`/vox`; clients and agents should use those native services.
+> **⚠ STALE — do not follow verbatim (flagged 2026-07-27).** Everything
+> below the Build section describes an older server: `TASK_VAULT`,
+> `TASK_DB_PATH`, `TASK_NEXTCLOUD_CONFIG`, `TASK_SEED_DEMO` and the
+> `NEXTCLOUD_*` vars are **not read by `task-server`**, and the smoke-test
+> commands (`task sync`, `task people`, `task invoice report`,
+> `task server add`) are **not in the CLI**. The NixOS module it documents
+> (`nix/module.nix`) is an orphan — nothing in the flake imports it.
+>
+> For the real thing use:
+> - [`../.env.example`](../.env.example) — the complete env-var inventory
+>   (`TASK_DATA_ROOT`, `TASK_SERVER_BIND`, `TASK_SERVER_VAULT_ROOT`, the
+>   per-service DB URLs, …)
+> - [`../deploy/chart/`](../deploy/chart/) — the Helm chart that actually
+>   ships, plus `deploy/docker-compose.yml`
+> - [`starcommand-webapp-runbook.md`](starcommand-webapp-runbook.md) — the
+>   operator runbook for the live deployment
+> - [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — what the server is
+>
+> Rewriting this file against the current server is open work.
+
+Task runs as a normal Rust service over a markdown vault plus per-service
+SQLite databases. It exposes architect/vox RPC over a WebSocket at
+`/org/{slug}/vox`; clients and agents use those typed services.
 
 ## Build
 
@@ -16,7 +36,7 @@ For development or manual administration:
 ```bash
 nix develop
 cargo check -p task-server
-cargo test -p task-core
+cargo check -p task-cli
 ```
 
 ## Starcommand stable/preview runbook

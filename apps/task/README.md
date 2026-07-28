@@ -776,23 +776,24 @@ not become it.
 
 ## What the words mean here
 
-- **Local-first.** The user's data lives on the user's device. Every
-  feature stores its source of truth in a [Loro](https://loro.dev/)
-  CRDT document. Edits work offline; the server is a sync relay, not
-  an authority.
-- **Realtime.** Edits propagate in milliseconds over a WebSocket. Open
-  two tabs on the same route and watch them stay in lockstep.
-- **Collaborative / Multiplayer.** No "save" button. No conflict
-  dialogs. CRDTs merge concurrent edits deterministically; the UI just
-  reflects current state.
-- **Extensible.** Every domain is a separate workspace member with a
-  consistent shape: `*-proto` (wire types), `*-crdt` (Loro source of
-  truth), `*-db` (SeaORM persistence), `*-ui` (Dioxus components).
-  Adding a feature is mechanical; removing one is a directory delete.
-  External integrations (Hermes-agent for AI dispatch, GitHub webhooks
-  for PR linking, CalDAV for calendar sync, Anthropic/OpenAI/Ollama
-  for chat models) plug into trait-shaped seams without touching the
-  core.
+- **Local-first.** The user's data is a folder of markdown files the
+  user owns. The vault is the source of truth; indexes and databases
+  are rebuildable from it. Delete the server and the data is intact.
+- **Realtime.** Edits to a vault file propagate in milliseconds over a
+  WebSocket. Open two tabs on the same note and watch them stay in
+  lockstep — that path is backed by [Loro](https://loro.dev/) CRDTs
+  (see `docs/architecture/vault-crdt-reconciliation.md`).
+- **Collaborative / Multiplayer.** For collaborative *text*, no "save"
+  button and no conflict dialogs: CRDTs merge concurrent edits
+  deterministically and the write-behind loop projects the result back
+  into the file.
+- **Extensible.** Every domain is a slice under `features/task/`,
+  exposing an `#[architect::rpc]` service trait. The common shape is
+  `<slice>-proto` (wire types + service traits) plus a `<slice>`
+  facade, with optional `-db` (sea-orm), `-ui` (Dioxus), and `-live`
+  (filesystem backend) crates. External integrations — agent backends,
+  forge sync, email backends — plug into trait-shaped seams without
+  touching the core.
 
 ## UI rules
 
@@ -818,77 +819,77 @@ This is non-negotiable.
   the project route. New theme-aware surfaces should respect both
   tiers — don't bypass the provider.
 - **Dumb components.** Feature `*-ui` crates own no state: data in,
-  events out via `EventHandler<T>`. The route layer (in `task-ui`)
-  wires repos to components. This keeps components portable across
-  web/desktop/mobile and reusable in storybooks.
+  events out via `EventHandler<T>`. Signals and vox clients live in
+  the page (`crates/task/ui/src/pages/`). This keeps components
+  portable across web/desktop/mobile and usable in ui-lab.
 
 When a component you need doesn't exist in fts-ui, prefer:
 1. Compose it from existing fts-ui primitives, or
-2. Add it to fts-ui upstream (the workspace dep is a path checkout,
-   so edits propagate immediately).
+2. Add it to fts-ui — it lives in-tree at `libs/fts-ui/fts-ui` as a
+   path dep, so edits propagate on the next `cargo check`.
 
 ## Architecture in 30 seconds
 
 ```
-features/<name>/
-  <name>-proto/    architect-derive wire types (#[derive(Entity)])
-  <name>-crdt/     EntityCrdt impl + <Name>RepoLoro (Loro source of truth)
-  <name>-db/       SeaORM persistence (crdt-seaorm tables + projections)
-  <name>-ui/       dumb Dioxus components — fts-ui only, theme-aware
-  <name>/          facade crate with feature gates (vox / server / fake / full)
-  spec/<name>.md   tracey spec rules
-  tests/native/    Repo trait + replica-convergence tests
+features/task/<slice>/
+  <slice>-proto/   entity types + #[architect::rpc] service traits;
+                   architect emits Client / Dispatcher / descriptor
+  <slice>/         facade + backend implementation
+  <slice>-db/      sea-orm entities + migrations   (rare)
+  <slice>-ui/      dumb Dioxus components          (rare)
+  <slice>-live/    filesystem backend + watcher    (vault, wiki)
 
-apps/server         task-server: WebSocket sync relay, webhook receivers,
-                    SeaORM persistence, integration registry boot
-apps/web/desktop    Dioxus platform launchers; thin shells over task-ui
-apps/db             standalone migrator + seeder
+apps/task/server    task-server: axum + one architect LayerRouter per
+                    org, served at /org/{slug}/vox
+apps/task/{web,desktop,mobile}
+                    Dioxus platform shells over crates/task/ui
+apps/task/cli       package task-cli → the `task` binary
 
-crates/task-ui      Dioxus app shell, AppShell/Sidebar/router,
-                    per-feature routes
-crates/task-cli     CLI commands
+crates/task/ui      package `ui` — the Dioxus app shell: router,
+                    pages/, theming, stores, vox session
 ```
 
-The auth schema is the only state that isn't local-first — sessions,
-credentials, and OAuth tokens are server-authoritative
-(`features/auth/`). Everything else flows through Loro and syncs via
-the WebSocket relay.
+The shape varies by slice: several are proto-only, and a few (`task`,
+`project`, `goal`, `cycle`) declare their service trait inside the
+facade crate rather than a separate proto. Read the neighbour before
+copying it.
 
-External integrations sit behind trait seams in `agent-proto`:
-- `AgentIntegration` (`hermes`, `mock`) for task dispatch + agent runs
-- `ChatModel` (`mock`, future: `anthropic` / `openai` / `ollama`) for
-  conversational completion
-- GitHub webhooks (PR → task status, commit ↔ branch linking)
-- CalDAV bidirectional sync for the calendar feature
+Storage is three-tiered: **markdown + YAML frontmatter in the vault**
+for most entities (the source of truth), **sea-orm** for a minority
+(agent-task queue, timer, threads, prefs, finance) plus architect's
+auth / permissions / share tables, and **Loro CRDTs** only for
+collaborative editing of vault markdown files.
 
-Each integration is a separate crate registered at server boot; the
-trait surface is stable so adding `openai` or `linear` plugins
-doesn't touch the rest of the codebase.
+Full detail: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Quick start
 
 ```bash
-# Enter the dev shell (direnv loads it automatically on cd).
-# Manual: nix develop .#ui
+# Enter the dev shell (direnv loads it automatically on cd from the
+# repo root). Manual: nix develop <repo-root>
 
-# Terminal 1 — the sync relay + webhook server
-just server                   # listens on :9090, pre-seeded fake data
+# From apps/task/ :
+
+# Terminal 1 — the server
+just server                   # listens on :9090
 
 # Terminal 2 — the Dioxus dev server
-just web                      # listens on :8765, hot-reload
+just web                      # listens on :8765
 
 # Or both in one process:
 just dev
-
-# Open http://localhost:8765 and try any of: /, /inbox, /projects-live,
-# /chat-ai, /calendar, /timer, /invoice, /inventory, /agents/runs.
-# Open a second tab on the same route — edits propagate instantly.
 ```
+
+There is no separate migrate/seed step: the server resolves its data
+root from `$TASK_DATA_ROOT` (default `$HOME/.task`), creates
+`orgs/<slug>/` on demand, and runs each service's migrations at boot.
+Point `TASK_DATA_ROOT` at a throwaway directory for a clean slate.
+See [`.env.example`](.env.example) for the full env surface.
 
 ## Common recipes
 
 ```bash
-just check         # cargo check --workspace
+just check         # cargo check --workspace  (the WHOLE monorepo)
 just build         # cargo build --workspace
 just test          # cargo test --workspace
 just fmt           # cargo fmt --all
@@ -896,28 +897,34 @@ just clippy        # cargo clippy --workspace --all-targets -- -D warnings
 just ci            # fmt --check + clippy + nextest run
 ```
 
-## Adding a feature
+`--workspace` means all ~160 monorepo members, not just Task — use
+`-p <crate>` when you only care about a Task crate.
 
-The scaffolder lives in `xtask`. Typical flow:
+## Adding a slice
 
-1. `cargo xtask new-feature <name>` writes the proto/crdt/db/ui/parent
-   crates with the right `Cargo.toml`s and a placeholder entity.
-2. Fill in the entity shape in `<name>-proto/src/lib.rs`.
-3. Codec the fields in `<name>-crdt/src/lib.rs` (mirror the cookbook
-   pattern).
-4. Build the dumb components in `<name>-ui/src/lib.rs` using
-   `fts_ui::prelude::*` and theme tokens.
-5. Wire the route in `crates/task-ui/src/feature_routes/<name>.rs`
-   and register it in `crates/task-ui/src/app.rs`.
+There is no scaffolder (`cargo xtask` only does TS codegen). Copy the
+nearest existing slice:
 
-Existing feature trios are the best reference — pick one whose shape
-matches yours and adapt.
+1. Pick a neighbour whose shape matches what you're building.
+2. Define entities + the `#[architect::rpc]` trait in
+   `<slice>-proto/src/` (or in the facade, if you're following a slice
+   that does it that way).
+3. Implement the backend in the facade crate — over `vault::Vault` for
+   markdown-backed entities, or sea-orm if the data genuinely isn't
+   file-shaped.
+4. Register the dispatcher in `org_layer_router` in
+   `apps/task/server/src/lib.rs`, and add its schema stamp alongside.
+5. Build components with `fts_ui::prelude::*` and theme tokens; wire
+   the page in `crates/task/ui/src/pages/` and the route in
+   `crates/task/ui/src/routes.rs`.
+
+Remember: touching a proto changes vox method ids — rebuild and
+restart task-server before trusting live behavior.
 
 ## Status
 
-Active development. Demo data is seeded server-side on every boot;
-nothing here is persisted across cold starts unless
-`SYNC_DEMO_DATABASE_URL=sqlite://./data.db?mode=rwc` is set.
+Active development. Data lives under `$TASK_DATA_ROOT` (default
+`$HOME/.task`) and persists across restarts.
 
 ## Credits
 

@@ -2,7 +2,8 @@
 const { defineConfig, devices } = require("@playwright/test");
 
 /**
- * Playwright config for the Task web app (`apps/web`).
+ * Playwright config for the Task web app (`apps/task/web`,
+ * package `task-app-web`).
  *
  * Modeled on the sibling `Editor/tests/playwright.config.js` and the
  * Dioxus repo's own `packages/playwright-tests/`. A single `webServer`
@@ -12,7 +13,7 @@ const { defineConfig, devices } = require("@playwright/test");
  * loading/empty states when the vox endpoint is absent.
  *
  * Run (from the repo root):
- *   nix develop .#playwright
+ *   nix develop <repo-root>
  *   cd tests/playwright && pnpm install
  *   pnpm test            # or: pnpm test:headed / pnpm test:ui
  *
@@ -21,7 +22,7 @@ const { defineConfig, devices } = require("@playwright/test");
  *
  * DATA-DRIVEN TESTS (opt-in): to exercise live tasks/projects, also run
  * a seeded `task-server` on the port baked into `DEFAULT_VOX_URL`
- * (`ws://127.0.0.1:18080/vox`, see `crates/ui/src/vox_session.rs`) and
+ * (`ws://127.0.0.1:18080/vox`, see `crates/task/ui/src/vox_session.rs`) and
  * build the web app with `TASK_VOX_URL_WEB` pointing at it. Add it as a
  * second `webServer` entry when those specs land.
  */
@@ -52,10 +53,10 @@ module.exports = defineConfig({
   ],
   webServer: {
     // Force the web platform and a fixed port. `dx serve` builds the
-    // wasm bundle and hosts it. cwd is `apps/web` relative to this
-    // config (tests/playwright/).
+    // wasm bundle and hosts it. cwd is `apps/task/web` relative to
+    // this config (apps/task/tests/playwright/).
     command: `dx serve --platform web --addr 127.0.0.1 --port ${PORT}`,
-    cwd: "../../apps/web",
+    cwd: "../../web",
     url: `http://127.0.0.1:${PORT}`,
     // First-time wasm build can be very slow.
     timeout: 10 * 60 * 1000,

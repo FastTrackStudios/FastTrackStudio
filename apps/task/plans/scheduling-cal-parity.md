@@ -1,5 +1,7 @@
 # Scheduling — cal.com feature parity tracker
 
+**Status:** parity tracker — ongoing. Living scoreboard, never "done".
+
 Maps the cal.com / cal.diy surface onto our `scheduling` feature so
 we can tell at a glance what's shipped, what's planned, and what we
 intentionally aren't doing.

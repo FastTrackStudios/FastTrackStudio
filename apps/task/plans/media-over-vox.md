@@ -1,5 +1,7 @@
 # Media over vox — retire the HTTP side-channels
 
+**Status:** partially shipped — needs triage (2026-07-27). `features/task/media/media-proto` and `apps/task/server/src/media.rs` exist, but the HTTP side-channel this plan set out to retire is still live: `apps/task/server/src/main.rs` still mounts an always-on `/media/{*path}` route.
+
 ## Why
 
 Song stems (and soon part bundles, sample previews, video) currently

@@ -74,7 +74,7 @@ notes/verses and add visibility:
 - **`features/wiki/wiki-graph`** 4-signal relevance scorer + Louvain communities — built;
   feeds the published graph.
 - **Federation** (`wiki-proto/federation.rs`, `plans/federated-task-platform.md`) +
-  archived `plans/archived/vault-publisher.md` (Quartz-style static export) — the publish
+  `plans/done/vault-publisher.md` (Quartz-style static export) — the publish
   hooks. Add the visibility filter to the export path.
 - **Layered model** already enforced: `vault/` → `wiki/Knowledge/` (curated, self-contained
   link-in target) → `resources/`. Maps onto private-journal → publishable-facts.

@@ -1,36 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOOK_SOURCE_DIR="$(git rev-parse --show-toplevel)/hooks"
-GIT_DIR="$(git rev-parse --git-dir)"
+# Point git at this directory for hooks. Run once per clone:
+#
+#   apps/task/hooks/install.sh      (or `just install-hooks` from apps/task/)
+#
+# `core.hooksPath` is repo-global and applies to every worktree, so
+# there is nothing to copy and nothing to re-run after `git worktree
+# add`. It is also the ONLY thing this script does — the hooks
+# themselves are the tracked files in this directory.
+#
+# CAVEAT: FastTrackStudio is one repo with one hooks path. Installing
+# these makes `capn fmt` / `capn pre-push` run for commits anywhere in
+# the tree, not just under apps/task/. Uninstall with:
+#
+#   git config --unset core.hooksPath
 
-git config core.hooksPath hooks
-echo "Configured git core.hooksPath=hooks"
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+REL="${HOOK_DIR#"$REPO_ROOT"/}"
 
-copy_hook() {
-  local src="$1"
-  local dst="$2"
-  mkdir -p "$(dirname "$dst")"
-  cp "$src" "$dst"
-  chmod +x "$dst"
-}
-
-install_for_dir() {
-  local hook_dir="$1"
-  mkdir -p "$hook_dir"
-  for hook in "$HOOK_SOURCE_DIR"/*; do
-    local name
-    name="$(basename "$hook")"
-    if [ "$name" = "install.sh" ]; then
-      continue
-    fi
-    copy_hook "$hook" "$hook_dir/$name"
-  done
-}
-
-install_for_dir "$GIT_DIR/hooks"
-for wt in "$GIT_DIR"/worktrees/*; do
-  if [ -d "$wt" ]; then
-    install_for_dir "$wt/hooks"
-  fi
-done
+chmod +x "$HOOK_DIR"/pre-commit "$HOOK_DIR"/pre-push
+git config core.hooksPath "$REL"
+echo "Configured git core.hooksPath=$REL"
