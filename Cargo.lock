@@ -8481,6 +8481,7 @@ name = "eq-dsp"
 version = "0.1.0"
 dependencies = [
  "audiocore-dsp",
+ "realfft",
 ]
 
 [[package]]
@@ -16663,6 +16664,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "685a9ac4b61f4e728e1d2c6a7844609c16527aeb5e6c865915c08e619c16410f"
 
 [[package]]
+name = "multiband-dsp"
+version = "0.1.0"
+
+[[package]]
 name = "multimap"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -23275,6 +23280,7 @@ dependencies = [
  "level-dsp",
  "modulation",
  "reverb",
+ "saturate-dsp",
  "signal-plugin-host",
 ]
 
