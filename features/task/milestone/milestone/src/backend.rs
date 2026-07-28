@@ -59,19 +59,14 @@ impl MilestoneBackend {
             MilestoneError::Io(format!("open vault {}: {e}", self.vault_root.display()))
         })?;
         for page in &vault.pages {
-            let Some((fm, _)) = crate::parse::split_frontmatter(&page.raw) else {
+            let Some((map, _)) = vault_entity::frontmatter::mapping(&page.raw) else {
                 continue;
             };
-            let Ok(map) = serde_yaml::from_str::<serde_yaml::Mapping>(fm) else {
-                continue;
-            };
-            if map.get("type").and_then(|v| v.as_str()) != Some("project") {
+            if vault_entity::yaml::str_at(&map, "type").as_deref() != Some("project") {
                 continue;
             }
-            let id_match = map
-                .get("id")
-                .and_then(|v| v.as_str())
-                .and_then(|s| Uuid::parse_str(s).ok())
+            let id_match = vault_entity::yaml::str_at(&map, "id")
+                .and_then(|s| Uuid::parse_str(&s).ok())
                 == Some(project_id);
             if id_match {
                 return Ok(page.rel_path.clone());
@@ -178,19 +173,14 @@ impl MilestoneService for MilestoneBackend {
         let vault = Vault::open(&self.vault_root)
             .map_err(|e| MilestoneError::Io(format!("open vault: {e}")))?;
         for page in &vault.pages {
-            let Some((fm, _)) = crate::parse::split_frontmatter(&page.raw) else {
+            let Some((map, _)) = vault_entity::frontmatter::mapping(&page.raw) else {
                 continue;
             };
-            let Ok(map) = serde_yaml::from_str::<serde_yaml::Mapping>(fm) else {
-                continue;
-            };
-            if map.get("type").and_then(|v| v.as_str()) != Some("task") {
+            if vault_entity::yaml::str_at(&map, "type").as_deref() != Some("task") {
                 continue;
             }
-            let linked = map
-                .get("milestoneId")
-                .and_then(|v| v.as_str())
-                .and_then(|s| Uuid::parse_str(s).ok())
+            let linked = vault_entity::yaml::str_at(&map, "milestoneId")
+                .and_then(|s| Uuid::parse_str(&s).ok())
                 == Some(id);
             if linked {
                 return Err(MilestoneError::BadRequest(format!(

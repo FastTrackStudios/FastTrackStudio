@@ -22,6 +22,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod entity;
 pub mod lookup;
 pub mod model;
 pub mod parse;
@@ -31,6 +32,7 @@ pub mod store;
 pub mod units;
 pub mod write;
 
+pub use entity::PantryItems;
 pub use lookup::{LookupError, lookup_external};
 pub use model::{
     DueType, FoodCategory, PantryItem, PantryItemDraft, StockEntry, SubReason, Substitution,

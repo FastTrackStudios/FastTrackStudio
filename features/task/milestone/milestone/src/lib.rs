@@ -17,20 +17,31 @@
 //! Forgejo-sync rollup design.
 
 pub mod model;
-pub mod parse;
-pub mod write;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod backend;
 pub mod service;
 
+// `entity` / `parse` / `write` / `backend` all reach the shared
+// `vault-entity` support layer, which walks `std::fs` (and pulls a
+// file watcher). Wasm consumers take `milestone-proto` directly.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod backend;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod entity;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod parse;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod write;
+
 pub use model::{Milestone, Status, Tags};
-pub use parse::{ParseError, looks_like_milestone, parse_milestone, parse_page};
 pub use service::{MilestoneError, MilestoneService};
-pub use write::{WriteError, default_milestone_path, serialize_milestone, write_milestone};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::MilestoneBackend;
+#[cfg(not(target_arch = "wasm32"))]
+pub use entity::Milestones;
+#[cfg(not(target_arch = "wasm32"))]
+pub use parse::{ParseError, looks_like_milestone, parse_milestone, parse_page};
+#[cfg(not(target_arch = "wasm32"))]
+pub use write::{WriteError, default_milestone_path, serialize_milestone, write_milestone};
 
 #[cfg(feature = "vox")]
 pub use milestone_proto::{

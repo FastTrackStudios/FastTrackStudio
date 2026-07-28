@@ -7,13 +7,8 @@
 //! them newline-joined. The free-form notes become the markdown body.
 
 use contacts_proto::Contact;
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml serialize: {0}")]
-    Yaml(String),
-}
+pub use vault_entity::WriteError;
 
 fn seq(values: Vec<&str>) -> serde_yaml::Value {
     serde_yaml::Value::Sequence(

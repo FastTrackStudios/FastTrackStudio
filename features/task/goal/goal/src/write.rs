@@ -1,49 +1,29 @@
 //! `Goal` → markdown bytes + path helpers.
 //!
-//! Frontmatter always carries `type: goal` so the parser has
-//! a single discriminator. Empty optional fields are skipped
-//! to keep new files terse.
+//! Serialization lives in [`crate::entity`]; this module keeps the
+//! historical `goal::write::*` paths working and adds the one thing
+//! the shared store doesn't cover — writing a goal straight to a vault
+//! root on disk, without an in-memory `Vault`.
 
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use thiserror::Error;
+use vault_entity::store::VaultEntity;
 
+pub use vault_entity::WriteError;
+
+use crate::entity::Goals;
 use crate::model::Goal;
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml: {0}")]
-    Yaml(String),
-    #[error("io: {0}")]
-    Io(String),
-    #[error("file exists at {0}; refusing to overwrite (pass overwrite=true)")]
-    Exists(String),
-    #[error("bad path: {0}")]
-    BadPath(String),
-}
-
+/// Render a goal as a full markdown page. Frontmatter always carries
+/// `type: goal` so the parser has a single discriminator; empty
+/// optional fields are skipped to keep new files terse.
 pub fn serialize_goal(goal: &Goal) -> Result<String, WriteError> {
-    let mut wrapper = serde_yaml::Mapping::new();
-    wrapper.insert("type".into(), "goal".into());
-    let body_yaml = serde_yaml::to_value(goal).map_err(|e| WriteError::Yaml(e.to_string()))?;
-    if let serde_yaml::Value::Mapping(m) = body_yaml {
-        for (k, v) in m {
-            wrapper.insert(k, v);
-        }
-    }
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(wrapper))
-        .map_err(|e| WriteError::Yaml(e.to_string()))?;
-    let body = if goal.details.is_empty() {
-        String::new()
-    } else if goal.details.starts_with('\n') {
-        goal.details.clone()
-    } else {
-        format!("\n{}", goal.details)
-    };
-    Ok(format!("---\n{yaml}---\n{body}"))
+    Goals::to_markdown(goal)
 }
 
+/// Write `goal` to `<vault_root>/<goal.path>`, creating parent
+/// directories.
 pub fn write_goal(
     vault_root: &Path,
     goal: &mut Goal,
@@ -60,10 +40,8 @@ pub fn write_goal(
         std::fs::create_dir_all(parent).map_err(|e| WriteError::Io(e.to_string()))?;
     }
     let now = Utc::now();
-    if goal.date_created.is_none() {
-        goal.date_created = Some(now);
-    }
-    goal.date_modified = Some(now);
+    Goals::on_create(goal, now);
+    Goals::on_update(goal, now);
     let body = serialize_goal(goal)?;
     std::fs::write(&abs, body).map_err(|e| WriteError::Io(e.to_string()))?;
     Ok(abs)
@@ -74,34 +52,7 @@ pub fn write_goal(
 /// — pass `folder` to override.
 #[must_use]
 pub fn default_goal_path(title: &str, folder: Option<&str>) -> String {
-    let slug = slugify(title);
-    match folder {
-        Some(f) => format!("{}/{slug}.md", f.trim_end_matches('/')),
-        None => format!("Goals/{slug}.md"),
-    }
-}
-
-pub(crate) fn slugify(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_dash = false;
-    for ch in s.chars() {
-        if ch.is_alphanumeric() {
-            for lc in ch.to_lowercase() {
-                out.push(lc);
-            }
-            prev_dash = false;
-        } else if !prev_dash && !out.is_empty() {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        out.push_str("goal");
-    }
-    out
+    Goals::default_path(title, folder)
 }
 
 #[cfg(test)]

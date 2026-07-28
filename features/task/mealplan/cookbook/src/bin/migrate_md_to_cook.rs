@@ -100,7 +100,7 @@ fn main() {
 }
 
 fn convert(raw: &str) -> Option<String> {
-    let (fm, body) = split_frontmatter(raw)?;
+    let (fm, body) = vault_entity::frontmatter::split(raw)?;
     let map: serde_yaml::Mapping = serde_yaml::from_str(fm).ok()?;
     if !looks_like_recipe(&map) {
         return None;
@@ -115,12 +115,6 @@ fn looks_like_recipe(map: &serde_yaml::Mapping) -> bool {
     map.get("tags")
         .and_then(|v| v.as_sequence())
         .is_some_and(|seq| seq.iter().any(|v| v.as_str() == Some("recipe")))
-}
-
-fn split_frontmatter(src: &str) -> Option<(&str, &str)> {
-    let rest = src.strip_prefix("---\n")?;
-    let end = rest.find("\n---\n")?;
-    Some((&rest[..end], &rest[end + 5..]))
 }
 
 fn render(map: &serde_yaml::Mapping, body: &str) -> String {

@@ -6,15 +6,10 @@
 //! separated by a `<!-- back -->` marker.
 
 use recall_proto::RecallCard;
-use thiserror::Error;
 
 use crate::parse::BACK_MARKER;
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml serialize: {0}")]
-    Yaml(String),
-}
+pub use vault_entity::WriteError;
 
 pub fn serialize_recall_card(card: &RecallCard) -> Result<String, WriteError> {
     let mut map = serde_yaml::Mapping::new();

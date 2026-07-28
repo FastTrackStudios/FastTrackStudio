@@ -2,9 +2,11 @@
 
 use thiserror::Error;
 use vault::Vault;
+use vault_entity::store::VaultEntity;
 
+use crate::entity::Projects;
 use crate::model::ProjectInfo;
-use crate::parse::{ParseError, looks_like_project, parse_page};
+use crate::parse::ParseError;
 
 #[derive(Debug, Error)]
 pub enum ScanError {
@@ -23,14 +25,18 @@ pub enum ScanError {
 /// `list()` — always agree. The on-disk file is **not**
 /// rewritten here; the id persists the next time the page is
 /// saved (`write_project` always emits `id:`).
+///
+/// Hand-written rather than [`vault_entity::VaultEntityStore::scan`]
+/// because a project page that has the discriminator but no complete
+/// frontmatter is skipped *silently* (it happens mid-edit), where the
+/// shared scan warns on every parse failure.
 pub fn scan_vault(vault: &Vault) -> Result<Vec<ProjectInfo>, ScanError> {
     let mut out = Vec::new();
     for page in &vault.pages {
-        let proto = page.to_proto();
-        if !looks_like_project(&proto) {
+        if !Projects::matches(page) {
             continue;
         }
-        match parse_page(&proto) {
+        match Projects::from_page(page) {
             Ok(p) => out.push(p),
             Err(ParseError::NoFrontmatter) => {
                 // Project discriminator without a complete

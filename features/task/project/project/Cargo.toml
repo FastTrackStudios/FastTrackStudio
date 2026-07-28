@@ -51,6 +51,7 @@ full = ["vox", "server", "fake"]
 # tokio[net] transitive.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 vault = { workspace = true }
+vault-entity = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -18,6 +18,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 architect = { workspace = true }
 vault = { workspace = true }
+vault-entity = { workspace = true }
 inventory = { workspace = true }
 cookbook = { workspace = true }
 # Wire model + `PantryService` trait live here; this native crate
