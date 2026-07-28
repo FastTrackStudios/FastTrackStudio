@@ -4,7 +4,7 @@
 
 use clap::Subcommand;
 
-use crate::project_path_for;
+use crate::timer::project_path_for;
 
 #[derive(Subcommand)]
 pub(crate) enum FinanceCmd {
