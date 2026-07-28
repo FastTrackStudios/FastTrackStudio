@@ -9289,6 +9289,7 @@ dependencies = [
  "signal-keys-ui",
  "signal-pack-library",
  "signal-packs-proto",
+ "signal-rigs-proto",
  "signal-sampler",
  "signal-synth-proto",
  "signal-synth-rig",
@@ -23137,6 +23138,8 @@ dependencies = [
  "midicore",
  "signal-bass-proto",
  "signal-proto",
+ "signal-rig-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "tracing",
  "tracing-subscriber",
@@ -23206,11 +23209,14 @@ name = "signal-drums"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "daw",
  "kontrol",
  "midicore",
  "signal-drums-proto",
  "signal-fx",
  "signal-plugin-host",
+ "signal-rig-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "tracing",
  "tracing-subscriber",
@@ -23306,6 +23312,8 @@ dependencies = [
  "signal-fx",
  "signal-guitar-proto",
  "signal-proto",
+ "signal-rig-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "tokio",
  "tracing",
@@ -23336,6 +23344,7 @@ dependencies = [
  "signal-grid-ui",
  "signal-guitar-proto",
  "signal-proto",
+ "signal-widgets",
  "uuid 1.23.4",
 ]
 
@@ -23399,6 +23408,8 @@ dependencies = [
  "signal-keys-proto",
  "signal-plugin-host",
  "signal-proto",
+ "signal-rig-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "signal-synth",
  "tokio",
@@ -23428,6 +23439,7 @@ dependencies = [
  "signal-browser",
  "signal-keys-proto",
  "signal-ui",
+ "signal-widgets",
 ]
 
 [[package]]
@@ -23565,6 +23577,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-rig-host"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-audio-io",
+ "eyre",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+ "tracing",
+]
+
+[[package]]
+name = "signal-rigs-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "vox",
+]
+
+[[package]]
 name = "signal-sampler"
 version = "0.1.0"
 dependencies = [
@@ -23597,6 +23630,7 @@ dependencies = [
  "signal-fx",
  "signal-plugin-host",
  "signal-proto",
+ "signal-rig-host",
  "symphonia",
  "symphonia-bundle-flac",
  "symphonia-codec-vorbis",
@@ -23680,6 +23714,7 @@ dependencies = [
  "signal-browser",
  "signal-keys",
  "signal-plugin-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "signal-synth",
  "signal-synth-proto",
@@ -23698,6 +23733,7 @@ dependencies = [
  "signal-proto",
  "signal-synth-proto",
  "signal-ui",
+ "signal-widgets",
 ]
 
 [[package]]
@@ -23723,9 +23759,17 @@ dependencies = [
  "signal-guitar-proto",
  "signal-guitar-ui",
  "signal-proto",
+ "signal-widgets",
  "tokio",
  "tracing",
  "uuid 1.23.4",
+]
+
+[[package]]
+name = "signal-widgets"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
 ]
 
 [[package]]
