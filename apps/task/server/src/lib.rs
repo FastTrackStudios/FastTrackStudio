@@ -1756,6 +1756,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         wiki_proto::service::watcher::watcher_rpc_service_descriptor(),
         wiki_proto::service::multimodal::multimodal_rpc_service_descriptor(),
         wiki_proto::service::review::review_rpc_service_descriptor(),
+        wiki_proto::service::events::events_stream_service_descriptor(),
         project::project_service_descriptor(),
         goal::goal_service_descriptor(),
         milestone::milestone_service_descriptor(),
@@ -2008,7 +2009,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             wiki_proto::service::review::review_rpc_service_descriptor(),
             wiki_proto::service::review::serve(wiki.clone()),
-        );
+        )
+        // Live wiki changes — the `Events` `#[subscribe]` stream.
+        // The hub lives on the `WikiBackend`, so every committed
+        // page write / ingest enqueue / review enqueue publishes
+        // into it.
+        .merge(wiki_proto::service::events::stream_layer(wiki.clone()));
 
     // Project / Goal / Milestone / Task readers (vault-backed).
     router = router
