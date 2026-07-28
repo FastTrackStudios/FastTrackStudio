@@ -1782,7 +1782,9 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         email_proto::descriptor(),
         git_proto::repo::repo_catalog_rpc_service_descriptor(),
         git_proto::issues::issue_tracker_rpc_service_descriptor(),
+        git_proto::issues::issue_tracker_stream_service_descriptor(),
         git_proto::reviews::review_surface_rpc_service_descriptor(),
+        git_proto::reviews::review_surface_stream_service_descriptor(),
         git_proto::connections::repo_connections_rpc_service_descriptor(),
         crdt::sync::doc_sync_service_descriptor(),
         crdt::sync::doc_presence_service_descriptor(),
@@ -2151,6 +2153,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             git_proto::reviews::review_surface_rpc_service_descriptor(),
             git_proto::reviews::serve(org.forge.clone()),
         )
+        // Live forge changes — the `#[subscribe]` stream siblings of
+        // `IssueTracker` / `ReviewSurface`. The hubs live on the
+        // forge backend, so every issue / PR write this server
+        // commits publishes into them.
+        .merge(git_proto::issues::stream_layer(org.forge.clone()))
+        .merge(git_proto::reviews::stream_layer(org.forge.clone()))
         .with(
             git_proto::connections::repo_connections_rpc_service_descriptor(),
             git_proto::connections::serve(connections::ConnectionsBackend::new(

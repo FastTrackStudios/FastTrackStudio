@@ -4,7 +4,6 @@
 use crate::{GitError, GitEvent, IssueId, IssueState, Label, Milestone, RepoId, User};
 use facet::Facet;
 use serde::{Deserialize, Serialize};
-use vox::Tx;
 
 #[derive(Debug, Clone, Facet, Serialize, Deserialize)]
 pub struct Issue {
@@ -81,10 +80,23 @@ pub trait IssueTracker {
     fn add_comment(&self, repo: &RepoId, issue: IssueId, body: String)
     -> Result<Comment, GitError>;
 
-    /// Live updates for one repo. Drop `tx` to unsubscribe.
-    /// On broadcast-lag the server sends `GitEvent::Resync` and
-    /// continues.
-    async fn subscribe(&self, repo: RepoId, tx: Tx<GitEvent>);
+    /// Every issue change this backend commits, as it happens —
+    /// create / update / comment. Unfiltered across repos: streams
+    /// take no params, and every [`GitEvent`] already names its
+    /// `repo`, so a page watching one repo filters client-side.
+    ///
+    /// ## Subscriber contract (changes only, no snapshot variant)
+    ///
+    /// Events name *what* changed, not the new value — an
+    /// [`Issue`] is a forge read, not something the event can
+    /// carry authoritatively. A subscriber lists once
+    /// ([`Self::list_issues`], after subscribing so nothing is
+    /// missed in between) and re-reads what an event touches:
+    /// `IssueCreated` / `IssueUpdated` / `IssueCommented` for its
+    /// repo mean "that row is stale", [`GitEvent::Resync`] means
+    /// "all of them are".
+    #[subscribe]
+    fn issue_events(&self) -> GitEvent;
 }
 
 #[cfg(feature = "vox")]

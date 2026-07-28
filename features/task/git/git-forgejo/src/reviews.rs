@@ -124,7 +124,7 @@ impl ReviewSurface for Backend {
         let base = self.check_forge(repo)?.to_string();
         let backend = self.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let created: Result<PullRequest, GitError> = self.runtime().block_on(async move {
             #[allow(clippy::struct_field_names)]
             #[derive(Serialize)]
             struct Body {
@@ -151,7 +151,14 @@ impl ReviewSurface for Backend {
             let resp = check_status(resp).await?;
             let raw: RawPull = resp.json().await.map_err(map_err)?;
             Ok(translate_pull(&repo, raw))
-        })
+        });
+        if let Ok(pr) = &created {
+            self.publish_review(GitEvent::PullRequestCreated {
+                repo: pr.repo.clone(),
+                pr: pr.id,
+            });
+        }
+        created
     }
 
     fn update_pull_request(
@@ -163,7 +170,7 @@ impl ReviewSurface for Backend {
         let base = self.check_forge(repo)?.to_string();
         let backend = self.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let updated: Result<PullRequest, GitError> = self.runtime().block_on(async move {
             #[allow(clippy::struct_field_names)]
             #[derive(Serialize, Default)]
             struct Body {
@@ -206,7 +213,15 @@ impl ReviewSurface for Backend {
             let resp = check_status(resp).await?;
             let raw: RawPull = resp.json().await.map_err(map_err)?;
             Ok(translate_pull(&repo, raw))
-        })
+        });
+        if let Ok(pr) = &updated {
+            self.publish_review(GitEvent::PullRequestUpdated {
+                repo: pr.repo.clone(),
+                pr: pr.id,
+                state: pr.state,
+            });
+        }
+        updated
     }
 
     fn list_reviews(&self, repo: &RepoId, pr: PullRequestId) -> Result<Vec<Review>, GitError> {
@@ -281,8 +296,9 @@ impl ReviewSurface for Backend {
     ) -> Result<Option<String>, GitError> {
         let base = self.check_forge(repo)?.to_string();
         let backend = self.clone();
+        let event_repo = repo.clone();
         let repo = repo.clone();
-        self.runtime().block_on(async move {
+        let merged: Result<Option<String>, GitError> = self.runtime().block_on(async move {
             #[allow(clippy::struct_field_names)]
             #[derive(Serialize)]
             struct Body {
@@ -314,16 +330,23 @@ impl ReviewSurface for Backend {
             }
             let parsed: Result<RawMergeResult, _> = serde_json::from_slice(&bytes);
             Ok(parsed.ok().and_then(|m| m.sha))
-        })
+        });
+        if merged.is_ok() {
+            self.publish_review(GitEvent::PullRequestUpdated {
+                repo: event_repo,
+                pr,
+                state: PullRequestState::Merged,
+            });
+        }
+        merged
     }
+}
 
-    async fn subscribe(&self, _repo: RepoId, _tx: Tx<GitEvent>) {
-        // See `issues::subscribe` — same story for PRs. Phase 2
-        // adds a 30s poll diffing against a cache.
-        tracing::warn!(
-            target: "git_forgejo",
-            "ReviewSurface::subscribe not yet implemented — no events will be delivered"
-        );
+/// The `#[subscribe]` backend contract for pull-request traffic.
+/// Same scope as the issue stream: changes this process commits.
+impl git_proto::reviews::ReviewSurfaceStreamSource for Backend {
+    fn review_events_hub(&self) -> &architect::PubSub<GitEvent> {
+        self.review_hub()
     }
 }
 

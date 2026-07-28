@@ -131,7 +131,7 @@ fn RepoCard(
     // loads independently. Returns `(number, title, state)` tuples —
     // all `PartialEq`-clean — so the rendered rows don't need the
     // non-`PartialEq` `Issue` struct.
-    let issues = use_resource({
+    let mut issues = use_resource({
         // Capture clones so the `slug` / `repo_id` props stay available
         // for the per-issue `IssueRow` children below.
         let slug = slug.clone();
@@ -153,6 +153,55 @@ fn RepoCard(
             }
         }
     });
+
+    // ── Live issue changes ────────────────────────────────────
+    // `IssueTracker`'s `#[subscribe]` stream. Events name what
+    // changed, not the new value (an `Issue` is a forge read), so a
+    // hit for this repo re-lists rather than folding — the event is
+    // the trigger, the rpc stays the source of truth.
+    //
+    // Scope: the hub carries what the *server* commits, so this is
+    // "someone else's Task session filed/closed an issue here", plus
+    // our own writes without a manual refetch. Forge-side changes by
+    // other actors still need the poll loop — no forge gives us a
+    // push channel we can attach to.
+    {
+        let sub_slug = slug.clone();
+        let filter_repo = repo_id.clone();
+        architect::use_stream(
+            move |tx| {
+                let slug = sub_slug.clone();
+                async move {
+                    if slug.is_empty() {
+                        return false;
+                    }
+                    let Ok(client) = crate::vox_clients::establish_for::<
+                        git_proto::issues::IssueTrackerStreamClient,
+                    >(&slug)
+                    .await
+                    else {
+                        return false;
+                    };
+                    client.issue_events(tx).await.is_ok()
+                }
+            },
+            move |ev: git_proto::GitEvent| {
+                let mut issues = issues;
+                // The stream is unfiltered across repos; each event
+                // names its own.
+                let hit = match &ev {
+                    git_proto::GitEvent::IssueCreated { repo, .. }
+                    | git_proto::GitEvent::IssueUpdated { repo, .. }
+                    | git_proto::GitEvent::IssueCommented { repo, .. } => repo == &filter_repo,
+                    git_proto::GitEvent::Resync => true,
+                    _ => false,
+                };
+                if hit {
+                    issues.restart();
+                }
+            },
+        );
+    }
 
     let (issue_rows, issue_err): (Vec<(u64, String, git_proto::IssueState)>, Option<String>) =
         match &*issues.read() {
