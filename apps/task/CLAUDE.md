@@ -7,7 +7,7 @@ the FastTrackStudio monorepo, not a standalone repo.
 Key callouts (all detailed in AGENTS.md):
 
 - **Layout**: `apps/task/{cli,server,web,desktop,mobile}`,
-  `crates/task/{ui,telemetry,store-proto,xtask}`,
+  `crates/task/{ui,telemetry,xtask}`,
   `features/task/<slice>/*`. The app shell is `crates/task/ui`
   (package `ui`); `task-ui` is a *different* crate
   (`features/task/task/task-ui`, the task-list components).

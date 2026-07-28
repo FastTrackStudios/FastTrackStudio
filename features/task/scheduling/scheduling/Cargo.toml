@@ -20,9 +20,10 @@ scheduling-proto = { workspace = true, features = ["vox"] }
 # `HasDispatcher` impl. `dispatch-tokio` gives the `spawn_blocking`
 # dispatcher the server uses (same as `task` / `project` backends).
 architect = { workspace = true, features = ["dispatch-tokio"] }
-store-proto = { workspace = true, default-features = false }
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
 serde = { workspace = true, features = ["derive"] }
+# Booking audit trail — one JSON object per line, appended in place.
+serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

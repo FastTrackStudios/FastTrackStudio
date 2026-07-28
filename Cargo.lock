@@ -22014,8 +22014,8 @@ dependencies = [
  "indexmap 2.14.0",
  "scheduling-proto",
  "serde",
+ "serde_json",
  "serde_yaml",
- "store-proto",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -24507,17 +24507,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "store-proto"
-version = "0.1.0"
-dependencies = [
- "architect",
- "facet 0.50.0-rc.5",
- "thiserror 2.0.18",
- "vox",
- "vox-types",
-]
-
-[[package]]
 name = "str_indices"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -25851,7 +25840,6 @@ dependencies = [
  "serde_yaml",
  "sha2 0.10.9",
  "share-proto",
- "store-proto",
  "tag",
  "tag-proto",
  "task",

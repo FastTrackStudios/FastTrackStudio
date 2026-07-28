@@ -748,15 +748,12 @@ pub(crate) async fn build_org_state(
         };
 
         // Scheduling backend rooted at the same vault. Day templates
-        // live under `Projects/Scheduling/templates/`; the kv/log
-        // stores back bookings + slot caches we don't surface yet, so
-        // an in-memory pair suffices for the mounted `DayTemplates`.
-        let scheduling = scheduling::VaultScheduler::new(
-            vault_root.clone(),
-            Box::new(store_proto::mem::MemStore::new()),
-            Box::new(store_proto::mem::MemStore::new()),
-        )
-        .map_err(|e| eyre::eyre!("scheduling backend: {e}"))?;
+        // live under `Projects/Scheduling/templates/`, bookings under
+        // `Records/bookings/`, and the booking audit trail under
+        // `Records/audit/` — every byte it owns is on disk, so a
+        // restart loses nothing.
+        let scheduling = scheduling::VaultScheduler::new(vault_root.clone())
+            .map_err(|e| eyre::eyre!("scheduling backend: {e}"))?;
 
         // Inbox backend rooted at the same vault — captured items
         // live under `Records/inbox/`.
