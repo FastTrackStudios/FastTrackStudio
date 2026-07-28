@@ -25,6 +25,7 @@
 
 mod admin;
 mod agent;
+mod api;
 mod auth;
 mod body;
 mod brief;
@@ -67,6 +68,7 @@ mod workstream;
 
 use crate::admin::{AdminCmd, run_admin};
 use crate::agent::{AgentCmd, run_agent};
+use crate::api::{ApiArgs, run_api};
 use crate::auth::{AuthCmd, run_auth, ws_base_to_http};
 use crate::body::{BodyCmd, run_body};
 use crate::code::{CodeCmd, run_code};
@@ -128,6 +130,14 @@ struct Cli {
 enum Commands {
     /// Probe the configured vox endpoint.
     Doctor,
+    /// The API reference, rendered from the live registry
+    /// (`task_server::permits::mounts()`): every mounted service,
+    /// its methods + arg names, the permit action/resource per
+    /// method, stream vs rpc, and the schema stamp. `task api
+    /// <service>` for one service; `--markdown` regenerates
+    /// `apps/task/docs/api-reference.md`; `--json` mirrors
+    /// `GET /org/{slug}/api`.
+    Api(ApiArgs),
     /// FS-native vault queries — no server, no CRDT.
     Vault {
         #[command(subcommand)]
@@ -353,17 +363,7 @@ async fn main() {
 /// `InvalidPayload` / `Unknown method` errors with zero context.
 /// Exits non-zero so dev scripts can gate on it.
 async fn doctor_check_schema(ws_url: &str) -> eyre::Result<()> {
-    // ws(s)://host:port[/path] → http(s)://host:port/.well-known/…
-    let origin = {
-        let http = ws_url
-            .replacen("wss://", "https://", 1)
-            .replacen("ws://", "http://", 1);
-        let after_scheme = http.find("://").map_or(http.len(), |i| i + 3);
-        let end = http[after_scheme..]
-            .find('/')
-            .map_or(http.len(), |i| after_scheme + i);
-        http[..end].to_owned()
-    };
+    let origin = http_origin(ws_url);
     let url = format!("{origin}/.well-known/task-server.json");
 
     let doc: serde_json::Value = match reqwest::get(&url).await {
@@ -432,6 +432,130 @@ async fn doctor_check_schema(ws_url: &str) -> eyre::Result<()> {
     Ok(())
 }
 
+/// ws(s)://host:port[/path] → http(s)://host:port — the HTTP origin of
+/// the vox endpoint, where the server's plain-HTTP surfaces live.
+fn http_origin(ws_url: &str) -> String {
+    let http = ws_url
+        .replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1);
+    let after_scheme = http.find("://").map_or(http.len(), |i| i + 3);
+    let end = http[after_scheme..]
+        .find('/')
+        .map_or(http.len(), |i| after_scheme + i);
+    http[..end].to_owned()
+}
+
+/// The API-surface half of `task doctor`: fetch `GET /org/{slug}/api`
+/// (the registry the running server serializes — see `task api`),
+/// report what is mounted (services vs `#[subscribe]` streams), and
+/// warn per service whose schema stamp differs from this CLI's build —
+/// the same stamp logic as the schema check, surfaced per-service
+/// instead of pass/fail. Warn-only: `doctor_check_schema` already
+/// gates hard on skew.
+async fn doctor_check_api(ws_url: &str) -> eyre::Result<()> {
+    let origin = http_origin(ws_url);
+
+    // Which org? Ask the server itself — the well-known document lists
+    // every hosted slug; prefer the home org.
+    let wk_url = format!("{origin}/.well-known/task-server.json");
+    let slug = match reqwest::get(&wk_url).await {
+        Ok(resp) => resp
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|doc| {
+                let orgs = doc.get("orgs")?.as_array()?.clone();
+                let pick = orgs
+                    .iter()
+                    .find(|o| o.get("is_home").and_then(|v| v.as_bool()).unwrap_or(false))
+                    .or_else(|| orgs.first())?;
+                Some(pick.get("slug")?.as_str()?.to_owned())
+            }),
+        Err(e) => {
+            println!("API check: SKIPPED — could not fetch {wk_url} ({e})");
+            return Ok(());
+        }
+    };
+    let Some(slug) = slug else {
+        println!("API check: SKIPPED — the server hosts no orgs (nothing to describe)");
+        return Ok(());
+    };
+
+    let api_url = format!("{origin}/org/{slug}/api");
+    let doc: serde_json::Value = match reqwest::get(&api_url).await {
+        Ok(resp) if resp.status().is_success() => resp
+            .json()
+            .await
+            .map_err(|e| eyre::eyre!("parse {api_url}: {e}"))?,
+        Ok(resp) => {
+            println!(
+                "API check: UNVERIFIED — {api_url} returned {} (the server \
+                 predates the API reference endpoint)",
+                resp.status()
+            );
+            return Ok(());
+        }
+        Err(e) => {
+            println!("API check: SKIPPED — could not fetch {api_url} ({e})");
+            return Ok(());
+        }
+    };
+
+    let services = doc
+        .get("services")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let streams = services
+        .iter()
+        .filter(|s| s.get("stream").and_then(|v| v.as_bool()).unwrap_or(false))
+        .count();
+    println!(
+        "API check: org `{slug}` mounts {} service(s) — {} rpc, {} stream(s) \
+         ({api_url})",
+        services.len(),
+        services.len() - streams,
+        streams,
+    );
+
+    // Per-service stamp diff against this build's registry.
+    let local = task_server::schema_stamps();
+    let mut stale: Vec<String> = Vec::new();
+    let mut unserved: Vec<&str> = Vec::new();
+    for (name, stamp) in &local {
+        let served = services.iter().find_map(|s| {
+            (s.get("name")?.as_str()? == *name).then(|| s.get("stamp"))?
+        });
+        match served.and_then(|v| v.as_str()) {
+            Some(s) if s == stamp => {}
+            Some(s) => stale.push(format!("{name} (server {s}, this build {stamp})")),
+            None => unserved.push(name),
+        }
+    }
+    if stale.is_empty() && unserved.is_empty() {
+        println!("  all {} service stamps match this build", local.len());
+    }
+    if !unserved.is_empty() {
+        println!(
+            "  WARNING: {} service(s) in this build are not mounted by the \
+             server: {}",
+            unserved.len(),
+            unserved.join(", ")
+        );
+    }
+    for line in &stale {
+        println!("  WARNING: stamp skew on {line}");
+    }
+    if !stale.is_empty() {
+        println!(
+            "  The running task-server was built against different `*-proto` \
+             shapes than this CLI for the service(s) above — rebuild whichever \
+             is older."
+        );
+    }
+    Ok(())
+}
+
 /// The authorization half of `task doctor`: how much of the org lane the
 /// permission gate actually covers, and what would break if enforcement
 /// were switched on.
@@ -464,6 +588,10 @@ async fn run(cli: Cli) -> eyre::Result<()> {
             println!("Vox endpoint: {}", remote.display_url);
             doctor_check_schema(&server).await?;
             doctor_check_permissions();
+            doctor_check_api(&server).await?;
+        }
+        Commands::Api(args) => {
+            return run_api(args);
         }
         Commands::Vault { cmd } => match cmd {
             // Sync ops touch vox and need async; everything

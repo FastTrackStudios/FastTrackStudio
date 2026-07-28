@@ -23,6 +23,41 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Deny-list of plugin ids this org has turned off. Empty = everything
+/// on — the pre-plugin behaviour, and what every existing `org.toml`
+/// (which lacks the field entirely) resolves to. Ids are validated
+/// against `task_plugin::CATALOG` at resolution time, not here: an
+/// unknown id is warned about and ignored so a newer build's manifest
+/// still loads on an older one. `Vec<String>` newtype — JSON column
+/// under the SeaORM emission, same pattern as `fitness_proto::Tags`.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct DisabledPlugins(pub Vec<String>);
+
+impl DisabledPlugins {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for DisabledPlugins {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl std::ops::Deref for DisabledPlugins {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(architect::Entity, Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[architect(table_name = "orgs", repo)]
@@ -55,6 +90,13 @@ pub struct OrgManifest {
     /// Empty until the org is first published; peers use this
     /// to validate federated identity claims.
     pub federation_url: String,
+
+    /// Plugins this org has turned off (deny-list; empty = all on).
+    /// Core plugins cannot be disabled — resolution ignores them here.
+    /// See `apps/task/plans/plugin-system.md`.
+    #[serde(default, skip_serializing_if = "DisabledPlugins::is_empty")]
+    #[architect(json)]
+    pub disabled_plugins: DisabledPlugins,
 
     #[architect(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
@@ -106,6 +148,7 @@ impl OrgManifest {
             display_name: display_name.into(),
             is_home,
             federation_url: String::new(),
+            disabled_plugins: DisabledPlugins::default(),
             created_at: now,
             updated_at: now,
         }
@@ -160,6 +203,37 @@ impl OrgManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An org.toml written before the field existed must parse, and an
+    /// empty deny-list must not change what a fresh manifest writes —
+    /// existing orgs stay byte-stable.
+    #[test]
+    fn plugins_field_is_backward_compatible() {
+        let pre_plugin = r#"
+id = "3fa5a6a2-3436-4d34-8f04-1f4a10bb9a1e"
+slug = "demo"
+display_name = "Demo"
+is_home = false
+federation_url = ""
+created_at = "2026-01-01T00:00:00Z"
+updated_at = "2026-01-01T00:00:00Z"
+"#;
+        let m = OrgManifest::parse_str(pre_plugin, "org.toml").expect("old manifest parses");
+        assert!(m.disabled_plugins.is_empty(), "absent field = all plugins on");
+
+        let out = toml::to_string(&m).expect("serialize");
+        assert!(
+            !out.contains("disabled_plugins"),
+            "empty deny-list must not be written:\n{out}"
+        );
+
+        let mut off = m.clone();
+        off.disabled_plugins = vec!["email".to_string()].into();
+        let out = toml::to_string(&off).expect("serialize");
+        assert!(out.contains("disabled_plugins"), "non-empty list is written:\n{out}");
+        let back = OrgManifest::parse_str(&out, "org.toml").expect("round-trip");
+        assert_eq!(back.disabled_plugins, off.disabled_plugins);
+    }
 
     #[test]
     fn roundtrip_via_tempdir() {

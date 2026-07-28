@@ -6,13 +6,15 @@ use dioxus::prelude::*;
 use dioxus_router::Navigator;
 use fts_ui::prelude::*;
 
-use crate::nav::{NavTab, nav_tabs, tabs_match};
+use crate::nav::{NavTab, nav_tabs_for, tabs_match, use_active_plugins};
 use crate::routes::Route;
 use crate::shell::org_switcher::OrgSwitcher;
 
 #[component]
 pub fn DesktopSidebar(current: Route) -> Element {
     let nav = use_navigator();
+    // Active org's enabled plugins — hides disabled plugins' tabs.
+    let plugins = use_active_plugins();
     rsx! {
         Sidebar { class: "flex h-screen w-72 flex-col overflow-hidden",
             SidebarHeader {
@@ -32,7 +34,7 @@ pub fn DesktopSidebar(current: Route) -> Element {
                 SidebarGroupLabel { "Workspace" }
                 SidebarGroupContent {
                     SidebarMenu {
-                        for tab in nav_tabs() {
+                        for tab in nav_tabs_for(&plugins) {
                             {render_sidebar_item(tab, &current, nav)}
                         }
                     }

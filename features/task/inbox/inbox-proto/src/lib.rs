@@ -24,6 +24,7 @@ pub use error::InboxError;
 pub use inbox_item::InboxItem;
 pub use schedule::{ReviewResponse, review, schedule};
 pub use service::Inbox;
+pub use service::inbox::InboxEvent;
 
 // architect-emitted vox bits: the async client / dispatcher /
 // descriptor for the one capability. Mount sites stitch the
@@ -32,4 +33,14 @@ pub use service::Inbox;
 pub use service::inbox::{
     InboxClient, InboxRpc, InboxRpcDispatcher, Service as InboxService, layer as inbox_layer,
     serve as inbox_serve,
+};
+
+// `#[subscribe] fn events` stream sibling — live inbox changes.
+// Mount `inbox_stream_layer(backend)` next to the base service;
+// subscribers drive an `InboxStreamClient`.
+#[cfg(feature = "vox")]
+pub use service::inbox::{
+    InboxStream, InboxStreamClient, InboxStreamSource,
+    inbox_stream_service_descriptor as inbox_stream_descriptor,
+    stream_layer as inbox_stream_layer, stream_serve as inbox_stream_serve,
 };

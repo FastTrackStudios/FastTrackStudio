@@ -28,6 +28,7 @@ pub mod service;
 pub use error::RecallError;
 pub use recall_card::{CardType, RecallCard};
 pub use service::Recall;
+pub use service::recall::RecallEvent;
 
 // architect-emitted vox bits: the async client / dispatcher /
 // descriptor for the one capability.
@@ -35,4 +36,14 @@ pub use service::Recall;
 pub use service::recall::{
     RecallClient, RecallRpc, RecallRpcDispatcher, Service as RecallService, layer as recall_layer,
     serve as recall_serve,
+};
+
+// `#[subscribe] fn events` stream sibling — live deck changes.
+// Mount `recall_stream_layer(backend)` next to the base service;
+// subscribers drive a `RecallStreamClient`.
+#[cfg(feature = "vox")]
+pub use service::recall::{
+    RecallStream, RecallStreamClient, RecallStreamSource,
+    recall_stream_service_descriptor as recall_stream_descriptor,
+    stream_layer as recall_stream_layer, stream_serve as recall_stream_serve,
 };

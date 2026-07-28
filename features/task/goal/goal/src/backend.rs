@@ -16,9 +16,29 @@ use crate::parse::{looks_like_goal, parse_page};
 use crate::service::{GoalError, GoalService};
 use crate::write::{default_goal_path, write_goal};
 
-#[derive(Debug, Clone, architect::HasDispatcher)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct GoalBackend {
     vault_root: PathBuf,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful mutation publishes the post-write state here
+    /// ([`GoalEvent::Upserted`] / [`GoalEvent::Deleted`]). Sliding
+    /// mailbox: a slow subscriber loses its *oldest* queued events,
+    /// which is correct for state-shaped payloads. Clones share the
+    /// hub (it's `Arc` inside).
+    ///
+    /// [`GoalEvent::Upserted`]: crate::service::GoalEvent::Upserted
+    /// [`GoalEvent::Deleted`]: crate::service::GoalEvent::Deleted
+    #[cfg(feature = "vox")]
+    events: architect::PubSub<crate::service::GoalEvent>,
+}
+
+// Manual impl: `PubSub` carries no `Debug`.
+impl std::fmt::Debug for GoalBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GoalBackend")
+            .field("vault_root", &self.vault_root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl GoalBackend {
@@ -26,7 +46,20 @@ impl GoalBackend {
     pub fn new(vault_root: impl Into<PathBuf>) -> Self {
         Self {
             vault_root: vault_root.into(),
+            #[cfg(feature = "vox")]
+            events: architect::PubSub::sliding(256),
         }
+    }
+
+    /// Publish a goal change to every `events` subscriber. Call only
+    /// after the write succeeded — subscribers fold these into state
+    /// fetched via `list()`, so a phantom event would desync them.
+    /// No-op without the `vox` feature (no wire, no subscribers).
+    fn publish(&self, event: crate::service::GoalEvent) {
+        #[cfg(feature = "vox")]
+        self.events.publish(event);
+        #[cfg(not(feature = "vox"))]
+        let _ = event;
     }
 
     #[must_use]
@@ -87,6 +120,7 @@ impl GoalService for GoalBackend {
         }
         write_goal(&self.vault_root, &mut goal, false)
             .map_err(|e| GoalError::Io(format!("write: {e}")))?;
+        self.publish(crate::service::GoalEvent::Upserted(goal.clone()));
         Ok(goal)
     }
 
@@ -102,6 +136,7 @@ impl GoalService for GoalBackend {
         next.date_modified = Some(Utc::now());
         write_goal(&self.vault_root, &mut next, true)
             .map_err(|e| GoalError::Io(format!("write: {e}")))?;
+        self.publish(crate::service::GoalEvent::Upserted(next.clone()));
         Ok(next)
     }
 
@@ -127,6 +162,7 @@ impl GoalService for GoalBackend {
         g.date_modified = Some(Utc::now());
         write_goal(&self.vault_root, &mut g, true)
             .map_err(|e| GoalError::Io(format!("write: {e}")))?;
+        self.publish(crate::service::GoalEvent::Upserted(g.clone()));
         Ok(g)
     }
 
@@ -145,6 +181,17 @@ impl GoalService for GoalBackend {
         let abs = self.vault_root.join(&g.path);
         std::fs::remove_file(&abs)
             .map_err(|e| GoalError::Io(format!("remove {}: {e}", abs.display())))?;
+        self.publish(crate::service::GoalEvent::Deleted(id));
         Ok(())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// `GoalService` impl above, on every successful mutation.
+#[cfg(feature = "vox")]
+impl crate::service::GoalServiceStreamSource for GoalBackend {
+    fn events_hub(&self) -> &architect::PubSub<crate::service::GoalEvent> {
+        &self.events
     }
 }

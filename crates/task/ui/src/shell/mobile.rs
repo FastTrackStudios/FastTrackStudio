@@ -26,7 +26,7 @@ use fts_ui::prelude::{Button, ButtonVariant, Text, TextVariant};
 
 use crate::auth::{AccountSheetBody, AuthCtx, Avatar};
 use crate::chrome::{fmt_hms, owner_id, resolve_org, use_second_tick};
-use crate::nav::{NavTab, nav_tabs, primary_mobile_tabs, tabs_match};
+use crate::nav::{NavTab, nav_tabs_for, primary_mobile_tabs, tabs_match, use_active_plugins};
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::presence::PresenceLocal;
 use crate::routes::Route;
@@ -559,7 +559,7 @@ fn MoreSheetBody(on_navigate: EventHandler<()>) -> Element {
     rsx! {
         div { class: "flex flex-col gap-4 pb-2",
             ul { class: "grid grid-cols-2 gap-x-2",
-                for tab in nav_tabs() {
+                for tab in nav_tabs_for(&use_active_plugins()) {
                     li { key: "{tab.label}",
                         Link {
                             to: tab.route.clone(),

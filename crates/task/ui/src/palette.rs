@@ -28,7 +28,7 @@ use nucleo_matcher::{
 };
 
 use crate::actions::{ActionsCtx, task_action_defs};
-use crate::nav::nav_tabs;
+use crate::nav::nav_tabs_for;
 use crate::orgs::OrgMeta;
 use crate::routes::Route;
 
@@ -188,6 +188,11 @@ fn PaletteModal() -> Element {
         cursor.set(0);
     };
 
+    // Active org's enabled plugins — disabled plugins' pages don't
+    // list. Signal reads (not hooks), so this is fine after the early
+    // return above.
+    let plugins = crate::orgs::active_plugin_set(&selection.read(), &org_list.read());
+
     // Commands (registry) + Pages (nav set) + Notes (vault index).
     let mut entries: Vec<PaletteEntry> = task_action_defs()
         .into_iter()
@@ -199,7 +204,7 @@ fn PaletteModal() -> Element {
             kind: Kind::Command,
         })
         .collect();
-    for tab in nav_tabs() {
+    for tab in nav_tabs_for(&plugins) {
         entries.push(PaletteEntry {
             label: tab.label.to_string(),
             detail: String::new(),

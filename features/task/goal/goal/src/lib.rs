@@ -48,12 +48,21 @@ pub use model::{Goal, Kind, Status, Tags};
 pub use entity::Goals;
 #[cfg(not(target_arch = "wasm32"))]
 pub use parse::{ParseError, looks_like_goal, parse_goal, parse_page};
-pub use service::{GoalError, GoalService, GoalServiceRpc};
+pub use service::{GoalError, GoalEvent, GoalService, GoalServiceRpc};
 #[cfg(feature = "vox")]
 pub use service::{
     GoalServiceClient, GoalServiceRpcDispatcher as GoalDispatcher, Service as GoalServiceBridge,
     goal_service_rpc_service_descriptor as goal_service_descriptor, layer as goal_service_layer,
     serve as serve_goal_service,
+};
+// `#[subscribe] fn events` stream sibling — live goal changes.
+// Mount `goal_service_stream_layer(backend)` next to the base
+// service; subscribers drive a `GoalServiceStreamClient`.
+#[cfg(feature = "vox")]
+pub use service::{
+    GoalServiceStream, GoalServiceStreamClient, GoalServiceStreamSource,
+    goal_service_stream_service_descriptor as goal_stream_descriptor,
+    stream_layer as goal_service_stream_layer, stream_serve as serve_goal_service_stream,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,4 +1,4 @@
-//! In-note section tabs.
+//! In-note section tabs, packaged as a Task note **widget provider**.
 //!
 //! When a note's frontmatter opts in — `tabs: true` (any note) or the
 //! legacy `type: event` — every top-level `# Section` heading AFTER the
@@ -12,10 +12,36 @@
 //! caret escapes the system: if the selection sits inside a hidden
 //! section, that section becomes active automatically, so editing never
 //! fights the tabs.
+//!
+//! The shell knows none of this: [`widgets`] hands the decoration
+//! pass + href handler to the `task-widgets` registry at the app root.
 
 use dioxus::prelude::*;
 use editor::state::EditorState;
 use editor::{Decoration, DecoratedRange};
+use task_widgets::{WidgetMatch, WidgetSpec};
+
+/// The section-tab widget specs.
+///
+/// Two specs on purpose: the tab system itself claims both `type: event`
+/// (legacy) and `tabs: true` notes, but header suppression is an
+/// *event-type* behavior — the editor's typed title widget IS an event's
+/// header — and must not leak onto arbitrary `tabs: true` notes.
+#[must_use]
+pub fn widgets() -> Vec<WidgetSpec> {
+    vec![
+        WidgetSpec::new(
+            "note-tabs",
+            vec![WidgetMatch::NoteType("event"), WidgetMatch::NoteFlag("tabs")],
+        )
+        .decorations(event_tab_decorations)
+        .on_href(|href, _ctx| handle_tab_href(href))
+        .plugin("core"),
+        WidgetSpec::new("note-tabs.event-header", vec![WidgetMatch::NoteType("event")])
+            .hide_note_header()
+            .plugin("core"),
+    ]
+}
 
 /// The active section tab (section name). Empty = first section.
 pub static EVENT_ACTIVE_TAB: GlobalSignal<String> = Signal::global(String::new);

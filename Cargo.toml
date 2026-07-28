@@ -842,9 +842,14 @@ libc = "0.2"
 # wasm-clean surface keep `default-features = false` (the consumer opts
 # into `vox`/`server`/`native`), mirroring Task's original table.
 # crates/task/
+task-plugin = { path = "crates/task/plugin" }
 task-telemetry = { path = "crates/task/telemetry" }
 task-ui-core = { path = "crates/task/ui-core" }
 task-player-ui = { path = "crates/task/player-ui" }
+# The note-widget extension contract (spec/registry/fullscreen chrome)
+# and the section-tabs widget provider it hosts.
+task-widgets = { path = "crates/task/widgets" }
+task-note-tabs = { path = "crates/task/note-tabs" }
 ui = { path = "crates/task/ui" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }

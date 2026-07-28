@@ -56,6 +56,37 @@ pub(crate) enum OrgCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Per-org plugin toggles — list the catalog with on/off
+    /// state, or enable/disable one plugin. Edits the org's
+    /// `org.toml` on THIS machine's data root (like `org init`,
+    /// this is the local-administration path); the server picks
+    /// the change up on restart until hot-reload lands.
+    #[command(subcommand)]
+    Plugins(PluginsCmd),
+}
+
+#[derive(clap::Subcommand)]
+pub(crate) enum PluginsCmd {
+    /// Every plugin this build knows, with the org's on/off state.
+    List {
+        /// Org slug; defaults to the active org.
+        #[arg(long)]
+        org: Option<String>,
+    },
+    /// Turn a plugin on (remove it from the org's deny-list).
+    Enable {
+        /// Plugin id from `task org plugins list`.
+        id: String,
+        #[arg(long)]
+        org: Option<String>,
+    },
+    /// Turn a plugin off. Data stays on disk; the plugin's
+    /// services stop being served and its surfaces hide.
+    Disable {
+        id: String,
+        #[arg(long)]
+        org: Option<String>,
+    },
 }
 
 pub(crate) async fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
@@ -130,6 +161,95 @@ pub(crate) async fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
                 }
             }
         }
+        OrgCmd::Plugins(cmd) => run_plugins(cmd)?,
     }
     Ok(())
+}
+
+/// `task org plugins …` — the local-administration path for per-org
+/// plugin toggles, mirroring `org init`: it edits `org.toml` under this
+/// machine's data root directly. Core plugins are not toggleable and a
+/// deny-list entry for one would be ignored at resolution anyway, so
+/// the commands refuse it up front with a clear message.
+fn run_plugins(cmd: PluginsCmd) -> eyre::Result<()> {
+    match cmd {
+        PluginsCmd::List { org } => {
+            let active = crate::org_ctx::resolve_active(org.as_deref())?;
+            let choice = disabled_choice(&active.manifest);
+            let set = task_plugin::PluginSet::resolve(choice.as_ref());
+            println!("plugins for org `{}`:", active.manifest.slug);
+            for p in task_plugin::CATALOG {
+                let state = if p.core {
+                    "core   "
+                } else if set.contains(p.id) {
+                    "on     "
+                } else {
+                    "off    "
+                };
+                println!("  {state}{:<18} {}", p.id, p.description);
+            }
+            // Surface stale entries so a typo'd disable is visible.
+            for id in active.manifest.disabled_plugins.iter() {
+                if task_plugin::find(id).is_none() {
+                    println!("  note: org.toml disables unknown plugin `{id}` (ignored)");
+                }
+            }
+        }
+        PluginsCmd::Enable { id, org } => {
+            let mut active = crate::org_ctx::resolve_active(org.as_deref())?;
+            check_toggleable(&id)?;
+            let before = active.manifest.disabled_plugins.len();
+            active.manifest.disabled_plugins.0.retain(|d| *d != id);
+            if active.manifest.disabled_plugins.len() == before {
+                println!("`{id}` is already enabled for `{}`", active.manifest.slug);
+                return Ok(());
+            }
+            active.manifest.write_to_dir(active.root.path())?;
+            println!(
+                "enabled `{id}` for `{}` — restart the server to serve it",
+                active.manifest.slug
+            );
+        }
+        PluginsCmd::Disable { id, org } => {
+            let mut active = crate::org_ctx::resolve_active(org.as_deref())?;
+            check_toggleable(&id)?;
+            if active.manifest.disabled_plugins.contains(&id) {
+                println!("`{id}` is already disabled for `{}`", active.manifest.slug);
+                return Ok(());
+            }
+            active.manifest.disabled_plugins.0.push(id.clone());
+            active.manifest.write_to_dir(active.root.path())?;
+            println!(
+                "disabled `{id}` for `{}` — data stays on disk; restart the server to apply",
+                active.manifest.slug
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The manifest's deny-list as the vocabulary's choice type.
+fn disabled_choice(m: &org_proto::OrgManifest) -> Option<task_plugin::PluginChoice> {
+    if m.disabled_plugins.is_empty() {
+        None
+    } else {
+        Some(task_plugin::PluginChoice::Disabled(
+            m.disabled_plugins.0.clone(),
+        ))
+    }
+}
+
+fn check_toggleable(id: &str) -> eyre::Result<()> {
+    match task_plugin::find(id) {
+        None => {
+            let known: Vec<&str> = task_plugin::CATALOG
+                .iter()
+                .filter(|p| !p.core)
+                .map(|p| p.id)
+                .collect();
+            eyre::bail!("unknown plugin `{id}` — known: {}", known.join(", "));
+        }
+        Some(p) if p.core => eyre::bail!("`{id}` is core and cannot be toggled"),
+        Some(_) => Ok(()),
+    }
 }

@@ -13,9 +13,26 @@ use crate::parse::{looks_like_milestone, parse_page};
 use crate::service::{MilestoneError, MilestoneService};
 use crate::write::{default_milestone_path, write_milestone};
 
-#[derive(Debug, Clone, architect::HasDispatcher)]
+#[derive(Clone, architect::HasDispatcher)]
 pub struct MilestoneBackend {
     vault_root: PathBuf,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful mutation publishes the post-write state here
+    /// (`MilestoneEvent::Upserted` / `MilestoneEvent::Deleted`).
+    /// Sliding mailbox: a slow subscriber loses its *oldest* queued
+    /// events, which is correct for state-shaped payloads. Clones
+    /// share the hub (it's `Arc` inside).
+    #[cfg(feature = "vox")]
+    events: architect::PubSub<milestone_proto::MilestoneEvent>,
+}
+
+// Manual impl: `PubSub` carries no `Debug`.
+impl std::fmt::Debug for MilestoneBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MilestoneBackend")
+            .field("vault_root", &self.vault_root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MilestoneBackend {
@@ -23,7 +40,21 @@ impl MilestoneBackend {
     pub fn new(vault_root: impl Into<PathBuf>) -> Self {
         Self {
             vault_root: vault_root.into(),
+            #[cfg(feature = "vox")]
+            events: architect::PubSub::sliding(256),
         }
+    }
+
+    /// Publish a milestone change to every `events` subscriber. Call
+    /// only after the write succeeded — subscribers fold these into
+    /// state fetched via `list()`, so a phantom event would desync
+    /// them. No-op without the `vox` feature (no wire, no
+    /// subscribers).
+    fn publish(&self, event: milestone_proto::MilestoneEvent) {
+        #[cfg(feature = "vox")]
+        self.events.publish(event);
+        #[cfg(not(feature = "vox"))]
+        let _ = event;
     }
 
     #[must_use]
@@ -137,6 +168,7 @@ impl MilestoneService for MilestoneBackend {
         }
         write_milestone(&self.vault_root, &mut m, false)
             .map_err(|e| MilestoneError::Io(format!("write: {e}")))?;
+        self.publish(milestone_proto::MilestoneEvent::Upserted(m.clone()));
         Ok(m)
     }
 
@@ -152,6 +184,7 @@ impl MilestoneService for MilestoneBackend {
         next.date_modified = Some(Utc::now());
         write_milestone(&self.vault_root, &mut next, true)
             .map_err(|e| MilestoneError::Io(format!("write: {e}")))?;
+        self.publish(milestone_proto::MilestoneEvent::Upserted(next.clone()));
         Ok(next)
     }
 
@@ -178,6 +211,7 @@ impl MilestoneService for MilestoneBackend {
         m.date_modified = Some(Utc::now());
         write_milestone(&self.vault_root, &mut m, true)
             .map_err(|e| MilestoneError::Io(format!("write: {e}")))?;
+        self.publish(milestone_proto::MilestoneEvent::Upserted(m.clone()));
         Ok(m)
     }
 
@@ -212,7 +246,18 @@ impl MilestoneService for MilestoneBackend {
         let abs = self.vault_root.join(&m.path);
         std::fs::remove_file(&abs)
             .map_err(|e| MilestoneError::Io(format!("remove {}: {e}", abs.display())))?;
+        self.publish(milestone_proto::MilestoneEvent::Deleted(id));
         Ok(())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// `MilestoneService` impl above, on every successful mutation.
+#[cfg(feature = "vox")]
+impl milestone_proto::MilestoneServiceStreamSource for MilestoneBackend {
+    fn events_hub(&self) -> &architect::PubSub<milestone_proto::MilestoneEvent> {
+        &self.events
     }
 }
 
