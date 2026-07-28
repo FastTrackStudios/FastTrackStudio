@@ -47,24 +47,17 @@ pub mod states;
 
 // FS-dependent modules. `entity` / `parse` reach the shared
 // `vault-entity` support layer, which walks `std::fs` (and pulls a
-// file watcher), so they join `backend` / `scan` / `write` behind the
-// non-wasm gate. The wasm-targeted UI imports the wire types + RPC
-// client only, not these.
-#[cfg(not(target_arch = "wasm32"))]
+// file watcher), as do `backend` / `scan` / `write`. Browser
+// consumers take `project-proto` instead of this crate, so none of
+// it needs a target gate.
 pub mod backend;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod entity;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod parse;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod scan;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod write;
 
 pub use model::{ProjectInfo, Status};
-#[cfg(not(target_arch = "wasm32"))]
 pub use entity::Projects;
-#[cfg(not(target_arch = "wasm32"))]
 pub use parse::{ParseError, looks_like_project, parse_page, parse_str};
 pub use service::{ProjectError, ProjectService, ProjectServiceRpc};
 #[cfg(feature = "vox")]
@@ -76,9 +69,6 @@ pub use service::{
 };
 pub use states::{StateDef, StateGroup, StatesConfig, default_states, resolve_state_group};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use backend::ProjectBackend;
-#[cfg(not(target_arch = "wasm32"))]
 pub use scan::scan_vault;
-#[cfg(not(target_arch = "wasm32"))]
 pub use write::{WriteError, serialize_project, write_project};

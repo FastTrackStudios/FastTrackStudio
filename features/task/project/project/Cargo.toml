@@ -26,6 +26,13 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 # server-only; parsers consume the proto shape so they
 # work everywhere.
 vault-proto = { workspace = true, default-features = false }
+# `vault::Vault` walks std::fs (and pulls a file watcher). Plain
+# deps now: this crate is the server-side half of the slice, and
+# browser consumers take `project-proto` instead — nothing wasm
+# reaches it, so the old `cfg(not(target_arch = "wasm32"))` dance
+# is gone.
+vault = { workspace = true }
+vault-entity = { workspace = true }
 
 # Server-only: SeaORM emissions from the architect derive.
 # Gated so wasm clients never pull SeaORM.
@@ -49,15 +56,6 @@ full = ["vox", "server", "fake"]
 # Forwarded so `project`-shaped consumers can still opt the wire
 # model into the client-side optimistic store.
 atom = ["project-proto/atom"]
-
-# `vault::Vault` is server-only (it walks std::fs). Wasm UI
-# imports project's wire types + RPC client without touching
-# the scanner / writer, so vault sits behind a non-wasm gate
-# so the wasm crate graph doesn't inherit vault-live's
-# tokio[net] transitive.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-vault = { workspace = true }
-vault-entity = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

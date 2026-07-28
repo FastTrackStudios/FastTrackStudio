@@ -24,11 +24,13 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7", "serde"] }
 workflows-proto.workspace = true
-# `VaultPage` lives in vault-proto (wasm-clean wire shape). The
-# parser consumes the proto shape so it works everywhere; the
-# richer `vault::Vault` (filesystem walker) is server-only and
-# sits behind a non-wasm gate below.
+# `VaultPage` lives in vault-proto (wasm-clean wire shape); the
+# richer `vault::Vault` is the filesystem walker. Plain deps now:
+# this crate is the server-side half of the slice, and browser
+# consumers take `task-proto` instead — nothing wasm reaches it,
+# so the old `cfg(not(target_arch = "wasm32"))` dance is gone.
 vault-proto = { workspace = true, default-features = false }
+vault = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
@@ -44,14 +46,6 @@ full = ["vox", "server", "fake"]
 # Forwarded so `task`-shaped consumers can still opt the wire
 # model into the client-side optimistic store.
 atom = ["task-proto/atom"]
-
-# `vault::Vault` is server-only (it walks std::fs and pulls
-# tokio-net transitively). The wasm UI imports task's wire types
-# + RPC client (model / parse / service) without touching the
-# scanner / writer / backend, so vault sits behind a non-wasm
-# gate to keep it out of the wasm crate graph. Mirrors `project`.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-vault = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
