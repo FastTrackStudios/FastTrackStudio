@@ -4124,6 +4124,7 @@ dependencies = [
  "tracing",
  "ureq 2.12.1",
  "uuid 1.23.4",
+ "vault-entity",
 ]
 
 [[package]]
@@ -4202,6 +4203,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+ "vault-entity",
  "vox",
  "vox-types",
  "walkdir",
@@ -11115,6 +11117,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vault-proto",
  "vox",
  "vox-types",
@@ -12635,6 +12638,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid 1.23.4",
+ "vault-entity",
 ]
 
 [[package]]
@@ -16373,6 +16377,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vault-proto",
  "vox",
  "vox-types",
@@ -18547,6 +18552,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vox",
  "vox-types",
 ]
@@ -19965,6 +19971,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vault-proto",
  "vox",
  "vox-types",
@@ -21042,6 +21049,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid 1.23.4",
+ "vault-entity",
 ]
 
 [[package]]
@@ -30831,6 +30839,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vault-proto",
  "vox",
  "vox-types",
