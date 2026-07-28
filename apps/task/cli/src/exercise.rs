@@ -9,6 +9,8 @@ use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
 use crate::shared::confirm;
 
+// ── Exercises (exercises::Store) ─────────────────────────────────────
+
 #[derive(Subcommand)]
 pub(crate) enum ExerciseCmd {
     List {
@@ -64,7 +66,9 @@ pub(crate) enum ExerciseCmd {
     },
 }
 
-pub(crate) async fn connect_exercises_client(url: &str) -> eyre::Result<exercises::ExercisesServiceClient> {
+pub(crate) async fn connect_exercises_client(
+    url: &str,
+) -> eyre::Result<exercises::ExercisesServiceClient> {
     establish_for_url(url).await
 }
 

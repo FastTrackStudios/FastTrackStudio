@@ -8,7 +8,6 @@ use crate::establish_for_url;
 use crate::project::connect_project_client;
 use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
-use crate::run;
 use crate::task_cmd::connect_task_client;
 
 #[derive(Subcommand)]
@@ -444,6 +443,26 @@ async fn mark_inbox_item(
         .map_err(|e| eyre::eyre!("mark {}: {e:?}", item.id))?;
     Ok(())
 }
+
+// ── Inbox AI processing pass ─────────────────────────────────────────
+//
+// `task inbox process` — the "daily processing pass" from
+// plans/relevancy-and-inbox.md: one LLM turn over every open
+// fleeting item proposes a `task` / `note` / `skip` promotion per
+// item; the user reviews each proposal (y / n / e-dit title, or
+// `--yes` for all) and accepted ones are applied through the
+// existing service surfaces:
+//
+//   task → `task::capture(title)` (tags/contexts/dates), project id
+//          from the proposed title via direct match or
+//          `task::infer_project_id`, `TaskService::create`, then the
+//          inbox item is marked processed with `processed_into` =
+//          the created task's vault path.
+//   note → written into the active org's local vault via
+//          `vault_obsidian::create_page` when `<org>/vault/` exists
+//          locally; otherwise printed for manual creation and marked
+//          processed only on explicit confirm.
+//   skip → offer `archived`.
 
 #[allow(clippy::too_many_lines)]
 async fn run_inbox_process(

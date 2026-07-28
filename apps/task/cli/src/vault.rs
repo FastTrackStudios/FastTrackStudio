@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use crate::establish_for_url;
 
+// ── FS-native Obsidian vault subcommands ─────────────────────────────
+
 #[derive(Subcommand)]
 pub(crate) enum VaultCmd {
     /// Open a vault and print a one-line summary.

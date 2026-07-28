@@ -450,7 +450,10 @@ where
 /// - the cycle-current shortcut (when `current = true` or arg
 ///   is `current`)
 /// - `none` / `null` / "" → clear
-pub(crate) fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<uuid::Uuid>> {
+pub(crate) fn resolve_cycle_arg(
+    arg: Option<String>,
+    current: bool,
+) -> eyre::Result<Option<uuid::Uuid>> {
     use chrono::{Datelike, Local, Weekday};
     use cycle::FirstWeekRule;
 

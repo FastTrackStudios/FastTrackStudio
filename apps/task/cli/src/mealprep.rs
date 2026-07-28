@@ -23,8 +23,8 @@ use scheduling_proto::{
 };
 
 use crate::establish_for_url;
-use crate::resolve_active_org;
 use crate::meal::resolve_meal_target;
+use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
 
 // ── Shared flags ─────────────────────────────────────────────

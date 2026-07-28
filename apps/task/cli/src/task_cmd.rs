@@ -4,14 +4,13 @@
 
 use clap::Subcommand;
 
-use crate::milestone::connect_milestone_client;
 use crate::establish_for_url;
+use crate::milestone::connect_milestone_client;
+use crate::milestone::resolve_milestone_target;
 use crate::project::connect_project_client;
 use crate::project::resolve_project_target;
 use crate::resolve_active_org;
-use crate::milestone::resolve_milestone_target;
 use crate::resolve_org_vox_url;
-use crate::run;
 use crate::shared::confirm;
 use crate::shared::resolve_body;
 

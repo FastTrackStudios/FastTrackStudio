@@ -12,6 +12,8 @@ use crate::resolve_org_vox_url;
 use crate::shared::confirm;
 use crate::shared::resolve_body;
 
+// ── Pantry (pantry::Store) ───────────────────────────────────────────
+
 #[derive(Subcommand)]
 pub(crate) enum PantryCmd {
     List {

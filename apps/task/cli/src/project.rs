@@ -4,13 +4,13 @@
 
 use clap::Subcommand;
 
-use crate::task_cmd::connect_task_client;
 use crate::establish_client;
 use crate::establish_for_url;
 use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
 use crate::shared::confirm;
 use crate::shared::resolve_body;
+use crate::task_cmd::connect_task_client;
 
 #[derive(Subcommand)]
 pub(crate) enum ProjectCmd {
@@ -681,7 +681,9 @@ pub(crate) async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
     Ok(())
 }
 
-pub(crate) async fn connect_project_client(url: &str) -> eyre::Result<project::ProjectServiceClient> {
+pub(crate) async fn connect_project_client(
+    url: &str,
+) -> eyre::Result<project::ProjectServiceClient> {
     establish_for_url(url).await
 }
 

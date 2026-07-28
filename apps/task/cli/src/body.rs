@@ -9,6 +9,8 @@ use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
 use crate::shared::confirm;
 
+// ── Body metrics (body::Store) ───────────────────────────────────────
+
 #[derive(Subcommand)]
 pub(crate) enum BodyCmd {
     List {

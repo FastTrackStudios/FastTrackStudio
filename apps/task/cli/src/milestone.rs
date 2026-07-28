@@ -435,7 +435,9 @@ pub(crate) async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
     Ok(())
 }
 
-pub(crate) async fn connect_milestone_client(url: &str) -> eyre::Result<milestone::MilestoneServiceClient> {
+pub(crate) async fn connect_milestone_client(
+    url: &str,
+) -> eyre::Result<milestone::MilestoneServiceClient> {
     establish_for_url(url).await
 }
 

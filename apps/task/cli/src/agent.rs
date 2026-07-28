@@ -4,17 +4,17 @@
 
 use clap::Subcommand;
 
-use crate::issue::ClaimOutcome;
 use crate::establish_for_url;
-use crate::goal::mutate_goal;
+use crate::issue::ClaimOutcome;
 use crate::issue::parse_agent_ref;
-use crate::resolve_active_org;
 use crate::issue::resolve_issue_id;
+use crate::issue::try_claim;
+use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
-use crate::run;
 use crate::shared::short_uuid;
 use crate::task_cmd::connect_task_client;
-use crate::issue::try_claim;
+
+// ── Agent task queue (agent-proto / agent-tasks) ─────────────────────
 
 #[derive(Subcommand)]
 pub(crate) enum AgentQueueCmd {
@@ -166,7 +166,7 @@ pub(crate) enum AgentCmd {
 /// progress) over a `WorkSession`, so it can be parked and resumed
 /// without losing the directive.
 #[derive(Subcommand)]
-enum GoalLoopCmd {
+pub(crate) enum GoalLoopCmd {
     /// Start (or restart) the loop toward a completion condition.
     Run {
         /// The completion condition. Write it so the worker's own

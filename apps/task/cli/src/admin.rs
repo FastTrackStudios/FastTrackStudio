@@ -5,7 +5,6 @@
 use clap::Subcommand;
 
 use crate::establish_server_client;
-use crate::run;
 
 #[derive(Subcommand)]
 pub(crate) enum AdminCmd {

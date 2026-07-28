@@ -8,13 +8,13 @@ use std::collections::HashMap;
 use crate::establish_for_url;
 use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
-use crate::run;
 use crate::shared::confirm;
-use crate::shared::git;
 
 // A clap command enum: constructed once per invocation, so the
 // inter-variant size gap is irrelevant, and boxing a variant's
 // args fights the `Subcommand` derive / flattening.
+// ── Wiki RPC handlers ────────────────────────────────────────────────
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub(crate) enum WikiCmd {
@@ -364,7 +364,7 @@ pub(crate) enum WikiCmd {
 
 #[derive(clap::Args)]
 #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
-struct WikiArchiveArgs {
+pub(crate) struct WikiArchiveArgs {
     /// Bulk importers (`task wiki archive import <kind>`).
     #[command(subcommand)]
     cmd: Option<WikiArchiveSub>,
@@ -427,7 +427,7 @@ struct WikiArchiveArgs {
 }
 
 #[derive(Subcommand)]
-enum WikiArchiveSub {
+pub(crate) enum WikiArchiveSub {
     /// Bookmark-service importers — batch front-ends to the
     /// archive router. Canonical-URL dedup makes re-runs (and
     /// cross-service overlap) idempotent.
@@ -467,7 +467,7 @@ enum WikiArchiveSub {
 }
 
 #[derive(Subcommand)]
-enum WikiArchiveImportCmd {
+pub(crate) enum WikiArchiveImportCmd {
     /// Readwise classic highlights (v2 /export/ API; Token
     /// auth, 20 req/min — pages are throttled automatically).
     Readwise {
@@ -524,7 +524,7 @@ enum WikiArchiveImportCmd {
 }
 
 #[derive(clap::Args, Clone)]
-struct WikiArchiveImportCommon {
+pub(crate) struct WikiArchiveImportCommon {
     /// Max items to archive this run (after dedup).
     #[arg(long)]
     limit: Option<usize>,
@@ -544,7 +544,7 @@ struct WikiArchiveImportCommon {
 }
 
 #[derive(Subcommand)]
-enum WikiReviewCmd {
+pub(crate) enum WikiReviewCmd {
     /// List every open review item.
     List {
         #[arg(long, default_value = "default")]
@@ -585,7 +585,7 @@ enum WikiReviewCmd {
 }
 
 #[derive(Subcommand)]
-enum WikiResearchCmd {
+pub(crate) enum WikiResearchCmd {
     /// List every research plan and its status.
     List {
         #[arg(long, default_value = "default")]
@@ -612,7 +612,7 @@ enum WikiResearchCmd {
 }
 
 #[derive(Subcommand)]
-enum WikiWatchCmd {
+pub(crate) enum WikiWatchCmd {
     /// Enable filesystem watch on `Wiki/raw/sources/` so
     /// dropping a file there auto-enqueues an ingest.
     On {
@@ -642,7 +642,7 @@ enum WikiWatchCmd {
 }
 
 #[derive(Subcommand)]
-enum WikiSchemaCmd {
+pub(crate) enum WikiSchemaCmd {
     /// Print `Wiki/schema.md`.
     Show {
         #[arg(long, default_value = "default")]
@@ -710,7 +710,7 @@ enum WikiSchemaCmd {
 }
 
 #[derive(Subcommand)]
-enum WikiCatalogCmd {
+pub(crate) enum WikiCatalogCmd {
     /// Dump the catalog (`Wiki/index.md` parsed).
     Show {
         #[arg(long, default_value = "default")]
@@ -736,7 +736,7 @@ enum WikiCatalogCmd {
 }
 
 #[derive(Subcommand)]
-enum WikiRawCmd {
+pub(crate) enum WikiRawCmd {
     /// List every raw source the wiki carries.
     List {
         #[arg(long, default_value = "default")]
@@ -784,7 +784,7 @@ enum WikiRawCmd {
 }
 
 #[derive(Subcommand)]
-enum WikiIngestCmd {
+pub(crate) enum WikiIngestCmd {
     List {
         #[arg(long, default_value = "default")]
         wiki_id: String,
@@ -818,7 +818,7 @@ enum WikiIngestCmd {
 }
 
 #[derive(Subcommand)]
-enum WikiFindingsCmd {
+pub(crate) enum WikiFindingsCmd {
     /// All open lint findings.
     List {
         #[arg(long, default_value = "default")]

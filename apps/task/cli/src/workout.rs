@@ -11,6 +11,8 @@ use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
 use crate::shared::confirm;
 
+// ── Workouts (routines + sessions) ───────────────────────────────────
+
 #[derive(Subcommand)]
 pub(crate) enum WorkoutCmd {
     /// Routines (the program — push/pull/legs, etc).

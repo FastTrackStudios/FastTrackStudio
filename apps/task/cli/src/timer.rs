@@ -382,7 +382,7 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
         let vox_url = vox_url.clone();
         async move {
             crate::json_out::resolve_project_arg(flag.as_deref(), || async {
-                establish_for_url::<::project::ProjectServiceClient>(&vox_url).await
+                establish_for_url::<project::ProjectServiceClient>(&vox_url).await
             })
             .await
         }
@@ -497,7 +497,7 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                         let project_title = match s.project_id {
                             None => None,
                             Some(pid) => {
-                                match establish_for_url::<::project::ProjectServiceClient>(&vox_url)
+                                match establish_for_url::<project::ProjectServiceClient>(&vox_url)
                                     .await
                                 {
                                     Ok(pc) => pc.get(pid).await.ok().map(|p| p.title),
@@ -753,7 +753,8 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 .await
                 .map_err(|e| eyre::eyre!("list: {e}"))?;
             if json {
-                let out: Vec<serde_json::Value> = rows.iter().map(crate::json_out::session_json).collect();
+                let out: Vec<serde_json::Value> =
+                    rows.iter().map(crate::json_out::session_json).collect();
                 crate::json_out::print_json(&out)?;
                 return Ok(());
             }
@@ -1022,7 +1023,9 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
             TimerTagCmd::Create { name, color, json } => {
                 let tag = ensure_tag(store.conn(), org_id, &name, &color).await?;
                 if json {
-                    crate::json_out::print_json(&crate::json_out::tag_json(&timer_proto::Tag::from(tag)))?;
+                    crate::json_out::print_json(&crate::json_out::tag_json(
+                        &timer_proto::Tag::from(tag),
+                    ))?;
                 } else {
                     println!("{}  {}", tag.id, tag.name);
                 }
@@ -1190,7 +1193,10 @@ async fn attach_tags_by_name(
 /// `Projects/<Name>/<Name>.md` — a flat scan misses them and
 /// every session then stores an empty `project_path`).
 /// `None` project_id → empty.
-pub(crate) fn project_path_for(vault_root: &std::path::Path, project_id: Option<uuid::Uuid>) -> String {
+pub(crate) fn project_path_for(
+    vault_root: &std::path::Path,
+    project_id: Option<uuid::Uuid>,
+) -> String {
     let Some(pid) = project_id else {
         return String::new();
     };
@@ -1216,7 +1222,7 @@ pub(crate) fn project_path_for(vault_root: &std::path::Path, project_id: Option<
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
             let basename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            let Ok(p) = ::project::parse_str(&rel, basename, &raw) else {
+            let Ok(p) = project::parse_str(&rel, basename, &raw) else {
                 continue;
             };
             if p.id == pid {

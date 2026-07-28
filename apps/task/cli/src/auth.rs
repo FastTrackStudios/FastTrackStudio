@@ -8,7 +8,6 @@ use crate::establish_for_url;
 use crate::global_org;
 use crate::resolve_org_vox_url;
 use crate::resolve_server_base;
-use crate::run;
 
 #[derive(Subcommand)]
 pub(crate) enum AuthCmd {
@@ -232,7 +231,8 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             // Persist the session keyed by (server, org) — same
             // shape as `Login` so subsequent commands work
             // without a follow-up `task auth login`.
-            let mut sess = crate::session_store::load()?.unwrap_or_else(crate::session_store::CliSession::empty);
+            let mut sess = crate::session_store::load()?
+                .unwrap_or_else(crate::session_store::CliSession::empty);
             let key = sess.record_login(
                 &slug,
                 &base,
@@ -275,7 +275,8 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             // by (server, org) and make it active. The stored
             // server URL is what later invocations resolve when
             // neither `--server` nor `TASK_VOX_URL` is set.
-            let mut sess = crate::session_store::load()?.unwrap_or_else(crate::session_store::CliSession::empty);
+            let mut sess = crate::session_store::load()?
+                .unwrap_or_else(crate::session_store::CliSession::empty);
             let key = sess.record_login(
                 &slug,
                 &base,
@@ -315,7 +316,10 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
                 // Where the NEXT command will go, after the full
                 // precedence fold (flag > env > session > default).
                 println!("server: {} (this invocation)", resolve_server_base(None));
-                println!("session: {}", crate::session_store::session_path()?.display());
+                println!(
+                    "session: {}",
+                    crate::session_store::session_path()?.display()
+                );
             }
             None => {
                 println!("Not signed in. Run `task auth login --email … --password …`.");
@@ -350,7 +354,9 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
                     let base = resolve_server_base(None);
                     sess.servers
                         .iter()
-                        .find(|(_, e)| e.slug == slug && crate::session_store::same_server(&e.url, &base))
+                        .find(|(_, e)| {
+                            e.slug == slug && crate::session_store::same_server(&e.url, &base)
+                        })
                         .or_else(|| sess.servers.iter().find(|(_, e)| e.slug == slug))
                         .map(|(k, _)| k.clone())
                         .ok_or_else(|| {
@@ -498,7 +504,10 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
 /// Resolve a `task auth use` reference against the stored session
 /// entries: exact key, exact slug (unique), then unique prefix of
 /// either. Ambiguity and misses list what IS stored.
-fn match_session_entry(sess: &crate::session_store::CliSession, reference: &str) -> eyre::Result<String> {
+fn match_session_entry(
+    sess: &crate::session_store::CliSession,
+    reference: &str,
+) -> eyre::Result<String> {
     if sess.servers.contains_key(reference) {
         return Ok(reference.to_owned());
     }
@@ -552,7 +561,10 @@ fn match_session_entry(sess: &crate::session_store::CliSession, reference: &str)
 /// Distinguishes "this command is local-only" from "you're not
 /// signed in": a remote session can never serve these — they need
 /// an org dir under the data root.
-fn local_org_ctx(org_override: Option<&str>, what: &str) -> eyre::Result<crate::org_ctx::ActiveOrg> {
+fn local_org_ctx(
+    org_override: Option<&str>,
+    what: &str,
+) -> eyre::Result<crate::org_ctx::ActiveOrg> {
     crate::org_ctx::resolve_active(org_override).map_err(|e| {
         crate::errors::usage(format!(
             "{what} is a local-only command (it reads the org's on-disk auth.sqlite)"

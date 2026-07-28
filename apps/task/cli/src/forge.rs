@@ -3,7 +3,6 @@
 //!
 //! Moved verbatim out of `main.rs`; behaviour unchanged.
 
-
 /// Build a `RepoId` for a forge from an `owner/repo` slug.
 /// `github=true` → GitHub; else Forgejo with the resolved base
 /// URL.

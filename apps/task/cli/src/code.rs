@@ -10,10 +10,8 @@ use crate::issue::ClaimOutcome;
 use crate::issue::parse_agent_ref;
 use crate::issue::resolve_issue_id;
 use crate::issue::try_claim;
-use crate::main;
 use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
-use crate::run;
 use crate::shared::git;
 use crate::shared::short_uuid;
 use crate::task_cmd::connect_task_client;
@@ -24,6 +22,8 @@ use crate::task_cmd::connect_task_client;
 /// the first 8 chars of the task UUID; `commit`/`push`/`status`/
 /// `finish` parse it back out of the current branch name, so the
 /// branch is the only state these verbs need.
+// ── git helpers for `task code` ──────────────────────────────
+
 #[derive(Subcommand)]
 pub(crate) enum CodeCmd {
     /// Claim a task, flip it to in-progress, and create a work

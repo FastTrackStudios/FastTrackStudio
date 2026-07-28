@@ -9,7 +9,7 @@
 //!
 //! Task / project commands (`list`, `set-done`, `new-task`,
 //! `new-project`) went away with `project-crdt`. Rebuild them
-//! against `::vault::Vault` once the on-disk task convention is
+//! against `vault::Vault` once the on-disk task convention is
 //! pinned down (frontmatter shape, folder layout).
 //!
 //! Endpoint resolution for `task doctor` (first match wins):
@@ -59,39 +59,37 @@ mod wiki;
 mod workout;
 mod workstream;
 
-use clap::{Parser, Subcommand};
-use crate::vault::{VaultCmd, run_vault, run_vault_sync};
-use crate::intake::{IntakeCmd, run_intake};
-use crate::workout::{WorkoutCmd, run_workout};
-use crate::exercise::{ExerciseCmd, connect_exercises_client, resolve_exercise_target, run_exercise};
-use crate::body::{BodyCmd, run_body};
-use crate::pantry::{PantryCmd, connect_pantry_client, resolve_pantry_target, run_pantry};
-use crate::meal::{MealCmd, run_meal};
-use crate::recipe::{RecipeCmd, run_recipe};
-use crate::location::{LocationCmd, connect_locations_client, resolve_location_target, run_location};
-use crate::inbox::{InboxCmd, run_inbox};
-use crate::threads::{ThreadsCmd, run_threads};
-use crate::milestone::{MilestoneCmd, run_milestone};
-use crate::setup::{SetupCmd, run_setup};
-use crate::label::{LabelCmd, run_label};
-use crate::code::{CodeCmd, run_code};
-use crate::issue::{ClaimOutcome, IssueCmd, parse_agent_ref, resolve_issue_id, run_issue, try_claim};
-use crate::agent::{AgentCmd, render_task_prompt, run_agent};
-use crate::task_cmd::{TaskCmd, connect_task_client, run_task};
-use crate::wiki::{WikiCmd, run_wiki};
-use crate::timer::{TimerCmd, run_timer, timer_owner_id};
-use crate::finance::{FinanceCmd, run_finance};
-use crate::auth::{AuthCmd, run_auth, ws_base_to_http};
 use crate::admin::{AdminCmd, run_admin};
-use crate::org::{OrgCmd, run_org};
-use crate::mount::{MountCmd, run_mount};
+use crate::agent::{AgentCmd, run_agent};
+use crate::auth::{AuthCmd, run_auth, ws_base_to_http};
+use crate::body::{BodyCmd, run_body};
+use crate::code::{CodeCmd, run_code};
 use crate::cycle::{CycleCmd, run_cycle};
-use crate::goal::{GoalCmd, connect_goal_client, mutate_goal, resolve_cycle_arg, resolve_goal_target, run_goal};
-use crate::project::{ProjectCmd, connect_project_client, resolve_project_target, run_project};
-use crate::forge::{ForgeBackend, build_repo_id, forge_backend_for, forge_link_store, forgejo_base_url, forgejo_token, github_token, parse_repo_slug};
+use crate::exercise::{ExerciseCmd, run_exercise};
+use crate::finance::{FinanceCmd, run_finance};
+use crate::goal::{GoalCmd, run_goal};
+use crate::inbox::{InboxCmd, run_inbox};
+use crate::intake::{IntakeCmd, run_intake};
+use crate::issue::{IssueCmd, run_issue};
+use crate::label::{LabelCmd, run_label};
+use crate::location::{LocationCmd, run_location};
+use crate::meal::{MealCmd, run_meal};
+use crate::milestone::{MilestoneCmd, run_milestone};
+use crate::mount::{MountCmd, run_mount};
+use crate::org::{OrgCmd, run_org};
+use crate::pantry::{PantryCmd, run_pantry};
+use crate::project::{ProjectCmd, run_project};
+use crate::recipe::{RecipeCmd, run_recipe};
+use crate::setup::{SetupCmd, run_setup};
+use crate::task_cmd::{TaskCmd, run_task};
+use crate::threads::{ThreadsCmd, run_threads};
+use crate::timer::{TimerCmd, run_timer};
+use crate::vault::{VaultCmd, run_vault, run_vault_sync};
+use crate::wiki::{WikiCmd, run_wiki};
+use crate::workout::{WorkoutCmd, run_workout};
+use clap::{Parser, Subcommand};
 use shared::RemoteVoxConfig;
-use shared::{confirm, git, resolve_body, short_uuid};
-use std::collections::HashMap;
+
 #[derive(Parser)]
 #[command(name = "task", about = "Task management CLI", version)]
 struct Cli {
@@ -142,11 +140,11 @@ enum Commands {
     Agent(AgentCmd),
     /// `Wiki/` operations — currently the LLM-driven
     /// ingest pipeline. Sister surface to `agent`; the
-    /// command itself routes through `agent-::wiki::bridge`.
+    /// command itself routes through `agent-wiki::bridge`.
     #[command(subcommand)]
     Wiki(WikiCmd),
     /// Billable time tracking. Local SQLite backed (no
-    /// server needed); same `::timer::Store` the server
+    /// server needed); same `timer::Store` the server
     /// mounts. Project lookup reads `Projects/*.md` for the
     /// rate cascade.
     #[command(subcommand)]
@@ -892,48 +890,3 @@ fn normalize_server_vox(raw: &str) -> String {
     let trimmed = ws.trim_end_matches('/').trim_end_matches("/vox");
     format!("{trimmed}/server/vox")
 }
-
-// ── Wiki RPC handlers ────────────────────────────────────────────────
-
-// ── git helpers for `task code` ──────────────────────────────
-
-// ── Location (locations::Store) ──────────────────────────────────────
-
-// ── Inbox AI processing pass ─────────────────────────────────────────
-//
-// `task inbox process` — the "daily processing pass" from
-// plans/relevancy-and-inbox.md: one LLM turn over every open
-// fleeting item proposes a `task` / `note` / `skip` promotion per
-// item; the user reviews each proposal (y / n / e-dit title, or
-// `--yes` for all) and accepted ones are applied through the
-// existing service surfaces:
-//
-//   task → `task::capture(title)` (tags/contexts/dates), project id
-//          from the proposed title via direct match or
-//          `task::infer_project_id`, `TaskService::create`, then the
-//          inbox item is marked processed with `processed_into` =
-//          the created task's vault path.
-//   note → written into the active org's local vault via
-//          `vault_obsidian::create_page` when `<org>/vault/` exists
-//          locally; otherwise printed for manual creation and marked
-//          processed only on explicit confirm.
-//   skip → offer `archived`.
-
-// ── Recipe (cookbook::Store) — read + delete only ─────────────────────
-
-// ── Meal (mealplan::Store) ───────────────────────────────────────────
-
-// ── Pantry (::pantry::Store) ───────────────────────────────────────────
-
-// ── Agent task queue (agent-proto / agent-tasks) ─────────────────────
-
-// ── Body metrics (::body::Store) ───────────────────────────────────────
-
-// ── Exercises (exercises::Store) ─────────────────────────────────────
-
-// ── Workouts (routines + sessions) ───────────────────────────────────
-
-// ── Intake (::intake::Store) ───────────────────────────────────────────
-
-// ── FS-native Obsidian vault subcommands ─────────────────────────────
-

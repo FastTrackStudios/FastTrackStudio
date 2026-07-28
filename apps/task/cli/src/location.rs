@@ -2,12 +2,13 @@
 //!
 //! Moved verbatim out of `main.rs`; behaviour unchanged.
 
-
 use crate::establish_for_url;
 use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
 use crate::shared::confirm;
 use crate::shared::resolve_body;
+
+// ── Location (locations::Store) ──────────────────────────────────────
 
 #[derive(clap::Subcommand)]
 pub(crate) enum LocationCmd {
@@ -72,7 +73,9 @@ pub(crate) enum LocationCmd {
     },
 }
 
-pub(crate) async fn connect_locations_client(url: &str) -> eyre::Result<locations::LocationsServiceClient> {
+pub(crate) async fn connect_locations_client(
+    url: &str,
+) -> eyre::Result<locations::LocationsServiceClient> {
     establish_for_url(url).await
 }
 

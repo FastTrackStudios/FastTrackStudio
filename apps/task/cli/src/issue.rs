@@ -12,11 +12,9 @@ use crate::forge::forge_link_store;
 use crate::forge::forgejo_base_url;
 use crate::forge::parse_repo_slug;
 use crate::goal::resolve_cycle_arg;
-use crate::main;
 use crate::project::connect_project_client;
 use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
-use crate::run;
 use crate::shared::resolve_body;
 use crate::shared::short_uuid;
 use crate::task_cmd::connect_task_client;
@@ -558,7 +556,7 @@ pub(crate) enum IssueCmd {
 /// degrades to the default registry everywhere).
 async fn project_states_map(
     url: &str,
-) -> std::collections::HashMap<uuid::Uuid, Option<::project::StatesConfig>> {
+) -> std::collections::HashMap<uuid::Uuid, Option<project::StatesConfig>> {
     match connect_project_client(url).await {
         Ok(pc) => pc
             .list()
@@ -572,14 +570,14 @@ async fn project_states_map(
 /// Classify one task's status via its owning project's state
 /// registry (default registry when project unknown / unset).
 fn resolve_task_group(
-    states: &std::collections::HashMap<uuid::Uuid, Option<::project::StatesConfig>>,
+    states: &std::collections::HashMap<uuid::Uuid, Option<project::StatesConfig>>,
     t: &task::TaskInfo,
-) -> ::project::StateGroup {
+) -> project::StateGroup {
     let cfg = t
         .project_id
         .and_then(|pid| states.get(&pid))
         .and_then(Option::as_ref);
-    ::project::resolve_state_group(cfg, &t.status)
+    project::resolve_state_group(cfg, &t.status)
 }
 
 /// Parse an `AgentRef` from CLI input. Accepted forms:
@@ -799,7 +797,9 @@ async fn resolve_project_filter(
         None => Ok(None),
         Some(p) => {
             let pc = connect_project_client(url).await?;
-            Ok(Some(crate::json_out::resolve_project_flexible(&pc, &p).await?.id))
+            Ok(Some(
+                crate::json_out::resolve_project_flexible(&pc, &p).await?.id,
+            ))
         }
     }
 }
@@ -816,7 +816,9 @@ async fn resolve_workstream_filter(
         Some(w) => {
             let wc: ::workstream::WorkstreamServiceClient = establish_for_url(url).await?;
             Ok(Some(
-                crate::json_out::resolve_workstream_flexible(&wc, &w).await?.id,
+                crate::json_out::resolve_workstream_flexible(&wc, &w)
+                    .await?
+                    .id,
             ))
         }
     }
@@ -1848,7 +1850,7 @@ pub(crate) async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             // no project use the default registry).
             let states_by_project: std::collections::HashMap<
                 uuid::Uuid,
-                Option<::project::StatesConfig>,
+                Option<project::StatesConfig>,
             > = match connect_project_client(&url).await {
                 Ok(pc) => pc
                     .list()
@@ -1857,12 +1859,12 @@ pub(crate) async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     .unwrap_or_default(),
                 Err(_) => std::collections::HashMap::new(),
             };
-            let group_of = |t: &task::TaskInfo| -> ::project::StateGroup {
+            let group_of = |t: &task::TaskInfo| -> project::StateGroup {
                 let cfg = t
                     .project_id
                     .and_then(|pid| states_by_project.get(&pid))
                     .and_then(Option::as_ref);
-                ::project::resolve_state_group(cfg, &t.status)
+                project::resolve_state_group(cfg, &t.status)
             };
 
             let total = filtered.len();

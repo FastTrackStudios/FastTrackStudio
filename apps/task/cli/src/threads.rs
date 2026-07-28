@@ -106,11 +106,15 @@ async fn resolve_thread_entity(
     match entity_type {
         "task" => {
             let tc = connect_task_client(url).await?;
-            Ok(crate::json_out::resolve_task_flexible(&tc, target).await?.id)
+            Ok(crate::json_out::resolve_task_flexible(&tc, target)
+                .await?
+                .id)
         }
         "project" => {
             let pc = connect_project_client(url).await?;
-            Ok(crate::json_out::resolve_project_flexible(&pc, target).await?.id)
+            Ok(crate::json_out::resolve_project_flexible(&pc, target)
+                .await?
+                .id)
         }
         other => Err(crate::errors::usage("resolve --entity-id")
             .cause(format!(

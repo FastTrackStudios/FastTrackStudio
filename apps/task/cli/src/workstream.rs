@@ -259,7 +259,10 @@ pub async fn run_workstream(cmd: WorkstreamCmd) -> eyre::Result<()> {
             let url = ws_url(org, server)?;
             let pc = crate::project::connect_project_client(&url).await?;
             let project_id = json_out::resolve_project_flexible(&pc, &project).await?.id;
-            let lead = lead.as_deref().map(crate::issue::parse_agent_ref).transpose()?;
+            let lead = lead
+                .as_deref()
+                .map(crate::issue::parse_agent_ref)
+                .transpose()?;
             let members: Vec<_> = members
                 .iter()
                 .map(|m| crate::issue::parse_agent_ref(m))

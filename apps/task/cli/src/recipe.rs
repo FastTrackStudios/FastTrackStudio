@@ -9,6 +9,8 @@ use crate::resolve_active_org;
 use crate::resolve_org_vox_url;
 use crate::shared::confirm;
 
+// ── Recipe (cookbook::Store) — read + delete only ─────────────────────
+
 #[derive(Subcommand)]
 pub(crate) enum RecipeCmd {
     /// List every recipe in the active org's cookbook.
