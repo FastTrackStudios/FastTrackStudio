@@ -1646,8 +1646,19 @@ const VAULT_PERMITS: architect_permissions::ServicePermits =
             architect_permissions::MethodPermit::new("set_folder", "write", "vault/{path}"),
             architect_permissions::MethodPermit::new("open_collab", "read", "vault/{path}"),
             architect_permissions::MethodPermit::new("base_views", "read", "vault/{path}"),
-            architect_permissions::MethodPermit::new("subscribe", "read", "vault/**"),
         ],
+    };
+
+/// Permits for the `#[subscribe]` stream sibling of `VaultSync` —
+/// a separate vox service with its own descriptor, so it needs its
+/// own table. Attaching to the change feed is a vault-wide read:
+/// the stream is unfiltered and every `VaultChange` names a path.
+const VAULT_STREAM_PERMITS: architect_permissions::ServicePermits =
+    architect_permissions::ServicePermits {
+        service: "vault-sync-stream",
+        methods: &[architect_permissions::MethodPermit::new(
+            "changes", "read", "vault/**",
+        )],
     };
 
 const MEDIA_PERMITS: architect_permissions::ServicePermits =
@@ -1674,6 +1685,7 @@ fn build_org_permissions_gate(auth: &AuthState) -> architect::permissions_gate::
         .unlisted(UnlistedPolicy::Allow)
         .observe_only(!enforce)
         .permit(vault_proto::descriptor(), VAULT_PERMITS)
+        .permit(vault_proto::stream_descriptor(), VAULT_STREAM_PERMITS)
         .permit(
             media_proto::media_service_service_descriptor(),
             MEDIA_PERMITS,
@@ -1702,6 +1714,7 @@ pub fn schema_stamps() -> Vec<(&'static str, String)> {
         architect_auth::auth_service_service_descriptor(),
         attachments_proto::attachment_service_service_descriptor(),
         vault_proto::descriptor(),
+        vault_proto::stream_descriptor(),
         architect_permissions_proto::permissions_service_service_descriptor(),
         share_proto::share_service_service_descriptor(),
         agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
@@ -1795,11 +1808,18 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.attachments.clone(),
             )),
         )
-        // Vault file replication (manifest / get / put / delete / subscribe).
+        // Vault file replication (manifest / get / put / delete).
         .with(
             vault_proto::descriptor(),
             vault_proto::serve(org.vault_sync.clone()),
         )
+        // Live vault changes — `VaultSync`'s `#[subscribe]` stream
+        // sibling. The hub lives on the `vault::Backend` above, so
+        // every path publishes into it: wire PUT/DELETE/set_folder,
+        // in-process writers holding a backend clone, and the
+        // filesystem watcher (external edits from vim / Obsidian /
+        // `git pull`).
+        .merge(vault_proto::stream_layer(org.vault_sync.clone()))
         // Permissions oracle — the caller's capability manifest, answered
         // by the SAME engine + identity the org lane's gate enforces with.
         .with(

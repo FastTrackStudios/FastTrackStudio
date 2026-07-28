@@ -46,7 +46,7 @@ pub use error::VaultSyncError;
 // glob-safe names: `VaultGraphClient`, `VaultGraphRpcDispatcher`,
 // `vault_graph_rpc_service_descriptor`, `vault_graph_serve`,
 // `vault_graph_layer`, `VaultGraphService`.
-pub use event::VaultEvent;
+pub use event::{VaultChange, VaultEvent};
 pub use file::{FileBytes, IfMatch, PutAck};
 pub use graph::prelude::*;
 pub use graph::{GraphLink, GraphUnresolved, TagCount};
@@ -66,4 +66,14 @@ pub use service::{VaultSync, VaultSyncRpc};
 pub use service::{
     Service, VaultSyncClient, VaultSyncRpcDispatcher as Dispatcher, layer, serve,
     vault_sync_rpc_service_descriptor as descriptor,
+};
+
+// `#[subscribe] fn changes` stream sibling — live vault changes.
+// Mount `vault_proto::stream_layer(backend)` next to
+// `vault_proto::serve(backend)`; clients subscribe through
+// `VaultSyncStreamClient::changes(tx)` (see `architect::use_stream`).
+#[cfg(feature = "vox")]
+pub use service::{
+    VaultSyncStreamClient, VaultSyncStreamSource, stream_layer, stream_serve,
+    vault_sync_stream_service_descriptor as stream_descriptor,
 };
