@@ -22,7 +22,10 @@ use scheduling_proto::{
     BlockAssignment, BlockCategory, DayPlan, DayPlansClient, PlannedBlock, TimeBlockId, TimeOfDay,
 };
 
-use crate::{establish_for_url, resolve_active_org, resolve_meal_target, resolve_org_vox_url};
+use crate::establish_for_url;
+use crate::resolve_active_org;
+use crate::resolve_meal_target;
+use crate::resolve_org_vox_url;
 
 // ── Shared flags ─────────────────────────────────────────────
 
