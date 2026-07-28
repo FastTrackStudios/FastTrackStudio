@@ -8481,6 +8481,7 @@ name = "eq-dsp"
 version = "0.1.0"
 dependencies = [
  "audiocore-dsp",
+ "realfft",
 ]
 
 [[package]]
