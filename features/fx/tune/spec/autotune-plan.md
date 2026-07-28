@@ -71,3 +71,23 @@ incl. melonix deep-dive.
 - Wire tuner UI (audio-controls tuner_graph) to real detection.
 - Write oss-pitch-editing.md research doc (melonix, WORLD, CREPE,
   PSOLA licenses) — pending research agent.
+
+## Status 2026-07-28 — first implementation pass
+
+- **model.rs landed**: NoteBlob center/drift/vibrato decomposition
+  (zero-phase 3 Hz split), PitchDoc with melonix warp/bend markers,
+  target curves + preview shift ratios. 5 tests.
+- **correct.rs upgraded**: Scale::from_intervals (keyflow bridge),
+  contains_pc, snap_hysteresis with per-PC bypass mask.
+- **NativeTune landed** (`signal.fx.tune`): fixes all three shipped
+  bugs — buffer-size-INDEPENDENT retune slew (settles by real block
+  duration; 0 ms = hard jump), MIDI target modes (latch/gate) via
+  PluginEvents.midi, per-PC bypass params, flex-tune, A4 reference,
+  hysteresis, detected-midi/cents readback for the tuner UI.
+- ⚠️ **PSOLA is broken at small ratios** (measured: 452 Hz at
+  −0.467 st came out 469 Hz — wrong direction; ±2 st off by ~10–30
+  cents). Granular is also inaccurate (−2 st → 367 Hz vs 402.7).
+  **WSOLA is cents-accurate at all tested shifts** and is now
+  NativeTune's engine. TODO: fix PsolaShifter's synthesis epoch
+  spacing (integer-period rounding suspected) and switch the shipped
+  apps/plugins/tune off PSOLA too — it has this bug in production.

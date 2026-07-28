@@ -23274,14 +23274,18 @@ dependencies = [
  "audiocore-dsp",
  "comp",
  "daw",
+ "daw-proto",
  "delay",
  "eq",
  "hound",
  "level-dsp",
+ "midicore-proto",
  "modulation",
+ "pitch-dsp",
  "reverb",
  "saturate-dsp",
  "signal-plugin-host",
+ "tune",
 ]
 
 [[package]]
