@@ -649,78 +649,6 @@ fn pick_server_base(flag_or_env: Option<&str>, session_url: Option<&str>) -> Str
     session_store::DEFAULT_LOCAL_VOX.to_owned()
 }
 
-#[cfg(test)]
-mod server_resolution_tests {
-    use super::*;
-
-    #[test]
-    fn flag_or_env_beats_session() {
-        assert_eq!(
-            pick_server_base(
-                Some("wss://task.starcommand.live/vox"),
-                Some("ws://127.0.0.1:18080")
-            ),
-            "wss://task.starcommand.live"
-        );
-        // …and the flip: env pointing local wins over a stored
-        // remote session — the URL switch IS the selector.
-        assert_eq!(
-            pick_server_base(
-                Some("ws://127.0.0.1:18080/vox"),
-                Some("wss://task.starcommand.live")
-            ),
-            "ws://127.0.0.1:18080"
-        );
-    }
-
-    #[test]
-    fn session_beats_default() {
-        assert_eq!(
-            pick_server_base(None, Some("wss://task.starcommand.live/vox")),
-            "wss://task.starcommand.live"
-        );
-        // Legacy "local" session entries resolve to the default.
-        assert_eq!(
-            pick_server_base(None, Some("local")),
-            session_store::DEFAULT_LOCAL_VOX
-        );
-    }
-
-    #[test]
-    fn default_when_nothing_set() {
-        assert_eq!(
-            pick_server_base(None, None),
-            session_store::DEFAULT_LOCAL_VOX
-        );
-        // Blank values don't shadow lower-precedence sources.
-        assert_eq!(
-            pick_server_base(Some(""), Some(" ")),
-            session_store::DEFAULT_LOCAL_VOX
-        );
-    }
-
-    #[test]
-    fn org_url_appends_per_org_path() {
-        // resolve_org_vox_url rides the same fold; with an
-        // explicit server the env/session never enter.
-        assert_eq!(
-            resolve_org_vox_url(Some("wss://task.starcommand.live/vox".into()), "codywright"),
-            "wss://task.starcommand.live/org/codywright/vox"
-        );
-    }
-
-    #[test]
-    fn ws_http_derivation() {
-        assert_eq!(
-            ws_base_to_http("wss://task.starcommand.live"),
-            "https://task.starcommand.live"
-        );
-        assert_eq!(
-            ws_base_to_http("ws://127.0.0.1:18080"),
-            "http://127.0.0.1:18080"
-        );
-    }
-}
 
 /// Embedded backend, built once per process: a full `AppState` plus the
 /// construction `Scope` that keeps its in-process vox acceptor tasks
@@ -917,4 +845,77 @@ fn normalize_server_vox(raw: &str) -> String {
     // server-mgmt path.
     let trimmed = ws.trim_end_matches('/').trim_end_matches("/vox");
     format!("{trimmed}/server/vox")
+}
+
+#[cfg(test)]
+mod server_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn flag_or_env_beats_session() {
+        assert_eq!(
+            pick_server_base(
+                Some("wss://task.starcommand.live/vox"),
+                Some("ws://127.0.0.1:18080")
+            ),
+            "wss://task.starcommand.live"
+        );
+        // …and the flip: env pointing local wins over a stored
+        // remote session — the URL switch IS the selector.
+        assert_eq!(
+            pick_server_base(
+                Some("ws://127.0.0.1:18080/vox"),
+                Some("wss://task.starcommand.live")
+            ),
+            "ws://127.0.0.1:18080"
+        );
+    }
+
+    #[test]
+    fn session_beats_default() {
+        assert_eq!(
+            pick_server_base(None, Some("wss://task.starcommand.live/vox")),
+            "wss://task.starcommand.live"
+        );
+        // Legacy "local" session entries resolve to the default.
+        assert_eq!(
+            pick_server_base(None, Some("local")),
+            session_store::DEFAULT_LOCAL_VOX
+        );
+    }
+
+    #[test]
+    fn default_when_nothing_set() {
+        assert_eq!(
+            pick_server_base(None, None),
+            session_store::DEFAULT_LOCAL_VOX
+        );
+        // Blank values don't shadow lower-precedence sources.
+        assert_eq!(
+            pick_server_base(Some(""), Some(" ")),
+            session_store::DEFAULT_LOCAL_VOX
+        );
+    }
+
+    #[test]
+    fn org_url_appends_per_org_path() {
+        // resolve_org_vox_url rides the same fold; with an
+        // explicit server the env/session never enter.
+        assert_eq!(
+            resolve_org_vox_url(Some("wss://task.starcommand.live/vox".into()), "codywright"),
+            "wss://task.starcommand.live/org/codywright/vox"
+        );
+    }
+
+    #[test]
+    fn ws_http_derivation() {
+        assert_eq!(
+            ws_base_to_http("wss://task.starcommand.live"),
+            "https://task.starcommand.live"
+        );
+        assert_eq!(
+            ws_base_to_http("ws://127.0.0.1:18080"),
+            "http://127.0.0.1:18080"
+        );
+    }
 }
