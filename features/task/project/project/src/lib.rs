@@ -1,11 +1,15 @@
-// architect's `Entity` derive emits a `#[cfg(feature = "vox")]`
-// block; we don't expose a vox feature here (project is a
-// wire/file format, not a service trait) so the gated code
-// never compiles, but rustc still flags the cfg as unknown.
-// Allow at crate scope until architect grows opt-out support.
+// architect's `Entity` derive emits cfg-gated blocks; allow
+// at crate scope.
 #![allow(unexpected_cfgs)]
 
 //! `project` — first-party project feature.
+//!
+//! The wasm-clean wire surface ([`ProjectInfo`] / [`Status`], the
+//! per-project state registry, and the [`ProjectService`] RPC
+//! trait) lives in the sibling [`project_proto`] crate; this crate
+//! sits on top of it and owns the vault-backed side (parse /
+//! serialize / scan / write / [`ProjectBackend`]). Every proto item
+//! is re-exported here at its historical `project::…` path.
 //!
 //! Projects are plain markdown pages living under
 //! `Projects/*.md` in the vault. Frontmatter carries the

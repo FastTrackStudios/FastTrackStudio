@@ -872,6 +872,7 @@ task = { path = "features/task/task/task", default-features = false }
 task-ui = { path = "features/task/task/task-ui" }
 task-server = { path = "apps/task/server" }
 project = { path = "features/task/project/project", default-features = false }
+project-proto = { path = "features/task/project/project-proto", default-features = false }
 org-proto = { path = "features/task/org/org-proto" }
 org-snapshot = { path = "features/task/org/org-snapshot" }
 timer-proto = { path = "features/task/timer/timer-proto", default-features = false }

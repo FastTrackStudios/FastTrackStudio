@@ -19998,6 +19998,7 @@ dependencies = [
  "chrono",
  "facet 0.50.0-rc.5",
  "fake",
+ "project-proto",
  "sea-orm",
  "serde",
  "serde_json",
@@ -20009,6 +20010,24 @@ dependencies = [
  "vault",
  "vault-entity",
  "vault-proto",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "project-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
  "vox",
  "vox-types",
 ]
