@@ -6,7 +6,9 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::ChevronRight;
 use uuid::Uuid;
 
-use crate::model::Status;
+use task_proto::{Priority, Status};
+
+use crate::display::{StatusLabel, TaskDisplay};
 use crate::{TaskInfo, TaskMutation};
 
 use super::row::TaskRow;
@@ -82,11 +84,11 @@ pub fn TaskList(props: TaskListProps) -> Element {
                 .cmp(&b.due_date())
                 .then_with(|| {
                     let rank = |p| match p {
-                        crate::model::Priority::Critical => 0,
-                        crate::model::Priority::High => 1,
-                        crate::model::Priority::Normal => 2,
-                        crate::model::Priority::Low => 3,
-                        crate::model::Priority::None => 4,
+                        Priority::Critical => 0,
+                        Priority::High => 1,
+                        Priority::Normal => 2,
+                        Priority::Low => 3,
+                        Priority::None => 4,
                     };
                     rank(a.priority_enum()).cmp(&rank(b.priority_enum()))
                 })
@@ -146,7 +148,7 @@ struct TaskListChildrenProps {
 fn TaskList_Children(props: TaskListChildrenProps) -> Element {
     // Subtasks nest under their parent when both are in the bucket —
     // the same domain arrangement the CLI list prints.
-    let arranged = task::arrange_families(props.items.clone(), |t| t.id, |t| t.parent);
+    let arranged = task_proto::arrange_families(props.items.clone(), |t| t.id, TaskDisplay::parent);
     rsx! {
         div { class: "flex flex-col gap-0.5 pl-1",
             for (depth, t) in arranged.into_iter() {

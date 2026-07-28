@@ -16,8 +16,8 @@ use agent_proto::session::{Session as AgentSession, SessionStatus as AgentStatus
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use project::ProjectInfo;
-use task::TaskInfo as DbTask;
+use project_proto::ProjectInfo;
+use task_proto::TaskInfo as DbTask;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
 use timer_proto::WorkSession;
 use uuid::Uuid;
@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::orgs::OrgMeta;
 use crate::routes::Route;
 use crate::shell::mobile::{BottomSheet, MobileActionBar};
-use crate::stores::{self, to_ui};
+use crate::stores;
 use crate::task_sort::{belongs, is_active_task};
 use threads::ui::ConversationsPanel;
 
@@ -145,7 +145,7 @@ pub fn ProjectDetailView(id: String) -> Element {
     // ── Live task fold ──────────────────────────────────────────────
     // Fetch-once-then-fold (the TaskService subscriber contract): the
     // task store hydrated once; from here on every change arrives as a
-    // [`task::TaskEvent`] and folds into the **shared store** — no
+    // [`task_proto::TaskEvent`] and folds into the **shared store** — no
     // refetch, and `belongs()` filters at render time, so an Upserted
     // task that newly matches the project joins the list and one that
     // stops matching drops out, for free.
@@ -162,16 +162,16 @@ pub fn ProjectDetailView(id: String) -> Element {
                     return false;
                 };
                 let Ok(client) =
-                    crate::vox_clients::establish_for::<task::TaskServiceStreamClient>(&slug).await
+                    crate::vox_clients::establish_for::<task_proto::TaskServiceStreamClient>(&slug).await
                 else {
                     return false;
                 };
                 client.events(tx).await.is_ok()
             }
         },
-        move |ev: task::TaskEvent| {
+        move |ev: task_proto::TaskEvent| {
             match ev {
-                task::TaskEvent::Upserted(t) => {
+                task_proto::TaskEvent::Upserted(t) => {
                     let slug = pkey_memo
                         .peek()
                         .as_ref()
@@ -181,7 +181,7 @@ pub fn ProjectDetailView(id: String) -> Element {
                     // in (keeps the slug from the event's org stream).
                     task_store.put(stores::OrgTask { slug, task: t });
                 }
-                task::TaskEvent::Deleted(id) => {
+                task_proto::TaskEvent::Deleted(id) => {
                     task_store.remove_real(&id);
                 }
             }
@@ -202,7 +202,7 @@ pub fn ProjectDetailView(id: String) -> Element {
                 .value()
                 .map(|rows| rows.iter().map(|(_, r)| r.task.clone()).collect())
                 .unwrap_or_default();
-            let mine: Vec<UiTask> = all.iter().filter(|t| belongs(t, &p)).map(to_ui).collect();
+            let mine: Vec<UiTask> = all.iter().filter(|t| belongs(t, &p)).cloned().collect();
             let total = mine.len();
             let done = mine.iter().filter(|t| t.status == "done").count();
             let pct: f32 = if p.progress_percent >= 0 {
@@ -912,7 +912,7 @@ async fn sleep_30s() {
 
 /// Comma-joined holder labels from `workflow.assignees`.
 fn assignee_labels(t: &DbTask) -> String {
-    use task::workflows_proto::AgentRef;
+    use task_proto::workflows_proto::AgentRef;
     let Some(w) = &t.workflow else {
         return String::new();
     };

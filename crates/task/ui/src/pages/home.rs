@@ -16,8 +16,8 @@ use crate::format::status_variant;
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{CalendarDays, CircleCheck};
 use fts_ui::prelude::*;
-use project::ProjectInfo;
-use task::TaskInfo as DbTask;
+use project_proto::ProjectInfo;
+use task_proto::TaskInfo as DbTask;
 
 use crate::routes::Route;
 use crate::stores;
@@ -260,7 +260,7 @@ fn ProjectCard(
                     status: ui_status,
                     priority: ui_priority,
                     on_click: move |()| {
-                        let s = task::click_transition(&next_status, None);
+                        let s = task_proto::click_transition(&next_status, None);
                         on_status.call((next_id, s.to_string()));
                     },
                 }

@@ -1,12 +1,14 @@
 //! Kanban board — one column per [`Status`] in
-//! `Status::BOARD_ORDER`. Cards mirror the row content but
+//! `crate::display::BOARD_ORDER`. Cards mirror the row content but
 //! stack the meta below the title.
 
 use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::TaskInfo;
-use crate::model::{Priority, Status};
+use task_proto::{Priority, Status};
+
+use crate::display::{PriorityLabel, StatusLabel, TaskDisplay};
 
 use super::palette::{priority_pill, priority_rail};
 
@@ -19,7 +21,7 @@ pub struct KanbanBoardProps {
 
 #[component]
 pub fn KanbanBoard(props: KanbanBoardProps) -> Element {
-    let columns: Vec<(Status, Vec<TaskInfo>)> = Status::BOARD_ORDER
+    let columns: Vec<(Status, Vec<TaskInfo>)> = crate::display::BOARD_ORDER
         .iter()
         .map(|s| {
             let bucket = props

@@ -94,12 +94,16 @@ links-ui.workspace = true
 email-ui.workspace = true
 goal-ui.workspace = true
 scripture-ui.workspace = true
-# Architect-generated vox clients for project + goal. The
+# Architect-generated vox clients for project + task, plus their
+# wire models and the pure domain rules the stores apply
+# client-side (relevance, relation cascade, capture). The
 # workspace pins vox to `default-features = false,
 # features = ["runtime"]` which is wasm-clean (no tcp /
 # tokio[net]). Pattern lifted from `vox/rust/wasm-browser-tests`.
-project = { workspace = true, features = ["vox"] }
-task = { workspace = true, features = ["vox"] }
+# The vault-backed `project` / `task` crates stay out of the
+# browser graph entirely — the protos are the whole contract.
+project-proto = { workspace = true, features = ["vox"] }
+task-proto = { workspace = true, features = ["vox"] }
 # Timer service client for the `/timer` time-tracking page.
 timer-proto = { workspace = true, features = ["vox"] }
 # Agent service clients for the `/agents` page — `SessionsClient`

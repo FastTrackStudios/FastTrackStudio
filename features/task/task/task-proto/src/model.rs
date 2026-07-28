@@ -294,6 +294,72 @@ pub struct TaskInfo {
     pub workflow: Option<WorkflowAttrs>,
 }
 
+impl TaskInfo {
+    /// A blank task carrying only `title` — open, normal priority,
+    /// stamped `dateCreated` / `dateModified`, no backing file yet
+    /// (`path` is empty; the writer derives one). This is the
+    /// plain constructor; [`crate::capture`] is the richer sibling
+    /// that also extracts `#tags` / `@contexts` / dates out of the
+    /// input line.
+    #[must_use]
+    pub fn new(title: impl Into<String>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            path: String::new(),
+            title: title.into(),
+            status: Status::Open.as_str().to_string(),
+            priority: Priority::Normal.as_str().to_string(),
+            due: None,
+            scheduled: None,
+            tags: StringList::default(),
+            contexts: StringList::default(),
+            projects: StringList::default(),
+            project_id: None,
+            milestone_id: None,
+            time_estimate: None,
+            time_entries: TimeEntries::default(),
+            recurrence: None,
+            recurrence_anchor: None,
+            complete_instances: StringList::default(),
+            completed_date: None,
+            agent_profile: String::new(),
+            dispatched_agent_tasks: StringList::default(),
+            date_created: Some(now),
+            date_modified: Some(now),
+            details: String::new(),
+            workflow: None,
+        }
+    }
+
+    /// Start of the running [`TimeEntry`], when this task's clock is
+    /// live. The read side of the invariant [`close_open_time_entries`]
+    /// / [`track_status_transition`] maintain: at most one entry is
+    /// open, and only while the task is in progress.
+    #[must_use]
+    pub fn running_since(&self) -> Option<DateTime<Utc>> {
+        self.time_entries
+            .iter()
+            .find(|e| e.end_time.is_none())
+            .map(|e| e.start_time)
+    }
+
+    /// Total tracked seconds across every [`TimeEntry`], counting a
+    /// still-running entry up to `now`. Negative spans (clock skew,
+    /// hand-edited frontmatter) clamp to zero.
+    #[must_use]
+    pub fn tracked_seconds(&self, now: DateTime<Utc>) -> i64 {
+        self.time_entries
+            .iter()
+            .map(|e| {
+                (e.end_time.unwrap_or(now) - e.start_time)
+                    .num_seconds()
+                    .max(0)
+            })
+            .sum()
+    }
+}
+
 fn default_priority() -> String {
     "normal".to_string()
 }

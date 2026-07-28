@@ -5,7 +5,9 @@
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use crate::model::Status;
+use task_proto::Status;
+
+use crate::display::StatusLabel;
 use crate::views::detail_full::{SectionLabel, SubtaskRow};
 use crate::views::palette::status_pill;
 
@@ -17,7 +19,7 @@ pub fn subtask_summary(rows: &[SubtaskRow]) -> (usize, usize) {
     let done = rows
         .iter()
         .filter(|r| {
-            project::resolve_state_group(None, &r.task.status) == project::StateGroup::Completed
+            project_proto::resolve_state_group(None, &r.task.status) == project_proto::StateGroup::Completed
         })
         .count();
     (done, rows.len())
@@ -47,8 +49,8 @@ pub fn SubtasksBoard(props: SubtasksBoardProps) -> Element {
                         // Strike-through follows the state group
                         // (progress decision), the pill keeps the
                         // raw status / enum label (display).
-                        let done_row = project::resolve_state_group(None, &row.task.status)
-                            == project::StateGroup::Completed;
+                        let done_row = project_proto::resolve_state_group(None, &row.task.status)
+                            == project_proto::StateGroup::Completed;
                         let title_cls = if done_row {
                             "flex-1 min-w-0 truncate text-sm text-muted-foreground line-through"
                         } else {
@@ -90,7 +92,7 @@ mod tests {
     use super::*;
 
     fn row(status: &str) -> SubtaskRow {
-        let mut t = task::capture("sub");
+        let mut t = task_proto::capture("sub");
         t.status = status.to_string();
         SubtaskRow {
             task: t,

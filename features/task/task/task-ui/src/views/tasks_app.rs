@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
+use crate::display::TaskDisplay;
 use crate::TaskInfo;
 use crate::TaskMutation;
 
@@ -69,7 +70,7 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
     let tracked_today: i64 = props
         .tasks
         .iter()
-        .flat_map(|t| &t.time_entries)
+        .flat_map(|t| t.time_entries.iter())
         .filter(|e| chrono::DateTime::<chrono::Local>::from(e.start_time).date_naive() == today)
         .map(|e| {
             (e.end_time.unwrap_or(now) - e.start_time)
@@ -85,7 +86,7 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                 span { class: "text-xs tabular-nums text-muted-foreground",
                     "{open_count} open · {done} done"
                     if tracked_today > 0 {
-                        " · {crate::model::duration_label(tracked_today)} tracked today"
+                        " · {crate::display::duration_label(tracked_today)} tracked today"
                     }
                 }
                 if let Some(extra) = props.header_extra.clone() {
@@ -135,10 +136,10 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                                 // running parent completes directly.
                                 let next = props.tasks.iter().find(|t| t.id == id).map(|t| {
                                     let parent_status = t
-                                        .parent
+                                        .parent()
                                         .and_then(|p| props.tasks.iter().find(|x| x.id == p))
                                         .map(|p| p.status.as_str());
-                                    task::click_transition(&t.status, parent_status)
+                                    task_proto::click_transition(&t.status, parent_status)
                                 });
                                 if let Some(s) = next {
                                     props.on_event.call(TaskMutation::SetStatus { id, status: s.to_string() });

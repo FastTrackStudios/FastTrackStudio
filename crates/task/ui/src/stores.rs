@@ -33,9 +33,9 @@ use architect::{
 };
 use chrono::{Datelike, NaiveDate, Utc, Weekday};
 use dioxus::prelude::*;
-use project::ProjectInfo;
-use task::TaskInfo as DbTask;
-use task_ui::{TaskInfo as UiTask, TaskMutation, TimeEntry as UiTimeEntry};
+use project_proto::ProjectInfo;
+use task_proto::TaskInfo as DbTask;
+use task_ui::TaskMutation;
 use timer_proto::{StartTimerRequest, WorkSession};
 use uuid::Uuid;
 
@@ -366,54 +366,6 @@ pub fn use_task_list() -> AtomResult<Vec<(Id<Uuid>, OrgTask)>, String> {
     })
 }
 
-/// Forward-convert the persistence model into the dumb UI model
-/// (`task_ui::TaskInfo`) the `TasksApp` board renders.
-pub fn to_ui(t: &DbTask) -> UiTask {
-    UiTask {
-        id: t.id,
-        title: t.title.clone(),
-        status: t.status.clone(),
-        priority: t.priority.clone(),
-        due: t.due.clone(),
-        scheduled: t.scheduled.clone(),
-        tags: t.tags.0.clone(),
-        contexts: t.contexts.0.clone(),
-        projects: t.projects.0.clone(),
-        time_estimate: t.time_estimate,
-        time_entries: t
-            .time_entries
-            .0
-            .iter()
-            .map(|e| UiTimeEntry {
-                start_time: e.start_time,
-                end_time: e.end_time,
-            })
-            .collect(),
-        recurrence: t.recurrence.clone(),
-        completed_date: t.completed_date,
-        date_created: t.date_created,
-        date_modified: t.date_modified,
-        details: t.details.clone(),
-        parent: t.workflow.as_ref().and_then(|w| w.parent),
-        project_id: t.project_id,
-    }
-}
-
-/// Map the UI-editable fields of a detail-sheet save back onto the
-/// authoritative record (preserving server-only fields like `path`,
-/// `project_id`, billing, agent attribution).
-fn apply_ui_edits(t: &mut DbTask, ui: &UiTask) {
-    t.title = ui.title.clone();
-    t.status = ui.status.clone();
-    t.priority = ui.priority.clone();
-    t.due = ui.due.clone();
-    t.scheduled = ui.scheduled.clone();
-    t.tags = ui.tags.clone().into();
-    t.contexts = ui.contexts.clone().into();
-    t.projects = ui.projects.clone().into();
-    t.details = ui.details.clone();
-}
-
 /// Optimistic writes for the task board, keyed off the store's slug tag.
 #[derive(Clone, Copy)]
 pub struct TaskMutations {
@@ -425,7 +377,7 @@ pub struct TaskMutations {
     create_project_scope: Option<Uuid>,
     /// Project store handle (Copy — it's a signal), for resolving
     /// `[[Project]]` wikilinks typed into quick-add
-    /// (task::infer_project_id) at create time.
+    /// (task_proto::infer_project_id) at create time.
     projects: ProjectStore,
 }
 
@@ -455,7 +407,7 @@ impl TaskMutations {
     pub fn apply(&self, create_slug: &str, mu: TaskMutation) {
         match mu {
             TaskMutation::Create { task } => {
-                let mut draft = task::capture(&task.title);
+                let mut draft = task_proto::capture(&task.title);
                 // Filing priority: explicit picker > page scope
                 // (project detail board) > [[wikilink]] inference.
                 let known: Vec<(Uuid, String)> = self
@@ -467,19 +419,22 @@ impl TaskMutations {
                 draft.project_id = task
                     .project_id
                     .or(self.create_project_scope)
-                    .or_else(|| task::infer_project_id(&draft.projects.0, &known));
+                    .or_else(|| task_proto::infer_project_id(&draft.projects.0, &known));
                 self.create(OrgTask {
                     slug: create_slug.to_owned(),
                     task: draft,
                 });
             }
             TaskMutation::Update { task } => {
+                // The board renders the authoritative record, so the
+                // detail sheet hands back a complete row — whole-record
+                // replace, no field-by-field bridge to keep in sync.
                 let id = task.id;
-                self.edit(id, move |t| apply_ui_edits(t, &task));
+                self.edit(id, move |t| t.clone_from(&task));
             }
             TaskMutation::SetStatus { id, status } => {
                 // Optimistic family cascade — the same domain rule the
-                // server applies (task::cascade_status), computed from
+                // server applies (task_proto::cascade_status), computed from
                 // the pre-edit store + the incoming status so parent and
                 // subtask checkboxes flip together instantly. The
                 // server's own cascade reconciles to the identical state
@@ -493,7 +448,7 @@ impl TaskMutations {
                         changed.status.clone_from(&status);
                         let all: Vec<DbTask> =
                             self.store.list().into_iter().map(|r| r.task).collect();
-                        task::cascade_status(&all, &changed)
+                        task_proto::cascade_status(&all, &changed)
                     })
                     .unwrap_or_default();
                 self.edit(id, move |t| {
@@ -501,13 +456,13 @@ impl TaskMutations {
                     t.status = status;
                     // Mirror the server's automatic time tracking so the
                     // running-timer state shows instantly.
-                    task::track_status_transition(&prev, t, chrono::Utc::now());
+                    task_proto::track_status_transition(&prev, t, chrono::Utc::now());
                 });
                 for (fid, fstatus) in follow_ups {
                     self.edit(fid, move |t| {
                         let prev = t.status.clone();
                         t.status = fstatus;
-                        task::track_status_transition(&prev, t, chrono::Utc::now());
+                        task_proto::track_status_transition(&prev, t, chrono::Utc::now());
                     });
                 }
             }
@@ -643,7 +598,7 @@ pub fn draft_project(title: String) -> ProjectInfo {
         priority: "normal".into(),
         project_type: "general".into(),
         lead: String::new(),
-        tags: project::model::Tags::default(),
+        tags: project_proto::model::Tags::default(),
         parent_id: None,
         same_as: None,
         target_date: None,

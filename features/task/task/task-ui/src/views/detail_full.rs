@@ -1,12 +1,11 @@
 //! `TaskDetailFull` — the rich, read-mostly detail surface.
 //!
-//! Designed to back BOTH the upcoming `/tasks/:id` page and the
-//! existing quick-edit sheet. Unlike the list / kanban views
-//! (which render the wasm-mirror `crate::model::TaskInfo`), this
-//! family consumes the full persistence shape `task::TaskInfo` +
-//! `WorkflowAttrs` directly — the page layer already holds the
-//! authoritative `Vec<task::TaskInfo>` (see `crates/ui`'s
-//! `task_wiring`), so no second mirror or converter is needed.
+//! Designed to back BOTH the `/tasks/:id` page and the existing
+//! quick-edit sheet. Like every other view in this crate it
+//! renders `task_proto::TaskInfo` + `WorkflowAttrs` directly —
+//! the page layer already holds the authoritative
+//! `Vec<TaskInfo>` (see `crates/ui`'s `task_wiring`), so no
+//! mirror or converter sits in between.
 //!
 //! Doctrine (plans/project-overview-task-ui.md): all data in via
 //! props (pre-resolved labels included — no lookups here), all
@@ -14,12 +13,12 @@
 //! writes, session fetch) happens in the page layer later.
 
 use dioxus::prelude::*;
-use task::TaskInfo as DbTask;
-use task::model::Estimate;
+use task_proto::model::Estimate;
+use task_proto::{Priority, Status, TaskInfo as DbTask};
 use uuid::Uuid;
 use workflows_proto::{Activity, Transition};
 
-use crate::model::{Priority, Status};
+use crate::display::{PriorityLabel, StatusLabel};
 use crate::views::links::LinkChips;
 use crate::views::palette::{priority_pill, status_pill};
 use crate::views::session_history::SessionHistory;
@@ -49,7 +48,7 @@ pub struct SubtaskRow {
 }
 
 /// Current claim state of the viewed task, as understood by the
-/// page layer. Mirrors `task::service::ClaimResult` so wiring is
+/// page layer. Mirrors `task_proto::service::ClaimResult` so wiring is
 /// a `From` away; `Pending` covers the in-flight RPC.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum ClaimState {
@@ -64,11 +63,12 @@ pub enum ClaimState {
     Pending,
 }
 
-impl From<task::service::ClaimResult> for ClaimState {
-    fn from(r: task::service::ClaimResult) -> Self {
+impl From<task_proto::service::ClaimResult> for ClaimState {
+    fn from(r: task_proto::service::ClaimResult) -> Self {
         match r {
-            task::service::ClaimResult::Won | task::service::ClaimResult::AlreadyMine => Self::Mine,
-            task::service::ClaimResult::Lost { holder } => Self::Held { holder },
+            task_proto::service::ClaimResult::Won
+            | task_proto::service::ClaimResult::AlreadyMine => Self::Mine,
+            task_proto::service::ClaimResult::Lost { holder } => Self::Held { holder },
         }
     }
 }
@@ -102,7 +102,7 @@ pub fn resolve_links(ids: &[Uuid], resolved: &[LinkedTaskRef]) -> Vec<LinkedTask
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TaskDetailFullProps {
-    /// Full persistence record (`task::TaskInfo`).
+    /// Full persistence record (`task_proto::TaskInfo`).
     pub task: DbTask,
     /// Resolved display label for `workflow.cycle`. Display-only
     /// this phase; `None` with a cycle id set falls back to the
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn claim_state_from_claim_result() {
-        use task::service::ClaimResult;
+        use task_proto::service::ClaimResult;
         assert_eq!(ClaimState::from(ClaimResult::Won), ClaimState::Mine);
         assert_eq!(ClaimState::from(ClaimResult::AlreadyMine), ClaimState::Mine);
         assert_eq!(

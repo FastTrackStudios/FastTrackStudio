@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use task::TaskInfo;
+use task_proto::TaskInfo;
 use task_ui::views::resolve_links;
 use task_ui::{ClaimState, LinkedTaskRef, SubtaskRow, TaskDetailFull};
 use uuid::Uuid;
@@ -35,7 +35,7 @@ fn claimant_json(account: Option<&crate::auth::ActiveAccount>) -> String {
     account.map_or_else(
         || WEB_CLAIMANT.to_owned(),
         |a| {
-            serde_json::to_string(&task::workflows_proto::AgentRef::Human {
+            serde_json::to_string(&task_proto::workflows_proto::AgentRef::Human {
                 user_id: a.user_id.to_string(),
                 display_name: Some(a.name.clone()),
             })
@@ -186,13 +186,13 @@ pub fn TaskDetailPage(id: Uuid) -> Element {
 }
 
 /// Friendly one-line label for a claim holder.
-fn agent_label(a: &task::workflows_proto::AgentRef) -> String {
+fn agent_label(a: &task_proto::workflows_proto::AgentRef) -> String {
     match a {
-        task::workflows_proto::AgentRef::Human {
+        task_proto::workflows_proto::AgentRef::Human {
             user_id,
             display_name,
         } => display_name.clone().unwrap_or_else(|| user_id.clone()),
-        task::workflows_proto::AgentRef::Agent { name, .. } => name.clone(),
+        task_proto::workflows_proto::AgentRef::Agent { name, .. } => name.clone(),
     }
 }
 
@@ -234,7 +234,7 @@ async fn update_task(slug: &str, task: TaskInfo) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::auth::ActiveAccount;
-    use task::workflows_proto::AgentRef;
+    use task_proto::workflows_proto::AgentRef;
 
     fn cody() -> ActiveAccount {
         ActiveAccount {
@@ -288,11 +288,11 @@ mod claimant_tests {
 
     #[test]
     fn legacy_fallback_parses_as_agent_ref() {
-        let parsed: task::workflows_proto::AgentRef =
+        let parsed: task_proto::workflows_proto::AgentRef =
             serde_json::from_str(WEB_CLAIMANT).expect("fallback claimant must parse");
         match parsed {
-            task::workflows_proto::AgentRef::Human { user_id, .. } => assert_eq!(user_id, "web"),
-            other @ task::workflows_proto::AgentRef::Agent { .. } => {
+            task_proto::workflows_proto::AgentRef::Human { user_id, .. } => assert_eq!(user_id, "web"),
+            other @ task_proto::workflows_proto::AgentRef::Agent { .. } => {
                 panic!("expected human ref, got {other:?}")
             }
         }
