@@ -13,6 +13,7 @@ members = [
     #    history preserved; framework changes are ordinary in-tree work)
     "libs/architect/architect",
     "libs/vendor/dioxus-test",
+    "libs/vendor/world",
     "libs/architect/macros/architect-derive",
     "libs/architect/macros/architect-rpc-derive",
     "libs/architect/macros/architect-action-derive",
@@ -575,6 +576,7 @@ delay = { path = "features/fx/delay/delay" }
 pitch = { path = "features/fx/pitch/pitch" }
 pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
 tune = { path = "features/fx/tune/tune" }
+world-sys = { path = "libs/vendor/world" }
 tune-dsp = { path = "features/fx/tune/tune-dsp" }
 level = { path = "features/fx/level/level" }
 level-dsp = { path = "features/fx/level/level-dsp" }

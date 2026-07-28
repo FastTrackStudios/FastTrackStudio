@@ -27302,6 +27302,7 @@ dependencies = [
  "pitch-dsp",
  "realfft",
  "tract-onnx",
+ "world-sys",
 ]
 
 [[package]]
@@ -31027,6 +31028,13 @@ dependencies = [
  "vox",
  "vox-types",
  "workflows-proto",
+]
+
+[[package]]
+name = "world-sys"
+version = "0.1.0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

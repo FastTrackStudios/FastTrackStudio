@@ -96,3 +96,16 @@ incl. melonix deep-dive.
   block-rate retune-slew bug is also fixed (settles by real block
   duration). The old octave-down test's CMND measure was being fooled
   by grain-rate AM into a 5x subharmonic — now zero-crossing based.
+
+- **WORLD vendored + render path landed**: libs/vendor/world
+  (world-sys, modified-BSD, cc-built with a thin extern-C wrapper
+  flattening the double** spectrograms). WorldAnalysis::analyze
+  (Harvest → CheapTrick → D4C) + synthesize_with_f0 — formant
+  preservation PROVEN in test (envelope peak stays at the formant
+  through a +26% pitch move, measured at harmonics). tune-dsp gains
+  the `world` feature + render.rs: PitchDoc edits → f0 rewrite on the
+  WORLD frame grid → resynthesis; end-to-end test transposes a blob
+  +3 st and the render lands on the new pitch with the formant intact.
+  Remaining for the editor: piano-roll surface (signal-ui) over
+  PitchDoc, time-warp in the render (frame remapping), engine-side
+  render jobs + styx doc format.
