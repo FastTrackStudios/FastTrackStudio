@@ -9289,6 +9289,7 @@ dependencies = [
  "signal-keys-ui",
  "signal-pack-library",
  "signal-packs-proto",
+ "signal-rigs-proto",
  "signal-sampler",
  "signal-synth-proto",
  "signal-synth-rig",
@@ -23138,6 +23139,7 @@ dependencies = [
  "signal-bass-proto",
  "signal-proto",
  "signal-rig-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "tracing",
  "tracing-subscriber",
@@ -23214,6 +23216,7 @@ dependencies = [
  "signal-fx",
  "signal-plugin-host",
  "signal-rig-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "tracing",
  "tracing-subscriber",
@@ -23310,6 +23313,7 @@ dependencies = [
  "signal-guitar-proto",
  "signal-proto",
  "signal-rig-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "tokio",
  "tracing",
@@ -23405,6 +23409,7 @@ dependencies = [
  "signal-plugin-host",
  "signal-proto",
  "signal-rig-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "signal-synth",
  "tokio",
@@ -23584,6 +23589,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-rigs-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "vox",
+]
+
+[[package]]
 name = "signal-sampler"
 version = "0.1.0"
 dependencies = [
@@ -23700,6 +23714,7 @@ dependencies = [
  "signal-browser",
  "signal-keys",
  "signal-plugin-host",
+ "signal-rigs-proto",
  "signal-sampler",
  "signal-synth",
  "signal-synth-proto",
