@@ -1,18 +1,24 @@
-//! `task` CLI — vertical-slice scaffold.
+//! `task` CLI — argument parsing, dispatch, and client plumbing.
 //!
-//! After the Loro entity layer was ripped, the surface is:
-//! - `task doctor` — print resolved vox endpoint URL.
-//! - `task vault <cmd>` — filesystem-native vault queries +
-//!   mutations (open / pages / tags / tasks / backlinks /
-//!   outline / grep / property-{read,set,remove} / create /
-//!   append / delete / move / base-query).
+//! Every command lives in its own module (`project`, `wiki`,
+//! `timer`, …); this file owns [`Cli`] / [`Commands`], the dispatch
+//! match, and the vox client helpers the modules share. The module
+//! for `task task …` is `task_cmd` — `mod task` at the crate root
+//! would shadow the `task` crate itself.
 //!
-//! Task / project commands (`list`, `set-done`, `new-task`,
-//! `new-project`) went away with `project-crdt`. Rebuild them
-//! against `vault::Vault` once the on-disk task convention is
-//! pinned down (frontmatter shape, folder layout).
+//! Commands reach their data one of two ways, and which one is not
+//! yet a settled design. Most go through vox against
+//! `/org/<slug>/vox`. A handful — `wiki`, `vault`, `agent`, `label`,
+//! `code`, `cycle`, `setup` — open the org tree on disk directly,
+//! and `timer` / `finance` / `auth` / `inbox` do both. The
+//! direct-to-disk paths resolve through
+//! `org_proto::DataRoot::from_env()` and therefore only work against
+//! an org hosted on this machine; `auth` makes that explicit with a
+//! guard that refuses to run against a remote session. Unifying this
+//! needs a decision about whether the CLI is a client or a
+//! co-resident tool.
 //!
-//! Endpoint resolution for `task doctor` (first match wins):
+//! Server endpoint resolution (first match wins):
 //! 1. `--server <url>` flag.
 //! 2. `TASK_VOX_URL` env var (loaded from `.env` if present).
 //! 3. `ws://127.0.0.1:9090/vox` default.
