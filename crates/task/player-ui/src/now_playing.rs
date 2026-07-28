@@ -4,10 +4,10 @@
 //! status bar:
 //!
 //! - [`GlobalNowPlayer`] is the headless engine — mounted once in
-//!   [`crate::shell::app_shell::AppShell`], OUTSIDE the route `Outlet`, so
+//!   [`the app shell`], OUTSIDE the route `Outlet`, so
 //!   its single `<audio>` element keeps playing across route changes. It
 //!   owns the queue (captured at play time, see
-//!   [`crate::chrome::NowPlayingRequest`]), mirrors its state into
+//!   [`crate::context::NowPlayingRequest`]), mirrors its state into
 //!   [`NowPlayingCtl`], and executes transport commands the UI posts back.
 //!   It renders nothing.
 //! - [`NowPlayingTab`] is the UI — a small rounded tab docked in the
@@ -22,7 +22,7 @@
 //!
 //! Future: a `video:` queue swaps the `<audio>` for a `<video>`.
 
-use crate::format::duration_mmss;
+use task_ui_core::format::duration_mmss;
 use dioxus::prelude::*;
 
 /// A transport command the [`NowPlayingTab`] UI posts to the headless
@@ -201,8 +201,8 @@ mod imp {
     use web_sys::{AnalyserNode, AudioContext, HtmlAudioElement, MediaElementAudioSourceNode};
 
     use super::{NowPlayingCtl, NpCmd};
-    use crate::chrome::NowPlaying;
-    use crate::pages::setlist_stream::imp::{Track, element_for, load_tracks};
+    use crate::context::NowPlaying;
+    use crate::setlist_stream::imp::{Track, element_for, load_tracks};
 
     /// Headless engine: owns the audio + queue, mirrors state to
     /// [`NowPlayingCtl`], and runs transport commands. Renders nothing (the
@@ -566,7 +566,7 @@ mod imp {
             };
             let is_active = el
                 .get_attribute("data-href")
-                .and_then(|h| h.strip_prefix("song-play:").map(crate::pages::vault::slugify))
+                .and_then(|h| h.strip_prefix("song-play:").map(task_ui_core::frontmatter::slugify))
                 .as_deref()
                 == active_slug;
             if is_active {

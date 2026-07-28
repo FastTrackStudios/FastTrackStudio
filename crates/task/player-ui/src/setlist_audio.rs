@@ -37,7 +37,7 @@ mod imp {
         MessagePort, Response,
     };
 
-    use crate::pages::song_session::imp::Manifest;
+    use crate::song_session::imp::Manifest;
 
     /// Stable take-guid for stem `j` of song `i` — the async decode attaches
     /// PCM by the same key the seed used. Unique across the whole setlist
@@ -63,11 +63,11 @@ mod imp {
     // service worker (scoped to `/assets/`) answers asset fetches with the
     // HTML shell. A Blob URL carries its own MIME and needs no server.
     const WORKLET_GLUE: &str =
-        include_str!("../../../../../apps/task/web/assets/worklet/daw_standalone.js");
+        include_str!("../../../../apps/task/web/assets/worklet/daw_standalone.js");
     const WORKLET_PROC: &str =
-        include_str!("../../../../../apps/task/web/assets/worklet/processor.js");
+        include_str!("../../../../apps/task/web/assets/worklet/processor.js");
     const WORKLET_WASM: &[u8] =
-        include_bytes!("../../../../../apps/task/web/assets/worklet/daw_standalone_bg.wasm");
+        include_bytes!("../../../../apps/task/web/assets/worklet/daw_standalone_bg.wasm");
 
     thread_local! {
         /// ONE `AudioContext` for the whole app, created lazily and NEVER

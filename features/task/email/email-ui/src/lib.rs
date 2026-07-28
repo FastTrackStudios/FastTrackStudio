@@ -15,7 +15,8 @@ use dioxus::prelude::*;
 use email_proto::{Account, Envelope};
 use fts_ui::prelude::*;
 
-use crate::orgs::{OrgMeta, OrgSelection};
+use task_ui_core::feeds;
+use task_ui_core::orgs::{OrgMeta, OrgSelection};
 
 #[component]
 pub fn EmailView() -> Element {
@@ -24,7 +25,7 @@ pub fn EmailView() -> Element {
 
     // The org we read mail from (first selected, or home).
     let slug = use_memo(move || {
-        crate::orgs::selected_slugs(&selection.read(), &org_list.read())
+        task_ui_core::orgs::selected_slugs(&selection.read(), &org_list.read())
             .into_iter()
             .next()
     });
@@ -35,7 +36,7 @@ pub fn EmailView() -> Element {
 
     let accounts = use_resource(move || async move {
         match slug() {
-            Some(s) => crate::feeds::fetch_email_accounts(&s).await,
+            Some(s) => fetch_email_accounts(&s).await,
             None => Ok(Vec::new()),
         }
     });
@@ -57,7 +58,7 @@ pub fn EmailView() -> Element {
 
     let envelopes = use_resource(move || async move {
         match (slug(), selected_account()) {
-            (Some(s), Some(acct)) => crate::feeds::fetch_email_envelopes(&s, &acct, 50).await,
+            (Some(s), Some(acct)) => fetch_email_envelopes(&s, &acct, 50).await,
             _ => Ok(Vec::new()),
         }
     });
@@ -216,4 +217,46 @@ fn format_date(date_ms: i64) -> String {
         .single()
         .map(|dt| dt.format("%b %-d").to_string())
         .unwrap_or_default()
+}
+
+// ── data ────────────────────────────────────────────────────────────
+//
+// This slice's RPCs live with the page that calls them, not in the
+// shell's `feeds` module — that is the point of the split. `feeds!` and
+// the fan-out helpers come from `task-ui-core`; see its `feeds` module
+// for the shape.
+
+feeds! {
+    email_proto::EmailSyncClient {
+        /// Every mail account the org's `EmailSync` backend serves. An org
+        /// with no configured mailbox returns an empty list (operational but
+        /// unconfigured) — the `/email` page renders that as an empty state
+        /// rather than an error.
+        fetch_email_accounts() -> Vec<email_proto::Account>
+            = accounts() as "list accounts";
+    }
+}
+
+/// Recent envelopes (header summaries) for one account's `INBOX`,
+/// newest first. `count` caps the slice. Returns an empty list for an
+/// empty mailbox; surfaces backend errors verbatim so the page can show
+/// them inline.
+pub async fn fetch_email_envelopes(
+    slug: &str,
+    account: &str,
+    count: u32,
+) -> Result<Vec<email_proto::Envelope>, String> {
+    let client = task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+    let mut envelopes = client
+        .fetch_envelopes(
+            account.to_owned(),
+            "INBOX".to_owned(),
+            email_proto::SeqRange::Recent(count),
+        )
+        .await
+        .map_err(|e| format!("{slug}: fetch envelopes: {e:?}"))?;
+    // Newest first — the backend's `Recent` ordering isn't guaranteed
+    // across implementations, so sort defensively on the date.
+    envelopes.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
+    Ok(envelopes)
 }

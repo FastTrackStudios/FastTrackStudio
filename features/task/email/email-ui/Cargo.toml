@@ -1,0 +1,22 @@
+[package]
+name = "email-ui"
+description = "Dioxus page for the mail reader (`/email`) — account list plus the selected account's recent envelopes. Owns its own `EmailSync` calls; the shell only routes to it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dioxus = { workspace = true }
+fts-ui.workspace = true
+# The shared UI seam: org scoping, the `feeds!` call macro over the
+# per-org vox connection, and the loading / error / empty phases.
+task-ui-core.workspace = true
+email-proto = { workspace = true, features = ["vox"] }
+# Envelope date formatting in the local zone.
+chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
+
+[lints]
+workspace = true

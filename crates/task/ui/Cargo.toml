@@ -34,20 +34,17 @@ view-calendar.workspace = true
 view-knowledge-graph.workspace = true
 task-ui.workspace = true
 
-# `type: song` vault view — the browser multitrack session player. The real
-# session-ui presentational components (mixer, transport, progress bars) plus
-# the proto types that drive them; the player populates session-ui's global
-# signals directly and renders these components (same crates the fasttrackstudio
-# wasm remote uses). `keyflow` (engraver+text) + `editor-keyflow` render the
-# synced chart pane (CPU engraver → inline SVG + `@font-face` glyphs).
-session-ui = { workspace = true, features = ["web"] }
-session-proto = { workspace = true }
-daw-proto = { workspace = true }
+# The shared Task UI seam — vox endpoint + per-org connection root,
+# display formatting, vault frontmatter reads. Re-exported from `lib.rs`
+# as `crate::format` / `crate::vox_session`.
+task-ui-core.workspace = true
+# `type: song` / `type: setlist` vault views — the browser multitrack
+# session player, extracted whole into its own crate. ONE dependency
+# instead of the audio stack: `session-ui`, `session-proto`, `daw-proto`,
+# `keyflow` (engraver), `editor-keyflow{,-lang}` and — on wasm — `daw`,
+# `daw-standalone` and `session` are all its business now, not ours.
+task-player-ui.workspace = true
 share-proto = { workspace = true }
-keyflow = { workspace = true, features = ["engraver", "text"] }
-editor-keyflow = { workspace = true }
-# Keyflow syntax highlighting for the setlist experience's chart editor.
-editor-keyflow-lang = { workspace = true }
 # `vox` for the `DayTemplatesClient` the schedule page calls to load
 # the day-plan overlay. Wasm-clean (serde-only client side).
 scheduling-proto = { workspace = true, features = ["vox", "atom"] }
@@ -91,16 +88,17 @@ cookbook-proto = { workspace = true, features = ["vox", "atom"] }
 pantry-proto = { workspace = true, features = ["vox", "atom"] }
 mealplan-proto = { workspace = true, features = ["vox"] }
 scheduling-ui.workspace = true
-# Cyclic life-calendar — Goals view uses the pure-function
-# generator to resolve `cycle_id` references to displayable
-# year/quarter/ordinal labels.
-cycle = { workspace = true, default-features = false }
+# Extracted feature pages — the shell routes to them, they own their
+# own protos and RPC calls. See crates/task/ui/ARCHITECTURE.md.
+links-ui.workspace = true
+email-ui.workspace = true
+goal-ui.workspace = true
+scripture-ui.workspace = true
 # Architect-generated vox clients for project + goal. The
 # workspace pins vox to `default-features = false,
 # features = ["runtime"]` which is wasm-clean (no tcp /
 # tokio[net]). Pattern lifted from `vox/rust/wasm-browser-tests`.
 project = { workspace = true, features = ["vox"] }
-goal = { workspace = true, features = ["vox"] }
 task = { workspace = true, features = ["vox"] }
 # Timer service client for the `/timer` time-tracking page.
 timer-proto = { workspace = true, features = ["vox"] }
@@ -113,20 +111,11 @@ agent-proto = { workspace = true, features = ["vox"] }
 # auto-emitted `VaultSyncClient`. `vox` feature only (no
 # `server`/`full`), so it stays wasm-clean like the others.
 vault-proto = { workspace = true, features = ["vox"] }
-# Signed blob download URLs for song stems stored as attachments
-# (the `stems:` frontmatter on `type: song` notes).
-attachments-proto = { workspace = true, features = ["vox"] }
-# Media streamed over vox — the forward path for stem playback.
-media-proto = { workspace = true, features = ["vox"] }
 # Wiki raw-source wire surface — `RawLayerClient` for the
 # `/wiki/sources` list + `/wiki/source/:name` SourceViewer
 # (archived articles + ^t-anchored video transcripts). `vox`
 # feature only, wasm-clean like the other proto clients.
 wiki-proto = { workspace = true, features = ["vox"] }
-# Email wire surface — the `EmailSync` client for the `/email`
-# page (account list + recent envelopes). `vox` feature only, so
-# it stays wasm-clean like the other proto clients above.
-email-proto = { workspace = true, features = ["vox"] }
 # Forge wire surface — `RepoCatalog` / `IssueTracker` clients the
 # `/repos` page binds to list repos + their issues for the
 # selected org. `vox` feature only, wasm-clean like the others.
@@ -162,16 +151,10 @@ nucleo-matcher.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
-# Error type for the Stage 4a in-browser session engine (wasm-only, but
-# wasm-clean + tiny so it rides the shared dep table).
-eyre.workspace = true
 fake.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-# Parses the song.md / arrangement.md frontmatter (the `song` folder schema)
-# when playing a manifest-less colocated song.
-serde_yaml.workspace = true
 
 # Browser glue. Compiles cleanly on native too; the source uses
 # them only inside `cfg(target_arch = "wasm32")` blocks.
@@ -207,56 +190,16 @@ web-sys = { workspace = true, features = [
     "Clipboard",
     "console",
     "Response",
-    # `type: song` session player — Web Audio multitrack. Each stem is streamed
-    # via an HTMLAudioElement (progressive Opus/ogg, low memory) routed through
-    # a per-stem GainNode for the mixer (mute/solo/volume).
-    "AudioContext",
-    "AudioContextOptions",
-    "AudioContextState",
-    "BaseAudioContext",
-    "AudioNode",
-    "AudioParam",
-    "GainNode",
-    "AudioDestinationNode",
-    # Per-stem VU metering tap (post-gain analyser → peak level).
-    "AnalyserNode",
-    # Stage 4b-2 engine-fed audio: a ScriptProcessorNode drives
-    # daw-standalone's WebRenderer (render() → the two output channels),
-    # and decodeAudioData → AudioBuffer supplies the decoded stem PCM.
-    "ScriptProcessorNode",
-    "AudioProcessingEvent",
-    "AudioBuffer",
-    "OscillatorNode",
-    # AudioWorklet render pump (setlist_audio.rs): the queue-player processor
-    # ships inline via a Blob URL; blocks stream over the node's MessagePort.
-    "AudioWorklet",
-    "AudioWorkletNode",
-    "AudioWorkletNodeOptions",
-    "Worklet",
-    "MessagePort",
-    "BlobPropertyBag",
-    "HtmlAudioElement",
-    "HtmlMediaElement",
-    "MediaElementAudioSourceNode",
-    "MediaStream",
-    "MediaStreamAudioDestinationNode",
-    # Media-over-vox playback: MediaSource-backed <audio> fed by
-    # MediaService chunks (src/pages/vox_media_source.rs).
-    "MediaSource",
-    "SourceBuffer",
-    "MediaSourceReadyState",
-    "Url",
 ] }
 futures-channel.workspace = true
 futures-util.workspace = true
 
-# Vox runtime (gives `#[vox::service]` clients + acceptor_on / NoopClient).
-# `transport-websocket` is enabled separately via `vox-websocket` so the
-# wasm build sidesteps `vox::highlevel::ws::WsListener` which always
-# wires `tokio::net::TcpListener`.
+# Vox runtime (gives `#[vox::service]` clients). The transport +
+# connection root live in `task-ui-core`; the shell only needs the
+# generated client traits its own protos expose.
 vox.workspace = true
 vox-core.workspace = true
-vox-websocket.workspace = true
+
 
 # Client-state framework: Connection/use_connect_reactive (per-org vox
 # caller), notifications + reactivity registries, optimistic Store +
@@ -277,23 +220,6 @@ crdt = { workspace = true, features = ["dioxus"] }
 # page. Wasm-only — used inside `cfg(target_arch = "wasm32")` blocks.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true, features = ["futures"] }
-
-# Stage 4a in-browser session engine (`src/session_engine.rs`, wasm-only):
-# a headless daw-standalone setlist player hosted in the tab via architect's
-# in-process LocalServer. These are the native player crates the
-# fasttrackstudio app embeds; here they run in the browser. Wasm target table
-# ONLY — native task builds (desktop/mobile/server) never pull them (they
-# carry REAPER/audio backends), keeping the native footprint unchanged.
-#
-#   session          the setlist-service facade (wasm-safe path: the
-#                    backend-agnostic `daw::get()` facade, no REAPER)
-#   daw              the base daw facade (`init_from_parts`, `LayerRouter`)
-#   daw-standalone   the in-process backend — `decode`+`web` (pure-Rust
-#                    symphonia + wasm-bindgen, NO cpal) + `bootstrap`
-#                    (`build_in_process_daw`)
-session = { workspace = true }
-daw = { workspace = true }
-daw-standalone = { workspace = true, features = ["decode", "web", "bootstrap"] }
 
 # Native session-token persistence (desktop/mobile) — architect-auth's
 # FileTokenStore, used in `cfg(not(target_arch = "wasm32"))` blocks in auth.rs.

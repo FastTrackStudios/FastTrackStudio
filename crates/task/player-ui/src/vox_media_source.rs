@@ -77,7 +77,7 @@ async fn feed(ms: MediaSource, org: String, hash: String) -> Result<(), String> 
         .add_source_buffer(WEBM_OPUS)
         .map_err(|e| format!("addSourceBuffer: {e:?}"))?;
 
-    let client = crate::vox_clients::media_client(&org).await?;
+    let client = crate::media_client(&org).await?;
     let (tx, mut rx) = vox::channel::<MediaChunk>();
     let h = hash.clone();
     wasm_bindgen_futures::spawn_local(async move {

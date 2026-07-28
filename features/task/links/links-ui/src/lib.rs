@@ -18,7 +18,8 @@ use view_knowledge_graph::{
     GraphFilterState, GraphFilters, KnowledgeGraphView, WikiGraph, apply_filters, build_link_graph,
 };
 
-use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
+use task_ui_core::feeds;
+use task_ui_core::orgs::{OrgMeta, OrgSelection, selected_slugs};
 
 /// The focal node plus its 1-hop neighbourhood — every edge touching
 /// `focal` and the nodes on either end. Empty edge set ⇒ just the node.
@@ -64,7 +65,7 @@ pub fn ConnectionsView() -> Element {
             .first()
             .cloned()
             .ok_or_else(|| "no organization selected".to_string())?;
-        let links = crate::feeds::fetch_link_graph(&slug).await?;
+        let links = fetch_link_graph(&slug).await?;
         Ok::<WikiGraph, String>(build_link_graph(&links, true))
     });
 
@@ -177,5 +178,22 @@ fn render_empty() -> Element {
             Heading { level: HeadingLevel::H3, "No connections yet" }
             Text { variant: TextVariant::Muted, "Annotate a verse, song or sermon to start weaving the web." }
         }
+    }
+}
+
+// ── data ────────────────────────────────────────────────────────────
+//
+// This slice's RPCs live with the page that calls them, not in the
+// shell's `feeds` module — that is the point of the split. `feeds!` and
+// the fan-out helpers come from `task-ui-core`; see its `feeds` module
+// for the shape.
+
+feeds! {
+    links_proto::LinksServiceClient {
+        /// Every typed link in an org's graph — the verse↔song↔sermon↔topic web
+        /// for the `/connections` page. Fetches at the lowest confidence and
+        /// includes private links; the page filters client-side.
+        fetch_link_graph() -> Vec<links_proto::TypedLink>
+            = graph(links_proto::Confidence::Speculative, true) as "link graph";
     }
 }

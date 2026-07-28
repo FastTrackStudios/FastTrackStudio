@@ -1,7 +1,7 @@
 //! `/goals` — goal hierarchy + cycle anchoring.
 //!
 //! Loads the selected org(s)' goals via the multi-org
-//! [`crate::feeds`] fan-out (the same convention as `/projects` and
+//! [`task_ui_core::feeds::fan_out`] (the same convention as `/projects` and
 //! `/tasks`): "All" aggregates every hosted org, selecting one scopes
 //! to it. Cycle pills resolve `cycle_id` ⇒ `(year, quarter, ordinal)`
 //! via the local pure-function generator (deterministic UUIDv5 means
@@ -14,15 +14,15 @@ use fts_ui::prelude::*;
 use goal::Goal;
 use uuid::Uuid;
 
-use crate::orgs::{OrgMeta, OrgSelection};
+use task_ui_core::orgs::{OrgMeta, OrgSelection};
 
 #[component]
 pub fn GoalsView() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let goals = use_resource(move || async move {
-        let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
-        crate::feeds::fetch_goals(&slugs).await
+        let slugs = task_ui_core::orgs::selected_slugs(&selection.read(), &org_list.read());
+        fetch_goals(&slugs).await
     });
 
     // Current cycle highlight — drives the "you're here" pill.
@@ -321,4 +321,16 @@ fn first_line(body: &str) -> Option<String> {
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with("---"))
         .map(std::string::ToString::to_string)
+}
+
+// ── data ────────────────────────────────────────────────────────────
+//
+// This slice's RPCs live with the page that calls them, not in the
+// shell's `feeds` module — that is the point of the split. `feeds!` and
+// the fan-out helpers come from `task-ui-core`; see its `feeds` module
+// for the shape.
+
+/// Goals across the selected orgs (concurrent fan-out).
+pub async fn fetch_goals(slugs: &[String]) -> Result<Vec<goal::Goal>, String> {
+    task_ui_core::feeds::fan_out(slugs, "list", |c: goal::GoalServiceClient| async move { c.list().await }).await
 }

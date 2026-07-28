@@ -4,7 +4,7 @@
 //! session view + chart as tabs that FOLLOW the current song.
 //!
 //! Built on the same streaming Web-Audio engine as the single-song
-//! [`SongView`](crate::pages::song_session) — the reusable primitives (manifest
+//! [`SongView`](crate::song_session) — the reusable primitives (manifest
 //! model, engine, mixer, session-proto mapping) are shared from
 //! `song_session::imp`; this module only adds the multi-song orchestration.
 //!
@@ -35,7 +35,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(target_arch = "wasm32")]
 mod imp {
-    use crate::format::duration_mmss;
+    use task_ui_core::format::duration_mmss;
     use std::rc::Rc;
 
     use dioxus::prelude::*;
@@ -46,14 +46,14 @@ mod imp {
     };
     use session_ui::{PerformanceSidebar, SETLIST_STRUCTURE};
 
-    use crate::pages::session_chart_pane::SessionChartPane;
+    use crate::session_chart_pane::SessionChartPane;
     // Stage 4b-2: the WebRenderer audio graph for the active song (the SAME
     // daw-standalone render graph as native cpal), driven in lockstep with the
     // engine transport.
-    use crate::pages::setlist_audio::SetlistAudio;
+    use crate::setlist_audio::SetlistAudio;
     // The streaming engine + manifest model + session-proto mapping are shared
     // with the single-song player (see `song_session::imp`).
-    use crate::pages::song_session::imp as media;
+    use crate::song_session::imp as media;
 
     /// One row in the setlist navigator: display title plus the at-a-glance
     /// facts (key / tempo) and the song's accent color (its first section's
@@ -148,7 +148,7 @@ mod imp {
                 }
                 div { class: "flex min-h-0 flex-1 flex-col overflow-auto",
                     if selected == CenterRight::Editor {
-                        crate::pages::keyflow_chart_editor::KeyflowChartEditor {
+                        crate::keyflow_chart_editor::KeyflowChartEditor {
                             key: "{editor_key}",
                             source: source.clone(),
                             guid: guid.clone(),
@@ -457,7 +457,7 @@ mod imp {
         // `SessionEventBridge` (ACTIVE_INDICES → the follow-effect above). We
         // also nudge the local signals optimistically so the UI is snappy.
         // STAGE 4b-2: real audio playback replaces the (silent) soft clock.
-        let np_ctl = use_context::<crate::shell::now_playing::NowPlayingCtl>();
+        let np_ctl = use_context::<crate::now_playing::NowPlayingCtl>();
         let play_pause: Callback<()> = use_callback({
             let mut playing = playing;
             let audio = audio;
@@ -474,7 +474,7 @@ mod imp {
                         // (Merely opening the player doesn't do this — only Play.)
                         let mut cmd = np_ctl.cmd;
                         let g = cmd.peek().0 + 1;
-                        cmd.set((g, crate::shell::now_playing::NpCmd::Pause));
+                        cmd.set((g, crate::now_playing::NpCmd::Pause));
                         a.play();
                     } else {
                         a.pause();
@@ -1182,7 +1182,7 @@ mod imp {
                                         }
                                     }
                                     // Key / notation / capo selector (right).
-                                    crate::pages::session_chart_pane::KeyBar {}
+                                    crate::session_chart_pane::KeyBar {}
                                 }
                                 div { class: "min-h-0 flex-1 overflow-hidden",
                                     {match chart_left() {

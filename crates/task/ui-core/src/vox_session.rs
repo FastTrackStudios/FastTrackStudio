@@ -16,7 +16,7 @@ use std::sync::{LazyLock, RwLock};
 /// When set, it overrides the env/same-origin default in [`vox_url`].
 /// Held in a process-global so the plain (non-component) `vox_url` +
 /// establish paths can read it; the app root keeps it in sync with the
-/// active [`crate::server_registry::ServerEntry`] via [`set_active_server`].
+/// active the app's server registry via [`set_active_server`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActiveServer {
     /// vox base URL — `ws(s)://host[:port]` (a trailing `/vox` is fine;

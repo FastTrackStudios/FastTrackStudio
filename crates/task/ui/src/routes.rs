@@ -179,7 +179,7 @@ fn ContactsRoute() -> Element {
 
 #[component]
 fn EmailRoute() -> Element {
-    rsx! { pages::email::EmailView {} }
+    rsx! { email_ui::EmailView {} }
 }
 
 #[component]
@@ -194,7 +194,7 @@ fn ProjectDetailRoute(id: String) -> Element {
 
 #[component]
 fn GoalsRoute() -> Element {
-    rsx! { pages::goals::GoalsView {} }
+    rsx! { goal_ui::GoalsView {} }
 }
 
 #[component]
@@ -224,12 +224,12 @@ fn InventoryRoute() -> Element {
 
 #[component]
 fn ScriptureRoute(reference: String) -> Element {
-    rsx! { pages::scripture::ScriptureView { reference } }
+    rsx! { scripture_ui::ScriptureView { reference } }
 }
 
 #[component]
 fn ConnectionsRoute() -> Element {
-    rsx! { pages::connections::ConnectionsView {} }
+    rsx! { links_ui::ConnectionsView {} }
 }
 
 #[component]

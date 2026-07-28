@@ -14,7 +14,7 @@
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod imp {
-    use crate::format::duration_mmss;
+    use task_ui_core::format::duration_mmss;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -22,7 +22,7 @@ pub(crate) mod imp {
     use wasm_bindgen::JsCast;
     use web_sys::HtmlAudioElement;
 
-    use crate::pages::vault::song_front_from;
+    use task_ui_core::frontmatter::song_front_from;
 
     /// One playable row.
     #[derive(Clone, PartialEq)]
@@ -51,10 +51,10 @@ pub(crate) mod imp {
             // Colocated `song` folder (song.md) is authoritative; the legacy
             // manifest.json is only a fallback for songs not yet migrated, so
             // migrated songs can drop it (#57 manifest retirement).
-            let resolved = match crate::pages::song_session::imp::fetch_kf_manifest(org, slug).await
+            let resolved = match crate::song_session::imp::fetch_kf_manifest(org, slug).await
             {
                 Ok(m) => Ok(m),
-                Err(_) => crate::pages::song_session::imp::fetch_manifest(&url).await,
+                Err(_) => crate::song_session::imp::fetch_manifest(&url).await,
             };
             match resolved {
                 Ok(m) => {
@@ -190,7 +190,7 @@ pub(crate) mod imp {
         // editor) route here: match the name against the track list and
         // select it.
         {
-            let play_req = use_context::<crate::chrome::SongPlayRequest>().0;
+            let play_req = use_context::<crate::context::SongPlayRequest>().0;
             let tracks = tracks;
             let mut last_gen = use_signal(|| 0u64);
             use_effect(move || {
@@ -205,7 +205,7 @@ pub(crate) mod imp {
                     toggle.call(());
                     return;
                 }
-                let slug = crate::pages::vault::slugify(&name);
+                let slug = task_ui_core::frontmatter::slugify(&name);
                 let Some(Ok(list)) = &*tracks.read_unchecked() else {
                     return;
                 };

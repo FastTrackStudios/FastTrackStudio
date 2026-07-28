@@ -41,29 +41,228 @@ use uuid::Uuid;
 
 use crate::orgs::{OrgMeta, OrgSelection};
 
-/// Provide every feature store at the app root (after
-/// `architect::use_app_supervised`, which provides the notifications +
-/// reactivity registries the mutations report into).
-pub fn provide_stores() {
-    provide_task_store();
-    provide_project_store();
-    provide_location_store();
-    provide_item_store();
-    provide_milestone_store();
-    provide_body_metric_store();
-    provide_exercise_store();
-    provide_recipe_store();
-    provide_pantry_store();
-    provide_inbox_store();
-    provide_recall_store();
-    provide_contact_store();
-    provide_booking_store();
-    provide_event_type_store();
-    provide_dayplan_store();
-    provide_session_store();
-    provide_invoice_store();
-    provide_thread_store();
-    provide_message_store();
+// ─────────────────────────────────────────────────────────────────────
+// The shape
+// ─────────────────────────────────────────────────────────────────────
+//
+// Every feature repeated the same skeleton: a `Store<Entity, String>`
+// alias, a `provide_*_store` that installs it at the app root, a
+// `use_*_store` handle hook, and — for the plain single-org registers —
+// a `use_*_list` over `use_first_org_list` and a two-field
+// `*Mutations` handle. Nineteen copies of that is the bulk of this
+// file's boilerplate, so [`stores!`] declares them as a table instead.
+//
+// `list:` and `mutations:` are optional: a feature whose list hook maps
+// rows (the multi-org `Org<X>` wrappers) or whose mutations carry extra
+// context (tasks, day plans) omits the line and hand-writes that piece
+// below. Every `impl *Mutations` block stays hand-written — the macro
+// only declares the handle, never the operations.
+
+/// Declare the feature stores. See the shape notes above.
+macro_rules! stores {
+    ($(
+        $(#[$smeta:meta])*
+        $alias:ident: $entity:ty {
+            provide: $provide:ident,
+            handle: $handle:ident,
+            $(
+                list:
+                $(#[$lmeta:meta])*
+                $list:ident -> $key:ty = $fetch:path,
+            )?
+            $(
+                mutations:
+                $(#[$mmeta:meta])*
+                $muts:ident via $usemuts:ident,
+            )?
+        }
+    )*) => {
+        /// Provide every feature store at the app root (after
+        /// `architect::use_app_supervised`, which provides the notifications +
+        /// reactivity registries the mutations report into).
+        pub fn provide_stores() {
+            $($provide();)*
+        }
+
+        $(
+            $(#[$smeta])*
+            pub type $alias = Store<$entity, String>;
+
+            #[doc = concat!("Install the shared [`", stringify!($alias), "`] at the app root.")]
+            pub fn $provide() -> $alias {
+                let store = use_store();
+                use_context_provider(move || store)
+            }
+
+            #[doc = concat!("Handle to the app-root [`", stringify!($alias), "`].")]
+            pub fn $handle() -> $alias {
+                use_context()
+            }
+
+            $(
+                $(#[$lmeta])*
+                pub fn $list() -> AtomResult<Vec<(Id<$key>, $entity)>, String> {
+                    use_first_org_list($handle(), |slug| async move { $fetch(&slug).await })
+                }
+            )?
+
+            $(
+                $(#[$mmeta])*
+                #[derive(Clone, Copy)]
+                pub struct $muts {
+                    store: $alias,
+                    write: Mutation<String>,
+                }
+
+                #[doc = concat!("Handle for [`", stringify!($muts), "`].")]
+                pub fn $usemuts() -> $muts {
+                    $muts { store: $handle(), write: use_mutation() }
+                }
+            )?
+        )*
+    };
+}
+
+stores! {
+    TaskStore: OrgTask {
+        provide: provide_task_store,
+        handle: use_task_store,
+    }
+
+    ProjectStore: OrgProject {
+        provide: provide_project_store,
+        handle: use_project_store,
+        mutations:
+            /// Optimistic writes for projects (full-record update).
+            ProjectMutations via use_project_mutations,
+    }
+
+    LocationStore: locations_proto::Location {
+        provide: provide_location_store,
+        handle: use_location_store,
+        list: use_location_list -> Uuid = crate::feeds::fetch_locations,
+        mutations: LocationMutations via use_location_mutations,
+    }
+
+    ItemStore: inventory_proto::Item {
+        provide: provide_item_store,
+        handle: use_item_store,
+        list: use_item_list -> Uuid = crate::feeds::fetch_inventory,
+        mutations: ItemMutations via use_item_mutations,
+    }
+
+    MilestoneStore: milestone_proto::Milestone {
+        provide: provide_milestone_store,
+        handle: use_milestone_store,
+        list: use_milestone_list -> Uuid = crate::feeds::fetch_milestones,
+        mutations: MilestoneMutations via use_milestone_mutations,
+    }
+
+    BodyMetricStore: fitness_proto::body::BodyMetric {
+        provide: provide_body_metric_store,
+        handle: use_body_metric_store,
+        list: use_body_metric_list -> Uuid = crate::feeds::fetch_body_metrics,
+        mutations: BodyMetricMutations via use_body_metric_mutations,
+    }
+
+    ExerciseStore: fitness_proto::exercises::Exercise {
+        provide: provide_exercise_store,
+        handle: use_exercise_store,
+        list: use_exercise_list -> Uuid = crate::feeds::fetch_exercises,
+        mutations: ExerciseMutations via use_exercise_mutations,
+    }
+
+    RecipeStore: cookbook_proto::Recipe {
+        provide: provide_recipe_store,
+        handle: use_recipe_store,
+        list: use_recipe_list -> String = crate::feeds::fetch_recipes,
+        mutations: RecipeMutations via use_recipe_mutations,
+    }
+
+    PantryStore: pantry_proto::PantryItem {
+        provide: provide_pantry_store,
+        handle: use_pantry_store,
+        list: use_pantry_list -> Uuid = crate::feeds::fetch_pantry,
+        mutations: PantryMutations via use_pantry_mutations,
+    }
+
+    InboxStore: inbox_proto::InboxItem {
+        provide: provide_inbox_store,
+        handle: use_inbox_store,
+        list: use_inbox_list -> String = crate::feeds::fetch_inbox,
+        mutations:
+            /// Optimistic writes for the capture queue. Upserts return unit on the
+            /// wire, so the row we sent doubles as the reconciled value (the id is
+            /// client-minted and stable).
+            InboxMutations via use_inbox_mutations,
+    }
+
+    RecallStore: recall_proto::RecallCard {
+        provide: provide_recall_store,
+        handle: use_recall_store,
+        list: use_recall_list -> String = crate::feeds::fetch_recall_cards,
+        mutations:
+            /// Optimistic writes for the deck. Upserts return unit on the wire, so
+            /// the row we sent doubles as the reconciled value (the id is
+            /// client-minted and stable).
+            RecallMutations via use_recall_mutations,
+    }
+
+    ContactStore: contacts_proto::Contact {
+        provide: provide_contact_store,
+        handle: use_contact_store,
+        list: use_contact_list -> String = crate::feeds::fetch_contacts,
+        mutations:
+            /// Optimistic writes for the directory. Upserts return unit on the
+            /// wire, so the row we sent doubles as the reconciled value (the id is
+            /// client-minted and stable).
+            ContactMutations via use_contact_mutations,
+    }
+
+    BookingStore: scheduling_proto::Booking {
+        provide: provide_booking_store,
+        handle: use_booking_store,
+        mutations: BookingMutations via use_booking_mutations,
+    }
+
+    EventTypeStore: scheduling_proto::EventType {
+        provide: provide_event_type_store,
+        handle: use_event_type_store,
+        list: use_event_type_list -> String = crate::feeds::fetch_event_types,
+        mutations: EventTypeMutations via use_event_type_mutations,
+    }
+
+    DayPlanStore: DayPlanRow {
+        provide: provide_dayplan_store,
+        handle: use_dayplan_store,
+        mutations:
+            /// Optimistic writes for the schedule's per-day plans: every edit
+            /// patches the date's store row synchronously, then persists the whole
+            /// merged day (`save_day_plan`); a rejected write rolls the day back
+            /// and reports to the Notifications tray.
+            DayPlanMutations via use_dayplan_mutations,
+    }
+
+    SessionStore: OrgSession {
+        provide: provide_session_store,
+        handle: use_session_store,
+        mutations: TimerMutations via use_timer_mutations,
+    }
+
+    InvoiceStore: OrgInvoice {
+        provide: provide_invoice_store,
+        handle: use_invoice_store,
+    }
+
+    ThreadStore: threads::Thread {
+        provide: provide_thread_store,
+        handle: use_thread_store,
+    }
+
+    MessageStore: threads::Message {
+        provide: provide_message_store,
+        handle: use_message_store,
+    }
 }
 
 // ── shared plumbing ─────────────────────────────────────────────────
@@ -155,16 +354,6 @@ impl StoreEntity for OrgTask {
     }
 }
 
-pub type TaskStore = Store<OrgTask, String>;
-
-pub fn provide_task_store() -> TaskStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_task_store() -> TaskStore {
-    use_context()
-}
 
 /// Tasks across the selected orgs as one [`AtomResult`].
 pub fn use_task_list() -> AtomResult<Vec<(Id<Uuid>, OrgTask)>, String> {
@@ -400,16 +589,6 @@ impl StoreEntity for OrgProject {
     }
 }
 
-pub type ProjectStore = Store<OrgProject, String>;
-
-pub fn provide_project_store() -> ProjectStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_project_store() -> ProjectStore {
-    use_context()
-}
 
 /// Projects across the selected orgs as one [`AtomResult`]. Hydrates
 /// the shared store, so `/projects/:id` is instant after a list visit.
@@ -450,19 +629,6 @@ pub fn use_project(id: String) -> AtomResult<OrgProject, String> {
     })
 }
 
-/// Optimistic writes for projects (full-record update).
-#[derive(Clone, Copy)]
-pub struct ProjectMutations {
-    store: ProjectStore,
-    write: Mutation<String>,
-}
-
-pub fn use_project_mutations() -> ProjectMutations {
-    ProjectMutations {
-        store: use_project_store(),
-        write: use_mutation(),
-    }
-}
 
 /// A new project from just a title — active, normal priority, the
 /// backend fills id/path/dates. The one draft literal (CLI has its
@@ -546,22 +712,6 @@ impl ProjectMutations {
 
 // ── locations ───────────────────────────────────────────────────────
 
-pub type LocationStore = Store<locations_proto::Location, String>;
-
-pub fn provide_location_store() -> LocationStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_location_store() -> LocationStore {
-    use_context()
-}
-
-pub fn use_location_list() -> AtomResult<Vec<(Id<Uuid>, locations_proto::Location)>, String> {
-    use_first_org_list(use_location_store(), |slug| async move {
-        crate::feeds::fetch_locations(&slug).await
-    })
-}
 
 /// Unsaved placeholder row for an optimistic location insert. The
 /// backend assigns the real `id` and vault `path` on create.
@@ -585,18 +735,6 @@ pub fn draft_location(
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct LocationMutations {
-    store: LocationStore,
-    write: Mutation<String>,
-}
-
-pub fn use_location_mutations() -> LocationMutations {
-    LocationMutations {
-        store: use_location_store(),
-        write: use_mutation(),
-    }
-}
 
 impl LocationMutations {
     pub fn create(&self, slug: String, draft: locations_proto::Location) {
@@ -608,22 +746,6 @@ impl LocationMutations {
 
 // ── inventory ───────────────────────────────────────────────────────
 
-pub type ItemStore = Store<inventory_proto::Item, String>;
-
-pub fn provide_item_store() -> ItemStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_item_store() -> ItemStore {
-    use_context()
-}
-
-pub fn use_item_list() -> AtomResult<Vec<(Id<Uuid>, inventory_proto::Item)>, String> {
-    use_first_org_list(use_item_store(), |slug| async move {
-        crate::feeds::fetch_inventory(&slug).await
-    })
-}
 
 /// Unsaved placeholder row for an optimistic inventory insert.
 pub fn draft_item(name: String, category: String) -> inventory_proto::Item {
@@ -648,18 +770,6 @@ pub fn draft_item(name: String, category: String) -> inventory_proto::Item {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct ItemMutations {
-    store: ItemStore,
-    write: Mutation<String>,
-}
-
-pub fn use_item_mutations() -> ItemMutations {
-    ItemMutations {
-        store: use_item_store(),
-        write: use_mutation(),
-    }
-}
 
 impl ItemMutations {
     pub fn create(&self, slug: String, draft: inventory_proto::Item) {
@@ -671,22 +781,6 @@ impl ItemMutations {
 
 // ── milestones ──────────────────────────────────────────────────────
 
-pub type MilestoneStore = Store<milestone_proto::Milestone, String>;
-
-pub fn provide_milestone_store() -> MilestoneStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_milestone_store() -> MilestoneStore {
-    use_context()
-}
-
-pub fn use_milestone_list() -> AtomResult<Vec<(Id<Uuid>, milestone_proto::Milestone)>, String> {
-    use_first_org_list(use_milestone_store(), |slug| async move {
-        crate::feeds::fetch_milestones(&slug).await
-    })
-}
 
 /// Unsaved placeholder row for an optimistic milestone insert.
 pub fn draft_milestone(
@@ -710,18 +804,6 @@ pub fn draft_milestone(
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct MilestoneMutations {
-    store: MilestoneStore,
-    write: Mutation<String>,
-}
-
-pub fn use_milestone_mutations() -> MilestoneMutations {
-    MilestoneMutations {
-        store: use_milestone_store(),
-        write: use_mutation(),
-    }
-}
 
 impl MilestoneMutations {
     pub fn create(&self, slug: String, draft: milestone_proto::Milestone) {
@@ -733,23 +815,6 @@ impl MilestoneMutations {
 
 // ── fitness: body metrics + exercises ───────────────────────────────
 
-pub type BodyMetricStore = Store<fitness_proto::body::BodyMetric, String>;
-
-pub fn provide_body_metric_store() -> BodyMetricStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_body_metric_store() -> BodyMetricStore {
-    use_context()
-}
-
-pub fn use_body_metric_list() -> AtomResult<Vec<(Id<Uuid>, fitness_proto::body::BodyMetric)>, String>
-{
-    use_first_org_list(use_body_metric_store(), |slug| async move {
-        crate::feeds::fetch_body_metrics(&slug).await
-    })
-}
 
 /// Unsaved placeholder row for an optimistic body-metric insert.
 pub fn draft_body_metric(
@@ -772,18 +837,6 @@ pub fn draft_body_metric(
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct BodyMetricMutations {
-    store: BodyMetricStore,
-    write: Mutation<String>,
-}
-
-pub fn use_body_metric_mutations() -> BodyMetricMutations {
-    BodyMetricMutations {
-        store: use_body_metric_store(),
-        write: use_mutation(),
-    }
-}
 
 impl BodyMetricMutations {
     pub fn create(&self, slug: String, draft: fitness_proto::body::BodyMetric) {
@@ -793,23 +846,6 @@ impl BodyMetricMutations {
     }
 }
 
-pub type ExerciseStore = Store<fitness_proto::exercises::Exercise, String>;
-
-pub fn provide_exercise_store() -> ExerciseStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_exercise_store() -> ExerciseStore {
-    use_context()
-}
-
-pub fn use_exercise_list() -> AtomResult<Vec<(Id<Uuid>, fitness_proto::exercises::Exercise)>, String>
-{
-    use_first_org_list(use_exercise_store(), |slug| async move {
-        crate::feeds::fetch_exercises(&slug).await
-    })
-}
 
 /// Unsaved placeholder row for an optimistic exercise insert.
 pub fn draft_exercise(name: String, category: String) -> fitness_proto::exercises::Exercise {
@@ -835,18 +871,6 @@ pub fn draft_exercise(name: String, category: String) -> fitness_proto::exercise
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct ExerciseMutations {
-    store: ExerciseStore,
-    write: Mutation<String>,
-}
-
-pub fn use_exercise_mutations() -> ExerciseMutations {
-    ExerciseMutations {
-        store: use_exercise_store(),
-        write: use_mutation(),
-    }
-}
 
 impl ExerciseMutations {
     pub fn create(&self, slug: String, draft: fitness_proto::exercises::Exercise) {
@@ -858,22 +882,6 @@ impl ExerciseMutations {
 
 // ── mealplan: recipes + pantry ──────────────────────────────────────
 
-pub type RecipeStore = Store<cookbook_proto::Recipe, String>;
-
-pub fn provide_recipe_store() -> RecipeStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_recipe_store() -> RecipeStore {
-    use_context()
-}
-
-pub fn use_recipe_list() -> AtomResult<Vec<(Id<String>, cookbook_proto::Recipe)>, String> {
-    use_first_org_list(use_recipe_store(), |slug| async move {
-        crate::feeds::fetch_recipes(&slug).await
-    })
-}
 
 /// Unsaved placeholder row for an optimistic recipe insert. Identity is
 /// the vault-relative `path`; the store keys the draft by a typed
@@ -901,18 +909,6 @@ pub fn draft_recipe(name: String) -> cookbook_proto::Recipe {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct RecipeMutations {
-    store: RecipeStore,
-    write: Mutation<String>,
-}
-
-pub fn use_recipe_mutations() -> RecipeMutations {
-    RecipeMutations {
-        store: use_recipe_store(),
-        write: use_mutation(),
-    }
-}
 
 impl RecipeMutations {
     pub fn create(&self, slug: String, draft: cookbook_proto::Recipe) {
@@ -936,22 +932,6 @@ impl RecipeMutations {
     }
 }
 
-pub type PantryStore = Store<pantry_proto::PantryItem, String>;
-
-pub fn provide_pantry_store() -> PantryStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_pantry_store() -> PantryStore {
-    use_context()
-}
-
-pub fn use_pantry_list() -> AtomResult<Vec<(Id<Uuid>, pantry_proto::PantryItem)>, String> {
-    use_first_org_list(use_pantry_store(), |slug| async move {
-        crate::feeds::fetch_pantry(&slug).await
-    })
-}
 
 /// Unsaved placeholder row for an optimistic pantry insert.
 pub fn draft_pantry_item(name: String, qty: Option<f64>, unit: String) -> pantry_proto::PantryItem {
@@ -991,18 +971,6 @@ pub fn draft_pantry_item(name: String, qty: Option<f64>, unit: String) -> pantry
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct PantryMutations {
-    store: PantryStore,
-    write: Mutation<String>,
-}
-
-pub fn use_pantry_mutations() -> PantryMutations {
-    PantryMutations {
-        store: use_pantry_store(),
-        write: use_mutation(),
-    }
-}
 
 impl PantryMutations {
     pub fn create(&self, slug: String, draft: pantry_proto::PantryItem) {
@@ -1014,38 +982,6 @@ impl PantryMutations {
 
 // ── inbox ───────────────────────────────────────────────────────────
 
-pub type InboxStore = Store<inbox_proto::InboxItem, String>;
-
-pub fn provide_inbox_store() -> InboxStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_inbox_store() -> InboxStore {
-    use_context()
-}
-
-pub fn use_inbox_list() -> AtomResult<Vec<(Id<String>, inbox_proto::InboxItem)>, String> {
-    use_first_org_list(use_inbox_store(), |slug| async move {
-        crate::feeds::fetch_inbox(&slug).await
-    })
-}
-
-/// Optimistic writes for the capture queue. Upserts return unit on the
-/// wire, so the row we sent doubles as the reconciled value (the id is
-/// client-minted and stable).
-#[derive(Clone, Copy)]
-pub struct InboxMutations {
-    store: InboxStore,
-    write: Mutation<String>,
-}
-
-pub fn use_inbox_mutations() -> InboxMutations {
-    InboxMutations {
-        store: use_inbox_store(),
-        write: use_mutation(),
-    }
-}
 
 impl InboxMutations {
     /// Capture a fresh item: it appears instantly, then persists.
@@ -1143,38 +1079,6 @@ impl InboxMutations {
 
 // ── recall (spaced-repetition deck) ─────────────────────────────────
 
-pub type RecallStore = Store<recall_proto::RecallCard, String>;
-
-pub fn provide_recall_store() -> RecallStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_recall_store() -> RecallStore {
-    use_context()
-}
-
-pub fn use_recall_list() -> AtomResult<Vec<(Id<String>, recall_proto::RecallCard)>, String> {
-    use_first_org_list(use_recall_store(), |slug| async move {
-        crate::feeds::fetch_recall_cards(&slug).await
-    })
-}
-
-/// Optimistic writes for the deck. Upserts return unit on the wire, so
-/// the row we sent doubles as the reconciled value (the id is
-/// client-minted and stable).
-#[derive(Clone, Copy)]
-pub struct RecallMutations {
-    store: RecallStore,
-    write: Mutation<String>,
-}
-
-pub fn use_recall_mutations() -> RecallMutations {
-    RecallMutations {
-        store: use_recall_store(),
-        write: use_mutation(),
-    }
-}
 
 impl RecallMutations {
     /// Author a fresh card: it appears instantly, then persists.
@@ -1233,38 +1137,6 @@ impl RecallMutations {
 
 // ── contacts (vault-backed people directory) ────────────────────────
 
-pub type ContactStore = Store<contacts_proto::Contact, String>;
-
-pub fn provide_contact_store() -> ContactStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_contact_store() -> ContactStore {
-    use_context()
-}
-
-pub fn use_contact_list() -> AtomResult<Vec<(Id<String>, contacts_proto::Contact)>, String> {
-    use_first_org_list(use_contact_store(), |slug| async move {
-        crate::feeds::fetch_contacts(&slug).await
-    })
-}
-
-/// Optimistic writes for the directory. Upserts return unit on the
-/// wire, so the row we sent doubles as the reconciled value (the id is
-/// client-minted and stable).
-#[derive(Clone, Copy)]
-pub struct ContactMutations {
-    store: ContactStore,
-    write: Mutation<String>,
-}
-
-pub fn use_contact_mutations() -> ContactMutations {
-    ContactMutations {
-        store: use_contact_store(),
-        write: use_mutation(),
-    }
-}
 
 impl ContactMutations {
     /// Author a fresh contact: it appears instantly, then persists.
@@ -1308,16 +1180,6 @@ impl ContactMutations {
 
 // ── bookings + event types ──────────────────────────────────────────
 
-pub type BookingStore = Store<scheduling_proto::Booking, String>;
-
-pub fn provide_booking_store() -> BookingStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_booking_store() -> BookingStore {
-    use_context()
-}
 
 /// Bookings for the first selected org, soonest start first.
 pub fn use_booking_list() -> AtomResult<Vec<(Id<String>, scheduling_proto::Booking)>, String> {
@@ -1329,18 +1191,6 @@ pub fn use_booking_list() -> AtomResult<Vec<(Id<String>, scheduling_proto::Booki
     })
 }
 
-#[derive(Clone, Copy)]
-pub struct BookingMutations {
-    store: BookingStore,
-    write: Mutation<String>,
-}
-
-pub fn use_booking_mutations() -> BookingMutations {
-    BookingMutations {
-        store: use_booking_store(),
-        write: use_mutation(),
-    }
-}
 
 impl BookingMutations {
     /// Cancel a booking: the row vanishes instantly; restored (and the
@@ -1359,22 +1209,6 @@ impl BookingMutations {
     }
 }
 
-pub type EventTypeStore = Store<scheduling_proto::EventType, String>;
-
-pub fn provide_event_type_store() -> EventTypeStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_event_type_store() -> EventTypeStore {
-    use_context()
-}
-
-pub fn use_event_type_list() -> AtomResult<Vec<(Id<String>, scheduling_proto::EventType)>, String> {
-    use_first_org_list(use_event_type_store(), |slug| async move {
-        crate::feeds::fetch_event_types(&slug).await
-    })
-}
 
 /// Draft a bookable event type (client-minted stable id; the backend
 /// derives the vault `path`).
@@ -1394,18 +1228,6 @@ pub fn draft_event_type(title: String, duration_min: u16) -> scheduling_proto::E
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct EventTypeMutations {
-    store: EventTypeStore,
-    write: Mutation<String>,
-}
-
-pub fn use_event_type_mutations() -> EventTypeMutations {
-    EventTypeMutations {
-        store: use_event_type_store(),
-        write: use_mutation(),
-    }
-}
 
 impl EventTypeMutations {
     pub fn create(&self, slug: String, draft: scheduling_proto::EventType) {
@@ -1437,16 +1259,6 @@ impl StoreEntity for DayPlanRow {
     }
 }
 
-pub type DayPlanStore = Store<DayPlanRow, String>;
-
-pub fn provide_dayplan_store() -> DayPlanStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_dayplan_store() -> DayPlanStore {
-    use_context()
-}
 
 /// The template a date defaults to: `weekend` for Sat/Sun, else
 /// `weekday`; falls back to the first template if those ids are absent.
@@ -1544,22 +1356,6 @@ fn clamp_time(min: u16) -> scheduling_proto::TimeOfDay {
     }
 }
 
-/// Optimistic writes for the schedule's per-day plans: every edit
-/// patches the date's store row synchronously, then persists the whole
-/// merged day (`save_day_plan`); a rejected write rolls the day back
-/// and reports to the Notifications tray.
-#[derive(Clone, Copy)]
-pub struct DayPlanMutations {
-    store: DayPlanStore,
-    write: Mutation<String>,
-}
-
-pub fn use_dayplan_mutations() -> DayPlanMutations {
-    DayPlanMutations {
-        store: use_dayplan_store(),
-        write: use_mutation(),
-    }
-}
 
 impl DayPlanMutations {
     /// The shared save lifecycle: patch one date's plan, mark every
@@ -1702,16 +1498,6 @@ impl StoreEntity for OrgSession {
     }
 }
 
-pub type SessionStore = Store<OrgSession, String>;
-
-pub fn provide_session_store() -> SessionStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_session_store() -> SessionStore {
-    use_context()
-}
 
 /// Sessions across the selected orgs, newest first. The running timer
 /// is *derived* from this one list (the open row for the active org +
@@ -1749,18 +1535,6 @@ pub fn draft_session(req: &StartTimerRequest) -> WorkSession {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct TimerMutations {
-    store: SessionStore,
-    write: Mutation<String>,
-}
-
-pub fn use_timer_mutations() -> TimerMutations {
-    TimerMutations {
-        store: use_session_store(),
-        write: use_mutation(),
-    }
-}
 
 impl TimerMutations {
     /// Start a timer: an open session appears instantly, then
@@ -1916,16 +1690,6 @@ impl StoreEntity for OrgInvoice {
     }
 }
 
-pub type InvoiceStore = Store<OrgInvoice, String>;
-
-pub fn provide_invoice_store() -> InvoiceStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_invoice_store() -> InvoiceStore {
-    use_context()
-}
 
 /// Invoices across the selected orgs, newest first.
 pub fn use_invoice_list() -> AtomResult<Vec<(Id<Uuid>, OrgInvoice)>, String> {
@@ -2067,16 +1831,6 @@ impl InvoiceMutations {
 
 // ── threads + messages (per-entity conversations) ───────────────────
 
-pub type ThreadStore = Store<threads::Thread, String>;
-
-pub fn provide_thread_store() -> ThreadStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_thread_store() -> ThreadStore {
-    use_context()
-}
 
 /// Threads anchored to one project, as one [`AtomResult`]. `key` is
 /// `(owning slug, project id)` — `None` while the project itself is
@@ -2095,16 +1849,6 @@ pub fn use_project_threads(
     })
 }
 
-pub type MessageStore = Store<threads::Message, String>;
-
-pub fn provide_message_store() -> MessageStore {
-    let store = use_store();
-    use_context_provider(move || store)
-}
-
-pub fn use_message_store() -> MessageStore {
-    use_context()
-}
 
 /// Messages of the selected thread. `key` is `(owning slug, thread
 /// id)`; `None` (nothing selected) stays `Loading` — render its
