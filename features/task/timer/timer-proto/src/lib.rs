@@ -53,7 +53,9 @@ pub mod tag;
 pub use client::Client;
 pub use error::TimerError;
 pub use rate::{OrgMemberRate, ProjectMemberRate};
-pub use service::{LogSessionRequest, RateResolution, RateSource, StartTimerRequest, TimerService};
+pub use service::{
+    LogSessionRequest, RateResolution, RateSource, StartTimerRequest, TimerEvent, TimerService,
+};
 pub use session::{WorkSession, WorkSessionFilter};
 pub use tag::{Tag, WorkSessionTag};
 
@@ -61,3 +63,13 @@ pub use tag::{Tag, WorkSessionTag};
 /// app calls via `establish_for::<TimerServiceClient>(slug)`.
 #[cfg(feature = "vox")]
 pub use service::TimerServiceClient;
+
+// `#[subscribe] fn events` stream sibling — live session changes.
+// Mount `timer_service_stream_layer(backend)` next to the base
+// service; subscribers drive a `TimerServiceStreamClient`.
+#[cfg(feature = "vox")]
+pub use service::{
+    TimerServiceStream, TimerServiceStreamClient, TimerServiceStreamSource,
+    stream_layer as timer_service_stream_layer, stream_serve as serve_timer_service_stream,
+    timer_service_stream_service_descriptor as timer_stream_descriptor,
+};

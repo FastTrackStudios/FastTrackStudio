@@ -242,6 +242,7 @@ table!(TIMER, "timer", "timer/**", [
     wa "set_org_member_rate", wa "set_project_member_rate",
     rd "list_org_member_rates", rd "list_project_member_rates",
 ]);
+table!(TIMER_STREAM, "timer-stream", "timer/**", [rd "events"]);
 
 table!(THREADS, "threads", "threads/**", [
     rd "list_threads", rd "get_thread", cm "create_thread", rd "list_messages",
@@ -513,6 +514,7 @@ pub fn mounts() -> Vec<Mount> {
             timer_proto::service::timer_service_rpc_service_descriptor(),
             TIMER,
         ),
+        m(timer_proto::timer_stream_descriptor(), TIMER_STREAM),
         m(
             threads::service::threads_service_rpc_service_descriptor(),
             THREADS,

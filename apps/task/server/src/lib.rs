@@ -1937,6 +1937,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             timer_proto::service::timer_service_rpc_service_descriptor(),
             timer_proto::service::serve(org.timer.clone()),
         )
+        // Live session changes — `TimerService`'s `#[subscribe]`
+        // stream sibling, served from the hub on the timer `Store`
+        // above. Sessions only; rate edits don't stream.
+        .merge(timer_proto::timer_service_stream_layer(org.timer.clone()))
         .with(
             threads::service::threads_service_rpc_service_descriptor(),
             threads::service::serve(org.threads.clone()),

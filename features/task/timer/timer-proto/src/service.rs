@@ -30,6 +30,47 @@ use crate::error::TimerError;
 use crate::rate::{OrgMemberRate, ProjectMemberRate};
 use crate::session::{WorkSession, WorkSessionFilter};
 
+/// One work-session change, broadcast to every [`TimerService`]
+/// subscriber on each successful session mutation.
+///
+/// ## What the stream carries
+///
+/// **Sessions only.** The "is a timer running right now?" state is
+/// *derived*: a running timer is exactly a session row with
+/// `end_time = None`, so streaming full post-write [`WorkSession`]
+/// rows covers the visible live surface — a timer starting
+/// (`Upserted` with open `end_time`), stopping (`Upserted` with the
+/// closed row, authoritative rate snapshot included), switching (two
+/// `Upserted`s: the closed row, then the new open one), retro-logs,
+/// edits, and deletes. Rate-table changes (`set_org_member_rate` /
+/// `set_project_member_rate`) do NOT stream — rates are a settings
+/// surface read on demand, and future sessions carry their snapshot.
+///
+/// ## Subscriber contract (no snapshot variant, v1)
+///
+/// Changes only — no `Snapshot` variant. Fetch the session list once
+/// via [`TimerService::list_sessions`] (after subscribing, so
+/// nothing is missed in between), then fold:
+///
+/// - [`TimerEvent::Upserted`] carries the **full post-write**
+///   [`WorkSession`] — replace (or insert) the row with a matching
+///   `id`. Idempotent re-application is harmless.
+/// - [`TimerEvent::Deleted`] — remove the row with that `id`.
+#[derive(
+    Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, ::facet::Facet,
+)]
+#[repr(u8)]
+// Upserted carries the full WorkSession by design (idempotent
+// full-state payloads) — same trade-off as `task_proto::TaskEvent`.
+#[allow(clippy::large_enum_variant)]
+pub enum TimerEvent {
+    /// A session was started, stopped, logged, or edited — the
+    /// payload is the complete state after the write.
+    Upserted(WorkSession),
+    /// The session with this id was permanently removed.
+    Deleted(Uuid),
+}
+
 #[architect::rpc]
 pub trait TimerService {
     /// Start a new work session for the calling user. Fails
@@ -129,6 +170,13 @@ pub trait TimerService {
         &self,
         project_id: Uuid,
     ) -> Result<Vec<ProjectMemberRate>, TimerError>;
+
+    /// Every work-session change, as it happens — fires on each
+    /// successful start / stop / switch / log / update / delete.
+    /// See [`TimerEvent`] for the fetch-once-then-fold subscriber
+    /// contract (sessions only; rate edits don't stream).
+    #[subscribe]
+    fn events(&self) -> TimerEvent;
 }
 
 /// Args for [`TimerService::update_session`]. `id` selects the row;

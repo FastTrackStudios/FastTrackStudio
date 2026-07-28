@@ -10,6 +10,9 @@ repository.workspace = true
 
 [dependencies]
 timer-proto = { workspace = true, features = ["server", "vox"] }
+# The `events` fan-out hub (`architect::PubSub`) behind the
+# `#[subscribe]` stream lives on the `Store`.
+architect = { workspace = true }
 project = { workspace = true }
 async-trait = "0.1"
 chrono = { workspace = true, features = ["clock", "serde"] }
