@@ -23280,6 +23280,7 @@ dependencies = [
  "level-dsp",
  "modulation",
  "reverb",
+ "saturate-dsp",
  "signal-plugin-host",
 ]
 
