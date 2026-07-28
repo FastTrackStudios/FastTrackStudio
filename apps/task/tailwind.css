@@ -12,7 +12,12 @@
  * (apps/task/), not to the app directories.
  */
 
-@import "tailwindcss";
+/* `source(none)` disables Tailwind v4's automatic content detection,
+ * which is rooted at the working directory and therefore made the
+ * output depend on where the build ran from. Everything the sheet needs
+ * is declared explicitly below, so the result is identical from any
+ * cwd — which is what lets `dx` own this build. */
+@import "tailwindcss" source(none);
 /* Task's palette: the canonical fts-ui design tokens plus the Obsidian
  * overrides. See apps/task/fts-theme.css. */
 @import "./fts-theme.css";
@@ -22,8 +27,14 @@
 @source "./*/src/**/*.{rs,html,css}";
 
 /* Paths track the monorepo dissolve (c1c5754ce): the Task crates now
- * live at <root>/crates/task/* and <root>/features/task/*. */
-@source "../../crates/task/ui/src/**/*.rs";
+ * live at <root>/crates/task/* and <root>/features/task/*.
+ *
+ * The glob is `crates/task/*` rather than naming `ui` alone: the shell
+ * split produced `ui-core` and `player-ui`, and naming one crate meant
+ * their classes were only reaching the sheet via Tailwind's automatic
+ * (cwd-rooted) scan. That scan is off — see `source(none)` above — so
+ * every source has to be named. */
+@source "../../crates/task/*/src/**/*.rs";
 @source "../../features/task/*/*-ui/src/**/*.rs";
 @source "../../features/task/view/view-*/src/**/*.rs";
 /* fts-ui primitives (Button/Sheet/Badge/…) — their variant classes

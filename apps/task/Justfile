@@ -41,13 +41,18 @@ task *args:
 web: css
     cd web && dx serve --web --addr 0.0.0.0 --hot-patch false
 
-# Regenerate every app's assets/tailwind.css from the ONE source
-# input, `apps/task/tailwind.css`. The output is gitignored build
-# artifact — each app's build.rs regenerates it during a normal cargo
-# build, so you rarely need this by hand; it's here for `dx serve`
-# (which reads assets/ before cargo runs) and for a quick refresh after
-# touching `@source` paths. `tailwindcss` comes from the nix devshell —
-# `direnv` already loaded it, no explicit nix call.
+# Regenerate every app's assets/tailwind.css from the ONE source input,
+# `apps/task/tailwind.css`.
+#
+# You rarely need this: dx runs the Tailwind watcher itself (Dioxus 0.7
+# detects the `tailwind.css` at each crate root), so `just web` /
+# `desktop` / `mobile` already compile the sheet. This recipe is for the
+# case dx isn't in the loop — a plain `cargo check --workspace`, which
+# still has to find the file because `asset!()` resolves at compile time.
+#
+# The sheet is identical whichever way it is produced: the input sets
+# `source(none)` and names every source explicitly, so the output does
+# not depend on the working directory.
 css:
     tailwindcss -i tailwind.css -o desktop/assets/tailwind.css
     tailwindcss -i tailwind.css -o mobile/assets/tailwind.css
