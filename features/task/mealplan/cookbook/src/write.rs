@@ -7,27 +7,17 @@
 
 use std::path::{Path, PathBuf};
 
-use thiserror::Error;
-
 use crate::model::Recipe;
 use crate::scan::COOKBOOK_DIR;
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("io: {0}")]
-    Io(String),
-    #[error("file exists at {0}; refusing to overwrite")]
-    Exists(String),
-    #[error("bad path: {0}")]
-    BadPath(String),
-}
+pub use vault_entity::WriteError;
 
 /// Default layout: `Cookbook/<slug>.cook`, relative to the
 /// wiki root (`<org>/wiki/Knowledge/`). Override `folder` for
 /// sub-folders under the cookbook root.
 #[must_use]
 pub fn default_recipe_path(name: &str, folder: Option<&str>) -> String {
-    let slug = slugify(name);
+    let slug = vault_entity::slugify(name, "recipe");
     match folder {
         Some(f) => format!("{}/{slug}.cook", f.trim_end_matches('/')),
         None => format!("{COOKBOOK_DIR}/{slug}.cook"),
@@ -163,27 +153,4 @@ fn remove_sibling_images(dir: &Path, stem: &str) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-pub(crate) fn slugify(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_dash = false;
-    for ch in s.chars() {
-        if ch.is_alphanumeric() {
-            for lc in ch.to_lowercase() {
-                out.push(lc);
-            }
-            prev_dash = false;
-        } else if !prev_dash && !out.is_empty() {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        out.push_str("recipe");
-    }
-    out
 }
