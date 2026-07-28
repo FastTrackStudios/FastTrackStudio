@@ -29,17 +29,24 @@
 //! system goals plug into.
 
 mod model;
-mod parse;
 mod service;
 
-// `backend` + `write` touch `vault::Vault` / `std::fs`. Wasm
-// UI consumes wire types + parser + RPC client.
+// `entity` / `parse` / `write` / `backend` all reach the shared
+// `vault-entity` support layer, which walks `std::fs` (and pulls a
+// file watcher). Wasm UI consumes wire types + the RPC client only.
 #[cfg(not(target_arch = "wasm32"))]
 mod backend;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod entity;
+#[cfg(not(target_arch = "wasm32"))]
+mod parse;
 #[cfg(not(target_arch = "wasm32"))]
 mod write;
 
 pub use model::{Goal, Kind, Status, Tags};
+#[cfg(not(target_arch = "wasm32"))]
+pub use entity::Goals;
+#[cfg(not(target_arch = "wasm32"))]
 pub use parse::{ParseError, looks_like_goal, parse_goal, parse_page};
 pub use service::{GoalError, GoalService, GoalServiceRpc};
 #[cfg(feature = "vox")]
