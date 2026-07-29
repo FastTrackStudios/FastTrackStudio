@@ -103,12 +103,19 @@ fn compact(v: &Value) -> String {
 
 // ── Tool catalog ─────────────────────────────────────────────────
 
-/// One exposed tool: MCP name, one-line purpose, and the JSON Schema
-/// the client validates arguments against.
+/// One exposed tool: MCP name, one-line purpose, the JSON Schema the
+/// client validates arguments against, and the owning plugin.
 pub struct ToolDef {
     pub name: &'static str,
     pub description: &'static str,
     pub schema: fn() -> Value,
+    /// Owning plugin's `task_plugin::CATALOG` id (`"core"` for
+    /// platform tools). Mirrors the `plugin` field on
+    /// [`crate::permits::Mount`]: a disabled plugin's tools are
+    /// absent from `tools/list` and refused at `tools/call` — the
+    /// same gate the vox router applies by not mounting the
+    /// plugin's services.
+    pub plugin: &'static str,
 }
 
 /// Shorthand for a JSON Schema object.
@@ -143,6 +150,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "task_context",
+            plugin: "core",
             description: "Orient yourself: today's date and time, the org you're working in, \
                           and a count of what's open (tasks due, events today, inbox items). \
                           Call this first when the user's request depends on 'now' or 'what's \
@@ -151,6 +159,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "list_tasks",
+            plugin: "core",
             description: "List tasks. Defaults to open tasks only. Filter by status, or by \
                           'due_on_or_before' (ISO YYYY-MM-DD) to answer 'what's due today/this \
                           week'. Returns ids you must pass to update_task.",
@@ -168,6 +177,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "create_task",
+            plugin: "core",
             description: "Create a task from natural language. The text is parsed the same way \
                           the app's quick-add is: '#tag', '@context', '[[Project]]', '!high', and \
                           dates like 'tomorrow', 'next monday', '2026-08-01' are extracted, and \
@@ -187,6 +197,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "update_task",
+            plugin: "core",
             description: "Change a task by id: mark it done, reschedule it, re-prioritize, or \
                           retitle. Only the fields you pass change. Get ids from list_tasks.",
             schema: || {
@@ -205,6 +216,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "list_events",
+            plugin: "scheduling",
             description: "List calendar events, optionally windowed by date. Always call this \
                           before rescheduling anything so you're moving real events and can see \
                           what a new time would collide with.",
@@ -221,6 +233,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "create_event",
+            plugin: "scheduling",
             description: "Put something on the calendar. Times are RFC-3339 with offset \
                           (e.g. '2026-07-25T14:00:00-05:00'); for an all-day event pass \
                           plain dates and all_day: true.",
@@ -239,6 +252,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "reschedule_event",
+            plugin: "scheduling",
             description: "Move an existing event to a new time, keeping everything else. This is \
                           the tool for 'rearrange my schedule' — call list_events first, then one \
                           reschedule per event you're moving.",
@@ -255,12 +269,14 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "cancel_event",
+            plugin: "scheduling",
             description: "Remove an event from the calendar. Confirm with the user before \
                           cancelling anything you didn't create in this conversation.",
             schema: || obj(json!({ "id": s_("Event id from list_events.") }), &["id"]),
         },
         ToolDef {
             name: "capture_inbox",
+            plugin: "core",
             description: "Capture a thought, reminder, or follow-up into the inbox — the right \
                           home for anything not yet shaped into a task. Captures land as \
                           'suggested' for the user to accept with one tap, so capture freely; \
@@ -278,6 +294,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "list_inbox",
+            plugin: "core",
             description: "What's waiting in the inbox for review today — the user's unprocessed \
                           captures. Useful for 'what did I say I'd look at'. Pass status \
                           'suggested' to see captures (including your own) still awaiting the \
@@ -294,6 +311,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "list_projects",
+            plugin: "core",
             description: "The user's projects. Use it to attach work to the right project, or to \
                           answer 'what am I working on'.",
             schema: || {
@@ -305,6 +323,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "list_goals",
+            plugin: "core",
             description: "The user's goals — the longer horizon above projects. Consult before \
                           advising on priorities.",
             schema: || {
@@ -316,6 +335,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "search_vault",
+            plugin: "core",
             description: "Find notes by path. The vault is the user's own writing — meeting \
                           notes, journals, references. Returns paths to pass to read_note.",
             schema: || {
@@ -330,6 +350,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "read_note",
+            plugin: "core",
             description: "Read one note's markdown by vault-relative path (from search_vault).",
             schema: || {
                 obj(
@@ -340,6 +361,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "append_note",
+            plugin: "core",
             description: "Append markdown to the end of an existing note. Use for adding to a \
                           running log or daily note; it never overwrites what's there.",
             schema: || {
@@ -355,10 +377,13 @@ pub fn tool_catalog() -> Vec<ToolDef> {
     ]
 }
 
-/// The catalog as MCP's `tools/list` payload.
-fn tools_list_payload() -> Value {
+/// The catalog as MCP's `tools/list` payload, filtered to the org's
+/// enabled plugins — a disabled plugin's tools are *absent*, exactly
+/// as its vox services are unmounted from the org router.
+fn tools_list_payload(plugins: &task_plugin::PluginSet) -> Value {
     let tools: Vec<Value> = tool_catalog()
         .iter()
+        .filter(|t| plugins.contains(t.plugin))
         .map(|t| {
             json!({
                 "name": t.name,
@@ -368,6 +393,26 @@ fn tools_list_payload() -> Value {
         })
         .collect();
     json!({ "tools": tools })
+}
+
+/// The plugin gate for one `tools/call`, mirroring [`tools_list_payload`]:
+/// - unknown tool → `Err(None)` (protocol-level method-not-found);
+/// - tool of a disabled plugin → `Err(Some(msg))` (tool-level error the
+///   model reads — the tool exists in the build, this org turned it off);
+/// - enabled → `Ok(())`.
+fn plugin_gate(name: &str, plugins: &task_plugin::PluginSet) -> Result<(), Option<String>> {
+    let Some(def) = tool_catalog().into_iter().find(|t| t.name == name) else {
+        return Err(None);
+    };
+    if plugins.contains(def.plugin) {
+        return Ok(());
+    }
+    let plugin_name = task_plugin::find(def.plugin).map_or(def.plugin, |p| p.name);
+    Err(Some(format!(
+        "`{name}` is unavailable: the {plugin_name} plugin (`{}`) is disabled for this org. \
+         Call `tools/list` for what this org serves.",
+        def.plugin,
+    )))
 }
 
 /// The system-prompt text MCP clients inject on connect. This is
@@ -471,7 +516,7 @@ pub async fn mcp_handler(
         }
         "ping" => Json(rpc_result(id, json!({}))).into_response(),
         "tools/list" => match authenticate(&state, &slug, &headers).await {
-            Ok(_) => Json(rpc_result(id, tools_list_payload())).into_response(),
+            Ok(org) => Json(rpc_result(id, tools_list_payload(&org.plugins))).into_response(),
             Err(e) => Json(rpc_error(id, code::INVALID_REQUEST, e)).into_response(),
         },
         "tools/call" => {
@@ -487,6 +532,23 @@ pub async fn mcp_handler(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
+            // Plugin gate FIRST — a disabled plugin's tool must fail
+            // the same way whether or not its backend would have
+            // answered, and before any backend work happens.
+            match plugin_gate(name, &org.plugins) {
+                Ok(()) => {}
+                Err(None) => {
+                    return Json(rpc_error(
+                        id,
+                        code::METHOD_NOT_FOUND,
+                        format!("unknown tool `{name}`"),
+                    ))
+                    .into_response();
+                }
+                Err(Some(msg)) => {
+                    return Json(rpc_result(id, tool_err(msg))).into_response();
+                }
+            }
             // The domain backends are the same sync trait impls the
             // vox layer serves, and they're written for architect's
             // blocking dispatcher — `vault_sync` in particular takes
@@ -676,11 +738,16 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                             .is_some_and(|d| date_of(d) <= today.as_str())
                 })
                 .count();
-            let events_today = org
-                .scheduling
-                .list_events()
-                .map(|evs| evs.iter().filter(|e| date_of(&e.start) == today).count())
-                .unwrap_or(0);
+            // Scheduling is a plugin; a core orientation call must not
+            // touch a backend this org has turned off.
+            let events_today = if org.plugins.contains("scheduling") {
+                org.scheduling
+                    .list_events()
+                    .map(|evs| evs.iter().filter(|e| date_of(&e.start) == today).count())
+                    .unwrap_or(0)
+            } else {
+                0
+            };
             let inbox_open = org
                 .inbox
                 .review_queue(today.clone())
@@ -1046,6 +1113,14 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for tool in &catalog {
             assert!(seen.insert(tool.name), "duplicate tool `{}`", tool.name);
+            // A typo'd plugin id would silently hide the tool for
+            // every org (unknown ids are never in a resolved set).
+            assert!(
+                task_plugin::find(tool.plugin).is_some(),
+                "`{}` names unknown plugin `{}`",
+                tool.name,
+                tool.plugin
+            );
             assert!(
                 tool.description.len() > 40,
                 "`{}` needs a description the model can select on",
@@ -1069,11 +1144,50 @@ mod tests {
 
     #[test]
     fn tools_list_payload_matches_the_catalog() {
-        let payload = tools_list_payload();
+        let all = task_plugin::PluginSet::resolve(None);
+        let payload = tools_list_payload(&all);
         let tools = payload["tools"].as_array().expect("tools array");
         assert_eq!(tools.len(), tool_catalog().len());
         assert!(tools.iter().all(|t| t["inputSchema"].is_object()));
         assert!(tools.iter().any(|t| t["name"] == "create_task"));
+    }
+
+    /// The plugin toggle on both MCP surfaces: a disabled plugin's
+    /// tools vanish from `tools/list`, and `tools/call` refuses them
+    /// with a message naming the plugin — while unknown tools stay a
+    /// protocol-level method-not-found.
+    #[test]
+    fn disabled_plugin_hides_and_refuses_its_tools() {
+        use task_plugin::{PluginChoice, PluginSet};
+        let no_scheduling =
+            PluginSet::resolve(Some(&PluginChoice::Disabled(vec!["scheduling".into()])));
+
+        let payload = tools_list_payload(&no_scheduling);
+        let names: Vec<&str> = payload["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .collect();
+        assert!(!names.contains(&"list_events"), "scheduling tool listed");
+        assert!(names.contains(&"create_task"), "core tool missing");
+        let dropped = tool_catalog()
+            .iter()
+            .filter(|t| t.plugin == "scheduling")
+            .count();
+        assert!(dropped > 0, "the scheduling plugin owns tools");
+        assert_eq!(names.len(), tool_catalog().len() - dropped);
+
+        // Call gate mirrors the listing.
+        assert!(plugin_gate("create_task", &no_scheduling).is_ok());
+        match plugin_gate("list_events", &no_scheduling) {
+            Err(Some(msg)) => {
+                assert!(msg.contains("scheduling"), "{msg}");
+                assert!(msg.contains("disabled"), "{msg}");
+            }
+            other => panic!("expected a disabled-plugin message, got {other:?}"),
+        }
+        assert_eq!(plugin_gate("no_such_tool", &no_scheduling), Err(None));
     }
 
     #[test]
