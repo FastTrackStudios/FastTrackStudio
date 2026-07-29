@@ -42,7 +42,7 @@ pub fn LocationsView() -> Element {
     });
 
     let mut name = use_signal(String::new);
-    let mut kind = use_signal(|| "other".to_string());
+    let kind = use_signal(|| "other".to_string());
     let mut address = use_signal(String::new);
 
     // The shared store: one AtomResult for the list, optimistic create.

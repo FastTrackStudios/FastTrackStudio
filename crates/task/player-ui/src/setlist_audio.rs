@@ -541,7 +541,7 @@ mod imp {
             if let Some(p) = self.pump.borrow_mut().take() {
                 let _ = p.port.post_message(&msg("stop"));
                 p.port.set_onmessage(None);
-                p.node.disconnect();
+                let _ = p.node.disconnect();
                 if let Some(sink) = &p.sink {
                     let _ = sink.pause();
                     sink.set_src_object(None);

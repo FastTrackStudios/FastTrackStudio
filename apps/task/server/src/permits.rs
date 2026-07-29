@@ -80,7 +80,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use architect_permissions::{
-    Action, AuditEvent, AuditSink, MethodPermit, PermissionEngine, Principal, Resource,
+    Action, AuditEvent, AuditSink, MethodPermit, PermissionEngine, Principal,
     ServicePermits,
 };
 use vox::ServiceDescriptor;

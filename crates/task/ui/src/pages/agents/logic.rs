@@ -79,6 +79,9 @@ pub fn status_pill(status: SessionStatus) -> Option<StatusPill> {
 
 /// Deterministic hash→HSL for stable per-identity colors
 /// (CodexMonitor's subagent pills). Returns (hue, sat%, light%).
+// Not yet referenced by the timeline (the subagent pills render
+// plain); kept — unit-tested below — for that wiring.
+#[allow(dead_code)]
 pub fn hash_hsl(identity: &str) -> (u32, u32, u32) {
     let mut h: u32 = 2166136261;
     for b in identity.bytes() {

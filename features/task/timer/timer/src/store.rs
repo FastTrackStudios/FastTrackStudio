@@ -24,7 +24,7 @@ use timer_proto::{
 use uuid::Uuid;
 
 use crate::entity::{
-    OrgMemberRateActive, OrgMemberRateColumn, OrgMemberRateEntity, OrgMemberRateModel,
+    OrgMemberRateColumn, OrgMemberRateEntity, OrgMemberRateModel,
     ProjectMemberRateActive, ProjectMemberRateColumn, ProjectMemberRateEntity,
     ProjectMemberRateModel, WorkSessionActive, WorkSessionColumn, WorkSessionEntity,
     WorkSessionModel,

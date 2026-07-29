@@ -87,7 +87,7 @@ use crate::admin::{AdminCmd, run_admin};
 #[cfg(feature = "plugin-agent")]
 use crate::agent::{AgentCmd, run_agent};
 use crate::api::{ApiArgs, run_api};
-use crate::auth::{AuthCmd, run_auth, ws_base_to_http};
+use crate::auth::{AuthCmd, run_auth};
 #[cfg(feature = "plugin-fitness")]
 use crate::body::{BodyCmd, run_body};
 use crate::code::{CodeCmd, run_code};
@@ -1229,6 +1229,7 @@ mod server_resolution_tests {
 
     #[test]
     fn ws_http_derivation() {
+        use crate::auth::ws_base_to_http;
         assert_eq!(
             ws_base_to_http("wss://task.starcommand.live"),
             "https://task.starcommand.live"

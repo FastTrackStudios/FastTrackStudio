@@ -163,7 +163,7 @@ impl PluginSet {
     /// Core plugins are always in the result regardless of the choice.
     #[must_use]
     pub fn resolve(choice: Option<&PluginChoice>) -> Self {
-        let mut warn_unknown = |ids: &[String]| {
+        let warn_unknown = |ids: &[String]| {
             for id in ids {
                 if find(id).is_none() {
                     tracing::warn!(plugin = %id, "org.toml names an unknown plugin — ignored");

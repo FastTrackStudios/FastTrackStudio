@@ -128,7 +128,7 @@ fn EmptyState(message: String) -> Element {
 #[component]
 fn BodySection(slug: Memo<Option<String>>) -> Element {
     let mut name = use_signal(String::new);
-    let mut kind = use_signal(|| "weight".to_string());
+    let kind = use_signal(|| "weight".to_string());
     let mut unit = use_signal(|| "kg".to_string());
 
     // The shared store: one AtomResult for the list, optimistic create.
@@ -253,7 +253,7 @@ fn BodyRow(metric: BodyMetric, pending: bool) -> Element {
 #[component]
 fn ExercisesSection(slug: Memo<Option<String>>) -> Element {
     let mut name = use_signal(String::new);
-    let mut category = use_signal(|| "chest".to_string());
+    let category = use_signal(|| "chest".to_string());
 
     // The shared store: one AtomResult for the list, optimistic create.
     let result = stores::use_exercise_list();

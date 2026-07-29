@@ -15,10 +15,9 @@
 //! `chat.completion.chunk` is surfaced as `ToolProgress` / `Warning`
 //! rather than dropped, so the UI never goes silent mid-tool.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use agent_proto::event::{AgentEvent, EventTap, SessionEvents};
+use agent_proto::event::{AgentEvent, SessionEvents};
 use agent_proto::message::{ContentBlock, Message, Role};
 use futures::StreamExt;
 use serde_json::{Value, json};

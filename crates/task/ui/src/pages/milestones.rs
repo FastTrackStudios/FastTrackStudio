@@ -38,7 +38,7 @@ pub fn MilestonesView() -> Element {
     });
 
     let mut title = use_signal(String::new);
-    let mut project = use_signal(String::new);
+    let project = use_signal(String::new);
     let mut due = use_signal(String::new);
 
     // The shared store: one AtomResult for the list, optimistic create.

@@ -685,9 +685,9 @@ pub fn LoginForm() -> Element {
     let ctx = use_context::<AuthCtx>();
     let busy = ctx.busy;
     let mut error = ctx.error;
-    let mut email = use_signal(String::new);
-    let mut password = use_signal(String::new);
-    let mut name = use_signal(String::new);
+    let email = use_signal(String::new);
+    let password = use_signal(String::new);
+    let name = use_signal(String::new);
     let mut creating = use_signal(|| false);
 
     let submit = move |_| {

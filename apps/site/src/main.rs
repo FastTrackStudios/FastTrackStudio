@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! FastTrackStudio Documentation Site
 //!
 //! Interactive documentation with live chart rendering for the keyflow parser.

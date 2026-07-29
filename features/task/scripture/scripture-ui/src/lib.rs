@@ -240,7 +240,7 @@ pub fn ScriptureView(reference: String) -> Element {
 
     // Jump to a display reference (`John 3:16` / OSIS / range start),
     // used by cross-ref and concordance rows.
-    let mut jump = use_callback(move |reference: String| {
+    let jump = use_callback(move |reference: String| {
         let Ok(scref) = ScriptureRef::parse(&reference) else {
             return;
         };

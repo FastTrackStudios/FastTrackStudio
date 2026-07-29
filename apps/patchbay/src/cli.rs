@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! patchbay-cli — the scriptable / AI-friendly surface of the patchbay.
 //!
 //! Talks to a RUNNING Patchbay app over ws (default

@@ -56,7 +56,7 @@ pub fn EmailView() -> Element {
         }
     });
 
-    let mut envelopes = use_resource(move || async move {
+    let envelopes = use_resource(move || async move {
         match (slug(), selected_account()) {
             (Some(s), Some(acct)) => fetch_email_envelopes(&s, &acct, 50).await,
             _ => Ok(Vec::new()),

@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use architect::vox;
 use email_config::FolderAliases;
 use email_proto::{
     Account, Draft, EmailEvent, EmailSync, EmailSyncError, Envelope, FlagDelta, Folder, Message,

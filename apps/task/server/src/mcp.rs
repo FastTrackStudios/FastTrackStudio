@@ -60,9 +60,13 @@ const VAULT_ID: &str = "default";
 /// `-32602` for bad tool arguments).
 mod code {
     pub const PARSE: i32 = -32700;
+    // The full standard set is kept on purpose (INTERNAL is currently
+    // unreferenced): this table documents the wire contract, not just
+    // the codes we happen to emit today.
     pub const INVALID_REQUEST: i32 = -32600;
     pub const METHOD_NOT_FOUND: i32 = -32601;
     pub const INVALID_PARAMS: i32 = -32602;
+    #[allow(dead_code)]
     pub const INTERNAL: i32 = -32603;
 }
 

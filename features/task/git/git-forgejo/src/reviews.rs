@@ -14,7 +14,6 @@ use git_proto::{
     Reviewer, User,
 };
 use serde::{Deserialize, Serialize};
-use vox::Tx;
 
 // ---- raw DTOs ---------------------------------------------------------
 

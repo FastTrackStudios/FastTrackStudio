@@ -38,7 +38,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use architect::vox;
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
@@ -192,16 +191,6 @@ impl Backend {
         match &self.layout {
             Layout::Explicit(map) => map.get(vault_id).cloned().ok_or(VaultSyncError::NotFound),
             Layout::UnderParent(parent) => Ok(parent.join(vault_id)),
-        }
-    }
-
-    /// Whether `vault_id` would resolve to a path this backend
-    /// serves. `Explicit`: present in the registry.
-    /// `UnderParent`: always true.
-    fn knows(&self, vault_id: &str) -> bool {
-        match &self.layout {
-            Layout::Explicit(map) => map.contains_key(vault_id),
-            Layout::UnderParent(_) => true,
         }
     }
 
