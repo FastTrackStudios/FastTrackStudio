@@ -968,6 +968,9 @@ scheduling-proto = { path = "features/task/scheduling/scheduling-proto", default
 scheduling-ui = { path = "features/task/scheduling/scheduling-ui" }
 inbox = { path = "features/task/inbox/inbox" }
 inbox-proto = { path = "features/task/inbox/inbox-proto", default-features = false }
+# features/task/notify — notifications (server-side notifier + the bell)
+notify = { path = "features/task/notify/notify" }
+notify-proto = { path = "features/task/notify/notify-proto", default-features = false }
 # features/task/recall — FSRS spaced-repetition learning deck
 recall = { path = "features/task/recall/recall" }
 recall-proto = { path = "features/task/recall/recall-proto", default-features = false }
