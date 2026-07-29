@@ -11121,6 +11121,7 @@ dependencies = [
  "chrono",
  "facet 0.50.0-rc.5",
  "fake",
+ "goal-proto",
  "sea-orm",
  "serde",
  "serde_json",
@@ -11137,6 +11138,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "goal-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "goal-ui"
 version = "0.1.0"
 dependencies = [
@@ -11144,7 +11162,7 @@ dependencies = [
  "cycle",
  "dioxus",
  "fts-ui",
- "goal",
+ "goal-proto",
  "task-ui-core",
  "uuid 1.23.4",
 ]
@@ -27801,7 +27819,7 @@ dependencies = [
  "futures-util",
  "git-proto",
  "gloo-timers",
- "goal",
+ "goal-proto",
  "goal-ui",
  "identity-proto",
  "inbox-proto",

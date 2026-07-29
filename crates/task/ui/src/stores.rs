@@ -201,7 +201,7 @@ stores! {
         stream:
             /// Live goal hierarchy — Upserted/Deleted `GoalEvent`s
             /// from every selected org fold into the merged list.
-            all goal::GoalServiceStreamClient => fold_goal_event,
+            all goal_proto::GoalServiceStreamClient => fold_goal_event,
     }
 
     MilestoneStore: milestone_proto::Milestone {
@@ -529,13 +529,13 @@ fn fold_project_event(store: &ProjectStore, slug: &str, ev: project_proto::Proje
     }
 }
 
-fn fold_goal_event(store: &GoalStore, slug: &str, ev: goal::GoalEvent) {
+fn fold_goal_event(store: &GoalStore, slug: &str, ev: goal_proto::GoalEvent) {
     match ev {
-        goal::GoalEvent::Upserted(goal) => store.put(OrgGoal {
+        goal_proto::GoalEvent::Upserted(goal) => store.put(OrgGoal {
             slug: slug.to_owned(),
             goal,
         }),
-        goal::GoalEvent::Deleted(id) => store.remove_real(&id),
+        goal_proto::GoalEvent::Deleted(id) => store.remove_real(&id),
     }
 }
 
@@ -1000,7 +1000,7 @@ impl ProjectMutations {
 #[derive(Clone, PartialEq)]
 pub struct OrgGoal {
     pub slug: String,
-    pub goal: goal::Goal,
+    pub goal: goal_proto::Goal,
 }
 
 impl StoreEntity for OrgGoal {

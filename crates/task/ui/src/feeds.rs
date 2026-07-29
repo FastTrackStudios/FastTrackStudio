@@ -50,8 +50,8 @@ pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)
 /// Goals across the selected orgs, each paired with the slug of the
 /// org it came from — feeds the shared goal store (the `/goals` page
 /// renders the merged hierarchy; the slug tag keys the live fold).
-pub async fn fetch_goals_tagged(slugs: &[String]) -> Result<Vec<(String, goal::Goal)>, String> {
-    fan_out_tagged(slugs, "list", |c: goal::GoalServiceClient| async move { c.list().await }).await
+pub async fn fetch_goals_tagged(slugs: &[String]) -> Result<Vec<(String, goal_proto::Goal)>, String> {
+    fan_out_tagged(slugs, "list", |c: goal_proto::GoalServiceClient| async move { c.list().await }).await
 }
 
 feeds! {

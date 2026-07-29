@@ -907,6 +907,7 @@ finance = { path = "features/task/finance/finance" }
 mount-proto = { path = "features/task/mount/mount-proto" }
 mount = { path = "features/task/mount/mount" }
 goal = { path = "features/task/goal/goal" }
+goal-proto = { path = "features/task/goal/goal-proto", default-features = false }
 milestone = { path = "features/task/milestone/milestone" }
 milestone-proto = { path = "features/task/milestone/milestone-proto", default-features = false }
 workstream = { path = "features/task/workstream/workstream" }

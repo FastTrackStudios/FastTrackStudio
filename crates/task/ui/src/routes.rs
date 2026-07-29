@@ -205,7 +205,7 @@ fn GoalsRoute() -> Element {
     // stream subscription (see `stores!`), so edits made anywhere
     // land on this page without a refetch.
     let goals = crate::stores::use_goal_list();
-    let rows: Option<Vec<goal::Goal>> = goals
+    let rows: Option<Vec<goal_proto::Goal>> = goals
         .value()
         .map(|rows| rows.iter().map(|(_, r)| r.goal.clone()).collect());
     let error = goals.error().cloned();
