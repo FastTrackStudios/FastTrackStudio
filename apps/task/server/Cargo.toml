@@ -118,6 +118,10 @@ scheduling-proto = { workspace = true, features = ["vox"] }
 scheduling = { workspace = true }
 inbox-proto = { workspace = true, features = ["vox"] }
 inbox = { workspace = true }
+# Notifications: the per-org store mounted as `Notify` + its stream,
+# fed in-process by the notifier (`src/notifier.rs`).
+notify-proto = { workspace = true, features = ["vox"] }
+notify = { workspace = true }
 recall-proto = { workspace = true, features = ["vox"] }
 recall = { workspace = true }
 contacts-proto = { workspace = true, features = ["vox"] }
