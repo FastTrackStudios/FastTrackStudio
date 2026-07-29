@@ -285,6 +285,7 @@ members = [
     "apps/plugins/limiter",
     "apps/plugins/meter",
     "apps/plugins/pitch",
+    "apps/plugins/unison",
     "apps/plugins/trigger",
     "apps/plugins/xtask",
     "apps/plugins/host",
