@@ -406,6 +406,9 @@ table!(EMAIL, "email", "email/**", [
     dl "fetch_attachment", wr "set_flags", wr "move_message", wa "delete_message",
     wr "append_draft", wa "send",
 ]);
+table!(EMAIL_PRODUCT, "email-product", "email/outbox/**", [
+    rd "list_outbox", wr "submit_draft", wa "approve", wr "cancel",
+]);
 table!(FORGE_REPOS, "forge-repos", "forge/repos/**", [rd "list_repos", rd "get_repo"]);
 table!(FORGE_ISSUES, "forge-issues", "forge/issues/**", [
     rd "list_issues", rd "get_issue", wr "create_issue", wr "update_issue",
@@ -697,6 +700,7 @@ pub fn mounts() -> Vec<Mount> {
         m("fitness", intake::intake_service_descriptor(), INTAKE),
         // Outside world
         m("email", email_proto::descriptor(), EMAIL),
+        m("email", email_proto::product_descriptor(), EMAIL_PRODUCT),
         m("email", email_proto::stream_descriptor(), EMAIL_STREAM),
         m("forge", git_proto::repo::repo_catalog_rpc_service_descriptor(), FORGE_REPOS),
         m(

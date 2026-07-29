@@ -242,6 +242,13 @@ pub struct OrgAppState {
     /// for the `EmailSync` RPC surface (accounts / folders /
     /// envelopes).
     pub email: email_maildir::Backend,
+    /// Email product layer — the staged-send outbox
+    /// (`EmailProduct`: submit / approve / cancel, human-in-the-
+    /// loop gate) over the same accounts. Shares the `email`
+    /// backend's `EmailChange` hub so outbox events ride the one
+    /// stream; its delivery poller sends through `email`'s
+    /// `EmailSync::send`.
+    pub email_product: email_product::ProductBackend,
     /// Forge backend (Forgejo) serving `RepoCatalog` +
     /// `IssueTracker` + `ReviewSurface`. Built from
     /// `TASK_FORGEJO_BASE_URL` + `TASK_FORGEJO_TOKEN`; when either
@@ -862,8 +869,28 @@ pub(crate) async fn build_org_state(
         // `/email` UI tolerates that.
         let mail_root = std::env::var("TASK_SERVER_MAIL_ROOT")
             .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
-        let email =
-            email_maildir::Backend::with_configured_accounts(discover_mail_accounts(&mail_root));
+        let mail_accounts = discover_mail_accounts(&mail_root);
+        let product_accounts: Vec<email_product::ProductAccount> = mail_accounts
+            .iter()
+            .map(|e| email_product::ProductAccount {
+                id: e.account.id.0.clone(),
+                root: e.root.clone(),
+            })
+            .collect();
+        let email = email_maildir::Backend::with_configured_accounts(mail_accounts);
+
+        // Email product layer — outbox with human-in-the-loop
+        // approval. Shares the maildir backend's `EmailChange`
+        // hub (one stream for mailbox + outbox events) and
+        // delivers approved entries through `EmailSync::send`
+        // on a 30s poller (approval wakes it immediately).
+        let email_product = email_product::ProductBackend::new(
+            product_accounts,
+            std::sync::Arc::new(email.clone()),
+            email_proto::EmailSyncStreamSource::changes_hub(&email).clone(),
+        )
+        .map_err(|e| eyre::eyre!("email product stores: {e}"))?;
+        let _email_poller = email_product.spawn_poller(std::time::Duration::from_secs(30));
 
         // Forge backend — Forgejo, the org's primary forge. Base
         // URL + token come from the same env vars the CLI's forge
@@ -1148,6 +1175,7 @@ pub(crate) async fn build_org_state(
             finance_backend,
             ledger_backend,
             email,
+            email_product,
             forge,
             forge_agent,
             issue_links_path: org_root.path().join("issue-links.json"),
@@ -2370,6 +2398,14 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 email_proto::descriptor(),
                 email_proto::serve(org.email.clone()),
+            )
+            // Product layer — the staged-send outbox
+            // (`EmailProduct`: list / submit / approve / cancel).
+            // Its events ride the `EmailSync` changes stream
+            // below (shared hub), so there's no second stream.
+            .with(
+                email_proto::product_descriptor(),
+                email_proto::product_serve(org.email_product.clone()),
             )
             // Live mailbox changes — `EmailSync`'s `#[subscribe]`
             // stream sibling, served from the backend's hub.

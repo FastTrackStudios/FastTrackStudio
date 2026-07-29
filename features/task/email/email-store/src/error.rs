@@ -14,4 +14,12 @@ pub enum StoreError {
     Schema(String),
     #[error("parse: {0}")]
     Parse(String),
+    #[error("outbox entry {0} not found")]
+    OutboxNotFound(u64),
+    #[error("outbox entry {id}: invalid transition from {from} via {op}")]
+    OutboxTransition {
+        id: u64,
+        from: &'static str,
+        op: &'static str,
+    },
 }

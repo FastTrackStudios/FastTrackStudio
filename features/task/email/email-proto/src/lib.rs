@@ -28,6 +28,8 @@ mod event;
 mod flag;
 mod folder;
 mod message;
+mod outbox;
+mod product;
 mod range;
 mod service;
 
@@ -39,6 +41,8 @@ pub use event::{EmailChange, EmailEvent};
 pub use flag::{Flag, FlagDelta};
 pub use folder::{Folder, FolderRole};
 pub use message::{Message, MessageId, ThreadId};
+pub use outbox::{OutboxEntry, OutboxStatus};
+pub use product::{EmailProduct, EmailProductRpc};
 pub use range::SeqRange;
 pub use service::{EmailSync, EmailSyncRpc};
 
@@ -61,4 +65,14 @@ pub use service::{
 pub use service::{
     EmailSyncStreamClient, EmailSyncStreamSource, stream_layer, stream_serve,
     email_sync_stream_service_descriptor as stream_descriptor,
+};
+
+// `EmailProduct` vox bits — the outbox / product surface. Mounted
+// next to the `EmailSync` service under the same "email" plugin;
+// its events ride the `EmailSync` changes stream.
+#[cfg(feature = "vox")]
+pub use product::{
+    EmailProductClient, EmailProductRpcDispatcher as ProductDispatcher,
+    email_product_rpc_service_descriptor as product_descriptor, layer as product_layer,
+    serve as product_serve,
 };

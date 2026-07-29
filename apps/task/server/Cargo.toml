@@ -143,6 +143,9 @@ email-config = { workspace = true }
 # `account.json` carries a `submit` endpoint — makes
 # `EmailSync::send` real for those accounts.
 email-smtp = { workspace = true }
+# The email product layer: staged-send outbox (`EmailProduct`)
+# with human-in-the-loop approval + the delivery poller.
+email-product = { workspace = true }
 vox = { workspace = true }
 # Org-wide presence: `crdt::sync::PresenceHost` + the `DocPresence`
 # vox service mounted per org (`vox` feature = the sync/presence

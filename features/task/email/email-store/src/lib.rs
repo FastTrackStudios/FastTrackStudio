@@ -22,6 +22,7 @@
 
 mod error;
 mod jwz;
+mod outbox;
 mod query;
 mod schema;
 mod store;
@@ -29,6 +30,7 @@ mod walker;
 
 pub use error::{Result, StoreError};
 pub use jwz::{ThreadAssignment, ThreadInput, compute_threads};
+pub use outbox::OUTBOX_MAX_RETRIES;
 pub use query::{SearchHit, StoredEnvelope};
 pub use store::Store;
 pub use walker::{MailEntry, walk_account, walk_folder};

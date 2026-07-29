@@ -8058,12 +8058,28 @@ dependencies = [
  "architect",
  "email-config",
  "email-proto",
+ "email-smtp",
  "mail-parser",
  "maildir",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "email-product"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "email-config",
+ "email-maildir",
+ "email-proto",
+ "email-store",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "vox",
 ]
 
 [[package]]
@@ -25907,7 +25923,9 @@ dependencies = [
  "ed25519-dalek 2.2.0",
  "email-config",
  "email-maildir",
+ "email-product",
  "email-proto",
+ "email-smtp",
  "exercises",
  "eyre",
  "facet 0.50.0-rc.5",

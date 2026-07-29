@@ -43,19 +43,35 @@ CREATE TABLE IF NOT EXISTS threads (
     last_date INTEGER NOT NULL
 );
 
--- Outbound queue: drafts + flag deltas + moves the sync layer
--- wants to replay when the backend comes back online. Lives in
--- the cache because the maildir doesn't have a natural place to
--- record "this needs to be replayed."
-CREATE TABLE IF NOT EXISTS pending_ops (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    op_kind   TEXT NOT NULL,
-    op_json   TEXT NOT NULL,
-    queued_at INTEGER NOT NULL,
-    last_err  TEXT
+"#;
+
+/// v2 — the outbox: the staged-send state machine
+/// (`Draft → PendingApproval → Approved → Sending → Sent |
+/// Failed`). Replaces the never-used `pending_ops` replay queue
+/// (dropped below). NOT disposable: approval state has no
+/// on-disk twin, so `rebuild_from_disk` must never touch these
+/// rows (it only clears `messages` / `messages_fts`).
+pub const SCHEMA_V2: &str = r#"
+CREATE TABLE IF NOT EXISTS outbox (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    status          TEXT NOT NULL,
+    draft_json      TEXT NOT NULL,
+    origin          TEXT NOT NULL DEFAULT 'user',
+    created_ms      INTEGER NOT NULL,
+    updated_ms      INTEGER NOT NULL,
+    retries         INTEGER NOT NULL DEFAULT 0,
+    next_attempt_ms INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    sent_message_id TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_outbox_status
+    ON outbox(status, next_attempt_ms);
+
+DROP TABLE IF EXISTS pending_ops;
 "#;
 
 /// Schema version. Bump + add a migration when the layout
-/// changes; for now the index is treated as disposable.
-pub const SCHEMA_VERSION: i64 = 1;
+/// changes; the mailbox index tables stay disposable, the
+/// product tables (outbox) do not.
+pub const SCHEMA_VERSION: i64 = 2;

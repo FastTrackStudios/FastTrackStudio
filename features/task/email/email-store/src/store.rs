@@ -15,7 +15,7 @@ use rusqlite::{Connection, Transaction, params};
 
 use crate::error::Result;
 use crate::query::{SearchHit, StoredEnvelope};
-use crate::schema::{SCHEMA_V1, SCHEMA_VERSION};
+use crate::schema::{SCHEMA_V1, SCHEMA_V2, SCHEMA_VERSION};
 use crate::walker;
 
 pub struct Store {
@@ -43,6 +43,7 @@ impl Store {
              PRAGMA foreign_keys = ON;",
         )?;
         conn.execute_batch(SCHEMA_V1)?;
+        conn.execute_batch(SCHEMA_V2)?;
         let store = Self { account_root, conn };
         store.set_user_version(SCHEMA_VERSION)?;
         Ok(store)
@@ -51,6 +52,16 @@ impl Store {
     fn set_user_version(&self, v: i64) -> Result<()> {
         self.conn.pragma_update(None, "user_version", v)?;
         Ok(())
+    }
+
+    /// Connection access for the product-layer modules in this
+    /// crate (`outbox`, later `derivations` / `notify`).
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 
     /// Insert-or-replace an envelope. `path` / `content_hash` /
