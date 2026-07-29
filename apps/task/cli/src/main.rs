@@ -29,33 +29,48 @@ mod admin;
 mod agent;
 mod api;
 mod auth;
+#[cfg(feature = "plugin-fitness")]
 mod body;
 mod brief;
 mod code;
+#[cfg(feature = "plugin-fasttrackstudio")]
 mod collection;
 mod cycle;
 mod errors;
+#[cfg(feature = "plugin-fitness")]
 mod exercise;
+#[cfg(feature = "plugin-finance")]
 mod finance;
 mod forge;
 mod goal;
 mod inbox;
+#[cfg(feature = "plugin-fitness")]
 mod intake;
 mod issue;
 mod json_out;
 mod label;
+// pantry/intake reuse location's client helpers, so the module
+// compiles whenever any of the three owners is in.
+#[cfg(any(feature = "plugin-home", feature = "plugin-mealplan", feature = "plugin-fitness"))]
 mod location;
+#[cfg(feature = "plugin-mealplan")]
 mod meal;
+#[cfg(feature = "plugin-mealplan")]
 mod mealprep;
 mod media;
 mod milestone;
 mod mount;
 mod org;
 mod org_ctx;
+// `intake` (fitness) reuses pantry's client helpers, so the module
+// compiles under either plugin.
+#[cfg(any(feature = "plugin-mealplan", feature = "plugin-fitness"))]
 mod pantry;
 mod plan;
 mod project;
+#[cfg(feature = "plugin-mealplan")]
 mod recipe;
+#[cfg(feature = "plugin-mealplan")]
 mod recipe_import;
 mod session_store;
 mod setup;
@@ -64,38 +79,51 @@ mod task_cmd;
 mod threads;
 mod timer;
 mod vault;
+#[cfg(feature = "plugin-wiki")]
 mod wiki;
+#[cfg(feature = "plugin-fitness")]
 mod workout;
 mod workstream;
 
 use crate::admin::{AdminCmd, run_admin};
+#[cfg(feature = "plugin-agent")]
 use crate::agent::{AgentCmd, run_agent};
 use crate::api::{ApiArgs, run_api};
-use crate::auth::{AuthCmd, run_auth, ws_base_to_http};
+use crate::auth::{AuthCmd, run_auth};
+#[cfg(feature = "plugin-fitness")]
 use crate::body::{BodyCmd, run_body};
 use crate::code::{CodeCmd, run_code};
 use crate::cycle::{CycleCmd, run_cycle};
+#[cfg(feature = "plugin-fitness")]
 use crate::exercise::{ExerciseCmd, run_exercise};
+#[cfg(feature = "plugin-finance")]
 use crate::finance::{FinanceCmd, run_finance};
 use crate::goal::{GoalCmd, run_goal};
 use crate::inbox::{InboxCmd, run_inbox};
+#[cfg(feature = "plugin-fitness")]
 use crate::intake::{IntakeCmd, run_intake};
 use crate::issue::{IssueCmd, run_issue};
 use crate::label::{LabelCmd, run_label};
+#[cfg(feature = "plugin-home")]
 use crate::location::{LocationCmd, run_location};
+#[cfg(feature = "plugin-mealplan")]
 use crate::meal::{MealCmd, run_meal};
 use crate::milestone::{MilestoneCmd, run_milestone};
 use crate::mount::{MountCmd, run_mount};
 use crate::org::{OrgCmd, run_org};
+#[cfg(feature = "plugin-mealplan")]
 use crate::pantry::{PantryCmd, run_pantry};
 use crate::project::{ProjectCmd, run_project};
+#[cfg(feature = "plugin-mealplan")]
 use crate::recipe::{RecipeCmd, run_recipe};
 use crate::setup::{SetupCmd, run_setup};
 use crate::task_cmd::{TaskCmd, run_task};
 use crate::threads::{ThreadsCmd, run_threads};
 use crate::timer::{TimerCmd, run_timer};
 use crate::vault::{VaultCmd, run_vault, run_vault_sync};
+#[cfg(feature = "plugin-wiki")]
 use crate::wiki::{WikiCmd, run_wiki};
+#[cfg(feature = "plugin-fitness")]
 use crate::workout::{WorkoutCmd, run_workout};
 use clap::{Parser, Subcommand};
 use shared::RemoteVoxConfig;
@@ -163,13 +191,21 @@ enum Commands {
     /// LLM-agent integration. Codex backend drives `chat`
     /// (one-shot) + `wiki ingest` (two-step `CoT` against a
     /// vault's `Wiki/raw/sources/`).
+    #[cfg(feature = "plugin-agent")]
     #[command(subcommand)]
     Agent(AgentCmd),
+    #[cfg(not(feature = "plugin-agent"))]
+    #[command(hide = true)]
+    Agent(NotCompiled),
     /// `Wiki/` operations — currently the LLM-driven
     /// ingest pipeline. Sister surface to `agent`; the
     /// command itself routes through `agent-wiki::bridge`.
+    #[cfg(feature = "plugin-wiki")]
     #[command(subcommand)]
     Wiki(WikiCmd),
+    #[cfg(not(feature = "plugin-wiki"))]
+    #[command(hide = true)]
+    Wiki(NotCompiled),
     /// Billable time tracking. Local SQLite backed (no
     /// server needed); same `timer::Store` the server
     /// mounts. Project lookup reads `Projects/*.md` for the
@@ -178,8 +214,12 @@ enum Commands {
     Timer(TimerCmd),
     /// Finance — reports + invoice generation from billable
     /// sessions, PDF rendering via fulgur.
+    #[cfg(feature = "plugin-finance")]
     #[command(subcommand)]
     Finance(FinanceCmd),
+    #[cfg(not(feature = "plugin-finance"))]
+    #[command(hide = true)]
+    Finance(NotCompiled),
     /// Architect-auth flows — local sign-in, session
     /// management, org selection. Writes the persistent
     /// session file consumed by `timer` / `finance`.
@@ -260,20 +300,32 @@ enum Commands {
     /// over `CollectionService`. Create, populate, reorder, and
     /// inspect headlessly (the entry point for library/setlist
     /// seeding).
+    #[cfg(feature = "plugin-fasttrackstudio")]
     #[command(subcommand)]
     Collection(collection::CollectionCmd),
+    #[cfg(not(feature = "plugin-fasttrackstudio"))]
+    #[command(hide = true)]
+    Collection(NotCompiled),
     /// Songs — build a durable Song folder (via the `song` crate)
     /// and add it to a target collection as a `song:` node.
+    #[cfg(feature = "plugin-fasttrackstudio")]
     #[command(subcommand)]
     Song(collection::SongCmd),
+    #[cfg(not(feature = "plugin-fasttrackstudio"))]
+    #[command(hide = true)]
+    Song(NotCompiled),
     /// Media — content-addressed blobs streamed over vox (stat /
     /// get / verify-song). The no-browser audio-streaming E2E.
     #[command(subcommand)]
     Media(media::MediaCmd),
     /// Physical places — studios, rooms, venues, storage.
     /// Pantry + inventory reference these by id.
+    #[cfg(feature = "plugin-home")]
     #[command(subcommand)]
     Location(LocationCmd),
+    #[cfg(not(feature = "plugin-home"))]
+    #[command(hide = true)]
+    Location(NotCompiled),
     /// Inbox — capture fleeting notes and triage the daily queue.
     #[command(subcommand)]
     Inbox(InboxCmd),
@@ -282,45 +334,105 @@ enum Commands {
     Threads(ThreadsCmd),
     /// Cookbook recipes (cooklang `.cook` files under
     /// `Wiki/Cookbook/`).
+    #[cfg(feature = "plugin-mealplan")]
     #[command(subcommand)]
     Recipe(RecipeCmd),
+    #[cfg(not(feature = "plugin-mealplan"))]
+    #[command(hide = true)]
+    Recipe(NotCompiled),
     /// Scheduled meals + cooking lifecycle (planned →
     /// cooked → pantry deductions).
+    #[cfg(feature = "plugin-mealplan")]
     #[command(subcommand)]
     Meal(MealCmd),
+    #[cfg(not(feature = "plugin-mealplan"))]
+    #[command(hide = true)]
+    Meal(NotCompiled),
     /// Pantry — stocked food items, qty + unit tracking,
     /// barcode resolution.
+    #[cfg(feature = "plugin-mealplan")]
     #[command(subcommand)]
     Pantry(PantryCmd),
+    #[cfg(not(feature = "plugin-mealplan"))]
+    #[command(hide = true)]
+    Pantry(NotCompiled),
     /// Shopping lists — auto-populate from recipe shortages /
     /// low stock / expiry; mark-purchased restocks the pantry.
+    #[cfg(feature = "plugin-mealplan")]
     #[command(subcommand)]
     Shopping(mealprep::ShoppingCmd),
+    #[cfg(not(feature = "plugin-mealplan"))]
+    #[command(hide = true)]
+    Shopping(NotCompiled),
     /// Body metrics — weight / body-fat / measurements log.
+    #[cfg(feature = "plugin-fitness")]
     #[command(subcommand)]
     Body(BodyCmd),
+    #[cfg(not(feature = "plugin-fitness"))]
+    #[command(hide = true)]
+    Body(NotCompiled),
     /// Exercise library — movement definitions referenced
     /// by routines + sessions.
+    #[cfg(feature = "plugin-fitness")]
     #[command(subcommand)]
     Exercise(ExerciseCmd),
+    #[cfg(not(feature = "plugin-fitness"))]
+    #[command(hide = true)]
+    Exercise(NotCompiled),
     /// Workout routines + sessions.
+    #[cfg(feature = "plugin-fitness")]
     #[command(subcommand)]
     Workout(WorkoutCmd),
+    #[cfg(not(feature = "plugin-fitness"))]
+    #[command(hide = true)]
+    Workout(NotCompiled),
     /// Food intake log — daily calorie + macro tracking.
+    #[cfg(feature = "plugin-fitness")]
     #[command(subcommand)]
     Intake(IntakeCmd),
+    #[cfg(not(feature = "plugin-fitness"))]
+    #[command(hide = true)]
+    Intake(NotCompiled),
     /// Day-plan schedule surface — show / edit blocks, assign
     /// tasks, materialize from templates, plan-vs-actual diff.
     /// All logic in `plan.rs`.
+    #[cfg(feature = "plugin-scheduling")]
     #[command(subcommand)]
     Plan(plan::PlanCmd),
+    #[cfg(not(feature = "plugin-scheduling"))]
+    #[command(hide = true)]
+    Plan(NotCompiled),
     /// What should I be doing right now — current block + time
     /// remaining + next block (falls back to the next due task).
+    #[cfg(feature = "plugin-scheduling")]
     Next(plan::NextArgs),
+    #[cfg(not(feature = "plugin-scheduling"))]
+    #[command(hide = true)]
+    Next(NotCompiled),
     /// Morning digest — today's blocks + events, due/overdue +
     /// in-progress tasks, active timer, blocked agent tasks, open
     /// inbox, meals + bookings. All logic in `brief.rs`.
     Brief(brief::BriefArgs),
+}
+
+/// Placeholder arguments for a plugin command that is compiled OUT of
+/// this build. Swallows whatever the user typed (so clap still parses
+/// the invocation) and the dispatch arm fails with "not compiled into
+/// this build" instead of clap's "unrecognized subcommand".
+#[allow(dead_code)] // referenced only when at least one plugin is compiled out
+#[derive(clap::Args)]
+struct NotCompiled {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true, num_args = 0..)]
+    _rest: Vec<String>,
+}
+
+/// The error a compiled-out plugin command fails with.
+#[allow(dead_code)] // referenced only when at least one plugin is compiled out
+fn not_compiled(plugin: &str) -> eyre::Report {
+    eyre::eyre!(
+        "the `{plugin}` plugin is not compiled into this build of task-cli \
+         (rebuild with `--features plugin-{plugin}`)"
+    )
 }
 
 /// Global `--org` / `--server` flags, captured once before dispatch.
@@ -616,17 +728,32 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         Commands::Task(cmd) => {
             return Box::pin(run_task(cmd)).await;
         }
+        #[cfg(feature = "plugin-agent")]
         Commands::Agent(cmd) => {
             return run_agent(cmd).await;
         }
+        #[cfg(not(feature = "plugin-agent"))]
+        Commands::Agent(_) => {
+            return Err(not_compiled("agent"));
+        }
+        #[cfg(feature = "plugin-wiki")]
         Commands::Wiki(cmd) => {
             return run_wiki(cmd).await;
+        }
+        #[cfg(not(feature = "plugin-wiki"))]
+        Commands::Wiki(_) => {
+            return Err(not_compiled("wiki"));
         }
         Commands::Timer(cmd) => {
             return run_timer(cmd, cli.org.as_deref()).await;
         }
+        #[cfg(feature = "plugin-finance")]
         Commands::Finance(cmd) => {
             return run_finance(cmd, cli.org.as_deref()).await;
+        }
+        #[cfg(not(feature = "plugin-finance"))]
+        Commands::Finance(_) => {
+            return Err(not_compiled("finance"));
         }
         Commands::Auth(cmd) => {
             return run_auth(cmd, cli.org.as_deref()).await;
@@ -667,17 +794,32 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         Commands::Workstream(cmd) => {
             return Box::pin(workstream::run_workstream(cmd)).await;
         }
+        #[cfg(feature = "plugin-fasttrackstudio")]
         Commands::Collection(cmd) => {
             return Box::pin(collection::run_collection(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-fasttrackstudio"))]
+        Commands::Collection(_) => {
+            return Err(not_compiled("fasttrackstudio"));
+        }
+        #[cfg(feature = "plugin-fasttrackstudio")]
         Commands::Song(cmd) => {
             return Box::pin(collection::run_song(cmd)).await;
+        }
+        #[cfg(not(feature = "plugin-fasttrackstudio"))]
+        Commands::Song(_) => {
+            return Err(not_compiled("fasttrackstudio"));
         }
         Commands::Media(cmd) => {
             return Box::pin(media::run_media(cmd)).await;
         }
+        #[cfg(feature = "plugin-home")]
         Commands::Location(cmd) => {
             return Box::pin(run_location(cmd)).await;
+        }
+        #[cfg(not(feature = "plugin-home"))]
+        Commands::Location(_) => {
+            return Err(not_compiled("home"));
         }
         Commands::Inbox(cmd) => {
             return Box::pin(run_inbox(cmd)).await;
@@ -685,35 +827,85 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         Commands::Threads(cmd) => {
             return Box::pin(run_threads(cmd)).await;
         }
+        #[cfg(feature = "plugin-mealplan")]
         Commands::Recipe(cmd) => {
             return Box::pin(run_recipe(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-mealplan"))]
+        Commands::Recipe(_) => {
+            return Err(not_compiled("mealplan"));
+        }
+        #[cfg(feature = "plugin-mealplan")]
         Commands::Meal(cmd) => {
             return Box::pin(run_meal(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-mealplan"))]
+        Commands::Meal(_) => {
+            return Err(not_compiled("mealplan"));
+        }
+        #[cfg(feature = "plugin-mealplan")]
         Commands::Pantry(cmd) => {
             return Box::pin(run_pantry(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-mealplan"))]
+        Commands::Pantry(_) => {
+            return Err(not_compiled("mealplan"));
+        }
+        #[cfg(feature = "plugin-mealplan")]
         Commands::Shopping(cmd) => {
             return Box::pin(mealprep::run_shopping(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-mealplan"))]
+        Commands::Shopping(_) => {
+            return Err(not_compiled("mealplan"));
+        }
+        #[cfg(feature = "plugin-fitness")]
         Commands::Body(cmd) => {
             return Box::pin(run_body(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-fitness"))]
+        Commands::Body(_) => {
+            return Err(not_compiled("fitness"));
+        }
+        #[cfg(feature = "plugin-fitness")]
         Commands::Exercise(cmd) => {
             return Box::pin(run_exercise(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-fitness"))]
+        Commands::Exercise(_) => {
+            return Err(not_compiled("fitness"));
+        }
+        #[cfg(feature = "plugin-fitness")]
         Commands::Workout(cmd) => {
             return Box::pin(run_workout(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-fitness"))]
+        Commands::Workout(_) => {
+            return Err(not_compiled("fitness"));
+        }
+        #[cfg(feature = "plugin-fitness")]
         Commands::Intake(cmd) => {
             return Box::pin(run_intake(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-fitness"))]
+        Commands::Intake(_) => {
+            return Err(not_compiled("fitness"));
+        }
+        #[cfg(feature = "plugin-scheduling")]
         Commands::Plan(cmd) => {
             return Box::pin(plan::run_plan(cmd)).await;
         }
+        #[cfg(not(feature = "plugin-scheduling"))]
+        Commands::Plan(_) => {
+            return Err(not_compiled("scheduling"));
+        }
+        #[cfg(feature = "plugin-scheduling")]
         Commands::Next(args) => {
             return Box::pin(plan::run_next(args)).await;
+        }
+        #[cfg(not(feature = "plugin-scheduling"))]
+        Commands::Next(_) => {
+            return Err(not_compiled("scheduling"));
         }
         Commands::Brief(args) => {
             return Box::pin(brief::run_brief(args)).await;
@@ -1084,6 +1276,7 @@ mod server_resolution_tests {
 
     #[test]
     fn ws_http_derivation() {
+        use crate::auth::ws_base_to_http;
         assert_eq!(
             ws_base_to_http("wss://task.starcommand.live"),
             "https://task.starcommand.live"

@@ -4,7 +4,6 @@
 use crate::{Backend, map_err};
 use git_proto::issues::{Comment, Issue, IssueFilter, IssueTracker, IssueUpdate};
 use git_proto::{GitError, GitEvent, IssueId, IssueState, Label, RepoId, User};
-use vox::Tx;
 
 impl IssueTracker for Backend {
     fn list_issues(&self, repo: &RepoId, filter: IssueFilter) -> Result<Vec<Issue>, GitError> {

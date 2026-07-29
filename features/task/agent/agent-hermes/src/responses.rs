@@ -24,10 +24,8 @@
 //! tells [`crate::stream::run_turn`] to fall back to the legacy path.
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
-use agent_proto::event::{AgentEvent, EventTap, SessionEvents};
+use agent_proto::event::{AgentEvent, SessionEvents};
 use agent_proto::tool::{ToolCall, ToolStatus};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};

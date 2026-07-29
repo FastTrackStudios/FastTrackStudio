@@ -24,7 +24,6 @@
 //! context; the queue is resolved from the live note text + vault
 //! resolver at click time.
 
-use std::rc::Rc;
 
 use dioxus::prelude::*;
 use task_ui_core::frontmatter::{

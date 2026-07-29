@@ -81,6 +81,7 @@ pub fn tag_json(t: &timer_proto::Tag) -> serde_json::Value {
     serde_json::to_value(t).unwrap_or(serde_json::Value::Null)
 }
 
+#[cfg(feature = "plugin-finance")]
 /// Invoice → JSON (wire shape). The proto struct doesn't derive
 /// `Serialize`, so build the object by hand (status rendered as the
 /// same lowercase slug the table view uses). Keys unchanged from

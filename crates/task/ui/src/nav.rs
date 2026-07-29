@@ -280,7 +280,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
         // renders its tables), so no dedicated tab — Obsidian-style.
         NavTab {
             label: "Watch",
-            plugin: "core",
+            plugin: "fasttrackstudio",
             icon: icon_watch,
             route: Route::WatchRoute {
                 v: String::new(),

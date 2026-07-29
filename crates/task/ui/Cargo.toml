@@ -118,7 +118,7 @@ task-proto = { workspace = true, features = ["vox"] }
 # Goal wire model + `GoalService(Stream)Client` for the live goal
 # store behind `/goals`. The goal crate is its own proto (wasm-clean
 # model + rpc trait; the vault-backed modules are cfg'd off on wasm).
-goal = { workspace = true, features = ["vox"] }
+goal-proto = { workspace = true, features = ["vox"] }
 # Timer service client for the `/timer` time-tracking page.
 timer-proto = { workspace = true, features = ["vox"] }
 # Agent service clients for the `/agents` page — `SessionsClient`

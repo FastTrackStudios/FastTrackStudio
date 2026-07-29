@@ -84,6 +84,9 @@ async fn every_mounted_service_has_a_permit_table() {
         .filter(|m| m.plugin == "mealplan" || m.plugin == "fitness")
         .map(|m| m.descriptor.service_name)
         .collect();
+    // Only provable when at least one of the denied plugins is compiled
+    // in — a core-only build's catalog never contained their mounts.
+    #[cfg(any(feature = "plugin-mealplan", feature = "plugin-fitness"))]
     assert!(!dropped.is_empty(), "the denied plugins own mounts");
     assert_eq!(router.len(), permits::mounts().len() - dropped.len());
     for m in &filtered {

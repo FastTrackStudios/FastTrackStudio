@@ -18,7 +18,6 @@ use dioxus::prelude::*;
 use editor::markdown::{PropValue, parse_frontmatter, serialize_property};
 use editor::{Changes, EditorState, TransactionEvent, TransactionSpec, dispatch_spec};
 use fts_ui::lucide_dioxus::{Plus, X};
-use fts_ui::prelude::*;
 
 /// Handle to the focused note's editor doc. The focused
 /// [`NoteView`](crate::pages::note_view) publishes this into context;

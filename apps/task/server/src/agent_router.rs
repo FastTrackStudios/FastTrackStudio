@@ -13,7 +13,7 @@
 use agent_codex::CodexBackend;
 use agent_hermes::HermesBackend;
 use agent_proto::error::AgentError;
-use agent_proto::event::{AgentEvent, AgentEventEnvelope};
+use agent_proto::event::AgentEventEnvelope;
 use agent_proto::message::Message;
 use agent_proto::service::discovery::{
     BackendHealth, CapabilityFlag, Discovery, ModelInfo, SkillInfo,

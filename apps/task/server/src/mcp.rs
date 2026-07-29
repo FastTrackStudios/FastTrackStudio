@@ -60,9 +60,13 @@ const VAULT_ID: &str = "default";
 /// `-32602` for bad tool arguments).
 mod code {
     pub const PARSE: i32 = -32700;
+    // The full standard set is kept on purpose (INTERNAL is currently
+    // unreferenced): this table documents the wire contract, not just
+    // the codes we happen to emit today.
     pub const INVALID_REQUEST: i32 = -32600;
     pub const METHOD_NOT_FOUND: i32 = -32601;
     pub const INVALID_PARAMS: i32 = -32602;
+    #[allow(dead_code)]
     pub const INTERNAL: i32 = -32603;
 }
 
@@ -152,7 +156,7 @@ fn a_(desc: &str) -> Value {
 /// correct selection.
 #[must_use]
 pub fn tool_catalog() -> Vec<ToolDef> {
-    vec![
+    let mut v = vec![
         ToolDef {
             name: "task_context",
             plugin: "core",
@@ -221,6 +225,10 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                 )
             },
         },
+    ];
+    // Calendar tools ride the scheduling plugin.
+    #[cfg(feature = "plugin-scheduling")]
+    v.extend([
         ToolDef {
             name: "list_events",
             plugin: "scheduling",
@@ -281,6 +289,8 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                           cancelling anything you didn't create in this conversation.",
             schema: || obj(json!({ "id": s_("Event id from list_events.") }), &["id"]),
         },
+    ]);
+    v.extend([
         ToolDef {
             name: "capture_inbox",
             plugin: "core",
@@ -794,7 +804,8 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                 )
             },
         },
-    ]
+    ]);
+    v
 }
 
 /// The catalog as MCP's `tools/list` payload, filtered to the org's
@@ -1239,6 +1250,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
     use inbox_proto::Inbox as _;
     use milestone::MilestoneService as _;
     use project::ProjectService as _;
+    #[cfg(feature = "plugin-scheduling")]
     use scheduling_proto::{
         Bookings as _, CalendarEvents as _, DayPlans as _, Slots as _,
     };
@@ -1267,8 +1279,11 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                             .is_some_and(|d| date_of(d) <= today.as_str())
                 })
                 .count();
-            // Scheduling is a plugin; a core orientation call must not
-            // touch a backend this org has turned off.
+            // Scheduling is a plugin twice over: compiled out under
+            // --no-default-features (cfg) and toggleable per org at
+            // runtime (PluginSet) — a core orientation call must not
+            // touch a backend that is off either way.
+            #[cfg(feature = "plugin-scheduling")]
             let events_today = if org.plugins.contains("scheduling") {
                 org.scheduling
                     .list_events()
@@ -1277,6 +1292,8 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             } else {
                 0
             };
+            #[cfg(not(feature = "plugin-scheduling"))]
+            let events_today = 0;
             let inbox_open = org
                 .inbox
                 .review_queue(today.clone())
@@ -1427,6 +1444,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(json!({ "count": out.len(), "events": out }))
         }
 
+        #[cfg(feature = "plugin-scheduling")]
         "create_event" => {
             let event = scheduling_proto::CalEvent {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -1444,6 +1462,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(event_json(&event))
         }
 
+        #[cfg(feature = "plugin-scheduling")]
         "reschedule_event" => {
             let id = required_str(args, "id")?;
             let start = required_str(args, "start")?;
@@ -1466,6 +1485,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(out)
         }
 
+        #[cfg(feature = "plugin-scheduling")]
         "cancel_event" => {
             let id = required_str(args, "id")?;
             org.scheduling
@@ -2354,6 +2374,7 @@ fn task_json(t: &task::TaskInfo) -> Value {
     })
 }
 
+#[cfg(feature = "plugin-scheduling")]
 fn event_json(e: &scheduling_proto::CalEvent) -> Value {
     json!({
         "id": e.id,

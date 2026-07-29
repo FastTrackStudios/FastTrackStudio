@@ -359,7 +359,7 @@ pub(crate) fn ProjectQuickAdd(
     #[props(default)] compact: bool,
 ) -> Element {
     let mut value = use_signal(String::new);
-    let mut chosen = use_signal(|| default_slug.clone());
+    let chosen = use_signal(|| default_slug.clone());
     let orgs_for_submit = orgs.clone();
     let mut submit = move || {
         let title = value.read().trim().to_string();

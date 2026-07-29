@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, broadcast};
 
-use agent_proto::event::{AgentEvent, AgentEventEnvelope, SessionEvents};
+use agent_proto::event::{AgentEventEnvelope, SessionEvents};
 use agent_proto::session::Session;
 
 pub use chat::{ChatHandle, ChatOpts};

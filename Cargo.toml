@@ -911,6 +911,7 @@ finance = { path = "features/task/finance/finance" }
 mount-proto = { path = "features/task/mount/mount-proto" }
 mount = { path = "features/task/mount/mount" }
 goal = { path = "features/task/goal/goal" }
+goal-proto = { path = "features/task/goal/goal-proto", default-features = false }
 milestone = { path = "features/task/milestone/milestone" }
 milestone-proto = { path = "features/task/milestone/milestone-proto", default-features = false }
 workstream = { path = "features/task/workstream/workstream" }
@@ -1068,9 +1069,14 @@ mermaid-rs-renderer = { path = "libs/editor/vendor/mermaid-rs-renderer" }
 
 # ── Lints — merged union of the dissolved workspaces' policies ─────────
 [workspace.lints.rust]
-dead_code = "allow"
-unused = "allow"
-unused_unsafe = "allow"
+# Flipped from "allow" 2026-07-28 (task cleanup): the blanket allows are
+# WHY ~30k lines of dead code accumulated silently. The task tree is
+# warning-clean under these; legacy crates in other domains carry a
+# crate-level `#![allow(dead_code, unused)]` marked "Lint debt" until
+# their own burn-down.
+dead_code = "warn"
+unused = "warn"
+unused_unsafe = "warn"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "allow"

@@ -17,11 +17,14 @@
 //! `project-crdt` crates. CRDT now lives only at the per-file
 //! editor layer (future); vault is the sole storage path.
 
+#[cfg(feature = "plugin-agent")]
 pub mod agent_router;
 pub mod api_ref;
 pub mod attachments;
 pub mod capability;
+#[cfg(feature = "plugin-forge")]
 pub mod connections;
+#[cfg(feature = "plugin-forge")]
 pub mod forge_sync;
 pub mod identity_mgmt;
 pub mod link_sync;
@@ -34,6 +37,7 @@ pub mod server_mgmt;
 pub mod share;
 pub mod snapshot;
 pub mod watch_bridge;
+#[cfg(feature = "plugin-forge")]
 pub mod webhooks;
 
 use std::path::PathBuf;
@@ -130,6 +134,7 @@ pub struct OrgAppState {
     /// `None` when attaching failed (warned, non-fatal).
     pub vault_watcher: Option<Arc<vault::sync::WatcherHandle>>,
     /// Wiki feature backend rooted at this org's `vault/`.
+    #[cfg(feature = "plugin-wiki")]
     pub wiki: wiki_live::WikiBackend,
     /// Project list / get backend — walks `vault/Projects/*.md`.
     pub projects: project::ProjectBackend,
@@ -146,11 +151,14 @@ pub struct OrgAppState {
     /// vault.
     pub tasks: task::TaskBackend,
     /// Locations backend — `type: location` pages.
+    #[cfg(feature = "plugin-home")]
     pub locations: locations::Store,
     /// Inventory backend — `type: item` gear/equipment pages.
+    #[cfg(feature = "plugin-home")]
     pub inventory: inventory::Store,
     /// Scripture backend — read-only Bible spine from the resource
     /// library (`<org>/resources/bible/<TX>/`).
+    #[cfg(feature = "plugin-scripture")]
     pub scripture: scripture::Store,
     /// Typed-link store — verse↔verse, note↔verse, idea↔wiki links with
     /// confidence + visibility (`<org>/links.jsonl`).
@@ -158,37 +166,50 @@ pub struct OrgAppState {
     /// Ordered-collection store — song Library / Setlist / Show / Playlist,
     /// one `CollectionService` per org (`<org>/collections.jsonl`; override
     /// `TASK_SERVER_COLLECTIONS_PATH`). JSONL-backed, lexorank-ordered.
+    #[cfg(feature = "plugin-fasttrackstudio")]
     pub collections: collection::Store,
     /// Resource Library reader — serves transcript sidecars under
     /// `<org>/resources/` to the watch/reader UI.
     pub resources: resources::ResourcesBackend,
     /// Cookbook (cooklang recipes under `Wiki/Cookbook/`).
+    #[cfg(feature = "plugin-mealplan")]
     pub cookbook: cookbook::Store,
     /// Mealplan — scheduled meals + their fulfillment math.
+    #[cfg(feature = "plugin-mealplan")]
     pub mealplan: mealplan::Store,
     /// Shopping-list service — generated/curated shopping lists.
+    #[cfg(feature = "plugin-mealplan")]
     pub shopping: mealplan::shopping::Store,
     /// Substitution-rule service — ingredient alternatives.
+    #[cfg(feature = "plugin-mealplan")]
     pub substitutions: mealplan::substitutions::Store,
     /// Pantry — stocked ingredients + barcode lookup.
+    #[cfg(feature = "plugin-mealplan")]
     pub pantry: pantry::Store,
     /// Body metrics — weight / body-fat / measurements log.
+    #[cfg(feature = "plugin-fitness")]
     pub body: body::Store,
     /// Exercise library — movement definitions referenced by
     /// routines + sessions.
+    #[cfg(feature = "plugin-fitness")]
     pub exercises: exercises::Store,
     /// Workout routines + sessions (planned + completed lifts).
+    #[cfg(feature = "plugin-fitness")]
     pub workouts: workouts::Store,
     /// Food intake — per-day calorie + macro log.
+    #[cfg(feature = "plugin-fitness")]
     pub intake: intake::Store,
+    #[cfg(feature = "plugin-agent")]
     pub agent_tasks: agent_tasks::Store,
     /// Codex agent backend — in-process session registry + turn
     /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
     /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
+    #[cfg(feature = "plugin-agent")]
     pub agent_codex: agent_codex::CodexBackend,
     /// Router over the agent backends (Codex + optional Hermes
     /// gateway) — the surface the agent vox services are served
     /// from. Sessions route to their owning backend.
+    #[cfg(feature = "plugin-agent")]
     pub agent_router: agent_router::AgentRouter,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
@@ -209,6 +230,7 @@ pub struct OrgAppState {
     /// Scheduling backend — day templates / availability under
     /// `vault/Projects/Scheduling/`. Mounted for `DayTemplates` so
     /// the app can overlay the daily plan on the calendar.
+    #[cfg(feature = "plugin-scheduling")]
     pub scheduling: scheduling::VaultScheduler,
     /// Inbox backend — captured items under `vault/Records/inbox/`.
     /// Mounted for `Inbox` so the capture UIs + daily review can
@@ -222,23 +244,28 @@ pub struct OrgAppState {
     /// Recall backend — spaced-repetition learning cards under
     /// `vault/Records/recall/`. Mounted for `Recall` so the deck UI +
     /// flashcard review round-trip FSRS-scheduled cards.
+    #[cfg(feature = "plugin-recall")]
     pub recall: recall::VaultRecall,
     /// Contacts backend — vault-backed people directory under
     /// `vault/Records/contacts/`. Mounted for `Contacts` so the
     /// directory UI + CardDAV sync accounts round-trip.
+    #[cfg(feature = "plugin-contacts")]
     pub contacts: contacts::VaultContacts,
     /// Tag registry — name → icon/color decorations at
     /// `vault/Records/tags.json`. Mounted for `TagService` so the
     /// calendar / lists decorate markdown tag names with an icon.
     pub tags: tag::VaultTags,
+    #[cfg(feature = "plugin-finance")]
     pub finance_conn: sea_orm::DatabaseConnection,
     /// Invoicing backend — persists invoices in `finance.sqlite` and
     /// links billed sessions in the timer DB. Mounted for `Invoicing`.
+    #[cfg(feature = "plugin-finance")]
     pub finance_backend: finance::FinanceBackend,
     /// Ledger backend — double-entry journal over the same
     /// `finance.sqlite`. Mounted for `Ledger` (post / balances /
     /// account history). The invoicing flow posts into it on
     /// mark-sent + payment.
+    #[cfg(feature = "plugin-finance")]
     pub ledger_backend: finance::LedgerService,
     /// Email backend — a Maildir-backed `email_proto::EmailSync`
     /// impl rooted at `<org>/vault/Mail/`. Serves whatever
@@ -247,6 +274,7 @@ pub struct OrgAppState {
     /// list, which the `/email` UI renders gracefully. Mounted
     /// for the `EmailSync` RPC surface (accounts / folders /
     /// envelopes).
+    #[cfg(feature = "plugin-email")]
     pub email: email_maildir::Backend,
     /// Forge backend (Forgejo) serving `RepoCatalog` +
     /// `IssueTracker` + `ReviewSurface`. Built from
@@ -254,12 +282,14 @@ pub struct OrgAppState {
     /// is absent it's constructed with empty credentials and the
     /// forge calls degrade to auth/forge errors the UI tolerates
     /// (empty list) rather than blocking server startup.
+    #[cfg(feature = "plugin-forge")]
     pub forge: git_forgejo::Backend,
     /// Forge backend authenticated as the agent/bot identity
     /// (`TASK_FORGEJO_BOT_TOKEN`). The forge-sync path routes
     /// agent-owned tasks through this so their issues are
     /// attributed to the bot account, distinct from human work.
     /// Falls back to [`Self::forge`] when no bot token is set.
+    #[cfg(feature = "plugin-forge")]
     pub forge_agent: git_forgejo::Backend,
     /// Path to this org's `issue-links.json` (the `git_config`
     /// `FileStore` shared with the CLI). Held so the forge-sync
@@ -491,6 +521,7 @@ impl AppState {
         // Background forge-sync: pull codeberg/Forgejo issue changes
         // back into linked tasks on an interval (outbound push is
         // handled inline by the `ForgeSyncTaskService` decorator).
+        #[cfg(feature = "plugin-forge")]
         forge_sync::spawn_poll_loop(state.clone());
         // Per-org notifier: subscribes to the org's event hubs
         // in-process and materializes notifications by rule
@@ -698,8 +729,10 @@ pub(crate) async fn build_org_state(
         // through plain filesystem ops. `wiki_id = "default"`
         // is conventional for the one-wiki-per-org case;
         // future federation may surface multiple ids.
+        #[cfg(any(feature = "plugin-wiki", feature = "plugin-mealplan"))]
         let wiki_root = std::env::var("TASK_SERVER_WIKI_ROOT")
             .map_or_else(|_| org_root.wiki_knowledge_dir(), PathBuf::from);
+        #[cfg(feature = "plugin-wiki")]
         let wiki = wiki_live::WikiBackend::single("default", wiki_root.clone())
             .map_err(|e| eyre::eyre!("wiki backend: {e}"))?;
 
@@ -709,16 +742,19 @@ pub(crate) async fn build_org_state(
         // helper — we co-locate it alongside the other org
         // dbs by hand for now. PR 4 promotes this to a
         // first-class resolver.
+        #[cfg(feature = "plugin-agent")]
         let agent_tasks_url = std::env::var("TASK_SERVER_AGENT_TASKS_URL").unwrap_or_else(|_| {
             format!(
                 "sqlite://{}?mode=rwc",
                 org_root.path().join("agent-tasks.sqlite").display()
             )
         });
+        #[cfg(feature = "plugin-agent")]
         let agent_tasks_conn = open_sqlite_pool(scope, agent_tasks_url, "agent-tasks", |db| {
             Box::pin(async move { agent_tasks::Migrator::up(&db, None).await.map(|()| db) })
         })
         .await?;
+        #[cfg(feature = "plugin-agent")]
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
 
         // Codex agent backend. In-process, in-memory session
@@ -728,16 +764,21 @@ pub(crate) async fn build_org_state(
         // is a single `#[subscribe]` stream served from one
         // `PubSub`, so Codex and Hermes publish into the same hub
         // and a client's one subscription covers sessions on either.
+        #[cfg(feature = "plugin-agent")]
         let agent_events = architect::PubSub::sliding(512);
+        #[cfg(feature = "plugin-agent")]
         let agent_codex = agent_codex::CodexBackend::with_events(agent_events.clone());
         // Hermes gateway backend — enabled when TASK_HERMES_URL is
         // set (see agent_hermes::HermesConfig::from_env). When
         // present it becomes the DEFAULT chat backend: sessions
         // created without an explicit backend_id land on Hermes.
+        #[cfg(feature = "plugin-agent")]
         let agent_hermes = agent_hermes::HermesBackend::from_env_with_events(agent_events.clone());
+        #[cfg(feature = "plugin-agent")]
         if let Some(h) = &agent_hermes {
             tracing::info!(url = %h.config().base_url, model = %h.config().model, "hermes agent gateway configured");
         }
+        #[cfg(feature = "plugin-agent")]
         let agent_router =
             agent_router::AgentRouter::new(agent_codex.clone(), agent_hermes, agent_events);
 
@@ -819,6 +860,7 @@ pub(crate) async fn build_org_state(
         // `Records/bookings/`, and the booking audit trail under
         // `Records/audit/` — every byte it owns is on disk, so a
         // restart loses nothing.
+        #[cfg(feature = "plugin-scheduling")]
         let scheduling = scheduling::VaultScheduler::new(vault_root.clone())
             .map_err(|e| eyre::eyre!("scheduling backend: {e}"))?;
 
@@ -829,11 +871,13 @@ pub(crate) async fn build_org_state(
 
         // Recall backend rooted at the same vault — learning cards
         // live under `Records/recall/`.
+        #[cfg(feature = "plugin-recall")]
         let recall = recall::VaultRecall::new(vault_root.clone())
             .map_err(|e| eyre::eyre!("recall backend: {e}"))?;
 
         // Contacts backend rooted at the same vault — people live
         // under `Records/contacts/`.
+        #[cfg(feature = "plugin-contacts")]
         let contacts = contacts::VaultContacts::new(vault_root.clone())
             .map_err(|e| eyre::eyre!("contacts backend: {e}"))?;
 
@@ -848,8 +892,10 @@ pub(crate) async fn build_org_state(
         // the migrated DB connection is exposed; the
         // task-cli `finance invoice` flow writes against it
         // when that feature lands.
+        #[cfg(feature = "plugin-finance")]
         let finance_url = std::env::var("TASK_SERVER_FINANCE_URL")
             .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.finance_db().display()));
+        #[cfg(feature = "plugin-finance")]
         let finance_conn = open_sqlite_pool(scope, finance_url, "finance", |db| {
             Box::pin(async move { finance_db::Migrator::up(&db, None).await.map(|()| db) })
         })
@@ -858,6 +904,7 @@ pub(crate) async fn build_org_state(
         // Ledger service — double-entry journal over the same
         // finance.sqlite connection. Shared with the invoicing
         // backend so mark-sent / payment post into it.
+        #[cfg(feature = "plugin-finance")]
         let ledger_backend = finance::LedgerService::new(finance_conn.clone())
             .map_err(|e| eyre::eyre!("ledger backend: {e}"))?;
 
@@ -865,6 +912,7 @@ pub(crate) async fn build_org_state(
         // marks billed sessions in the timer DB, so it needs both.
         // It also posts double-entry journal entries to the ledger on
         // mark-sent + payment, so it gets a clone of the ledger.
+        #[cfg(feature = "plugin-finance")]
         let finance_backend = finance::FinanceBackend::new(
             finance_conn.clone(),
             timer.conn().clone(),
@@ -884,8 +932,10 @@ pub(crate) async fn build_org_state(
         // `/email` UI tolerates that. Each discovered account
         // maps to a Maildir++ root; `Backend::with_accounts`
         // creates the `cur/new/tmp` dirs on demand.
+        #[cfg(feature = "plugin-email")]
         let mail_root = std::env::var("TASK_SERVER_MAIL_ROOT")
             .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
+        #[cfg(feature = "plugin-email")]
         let email = email_maildir::Backend::with_accounts(discover_mail_accounts(&mail_root));
 
         // Forge backend — Forgejo, the org's primary forge. Base
@@ -897,12 +947,15 @@ pub(crate) async fn build_org_state(
         // auth/forge `GitError` the /repos UI renders as an empty
         // list. `from_token` only errors when called outside a tokio
         // runtime, which `build_org_state` always is.
+        #[cfg(feature = "plugin-forge")]
         let forgejo_base = std::env::var("TASK_FORGEJO_BASE_URL").unwrap_or_default();
+        #[cfg(feature = "plugin-forge")]
         let forgejo_token = std::env::var("TASK_FORGEJO_TOKEN")
             .ok()
             .filter(|t| !t.is_empty())
             .or_else(|| std::env::var("FORGEJO_TOKEN").ok())
             .unwrap_or_default();
+        #[cfg(feature = "plugin-forge")]
         let forge = git_forgejo::Backend::from_token(forgejo_base.clone(), forgejo_token)
             .map_err(|e| eyre::eyre!("forge backend: {e}"))?;
         // Agent/bot identity for forge-sync attribution. Token from
@@ -912,6 +965,7 @@ pub(crate) async fn build_org_state(
         // When neither is set we reuse the human backend, so
         // agent-owned tasks still sync — just under the human
         // identity until the bot token is configured.
+        #[cfg(feature = "plugin-forge")]
         let forge_agent = match std::env::var("TASK_FORGEJO_BOT_TOKEN")
             .ok()
             .or_else(|| std::env::var("FTS_CODEBERG_ACCESS_TOKEN").ok())
@@ -925,6 +979,7 @@ pub(crate) async fn build_org_state(
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
         // failures here shouldn't block startup.
+        #[cfg(feature = "plugin-wiki")]
         if let Ok(entries) = std::fs::read_dir(&vault_root) {
             for entry in entries.flatten() {
                 if !entry.path().is_dir() {
@@ -961,14 +1016,18 @@ pub(crate) async fn build_org_state(
         // mutable views; cross-coordination happens at the
         // service level. `Vault::open` is cheap (no parsing
         // beyond directory walk).
+        #[cfg(feature = "plugin-home")]
         let locations_vault = vault::Vault::open(&vault_root)
             .map_err(|e| eyre::eyre!("open locations vault: {e}"))?;
+        #[cfg(feature = "plugin-home")]
         let locations = locations::Store::new(locations_vault);
         // Inventory — `type: item` gear/equipment pages. Its own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`, like
         // locations.
+        #[cfg(feature = "plugin-home")]
         let inventory_vault = vault::Vault::open(&vault_root)
             .map_err(|e| eyre::eyre!("open inventory vault: {e}"))?;
+        #[cfg(feature = "plugin-home")]
         let inventory = inventory::Store::new(inventory_vault);
         // Scripture — read-only Bible spine loaded from the resource
         // library (`<org>/resources/bible/<TX>/`). A missing root yields
@@ -978,13 +1037,16 @@ pub(crate) async fn build_org_state(
         // (never bundled). ESV needs a Crossway key; NIV rides API.Bible
         // and additionally needs that edition's `bible_id` (NIV is tightly
         // licensed — only works if the key has NIV access).
+        #[cfg(feature = "plugin-scripture")]
         let mut scripture_api = Vec::new();
+        #[cfg(feature = "plugin-scripture")]
         if let Ok(key) = std::env::var("TASK_ESV_API_KEY").or_else(|_| std::env::var("ESV_API_KEY"))
         {
             if !key.is_empty() {
                 scripture_api.push(scripture::ApiTranslation::esv(key));
             }
         }
+        #[cfg(feature = "plugin-scripture")]
         if let (Ok(key), Ok(bible_id)) = (
             std::env::var("TASK_API_BIBLE_KEY").or_else(|_| std::env::var("API_BIBLE_KEY")),
             std::env::var("TASK_API_BIBLE_NIV_ID"),
@@ -1000,9 +1062,11 @@ pub(crate) async fn build_org_state(
         }
         // Strong's lexicon for word study (`<org>/resources/lexicon/strongs/`);
         // empty if not installed.
+        #[cfg(feature = "plugin-scripture")]
         let scripture_lexicon =
             scripture::Lexicon::load_dir(&org_root.resources_dir().join("lexicon").join("strongs"))
                 .map_err(|e| eyre::eyre!("load lexicon: {e}"))?;
+        #[cfg(feature = "plugin-scripture")]
         let scripture =
             scripture::Store::load_resource_root(&org_root.resources_dir().join("bible"))
                 .map_err(|e| eyre::eyre!("load scripture: {e}"))?
@@ -1042,8 +1106,10 @@ pub(crate) async fn build_org_state(
         // JSONL at `<org>/collections.jsonl` (override via
         // `TASK_SERVER_COLLECTIONS_PATH`, mirroring the vault-root override
         // so tests can isolate it). A missing file is an empty store.
+        #[cfg(feature = "plugin-fasttrackstudio")]
         let collections_path = std::env::var("TASK_SERVER_COLLECTIONS_PATH")
             .map_or_else(|_| org_root.path().join("collections.jsonl"), PathBuf::from);
+        #[cfg(feature = "plugin-fasttrackstudio")]
         let collections = collection::Store::open(collections_path);
         // Link-graph reader over the same `"default"` vault root
         // the sync backend serves — read-only, so no dir creation.
@@ -1062,7 +1128,9 @@ pub(crate) async fn build_org_state(
         // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
         // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
         // vault root. Match the wiki backend's anchor.
+        #[cfg(feature = "plugin-mealplan")]
         let cookbook = cookbook::Store::new(wiki_root.clone());
+        #[cfg(feature = "plugin-mealplan")]
         let mealplan_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open mealplan vault: {e}"))?;
         // `with_cookbook`: meals live in the vault, but their
@@ -1070,31 +1138,46 @@ pub(crate) async fn build_org_state(
         // cookbook above — without it `can_cook` / cook
         // deductions look for `.cook` files under the vault
         // root and never find them.
+        #[cfg(feature = "plugin-mealplan")]
         let mealplan = mealplan::Store::new(mealplan_vault).with_cookbook(cookbook.clone());
         // Shopping list + substitution-rule services — sibling
         // mealplan stores, each its own vault snapshot.
+        #[cfg(feature = "plugin-mealplan")]
         let shopping_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open shopping vault: {e}"))?;
+        #[cfg(feature = "plugin-mealplan")]
         let shopping =
             mealplan::shopping::Store::new(shopping_vault).with_cookbook(cookbook.clone());
+        #[cfg(feature = "plugin-mealplan")]
         let substitutions_vault = vault::Vault::open(&vault_root)
             .map_err(|e| eyre::eyre!("open substitutions vault: {e}"))?;
+        #[cfg(feature = "plugin-mealplan")]
         let substitutions = mealplan::substitutions::Store::new(substitutions_vault);
+        #[cfg(feature = "plugin-mealplan")]
         let pantry_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open pantry vault: {e}"))?;
+        #[cfg(feature = "plugin-mealplan")]
         let pantry = pantry::Store::new(pantry_vault);
         // Fitness suite. Each takes its own vault snapshot.
+        #[cfg(feature = "plugin-fitness")]
         let body_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open body vault: {e}"))?;
+        #[cfg(feature = "plugin-fitness")]
         let body = body::Store::new(body_vault);
+        #[cfg(feature = "plugin-fitness")]
         let exercises_vault = vault::Vault::open(&vault_root)
             .map_err(|e| eyre::eyre!("open exercises vault: {e}"))?;
+        #[cfg(feature = "plugin-fitness")]
         let exercises = exercises::Store::new(exercises_vault);
+        #[cfg(feature = "plugin-fitness")]
         let workouts_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open workouts vault: {e}"))?;
+        #[cfg(feature = "plugin-fitness")]
         let workouts = workouts::Store::new(workouts_vault);
+        #[cfg(feature = "plugin-fitness")]
         let intake_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open intake vault: {e}"))?;
+        #[cfg(feature = "plugin-fitness")]
         let intake = intake::Store::new(intake_vault);
 
         // Every open sqlite pool, for the snapshot engine's
@@ -1103,13 +1186,15 @@ pub(crate) async fn build_org_state(
         // coverage for that db, never correctness of live serving.
         let mut sqlite_conns = vec![
             auth.db.clone(),
-            agent_tasks.conn().clone(),
             timer.conn().clone(),
             threads.conn().clone(),
             notify_store.conn().clone(),
             prefs.conn().clone(),
-            finance_conn.clone(),
         ];
+        #[cfg(feature = "plugin-agent")]
+        sqlite_conns.push(agent_tasks.conn().clone());
+        #[cfg(feature = "plugin-finance")]
+        sqlite_conns.push(finance_conn.clone());
         // Identity locker only exists on the home org; include its pool
         // in the snapshot checkpoint set when it was opened.
         if let Some(store) = &identity {
@@ -1134,46 +1219,72 @@ pub(crate) async fn build_org_state(
             vault_sync: vault_sync_state,
             vault_collab,
             vault_watcher,
+            #[cfg(feature = "plugin-scripture")]
             scripture,
             links,
+            #[cfg(feature = "plugin-fasttrackstudio")]
             collections,
             resources,
+            #[cfg(feature = "plugin-wiki")]
             wiki,
             projects,
             goals,
             milestones,
             workstreams,
             tasks,
+            #[cfg(feature = "plugin-home")]
             locations,
+            #[cfg(feature = "plugin-home")]
             inventory,
+            #[cfg(feature = "plugin-mealplan")]
             cookbook,
+            #[cfg(feature = "plugin-mealplan")]
             mealplan,
+            #[cfg(feature = "plugin-mealplan")]
             shopping,
+            #[cfg(feature = "plugin-mealplan")]
             substitutions,
+            #[cfg(feature = "plugin-mealplan")]
             pantry,
+            #[cfg(feature = "plugin-fitness")]
             body,
+            #[cfg(feature = "plugin-fitness")]
             exercises,
+            #[cfg(feature = "plugin-fitness")]
             workouts,
+            #[cfg(feature = "plugin-fitness")]
             intake,
+            #[cfg(feature = "plugin-agent")]
             agent_tasks,
+            #[cfg(feature = "plugin-agent")]
             agent_codex,
+            #[cfg(feature = "plugin-agent")]
             agent_router,
             agent_dispatch_vault_root: vault_root,
             timer,
             threads,
             prefs,
             identity,
+            #[cfg(feature = "plugin-scheduling")]
             scheduling,
             inbox,
             notify: notify_store,
+            #[cfg(feature = "plugin-recall")]
             recall,
+            #[cfg(feature = "plugin-contacts")]
             contacts,
             tags,
+            #[cfg(feature = "plugin-finance")]
             finance_conn,
+            #[cfg(feature = "plugin-finance")]
             finance_backend,
+            #[cfg(feature = "plugin-finance")]
             ledger_backend,
+            #[cfg(feature = "plugin-email")]
             email,
+            #[cfg(feature = "plugin-forge")]
             forge,
+            #[cfg(feature = "plugin-forge")]
             forge_agent,
             issue_links_path: org_root.path().join("issue-links.json"),
             presence: crdt::sync::PresenceHost::new(
@@ -1195,6 +1306,7 @@ pub(crate) async fn build_org_state(
 /// or empty `mail_root` yields an empty vec — the backend then
 /// serves no accounts, which is a valid "operational but
 /// unconfigured" state.
+#[cfg(feature = "plugin-email")]
 fn discover_mail_accounts(
     mail_root: &std::path::Path,
 ) -> Vec<(email_proto::Account, PathBuf, email_config::FolderAliases)> {
@@ -1489,14 +1601,19 @@ pub fn router(state: AppState) -> Router {
     let well_known = Router::new()
         .route("/.well-known/task-server.json", get(well_known_handler))
         .with_state(state.clone());
-    let per_org = Router::new()
-        .route("/org/{slug}/health", get(per_org_health_handler))
-        .route("/org/{slug}/api", get(per_org_api_handler))
-        .route("/org/{slug}/vox", any(per_org_vox_handler))
+    // Forge webhook receiver — only a forge-carrying build has the
+    // handler; without the plugin the route 404s like any unknown path.
+    #[cfg(feature = "plugin-forge")]
+    let webhook_routes = Router::new()
         .route(
             "/org/{slug}/webhooks/forge",
             axum::routing::post(webhooks::forge_webhook_handler),
         )
+        .with_state(state.clone());
+    let per_org = Router::new()
+        .route("/org/{slug}/health", get(per_org_health_handler))
+        .route("/org/{slug}/api", get(per_org_api_handler))
+        .route("/org/{slug}/vox", any(per_org_vox_handler))
         .route("/org/{slug}/share/{token}", get(share_landing_handler))
         // MCP — Task as a tool surface for agents (Hermes gateway,
         // Claude Code, any MCP client). See `mcp`.
@@ -1529,16 +1646,17 @@ pub fn router(state: AppState) -> Router {
         .route("/server/permissions", get(permissions_report_handler))
         .with_state(state.clone());
 
-    Router::new()
+    let router = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/vox", get(legacy_vox_handler))
         .merge(well_known)
         .merge(per_org)
         .merge(server_mgmt)
         .merge(watch_bridge::watch_router())
-        .merge(blob_router)
-        .layer(cors_layer())
-        .with_state(state)
+        .merge(blob_router);
+    #[cfg(feature = "plugin-forge")]
+    let router = router.merge(webhook_routes);
+    router.layer(cors_layer()).with_state(state)
 }
 
 /// CORS policy. **Default is unchanged**: with `TASK_CORS_ALLOWED_ORIGINS`
@@ -1933,6 +2051,8 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     // field there is the single source of truth; `permits_cover_router`
     // asserts the two views agree for any set). No deny-list = every
     // branch taken = exactly the pre-plugin router.
+    // Unused only in a core-only build (every plugin compiled out).
+    #[allow(unused_variables)]
     let on = |id: &str| org.plugins.contains(id);
 
     let mut router = LayerRouter::new()
@@ -1991,6 +2111,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         );
 
     // ── Agent plugin ─────────────────────────────────────────────
+    #[cfg(feature = "plugin-agent")]
     if on("agent") {
         router = router
             // Agent-task queue — slim domain trait (claim / complete / set-status).
@@ -2058,6 +2179,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         );
 
     // ── Scheduling plugin ────────────────────────────────────────
+    #[cfg(feature = "plugin-scheduling")]
     if on("scheduling") {
         router = router
             // Scheduling — day templates (drives the calendar overlay)
@@ -2126,6 +2248,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .merge(notify_proto::notify_stream_layer(org.notify.clone()));
 
     // ── Recall plugin ────────────────────────────────────────────
+    #[cfg(feature = "plugin-recall")]
     if on("recall") {
         router = router
             .with(
@@ -2138,6 +2261,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     }
 
     // ── Contacts plugin ──────────────────────────────────────────
+    #[cfg(feature = "plugin-contacts")]
     if on("contacts") {
         router = router
             .with(
@@ -2156,6 +2280,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     );
 
     // ── Finance plugin ───────────────────────────────────────────
+    #[cfg(feature = "plugin-finance")]
     if on("finance") {
         router = router
             .with(
@@ -2169,6 +2294,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     }
 
     // ── Wiki plugin — 11 per-capability traits, one descriptor each.
+    #[cfg(feature = "plugin-wiki")]
     if on("wiki") {
         let wiki = org.wiki.clone();
         router = router
@@ -2254,16 +2380,22 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             workstream::workstream_service_descriptor(),
             workstream::serve_workstream_service(org.workstreams.clone()),
         )
-        .with(
-            task::task_service_descriptor(),
-            task::serve_task_service(forge_sync::ForgeSyncTaskService::new(
+        .with(task::task_service_descriptor(), {
+            // With the forge plugin compiled in, TaskService is wrapped
+            // in the forge-sync decorator (outbound issue push on task
+            // writes); without it the raw backend serves directly.
+            #[cfg(feature = "plugin-forge")]
+            let svc = task::serve_task_service(forge_sync::ForgeSyncTaskService::new(
                 org.tasks.clone(),
                 org.forge.clone(),
                 org.forge_agent.clone(),
                 org.slug.clone(),
                 org.issue_links_path.clone(),
-            )),
-        )
+            ));
+            #[cfg(not(feature = "plugin-forge"))]
+            let svc = task::serve_task_service(org.tasks.clone());
+            svc
+        })
         // Live task changes — the `#[subscribe]` stream sibling of
         // `TaskService`. The hub lives on the raw `TaskBackend`, so
         // every write path publishes into it: vox calls through the
@@ -2280,6 +2412,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         ));
 
     // ── Home-ops plugin — locations + physical inventory.
+    #[cfg(feature = "plugin-home")]
     if on("home") {
         router = router
             .with(
@@ -2293,6 +2426,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     }
 
     // ── Scripture plugin ─────────────────────────────────────────
+    #[cfg(feature = "plugin-scripture")]
     if on("scripture") {
         router = router.with(
             scripture::scripture_service_descriptor(),
@@ -2312,6 +2446,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
 
     // ── FastTrackStudio plugin — ordered collections (Library /
     // Setlist / Show / Playlist) backing the song/setlist surfaces.
+    #[cfg(feature = "plugin-fasttrackstudio")]
     if on("fasttrackstudio") {
         router = router.with(
             collection::collection_service_descriptor(),
@@ -2321,6 +2456,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
 
     // ── Mealplan plugin — cookbook / plan / pantry / shopping /
     // substitutions.
+    #[cfg(feature = "plugin-mealplan")]
     if on("mealplan") {
         router = router
             .with(
@@ -2346,6 +2482,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     }
 
     // ── Fitness plugin — body / exercises / workouts / intake.
+    #[cfg(feature = "plugin-fitness")]
     if on("fitness") {
         router = router
             .with(
@@ -2369,6 +2506,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     // ── Email plugin — `EmailSync` (accounts / folders / envelopes /
     // fetch / send / flag / subscribe), served by the per-org
     // Maildir backend.
+    #[cfg(feature = "plugin-email")]
     if on("email") {
         router = router
             .with(
@@ -2385,6 +2523,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
     // binds RepoCatalog (list repos) + IssueTracker (list issues
     // per repo); ReviewSurface rounds out the surface so PR views
     // can bind without another mount pass.
+    #[cfg(feature = "plugin-forge")]
     if on("forge") {
         router = router
             .with(

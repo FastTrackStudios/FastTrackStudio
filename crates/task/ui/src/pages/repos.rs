@@ -131,7 +131,7 @@ fn RepoCard(
     // loads independently. Returns `(number, title, state)` tuples —
     // all `PartialEq`-clean — so the rendered rows don't need the
     // non-`PartialEq` `Issue` struct.
-    let mut issues = use_resource({
+    let issues = use_resource({
         // Capture clones so the `slug` / `repo_id` props stay available
         // for the per-issue `IssueRow` children below.
         let slug = slug.clone();

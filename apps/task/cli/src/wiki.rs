@@ -2,8 +2,7 @@
 //!
 //! Moved verbatim out of `main.rs`; behaviour unchanged.
 
-use clap::{Args, Subcommand};
-use std::collections::HashMap;
+use clap::Subcommand;
 
 use crate::establish_for_url;
 use crate::resolve_active_org;

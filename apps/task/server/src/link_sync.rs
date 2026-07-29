@@ -6,10 +6,16 @@
 //! become `note → note` links.
 
 use std::path::{Path, PathBuf};
+#[cfg(feature = "plugin-scripture")]
 use std::sync::OnceLock;
 
 use links::{Confidence, LinksService, NodeKind, NodeRef, Relation, Store, TypedLink, Visibility};
+#[cfg(feature = "plugin-scripture")]
 use regex::Regex;
+// Verse-ref recognition rides the scripture plugin; a build without it
+// still syncs note→note wikilinks, it just never mints `note → verse`
+// edges (see `is_verse_ref` / the cfg'd arm in `sync_note`).
+#[cfg(feature = "plugin-scripture")]
 use scripture::VerseRange;
 use tokio::sync::broadcast;
 use vault::VaultGraph as _;
@@ -22,9 +28,11 @@ const SOURCE_REF: &str = "vault-link-sync";
 /// Mirrors `vault_obsidian::obsidian_parse::LINK_REGEX` (copied so the
 /// server doesn't pull the obsidian feature just for the pattern):
 /// g1 = target, g2 = `#^block`, g3 = `#heading`, g4 = `|alias`.
+#[cfg(feature = "plugin-scripture")]
 const LINK_REGEX: &str =
     r"\[\[([^\]\|#\^\r\n]+)(?:#\^([a-zA-Z0-9\-]+)|#([^\]\|\r\n]+))?(?:\|([^\]\r\n]+))?\]\]";
 
+#[cfg(feature = "plugin-scripture")]
 fn link_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(LINK_REGEX).expect("LINK_REGEX is valid"))
@@ -66,22 +74,27 @@ fn sync_note(store: &Store, graph: &vault::GraphBackend, rel_path: &str, content
     let src = NodeRef::new(NodeKind::Note, rel_path);
     remove_synced(store, &src);
 
-    let mut seen = std::collections::HashSet::new();
-    for cap in link_re().captures_iter(content) {
-        // Skip anchored links (`#^block` / `#heading`) — not verse refs.
-        if cap.get(2).is_some() || cap.get(3).is_some() {
-            continue;
+    #[cfg(feature = "plugin-scripture")]
+    {
+        let mut seen = std::collections::HashSet::new();
+        for cap in link_re().captures_iter(content) {
+            // Skip anchored links (`#^block` / `#heading`) — not verse refs.
+            if cap.get(2).is_some() || cap.get(3).is_some() {
+                continue;
+            }
+            let target = cap.get(1).map_or("", |m| m.as_str().trim());
+            let Ok(range) = VerseRange::parse(target) else {
+                continue;
+            };
+            let osis = range.osis();
+            if !seen.insert(osis.clone()) {
+                continue;
+            }
+            let _ = store.create(synced_link(&src, NodeRef::verse(osis)));
         }
-        let target = cap.get(1).map_or("", |m| m.as_str().trim());
-        let Ok(range) = VerseRange::parse(target) else {
-            continue;
-        };
-        let osis = range.osis();
-        if !seen.insert(osis.clone()) {
-            continue;
-        }
-        let _ = store.create(synced_link(&src, NodeRef::verse(osis)));
     }
+    #[cfg(not(feature = "plugin-scripture"))]
+    let _ = content;
 
     // FUTURE: `links()` rebuilds the vault LinkIndex per save — O(vault).
     // Fine at MVP scale; make it incremental if vaults grow.
@@ -93,9 +106,12 @@ fn sync_note(store: &Store, graph: &vault::GraphBackend, rel_path: &str, content
         }
         // Verse refs are already synced above; don't double-edge when a
         // page happens to shadow a verse name (`John 3:16.md`).
-        let sans_anchor = l.linkpath.split('#').next().unwrap_or("").trim();
-        if VerseRange::parse(sans_anchor).is_ok() {
-            continue;
+        #[cfg(feature = "plugin-scripture")]
+        {
+            let sans_anchor = l.linkpath.split('#').next().unwrap_or("").trim();
+            if VerseRange::parse(sans_anchor).is_ok() {
+                continue;
+            }
         }
         if !seen_notes.insert(resolved.clone()) {
             continue;
@@ -136,7 +152,9 @@ pub fn spawn(
     });
 }
 
-#[cfg(test)]
+// Both tests assert the verse-edge half, which needs the scripture
+// plugin compiled in.
+#[cfg(all(test, feature = "plugin-scripture"))]
 mod tests {
     use super::*;
 

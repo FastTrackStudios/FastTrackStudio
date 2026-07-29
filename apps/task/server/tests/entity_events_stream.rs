@@ -15,6 +15,10 @@
 //! Self-sandboxed: tempdir data root via `TASK_DATA_ROOT`, one test
 //! per binary so the env setup races nothing.
 
+// This test exercises services owned by the `scheduling` plugin;
+// a build without it has nothing to cover.
+#![cfg(feature = "plugin-scheduling")]
+
 use std::time::Duration;
 
 use architect::Scope;

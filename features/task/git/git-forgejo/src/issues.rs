@@ -8,7 +8,6 @@ use crate::{Backend, check_status, map_err};
 use git_proto::issues::{Comment, Issue, IssueFilter, IssueTracker, IssueUpdate};
 use git_proto::{GitError, GitEvent, IssueId, IssueState, Label, Milestone, RepoId, User};
 use serde::{Deserialize, Serialize};
-use vox::Tx;
 
 // ---- raw DTOs ---------------------------------------------------------
 
