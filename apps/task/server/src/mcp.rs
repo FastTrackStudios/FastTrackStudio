@@ -758,6 +758,24 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                 )
             },
         },
+        // ── Discovery ────────────────────────────────────────────
+        ToolDef {
+            name: "api_reference",
+            plugin: "core",
+            description: "The org's ENTIRE server API — every vox service and method, with \
+                          the permit each needs and whether its plugin is enabled here. The MCP \
+                          tools are a curated subset; call this to answer 'can Task do X?' or to \
+                          see what exists beyond the tools. Pass `service` for one service's \
+                          full detail (argument names, permits, docs).",
+            schema: || {
+                obj(
+                    json!({
+                        "service": s_("Service name or alias to expand (substring match), e.g. 'task', 'wiki-search'."),
+                    }),
+                    &[],
+                )
+            },
+        },
         ToolDef {
             name: "draft_reply",
             plugin: "email",
@@ -2193,6 +2211,84 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                 "in_reply_to": message_id,
                 "note": "saved to Drafts — the user reviews and sends it from their mail client",
             }))
+        }
+
+        // ── Discovery ────────────────────────────────────────────
+        //
+        // Why discovery but no generic `invoke_service`: vox's wire
+        // is typed end-to-end — per-connection schema exchange builds
+        // phon compat decode programs per (method, direction, reader
+        // type), and the only dispatch entry (`Handler::handle`)
+        // takes a `RequestCall` + `DriverReplySink` owned by a live
+        // connection driver. There is no `call(MethodId, json)`
+        // surface to build on without hand-writing a closure per
+        // method (i.e. re-curating the catalog). If vox grows a
+        // dynamic client, wire it here behind the same plugin gate.
+        "api_reference" => {
+            let services = crate::api_ref::reference_for(&org.plugins);
+            match arg_str(args, "service").map(|s| s.to_lowercase()) {
+                // The whole surface, compact: one line per method.
+                None => {
+                    let out: Vec<Value> = services
+                        .iter()
+                        .map(|s| {
+                            json!({
+                                "service": s.name,
+                                "alias": s.alias,
+                                "plugin": s.plugin,
+                                "mounted": s.mounted,
+                                "methods": s
+                                    .methods
+                                    .iter()
+                                    .map(|m| format!("{}({})", m.name, m.args.join(", ")))
+                                    .collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect();
+                    Ok(json!({
+                        "service_count": out.len(),
+                        "note": "The org's full vox RPC surface (the MCP tools are a curated \
+                                 subset of it). `mounted: false` = that plugin is disabled \
+                                 here. Pass `service` for one service's permits and docs.",
+                        "services": out,
+                    }))
+                }
+                // One service (or a few matches), full detail.
+                Some(f) => {
+                    let hits: Vec<Value> = services
+                        .iter()
+                        .filter(|s| {
+                            s.name.to_lowercase().contains(&f)
+                                || s.alias.is_some_and(|a| a.to_lowercase().contains(&f))
+                        })
+                        .map(|s| {
+                            json!({
+                                "service": s.name,
+                                "alias": s.alias,
+                                "plugin": s.plugin,
+                                "mounted": s.mounted,
+                                "doc": s.doc,
+                                "methods": s.methods.iter().map(|m| json!({
+                                    "name": m.name,
+                                    "args": m.args,
+                                    "stream": m.stream,
+                                    "permit": m.action.zip(m.resource)
+                                        .map(|(a, r)| format!("{a} {r}")),
+                                    "audited": m.audited,
+                                    "doc": m.doc,
+                                })).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect();
+                    if hits.is_empty() {
+                        return Err(ToolFailure::Message(format!(
+                            "no service matches `{f}` — call api_reference with no arguments \
+                             for the full list"
+                        )));
+                    }
+                    Ok(json!({ "services": hits }))
+                }
+            }
         }
 
         _ => Err(ToolFailure::Unknown),
