@@ -32,6 +32,7 @@ pub const INBOX_PROCESS: &str = "fts.inbox.process";
 pub const CAPTURE_FLEETING: &str = "fts.capture.fleeting";
 pub const PALETTE_TOGGLE: &str = "fts.palette.toggle";
 pub const PICKER_NOTES: &str = "fts.picker.notes";
+pub const SEARCH_ALL: &str = "fts.search.all";
 pub const TOGGLE_SIDEBAR: &str = "fts.toggle.sidebar";
 pub const TOGGLE_PANEL: &str = "fts.toggle.panel";
 pub const TOGGLE_ZEN: &str = "fts.toggle.zen";
@@ -64,6 +65,8 @@ pub enum Intent {
     TogglePalette,
     /// Open the note omni-picker (Ctrl+O).
     OpenOmni,
+    /// Open the telescope-style everything-search window.
+    OpenSearch,
     /// Toggle the vault sidebar.
     ToggleSidebar,
     /// Toggle the right (backlinks) panel.
@@ -81,6 +84,7 @@ pub fn intent_for(action_id: &str) -> Option<Intent> {
         CAPTURE_FLEETING => Intent::OpenFleeting,
         PALETTE_TOGGLE => Intent::TogglePalette,
         PICKER_NOTES => Intent::OpenOmni,
+        SEARCH_ALL => Intent::OpenSearch,
         TOGGLE_SIDEBAR => Intent::ToggleSidebar,
         TOGGLE_PANEL => Intent::TogglePanel,
         TOGGLE_ZEN => Intent::ToggleZen,
@@ -150,6 +154,13 @@ pub fn task_action_defs() -> Vec<ActionDefinition> {
             "Open the fuzzy note omni-picker",
             ActionCategory::General,
             Some("Ctrl+O"),
+        ),
+        def(
+            SEARCH_ALL,
+            "Search everything…",
+            "Fuzzy-search notes, tasks, and projects in one window",
+            ActionCategory::General,
+            Some("Space Space"),
         ),
         def(
             PALETTE_TOGGLE,

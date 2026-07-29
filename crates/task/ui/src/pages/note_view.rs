@@ -406,6 +406,12 @@ pub(crate) fn NoteView(
             }
             .to_owned()
         });
+        // Let the leader-key engine know when plain keys are vim
+        // motions (NORMAL mode), so `<space>` can start a sequence
+        // from inside the editor. Cleared on unmount below.
+        crate::shortcuts::set_editor_vim_normal(
+            vim.is_some_and(|v| v.read().mode == editor::editor_vim::Mode::Normal),
+        );
         let collab_label = collab
             .read()
             .as_ref()
@@ -419,15 +425,45 @@ pub(crate) fn NoteView(
             on_save: Some(on_save_cb),
         }));
     });
+    use_drop(|| crate::shortcuts::set_editor_vim_normal(false));
+
+    // ── Title focus from the document top ─────────────────────
+    // The title is the document's first line, spatially: `k` /
+    // ArrowUp with the caret already pinned at the top (vim NORMAL —
+    // the motion clamps, so the selection doesn't move) walks focus
+    // up into the title field. `last_head` trails the rendered
+    // selection; an unchanged head after an up-motion means the
+    // editor had nowhere left to go.
+    let mut focus_title = use_signal(|| 0u32);
+    let last_head = use_signal(|| usize::MAX);
+    {
+        let state = session.state;
+        use_effect(move || {
+            let head = state.read().selection.primary().head;
+            let mut lh = last_head;
+            lh.set(head);
+        });
+    }
 
     rsx! {
         div {
             class: "flex min-h-0 min-w-0 flex-1 flex-col",
             onkeydown: move |evt: Event<KeyboardData>| {
                 let m = evt.modifiers();
-                if (m.ctrl() || m.meta()) && evt.key().to_string() == "s" {
+                let key = evt.key().to_string();
+                if (m.ctrl() || m.meta()) && key == "s" {
                     evt.prevent_default();
                     session.save();
+                    return;
+                }
+                let normal = vim
+                    .is_some_and(|v| v.read().mode == editor::editor_vim::Mode::Normal);
+                if normal
+                    && (key == "k" || key == "ArrowUp")
+                    && !(m.ctrl() || m.alt() || m.meta())
+                    && session.state.peek().selection.primary().head == *last_head.peek()
+                {
+                    focus_title += 1;
                 }
             },
             // Mobile-only name + save-state strip.
@@ -505,21 +541,24 @@ pub(crate) fn NoteView(
                     // keyflow-source editor was used. So skip it entirely while
                     // a fullscreen experience owns the screen.
                     if note_body_visible(is_experience_note, widget_fullscreen()) {
-                        // A claimed note may render its own title (the editor's
-                        // typed title widget IS the title) — skip the shell's
-                        // duplicate header when a claimant says so.
-                        if !hide_note_header {
-                            crate::pages::note_header::NoteHeader {
-                                home,
-                                props_open,
-                                on_renamed: move |_| on_renamed.call(()),
-                            }
-                        }
                         // Raw view (status-bar toggle): the literal file text
                         // MINUS the YAML frontmatter — properties stay in the
                         // right-sidebar Properties tab. Read currently renders
                         // the editor (the reading-view design comes later).
                         div { class: "mx-auto w-full max-w-3xl",
+                        // A claimed note may render its own title (the editor's
+                        // typed title widget IS the title) — skip the shell's
+                        // duplicate header when a claimant says so. Inside the
+                        // centered column so the title and the note body share
+                        // the same left edge.
+                        if !hide_note_header {
+                            crate::pages::note_header::NoteHeader {
+                                home,
+                                props_open,
+                                focus_req: focus_title,
+                                on_renamed: move |_| on_renamed.call(()),
+                            }
+                        }
                         if use_context::<crate::chrome::NoteViewMode>().0() == crate::chrome::ViewMode::Raw {
                             pre { class: "whitespace-pre-wrap px-6 py-4 font-mono text-sm leading-6 text-foreground",
                                 {raw_body_text(&session.state.read().doc.to_string())}

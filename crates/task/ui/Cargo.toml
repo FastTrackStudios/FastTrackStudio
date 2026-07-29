@@ -165,6 +165,9 @@ actions-standalone.workspace = true
 # fts-ui combobox filter uses, kept here so the palette can rank (not
 # just filter) results.
 nucleo-matcher.workspace = true
+# The `<space><space>` everything-search window's matcher (the same
+# scorer the fff finder embeds).
+neo_frizbee.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

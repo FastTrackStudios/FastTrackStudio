@@ -135,6 +135,7 @@ pub fn CommandPalette() -> Element {
     let whichkey = crate::shortcuts::use_app_shortcuts();
     rsx! {
         crate::shortcuts::WhichKeyOverlay { state: whichkey }
+        crate::search::SearchOverlay {}
         OmniPicker {}
         PaletteModal {}
     }
