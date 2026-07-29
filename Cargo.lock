@@ -8327,8 +8327,12 @@ dependencies = [
 name = "engraver-score"
 version = "0.1.0"
 dependencies = [
+ "engraver-proto",
+ "kurbo 0.13.1",
  "musicxml",
+ "peniko 0.6.1",
  "thiserror 2.0.18",
+ "tracing",
  "zip 2.4.2",
 ]
 
@@ -23271,6 +23275,39 @@ dependencies = [
  "midicore-ui",
  "signal-drums-proto",
  "signal-ui",
+]
+
+[[package]]
+name = "signal-ekit"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "daw",
+ "midicore",
+ "signal-ekit-proto",
+ "signal-rigs-proto",
+ "signal-sampler",
+ "signal-space",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "signal-ekit-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "vox",
+]
+
+[[package]]
+name = "signal-ekit-ui"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "dioxus",
+ "signal-ekit-proto",
 ]
 
 [[package]]
