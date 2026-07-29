@@ -17293,6 +17293,23 @@ dependencies = [
 
 [[package]]
 name = "notify"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "async-trait",
+ "chrono",
+ "notify-proto",
+ "reqwest 0.12.28",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid 1.23.4",
+]
+
+[[package]]
+name = "notify"
 version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d3d07927151ff8575b7087f245456e549fea62edf0ec4e565a5ee50c8402bc3"
@@ -17316,7 +17333,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a689eb4262184d9a1727f9087cd03883ea716682ab03ed24efec57d7716dccb8"
 dependencies = [
  "log",
- "notify",
+ "notify 8.2.0",
  "notify-types",
  "tempfile",
 ]
@@ -17328,9 +17345,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17849edfaabd9a5fef1c606d99cfc615a8e99f7ac4366406d86c7942a3184cf2"
 dependencies = [
  "log",
- "notify",
+ "notify 8.2.0",
  "notify-types",
  "tempfile",
+]
+
+[[package]]
+name = "notify-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid 1.23.4",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -25959,6 +25991,8 @@ dependencies = [
  "mealplan",
  "media-proto",
  "milestone",
+ "notify 0.1.0",
+ "notify-proto",
  "org-proto",
  "org-snapshot",
  "pantry",
@@ -27846,6 +27880,7 @@ dependencies = [
  "locations-proto",
  "mealplan-proto",
  "milestone-proto",
+ "notify-proto",
  "nucleo-matcher",
  "pantry-proto",
  "prefs-proto",
@@ -28458,7 +28493,7 @@ dependencies = [
  "editor-state",
  "facet 0.50.0-rc.5",
  "indexmap 2.14.0",
- "notify",
+ "notify 8.2.0",
  "notify-debouncer-mini 0.7.0",
  "rayon",
  "regex",
@@ -28484,7 +28519,7 @@ dependencies = [
  "facet 0.50.0-rc.5",
  "futures",
  "indexmap 2.14.0",
- "notify",
+ "notify 8.2.0",
  "notify-debouncer-mini 0.6.0",
  "regex",
  "serde",

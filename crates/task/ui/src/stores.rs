@@ -255,6 +255,16 @@ stores! {
             InboxMutations via use_inbox_mutations,
     }
 
+    NotificationStore: notify_proto::Notification {
+        provide: provide_notification_store,
+        handle: use_notification_store,
+        list: use_notification_list -> Uuid = crate::feeds::fetch_notifications,
+        stream:
+            /// Live bell — the notifier's pushes and read-flips fold
+            /// in as they happen, so the unread badge is real-time.
+            first notify_proto::NotifyStreamClient => fold_notify_event,
+    }
+
     RecallStore: recall_proto::RecallCard {
         provide: provide_recall_store,
         handle: use_recall_store,
@@ -550,6 +560,13 @@ fn fold_inbox_event(store: &InboxStore, _slug: &str, ev: inbox_proto::InboxEvent
     match ev {
         inbox_proto::InboxEvent::Upserted(item) => store.put(item),
         inbox_proto::InboxEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+fn fold_notify_event(store: &NotificationStore, _slug: &str, ev: notify_proto::NotifyEvent) {
+    match ev {
+        notify_proto::NotifyEvent::Upserted(n) => store.put(n),
+        notify_proto::NotifyEvent::Deleted(id) => store.remove_real(&id),
     }
 }
 

@@ -153,6 +153,25 @@ feeds! {
     }
 }
 
+feeds! {
+    notify_proto::NotifyClient {
+        /// Recent notifications, newest first (one default server
+        /// page) — the bell's backing fetch; the live fold keeps it
+        /// current after that.
+        fetch_notifications() -> Vec<notify_proto::Notification>
+            = list(notify_proto::NotifyListFilter::recent()) as "list notifications";
+
+        /// Flip one notification read (returns the post-write row;
+        /// the stream folds it everywhere).
+        mark_notification_read(id: uuid::Uuid) -> notify_proto::Notification
+            = mark_read(id) as "mark notification read";
+
+        /// Flip every unread notification read.
+        mark_all_notifications_read() -> u64
+            = mark_all_read() as "mark all notifications read";
+    }
+}
+
 // ── Recall (spaced-repetition learning deck) ─────────────────────────
 
 feeds! {

@@ -27,6 +27,7 @@ pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
 pub mod media;
+pub mod notifier;
 pub mod permits;
 pub mod presence;
 pub mod server_mgmt;
@@ -213,6 +214,11 @@ pub struct OrgAppState {
     /// Mounted for `Inbox` so the capture UIs + daily review can
     /// round-trip fleeting notes.
     pub inbox: inbox::VaultInbox,
+    /// Notifications store — the per-org `notify.sqlite` queue behind
+    /// the bell. Mounted for `Notify` (+ its stream); written by the
+    /// in-process notifier (`crate::notifier`), which materializes
+    /// rows from the org's event hubs.
+    pub notify: notify::Store,
     /// Recall backend — spaced-repetition learning cards under
     /// `vault/Records/recall/`. Mounted for `Recall` so the deck UI +
     /// flashcard review round-trip FSRS-scheduled cards.
@@ -486,6 +492,10 @@ impl AppState {
         // back into linked tasks on an interval (outbound push is
         // handled inline by the `ForgeSyncTaskService` decorator).
         forge_sync::spawn_poll_loop(state.clone());
+        // Per-org notifier: subscribes to the org's event hubs
+        // in-process and materializes notifications by rule
+        // (see `notifier`'s module docs for the catalog).
+        notifier::spawn(&state);
         Ok(state)
     }
 
@@ -759,6 +769,22 @@ pub(crate) async fn build_org_state(
         })
         .await?;
         let threads = threads::Store::new(threads_conn);
+
+        // Notifications store. SQLite at
+        // `<data_root>/orgs/<slug>/notify.sqlite` (override via
+        // `TASK_SERVER_NOTIFY_URL`); migrations run on open. Fed by
+        // the notifier (`crate::notifier`), served as `Notify`.
+        let notify_url = std::env::var("TASK_SERVER_NOTIFY_URL").unwrap_or_else(|_| {
+            format!(
+                "sqlite://{}?mode=rwc",
+                org_root.path().join("notify.sqlite").display()
+            )
+        });
+        let notify_conn = open_sqlite_pool(scope, notify_url, "notify", |db| {
+            Box::pin(async move { notify::Migrator::up(&db, None).await.map(|()| db) })
+        })
+        .await?;
+        let notify_store = notify::Store::new(notify_conn);
 
         // Per-user preferences. SQLite at
         // `<data_root>/orgs/<slug>/prefs.sqlite` (override via
@@ -1080,6 +1106,7 @@ pub(crate) async fn build_org_state(
             agent_tasks.conn().clone(),
             timer.conn().clone(),
             threads.conn().clone(),
+            notify_store.conn().clone(),
             prefs.conn().clone(),
             finance_conn.clone(),
         ];
@@ -1138,6 +1165,7 @@ pub(crate) async fn build_org_state(
             identity,
             scheduling,
             inbox,
+            notify: notify_store,
             recall,
             contacts,
             tags,
@@ -2083,6 +2111,19 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         // Live inbox changes — `Inbox`'s `#[subscribe]` stream
         // sibling, served from the hub on the `VaultInbox` above.
         .merge(inbox_proto::inbox_stream_layer(org.inbox.clone()));
+
+    router = router
+        // Notifications — the bell's queue (list / mark_read /
+        // mark_all_read / delete). Rows are written by the in-process
+        // notifier (`crate::notifier`), not by clients.
+        .with(
+            notify_proto::notify_rpc_service_descriptor(),
+            notify_proto::notify_serve(org.notify.clone()),
+        )
+        // Live notification changes — `Notify`'s `#[subscribe]`
+        // stream sibling, served from the hub on the notify `Store`
+        // above. The bell folds these (fetch-once-then-fold).
+        .merge(notify_proto::notify_stream_layer(org.notify.clone()));
 
     // ── Recall plugin ────────────────────────────────────────────
     if on("recall") {

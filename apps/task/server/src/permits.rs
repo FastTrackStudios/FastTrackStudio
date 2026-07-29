@@ -281,6 +281,13 @@ table!(SCHEDULING_STREAM, "scheduling-events", "scheduling/**", [rd "events"]);
 
 // ── Knowledge lane ───────────────────────────────────────────────────────
 
+// Notifications: clients read + flip read-state + prune; creation is
+// server-internal (the notifier), so no client-reachable write mints
+// rows.
+table!(NOTIFY, "notify", "notifications/**", [
+    rd "list", wr "mark_read", wr "mark_all_read", wa "delete",
+]);
+table!(NOTIFY_STREAM, "notify-stream", "notifications/**", [rd "events"]);
 table!(INBOX, "inbox", "inbox/**", [
     rd "list_inbox", rd "review_queue", rd "get_inbox_item",
     wr "upsert_inbox_item", wa "delete_inbox_item",
@@ -600,6 +607,8 @@ pub fn mounts() -> Vec<Mount> {
         // Knowledge
         m("core", inbox_proto::service::inbox::inbox_rpc_service_descriptor(), INBOX),
         m("core", inbox_proto::inbox_stream_descriptor(), INBOX_STREAM),
+        m("core", notify_proto::notify_rpc_service_descriptor(), NOTIFY),
+        m("core", notify_proto::notify_stream_descriptor(), NOTIFY_STREAM),
         m(
             "recall",
             recall_proto::service::recall::recall_rpc_service_descriptor(),
