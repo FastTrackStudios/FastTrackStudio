@@ -231,6 +231,12 @@ pub(crate) fn forgejo_token() -> eyre::Result<String> {
 
 /// Open the per-org issue-link `FileStore` at
 /// `~/.task/orgs/<slug>/issue-links.json`.
+///
+/// Vox-unification judgment: machine-local integration config —
+/// the forge sync loop that consumes it (webhooks, `task setup`,
+/// server forge_sync) runs co-resident with this data root. A
+/// remote provisioning path would need an org-management RPC
+/// (gap, tracked with the webhook secret below in `setup.rs`).
 pub(crate) fn forge_link_store(org_slug: &str) -> eyre::Result<git_config::FileStore> {
     let home = std::env::var_os("HOME")
         .ok_or_else(|| eyre::eyre!("HOME not set; can't resolve issue-link store path"))?;

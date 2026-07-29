@@ -653,7 +653,7 @@ async fn run(cli: Cli) -> eyre::Result<()> {
             return run_mount(cmd);
         }
         Commands::Cycle(cmd) => {
-            return run_cycle(cmd);
+            return Box::pin(run_cycle(cmd)).await;
         }
         Commands::Project(cmd) => {
             return Box::pin(run_project(cmd)).await;

@@ -723,6 +723,14 @@ pub(crate) async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
 }
 
 /// Per-org handoff store path.
+///
+/// Vox-unification judgment: DELIBERATELY machine-local. Handoffs
+/// are the park/resume context of the `task code` git dev-loop,
+/// which operates on THIS machine's checkouts and worktrees —
+/// exactly like the agent goal-loop store (`org_workflows_dir`).
+/// Cross-machine agent handoff would need a workflows service on
+/// the org router first (none exists; workflows-proto is
+/// types-only).
 fn handoff_store_path(org_slug: &str) -> eyre::Result<std::path::PathBuf> {
     let home = std::env::var_os("HOME").ok_or_else(|| eyre::eyre!("HOME not set"))?;
     Ok(std::path::Path::new(&home)
