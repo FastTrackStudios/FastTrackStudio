@@ -108,9 +108,13 @@ mod ios {
             NSString::from_str(&cfg.org_slug),
             NSString::from_str(&cfg.token),
         ];
+        // `&*` reborrows through `Retained`: the generic `CopiedKey`
+        // key parameter gets no deref coercion from `&Retained<_>`, and
+        // the values coerce `&NSString` → `&AnyObject` only from a
+        // plain reference.
         let context = NSDictionary::<NSString, AnyObject>::from_slices(
-            &[&keys[0], &keys[1], &keys[2]],
-            &[&values[0], &values[1], &values[2]],
+            &[&*keys[0], &*keys[1], &*keys[2]],
+            &[&*values[0], &*values[1], &*values[2]],
         );
         match unsafe { session.updateApplicationContext_error(&context) } {
             Ok(()) => tracing::info!(
