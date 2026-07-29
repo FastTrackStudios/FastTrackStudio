@@ -34,6 +34,9 @@ fn task(data_root: &Path, args: &[&str]) -> Output {
         .env_remove("TASK_ORG_ID")
         .env_remove("TASK_USER_ID")
         .env_remove("TASK_VAULT_ROOT")
+        // Keep sign-ins inside the scratch root, away from the
+        // developer's real ~/.local/share/task/session.json.
+        .env("TASK_SESSION_FILE", data_root.join("session.json"))
         .output()
         .expect("spawn task binary")
 }
@@ -54,6 +57,44 @@ fn scratch_org() -> tempfile::TempDir {
     let out = task(tmp.path(), &["org", "init", "t", "--name", "T"]);
     ok(&out);
     tmp
+}
+
+#[test]
+fn auth_signup_and_users_over_embedded_vox() {
+    let tmp = scratch_org();
+
+    // Empty org: the users listing answers over vox (tokenless
+    // fallback enumerates the org store — no auth.sqlite opened by
+    // the CLI, and no "local-only command" refusal).
+    let out = task(tmp.path(), &["--org", "t", "auth", "users"]);
+    assert!(ok(&out).contains("(no users)"));
+
+    // Sign up over the embedded org AuthService, then list again.
+    let out = task(
+        tmp.path(),
+        &[
+            "--org",
+            "t",
+            "auth",
+            "signup",
+            "--email",
+            "a@example.com",
+            "--password",
+            "hunter22",
+            "--name",
+            "Alice",
+        ],
+    );
+    let stdout = ok(&out);
+    assert!(stdout.contains("Created user a@example.com"), "{stdout}");
+
+    let out = task(tmp.path(), &["--org", "t", "auth", "users"]);
+    let stdout = ok(&out);
+    assert!(stdout.contains("a@example.com"), "{stdout}");
+
+    // And the session landed in the scratch session file, not the
+    // developer's real one.
+    assert!(tmp.path().join("session.json").is_file());
 }
 
 #[test]
