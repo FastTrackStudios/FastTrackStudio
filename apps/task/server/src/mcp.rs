@@ -140,6 +140,11 @@ fn b_(desc: &str) -> Value {
     json!({ "type": "boolean", "description": desc })
 }
 
+/// Array-of-strings schema.
+fn a_(desc: &str) -> Value {
+    json!({ "type": "array", "items": { "type": "string" }, "description": desc })
+}
+
 /// Every tool this server exposes, in the order the agent sees them.
 ///
 /// Descriptions are written *for the model*: they say when to reach
@@ -168,6 +173,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                     json!({
                         "status": s_("Exact status to match, e.g. 'open', 'in-progress', 'done'. Omit for all open tasks."),
                         "due_on_or_before": s_("ISO date (YYYY-MM-DD). Keeps tasks due or scheduled on/before it."),
+                        "project": s_("Project UUID (from list_projects) — keeps tasks belonging to that project."),
                         "query": s_("Case-insensitive substring match on the title."),
                         "limit": i_("Max rows (default 50, max 200)."),
                     }),
@@ -209,6 +215,7 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                         "due": s_("New due date (ISO YYYY-MM-DD); pass an empty string to clear."),
                         "scheduled": s_("New scheduled date (ISO YYYY-MM-DD); empty string clears."),
                         "priority": s_("'none' | 'low' | 'normal' | 'high' | 'critical'."),
+                        "assignees": a_("Replace who owns the task: 'agent:NAME' or 'human:USER_ID' entries (bare names mean agent:). Empty array unclaims. Prefer claim_task to take a task for yourself."),
                     }),
                     &["id"],
                 )
@@ -374,6 +381,401 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                 )
             },
         },
+        ToolDef {
+            name: "write_note",
+            plugin: "core",
+            description: "Create a note, or REPLACE an existing one wholesale. Destructive on \
+                          existing paths — read_note first and prefer append_note for adding to \
+                          a note that already exists.",
+            schema: || {
+                obj(
+                    json!({
+                        "path": s_("Vault-relative path, e.g. 'Records/notes/plan.md'."),
+                        "content": s_("The note's full markdown content."),
+                    }),
+                    &["path", "content"],
+                )
+            },
+        },
+        // ── Task workflow ────────────────────────────────────────
+        ToolDef {
+            name: "claim_task",
+            plugin: "core",
+            description: "Atomically claim a task before working on it — exactly one caller wins \
+                          when several agents try; losers are told who holds it. Use this instead \
+                          of update_task assignees when taking work for yourself.",
+            schema: || {
+                obj(
+                    json!({
+                        "id": s_("Task UUID from list_tasks."),
+                        "agent": s_("Who is claiming: 'agent:NAME' or 'human:USER_ID' (a bare name means agent:)."),
+                        "force": b_("Steal an existing claim. Only with the user's explicit say-so."),
+                    }),
+                    &["id", "agent"],
+                )
+            },
+        },
+        // ── Projects / goals / milestones ────────────────────────
+        ToolDef {
+            name: "create_project",
+            plugin: "core",
+            description: "Create a project — a container of related tasks with its own vault \
+                          page. Check list_projects first so you don't duplicate one that \
+                          already exists.",
+            schema: || {
+                obj(
+                    json!({
+                        "title": s_("Project name."),
+                        "status": s_("'active' (default) | 'planned' | 'paused' | 'done' | 'cancelled'."),
+                        "priority": s_("'urgent' | 'high' | 'normal' (default) | 'low'."),
+                        "parent_id": s_("UUID of a parent project, for sub-projects."),
+                        "details": s_("Markdown body — scope, links, context."),
+                    }),
+                    &["title"],
+                )
+            },
+        },
+        ToolDef {
+            name: "update_project",
+            plugin: "core",
+            description: "Change a project by id: retitle, set status/priority, or replace its \
+                          markdown body. Only the fields you pass change.",
+            schema: || {
+                obj(
+                    json!({
+                        "id": s_("Project UUID from list_projects."),
+                        "title": s_("New name."),
+                        "status": s_("New status, e.g. 'active', 'paused', 'done'."),
+                        "priority": s_("New priority."),
+                        "details": s_("REPLACES the whole markdown body."),
+                    }),
+                    &["id"],
+                )
+            },
+        },
+        ToolDef {
+            name: "create_goal",
+            plugin: "core",
+            description: "Create a goal — the horizon above projects ('run a marathon', 'ship \
+                          the album'). Kind sets the horizon: lifetime (default), yearly, \
+                          quarterly, cycle, weekly.",
+            schema: || {
+                obj(
+                    json!({
+                        "title": s_("The goal."),
+                        "kind": s_("'lifetime' (default) | 'yearly' | 'quarterly' | 'cycle' | 'weekly'."),
+                        "status": s_("'aspiration' (default) | 'active' | 'paused' | 'achieved' | 'abandoned'."),
+                        "target_date": s_("ISO date (YYYY-MM-DD) the goal aims at."),
+                        "details": s_("Markdown body — vision, success criteria."),
+                    }),
+                    &["title"],
+                )
+            },
+        },
+        ToolDef {
+            name: "update_goal",
+            plugin: "core",
+            description: "Change a goal by id: retitle, move it through its lifecycle \
+                          (aspiration → active → achieved), or shift the target date. Only the \
+                          fields you pass change.",
+            schema: || {
+                obj(
+                    json!({
+                        "id": s_("Goal UUID from list_goals."),
+                        "title": s_("New title."),
+                        "status": s_("New status, e.g. 'active', 'achieved'."),
+                        "kind": s_("New horizon kind."),
+                        "target_date": s_("New target date (YYYY-MM-DD); empty string clears."),
+                    }),
+                    &["id"],
+                )
+            },
+        },
+        ToolDef {
+            name: "list_milestones",
+            plugin: "core",
+            description: "Milestones — dated checkpoints inside a project that tasks roll up \
+                          to. Filter by project to see one project's roadmap.",
+            schema: || {
+                obj(
+                    json!({
+                        "project": s_("Project UUID — only that project's milestones."),
+                        "limit": i_("Max rows (default 50, max 200)."),
+                    }),
+                    &[],
+                )
+            },
+        },
+        ToolDef {
+            name: "create_milestone",
+            plugin: "core",
+            description: "Create a milestone inside a project (project_id from list_projects). \
+                          Optionally point it at a goal to build the task → milestone → goal \
+                          chain.",
+            schema: || {
+                obj(
+                    json!({
+                        "project_id": s_("Owning project UUID. Required."),
+                        "title": s_("The checkpoint, e.g. 'v1.0 shipped'."),
+                        "due_date": s_("Target date (YYYY-MM-DD)."),
+                        "goal_id": s_("Goal UUID this milestone ladders up to."),
+                        "details": s_("Markdown description."),
+                    }),
+                    &["project_id", "title"],
+                )
+            },
+        },
+        ToolDef {
+            name: "update_milestone",
+            plugin: "core",
+            description: "Change a milestone by id: retitle, close it ('closed'), or move its \
+                          due date. Only the fields you pass change.",
+            schema: || {
+                obj(
+                    json!({
+                        "id": s_("Milestone UUID from list_milestones."),
+                        "title": s_("New title."),
+                        "status": s_("'open' | 'closed'."),
+                        "due_date": s_("New due date (YYYY-MM-DD); empty string clears."),
+                    }),
+                    &["id"],
+                )
+            },
+        },
+        // ── Inbox processing ─────────────────────────────────────
+        ToolDef {
+            name: "process_inbox_item",
+            plugin: "core",
+            description: "Move an inbox item through its lifecycle: 'open' accepts a suggestion \
+                          into the trusted queue, 'processed' marks it handled (e.g. after you \
+                          turned it into a task), 'archived' dismisses it. Get ids from \
+                          list_inbox.",
+            schema: || {
+                obj(
+                    json!({
+                        "id": s_("Inbox item id from list_inbox."),
+                        "status": s_("'open' | 'processed' | 'archived'."),
+                    }),
+                    &["id", "status"],
+                )
+            },
+        },
+        // ── Day plans / bookings (scheduling plugin) ─────────────
+        ToolDef {
+            name: "get_day_plan",
+            plugin: "scheduling",
+            description: "The time-blocked plan for one day (blocks with start/end/label/\
+                          category), or null when the day has no plan yet. Read this before \
+                          upsert_day_plan so you edit the real blocks.",
+            schema: || {
+                obj(
+                    json!({ "date": s_("ISO date (YYYY-MM-DD).") }),
+                    &["date"],
+                )
+            },
+        },
+        ToolDef {
+            name: "upsert_day_plan",
+            plugin: "scheduling",
+            description: "Write one day's time-blocked plan. REPLACES the whole day — call \
+                          get_day_plan first and resend every block you want to keep. Times are \
+                          'HH:MM' (24h).",
+            schema: || {
+                obj(
+                    json!({
+                        "date": s_("ISO date (YYYY-MM-DD)."),
+                        "blocks": {
+                            "type": "array",
+                            "description": "The day's blocks, in order.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "start": s_("'HH:MM' 24h start."),
+                                    "end": s_("'HH:MM' 24h end."),
+                                    "label": s_("What the block is, e.g. 'Deep work'."),
+                                    "category": s_("One of: reset, spiritual, meal, exercise, hygiene, allocatable, maintenance, wind_down, sleep, other (default)."),
+                                    "note": s_("Optional free-text note."),
+                                    "fixed": b_("Immovable — reflow never shifts it."),
+                                },
+                                "required": ["start", "end", "label"],
+                                "additionalProperties": false,
+                            },
+                        },
+                    }),
+                    &["date", "blocks"],
+                )
+            },
+        },
+        ToolDef {
+            name: "list_bookings",
+            plugin: "scheduling",
+            description: "Bookings people have made against the user's bookable event types — \
+                          who, when, and their status (pending/confirmed/cancelled).",
+            schema: || {
+                obj(
+                    json!({ "limit": i_("Max rows (default 50, max 200).") }),
+                    &[],
+                )
+            },
+        },
+        ToolDef {
+            name: "list_open_slots",
+            plugin: "scheduling",
+            description: "Free bookable slots for an event type inside a UTC window — call \
+                          before book_slot so you offer times that are actually open.",
+            schema: || {
+                obj(
+                    json!({
+                        "event_type_id": s_("The bookable event type's id."),
+                        "from": s_("ISO-8601 UTC window start (inclusive)."),
+                        "to": s_("ISO-8601 UTC window end (exclusive)."),
+                    }),
+                    &["event_type_id", "from", "to"],
+                )
+            },
+        },
+        ToolDef {
+            name: "book_slot",
+            plugin: "scheduling",
+            description: "Book an open slot (from list_open_slots) for an attendee. Fails if \
+                          the slot was taken in the meantime — re-query and offer another.",
+            schema: || {
+                obj(
+                    json!({
+                        "event_type_id": s_("The event type being booked."),
+                        "start": s_("Slot start, ISO-8601 UTC (from list_open_slots)."),
+                        "end": s_("Slot end, ISO-8601 UTC."),
+                        "attendee_name": s_("Who the booking is for."),
+                        "attendee_email": s_("Their email."),
+                        "note": s_("Optional note on the booking."),
+                    }),
+                    &["event_type_id", "start", "end", "attendee_name", "attendee_email"],
+                )
+            },
+        },
+        ToolDef {
+            name: "cancel_booking",
+            plugin: "scheduling",
+            description: "Cancel a booking by id (from list_bookings). Confirm with the user \
+                          before cancelling a confirmed booking.",
+            schema: || {
+                obj(
+                    json!({ "id": s_("Booking id from list_bookings.") }),
+                    &["id"],
+                )
+            },
+        },
+        // ── Contacts ─────────────────────────────────────────────
+        ToolDef {
+            name: "list_contacts",
+            plugin: "contacts",
+            description: "The user's people directory. Search by name, email, or organization \
+                          to find who they mean; returns ids for upsert_contact.",
+            schema: || {
+                obj(
+                    json!({
+                        "query": s_("Case-insensitive match against name, emails, and organization."),
+                        "limit": i_("Max rows (default 50, max 200)."),
+                    }),
+                    &[],
+                )
+            },
+        },
+        ToolDef {
+            name: "upsert_contact",
+            plugin: "contacts",
+            description: "Create a contact, or update one by id (from list_contacts). On \
+                          update, only the fields you pass change.",
+            schema: || {
+                obj(
+                    json!({
+                        "id": s_("Existing contact id to update. Omit to create."),
+                        "name": s_("Display name. Required when creating."),
+                        "emails": a_("Email addresses, primary first. Replaces the list."),
+                        "phones": a_("Phone numbers, primary first. Replaces the list."),
+                        "organization": s_("Company / organization."),
+                        "notes": s_("Free-form notes."),
+                    }),
+                    &[],
+                )
+            },
+        },
+        // ── Email (read + draft only — no send tool, by design) ──
+        ToolDef {
+            name: "list_email_accounts",
+            plugin: "email",
+            description: "The mail accounts this org serves, with their folders. Call first to \
+                          learn the account id + folder names list_envelopes needs.",
+            schema: || obj(json!({}), &[]),
+        },
+        ToolDef {
+            name: "list_envelopes",
+            plugin: "email",
+            description: "Message summaries (subject, from, date, snippet) for one folder, \
+                          newest first. Returns message ids for read_email.",
+            schema: || {
+                obj(
+                    json!({
+                        "account": s_("Account id from list_email_accounts."),
+                        "folder": s_("Folder name (from list_email_accounts). Default 'INBOX'."),
+                        "limit": i_("Most recent N (default 50, max 200)."),
+                    }),
+                    &["account"],
+                )
+            },
+        },
+        ToolDef {
+            name: "read_email",
+            plugin: "email",
+            description: "One full message by id — headers, text body, attachment names. Read \
+                          before drafting a reply.",
+            schema: || {
+                obj(
+                    json!({
+                        "account": s_("Account id."),
+                        "message_id": s_("Message id from list_envelopes."),
+                    }),
+                    &["account", "message_id"],
+                )
+            },
+        },
+        ToolDef {
+            name: "draft_email",
+            plugin: "email",
+            description: "Compose a NEW message into the account's Drafts folder. Nothing is \
+                          sent — the user reviews and sends from their mail client. There is \
+                          deliberately no send tool.",
+            schema: || {
+                obj(
+                    json!({
+                        "account": s_("Account id from list_email_accounts."),
+                        "to": a_("Recipient email addresses."),
+                        "cc": a_("CC addresses."),
+                        "subject": s_("Subject line."),
+                        "body": s_("Plain-text body."),
+                    }),
+                    &["account", "to", "subject", "body"],
+                )
+            },
+        },
+        ToolDef {
+            name: "draft_reply",
+            plugin: "email",
+            description: "Draft a reply to a message (id from list_envelopes) into Drafts, \
+                          with correct To/Re:/threading headers. Nothing is sent — the user \
+                          reviews and sends from their mail client.",
+            schema: || {
+                obj(
+                    json!({
+                        "account": s_("Account id."),
+                        "message_id": s_("The message being replied to."),
+                        "body": s_("Plain-text reply body."),
+                        "reply_all": b_("CC everyone on the original message."),
+                    }),
+                    &["account", "message_id", "body"],
+                )
+            },
+        },
     ]
 }
 
@@ -442,8 +844,15 @@ tap, so err on the side of capturing.\n\
 Say what you're about to move before you move it.\n\
 - Read before you write: `search_vault` then `read_note`. The user's notes are usually \
 better context than your assumptions.\n\
+- Taking on a task yourself? `claim_task` it first — claims are atomic, so parallel \
+agents can't collide on the same work.\n\
+- Email is read-and-draft only: `draft_email` / `draft_reply` land in Drafts for the \
+user to send. There is no send tool; say so when the user asks you to \"send\".\n\
+- `api_reference` shows everything this org's server can do (every service and method, \
+including what has no dedicated tool here) — use it to answer \"can Task do X?\".\n\
 - Confirm before destructive or wide-reaching changes (cancelling events you didn't just \
-create, bulk status changes). Ordinary additions don't need a confirmation round-trip.",
+create, bulk status changes, overwriting notes with `write_note`). Ordinary additions \
+don't need a confirmation round-trip.",
         stamp = now.format("%A, %B %-d, %Y at %-I:%M %p %:z"),
         weekday = now.format("%A"),
     )
@@ -682,6 +1091,103 @@ fn date_of(stamp: &str) -> &str {
     stamp.split('T').next().unwrap_or(stamp)
 }
 
+/// Parse a UUID argument with an error naming the field.
+fn parse_uuid(value: &str, what: &str) -> Result<uuid::Uuid, ToolFailure> {
+    value
+        .parse::<uuid::Uuid>()
+        .map_err(|_| ToolFailure::Message(format!("`{value}` is not a {what} id (expected a UUID)")))
+}
+
+/// `YYYY-MM-DD` → `NaiveDate`, with an actionable error.
+fn parse_date(value: &str, key: &str) -> Result<chrono::NaiveDate, ToolFailure> {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| ToolFailure::Message(format!("`{key}` must be an ISO date (YYYY-MM-DD), got `{value}`")))
+}
+
+/// `"agent:NAME"` / `"human:USER_ID"` / bare name (= agent) → the
+/// claim identity — the same convention `task issue claim` uses.
+fn parse_agent(s: &str) -> Result<task::workflows_proto::AgentRef, ToolFailure> {
+    use task::workflows_proto::AgentRef;
+    let s = s.trim();
+    if let Some(user) = s.strip_prefix("human:") {
+        let user = user.trim();
+        if user.is_empty() {
+            return Err(ToolFailure::Message("`human:` needs a user id".into()));
+        }
+        return Ok(AgentRef::human(user));
+    }
+    let name = s.strip_prefix("agent:").unwrap_or(s).trim();
+    if name.is_empty() {
+        return Err(ToolFailure::Message(
+            "agent ref is empty — pass 'agent:NAME' or 'human:USER_ID'".into(),
+        ));
+    }
+    Ok(AgentRef::agent(name))
+}
+
+/// `"HH:MM"` (24h) → minutes-since-midnight.
+fn parse_hhmm(s: &str, key: &str) -> Result<scheduling_proto::TimeOfDay, ToolFailure> {
+    let bad = || ToolFailure::Message(format!("`{key}` must be 'HH:MM' (24h), got `{s}`"));
+    let (h, m) = s.split_once(':').ok_or_else(bad)?;
+    let h: u8 = h.parse().map_err(|_| bad())?;
+    let m: u8 = m.parse().map_err(|_| bad())?;
+    if h > 24 || m > 59 {
+        return Err(bad());
+    }
+    Ok(scheduling_proto::TimeOfDay::new(h, m))
+}
+
+/// Day-plan block category, spelled the way the schema documents it
+/// (lower snake_case); unknown values are an error rather than a
+/// silent `Other` so the model learns the vocabulary.
+fn parse_block_category(s: &str) -> Result<scheduling_proto::BlockCategory, ToolFailure> {
+    use scheduling_proto::BlockCategory as C;
+    Ok(match s.to_ascii_lowercase().as_str() {
+        "reset" => C::Reset,
+        "spiritual" => C::Spiritual,
+        "meal" => C::Meal,
+        "exercise" => C::Exercise,
+        "hygiene" => C::Hygiene,
+        "allocatable" => C::Allocatable,
+        "maintenance" => C::Maintenance,
+        "wind_down" | "winddown" => C::WindDown,
+        "sleep" => C::Sleep,
+        "other" => C::Other,
+        other => {
+            return Err(ToolFailure::Message(format!(
+                "unknown block category `{other}` — use reset, spiritual, meal, exercise, \
+                 hygiene, allocatable, maintenance, wind_down, sleep, or other"
+            )));
+        }
+    })
+}
+
+/// A string-array argument. Absent → `None`; present (even empty)
+/// → the parsed list, so "replace with empty" is expressible.
+fn arg_str_list(args: &Value, key: &str) -> Result<Option<Vec<String>>, ToolFailure> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item.as_str() {
+                    Some(s) if !s.trim().is_empty() => out.push(s.trim().to_string()),
+                    Some(_) => {}
+                    None => {
+                        return Err(ToolFailure::Message(format!(
+                            "`{key}` must be an array of strings"
+                        )));
+                    }
+                }
+            }
+            Ok(Some(out))
+        }
+        Some(_) => Err(ToolFailure::Message(format!(
+            "`{key}` must be an array of strings"
+        ))),
+    }
+}
+
 /// Turn a backend error into something the model can act on.
 ///
 /// Domain errors debug-print as bare variants (`NotFound`,
@@ -709,10 +1215,15 @@ fn backend_err(what: &str, subject: &str, e: &impl std::fmt::Debug) -> ToolFailu
 /// this on `spawn_blocking`.
 #[allow(clippy::too_many_lines)]
 fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value, ToolFailure> {
+    use contacts_proto::Contacts as _;
+    use email_proto::EmailSync as _;
     use goal::GoalService as _;
     use inbox_proto::Inbox as _;
+    use milestone::MilestoneService as _;
     use project::ProjectService as _;
-    use scheduling_proto::service::calendar_events::CalendarEvents as _;
+    use scheduling_proto::{
+        Bookings as _, CalendarEvents as _, DayPlans as _, Slots as _,
+    };
     use task::TaskService as _;
     use vault_proto::VaultSync as _;
 
@@ -767,11 +1278,16 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
 
         "list_tasks" => {
             let status = arg_str(args, "status");
+            let project = match arg_str(args, "project") {
+                Some(p) => Some(parse_uuid(&p, "project")?),
+                None => None,
+            };
             let filter = task::TaskListFilter {
                 // An explicit status wins; without one we show what's
                 // actionable, which is what "my tasks" means.
                 open_only: status.is_none(),
                 status,
+                project,
                 due_on_or_before: arg_str(args, "due_on_or_before"),
                 ..Default::default()
             };
@@ -836,11 +1352,45 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             if let Some(scheduled) = optional_field(args, "scheduled") {
                 current.scheduled = scheduled;
             }
+            if let Some(refs) = arg_str_list(args, "assignees")? {
+                let parsed: Result<Vec<_>, ToolFailure> =
+                    refs.iter().map(|r| parse_agent(r)).collect();
+                current
+                    .workflow
+                    .get_or_insert_with(Default::default)
+                    .assignees = task::model::AgentRefList(parsed?);
+            }
             let saved = org
                 .tasks
                 .update(current)
                 .map_err(|e| backend_err("task", &id, &e))?;
             Ok(task_json(&saved))
+        }
+
+        "claim_task" => {
+            let id = required_str(args, "id")?;
+            let uuid = parse_uuid(&id, "task")?;
+            let agent = parse_agent(&required_str(args, "agent")?)?;
+            let agent_json = serde_json::to_string(&agent)
+                .map_err(|e| ToolFailure::Message(format!("encode agent: {e}")))?;
+            let outcome = org
+                .tasks
+                .try_claim(uuid, agent_json, arg_bool(args, "force"))
+                .map_err(|e| backend_err("task", &id, &e))?;
+            Ok(match outcome {
+                task::service::ClaimResult::Won => json!({
+                    "id": id, "claim": "won",
+                    "note": "the task is yours — set it in-progress and start",
+                }),
+                task::service::ClaimResult::AlreadyMine => json!({
+                    "id": id, "claim": "already_mine",
+                }),
+                task::service::ClaimResult::Lost { holder } => json!({
+                    "id": id, "claim": "lost", "holder": holder,
+                    "note": "someone else holds this task — pick different work \
+                             or ask the user before forcing",
+                }),
+            })
         }
 
         "list_events" => {
@@ -1069,7 +1619,621 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(json!({ "path": path, "appended": true }))
         }
 
+        "write_note" => {
+            let path = required_str(args, "path")?;
+            let content = required_str(args, "content")?;
+            let existed = org.vault_sync.get_file(VAULT_ID, &path).is_ok();
+            org.vault_sync
+                .put_file(
+                    VAULT_ID,
+                    &path,
+                    content.into_bytes(),
+                    vault_proto::IfMatch::Force,
+                )
+                .map_err(|e| backend_err("note", &path, &e))?;
+            Ok(json!({
+                "path": path,
+                "written": true,
+                "replaced_existing": existed,
+            }))
+        }
+
+        // ── Projects / goals / milestones ────────────────────────
+        "create_project" => {
+            let draft = project::ProjectInfo {
+                id: uuid::Uuid::nil(),
+                path: String::new(),
+                title: required_str(args, "title")?,
+                status: arg_str(args, "status").unwrap_or_else(|| "active".into()),
+                priority: arg_str(args, "priority").unwrap_or_else(|| "normal".into()),
+                project_type: "general".into(),
+                lead: String::new(),
+                tags: project::model::Tags::default(),
+                parent_id: match arg_str(args, "parent_id") {
+                    Some(p) => Some(parse_uuid(&p, "project")?),
+                    None => None,
+                },
+                same_as: None,
+                target_date: None,
+                progress_percent: -1,
+                details: arg_str(args, "details").unwrap_or_default(),
+                client_id: None,
+                billable_default: false,
+                currency: String::new(),
+                default_rate_cents: 0,
+                estimated_seconds: 0,
+                agent_profile: String::new(),
+                color: String::new(),
+                image: String::new(),
+                archived: false,
+                states: None,
+                date_created: None,
+                date_modified: None,
+            };
+            let title = draft.title.clone();
+            let created = org
+                .projects
+                .create(draft)
+                .map_err(|e| backend_err("project", &title, &e))?;
+            Ok(project_json(&created))
+        }
+
+        "update_project" => {
+            let id = required_str(args, "id")?;
+            let uuid = parse_uuid(&id, "project")?;
+            let mut current = org
+                .projects
+                .get(uuid)
+                .map_err(|e| backend_err("project", &id, &e))?;
+            if let Some(title) = arg_str(args, "title") {
+                current.title = title;
+            }
+            if let Some(status) = arg_str(args, "status") {
+                current.status = status;
+            }
+            if let Some(priority) = arg_str(args, "priority") {
+                current.priority = priority;
+            }
+            if let Some(details) = arg_str(args, "details") {
+                current.details = details;
+            }
+            let saved = org
+                .projects
+                .update(current)
+                .map_err(|e| backend_err("project", &id, &e))?;
+            Ok(project_json(&saved))
+        }
+
+        "create_goal" => {
+            let draft = goal::Goal {
+                id: uuid::Uuid::nil(),
+                path: String::new(),
+                title: required_str(args, "title")?,
+                kind: arg_str(args, "kind").unwrap_or_else(|| "lifetime".into()),
+                status: arg_str(args, "status").unwrap_or_else(|| "aspiration".into()),
+                parent_id: None,
+                target_date: match arg_str(args, "target_date") {
+                    Some(d) => Some(parse_date(&d, "target_date")?),
+                    None => None,
+                },
+                cycle_id: None,
+                tags: goal::Tags::default(),
+                date_created: None,
+                date_modified: None,
+                details: arg_str(args, "details").unwrap_or_default(),
+            };
+            let title = draft.title.clone();
+            let created = org
+                .goals
+                .create(draft)
+                .map_err(|e| backend_err("goal", &title, &e))?;
+            Ok(goal_json(&created))
+        }
+
+        "update_goal" => {
+            let id = required_str(args, "id")?;
+            let uuid = parse_uuid(&id, "goal")?;
+            let mut current = org
+                .goals
+                .get(uuid)
+                .map_err(|e| backend_err("goal", &id, &e))?;
+            if let Some(title) = arg_str(args, "title") {
+                current.title = title;
+            }
+            if let Some(status) = arg_str(args, "status") {
+                current.status = status;
+            }
+            if let Some(kind) = arg_str(args, "kind") {
+                current.kind = kind;
+            }
+            if let Some(target) = optional_field(args, "target_date") {
+                current.target_date = match target {
+                    Some(d) => Some(parse_date(&d, "target_date")?),
+                    None => None,
+                };
+            }
+            let saved = org
+                .goals
+                .update(current)
+                .map_err(|e| backend_err("goal", &id, &e))?;
+            Ok(goal_json(&saved))
+        }
+
+        "list_milestones" => {
+            let project = match arg_str(args, "project") {
+                Some(p) => Some(parse_uuid(&p, "project")?),
+                None => None,
+            };
+            let rows = org
+                .milestones
+                .list()
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
+            let out: Vec<Value> = rows
+                .iter()
+                .filter(|m| project.is_none_or(|p| m.project_id == p))
+                .take(arg_limit(args))
+                .map(milestone_json)
+                .collect();
+            Ok(json!({ "count": out.len(), "milestones": out }))
+        }
+
+        "create_milestone" => {
+            let draft = milestone::Milestone {
+                id: uuid::Uuid::nil(),
+                path: String::new(),
+                title: required_str(args, "title")?,
+                project_id: parse_uuid(&required_str(args, "project_id")?, "project")?,
+                goal_id: match arg_str(args, "goal_id") {
+                    Some(g) => Some(parse_uuid(&g, "goal")?),
+                    None => None,
+                },
+                status: "open".into(),
+                due_date: match arg_str(args, "due_date") {
+                    Some(d) => Some(parse_date(&d, "due_date")?),
+                    None => None,
+                },
+                tags: milestone::Tags::default(),
+                forge_ref: None,
+                date_created: None,
+                date_modified: None,
+                details: arg_str(args, "details").unwrap_or_default(),
+            };
+            let title = draft.title.clone();
+            let created = org
+                .milestones
+                .create(draft)
+                .map_err(|e| backend_err("milestone", &title, &e))?;
+            Ok(milestone_json(&created))
+        }
+
+        "update_milestone" => {
+            let id = required_str(args, "id")?;
+            let uuid = parse_uuid(&id, "milestone")?;
+            let mut current = org
+                .milestones
+                .get(uuid)
+                .map_err(|e| backend_err("milestone", &id, &e))?;
+            if let Some(title) = arg_str(args, "title") {
+                current.title = title;
+            }
+            if let Some(status) = arg_str(args, "status") {
+                current.status = status;
+            }
+            if let Some(due) = optional_field(args, "due_date") {
+                current.due_date = match due {
+                    Some(d) => Some(parse_date(&d, "due_date")?),
+                    None => None,
+                };
+            }
+            let saved = org
+                .milestones
+                .update(current)
+                .map_err(|e| backend_err("milestone", &id, &e))?;
+            Ok(milestone_json(&saved))
+        }
+
+        // ── Inbox processing ─────────────────────────────────────
+        "process_inbox_item" => {
+            let id = required_str(args, "id")?;
+            let status = required_str(args, "status")?.to_lowercase();
+            let allowed = [
+                inbox_proto::InboxItem::STATUS_OPEN,
+                inbox_proto::InboxItem::STATUS_PROCESSED,
+                inbox_proto::InboxItem::STATUS_ARCHIVED,
+            ];
+            if !allowed.contains(&status.as_str()) {
+                return Err(ToolFailure::Message(format!(
+                    "`status` must be one of open, processed, archived — got `{status}`"
+                )));
+            }
+            let mut item = org
+                .inbox
+                .get_inbox_item(&id)
+                .map_err(|e| backend_err("inbox item", &id, &e))?;
+            let was = item.status.clone();
+            item.status = status;
+            org.inbox
+                .upsert_inbox_item(&item)
+                .map_err(|e| backend_err("inbox item", &id, &e))?;
+            Ok(json!({ "id": item.id, "status": item.status, "was": was }))
+        }
+
+        // ── Day plans / bookings ─────────────────────────────────
+        "get_day_plan" => {
+            let date = required_str(args, "date")?;
+            parse_date(&date, "date")?;
+            let plan = org
+                .scheduling
+                .get_day_plan(&date)
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
+            Ok(json!({ "date": date, "plan": plan.map(|p| day_plan_json(&p)) }))
+        }
+
+        "upsert_day_plan" => {
+            let date = required_str(args, "date")?;
+            parse_date(&date, "date")?;
+            let Some(blocks) = args.get("blocks").and_then(Value::as_array) else {
+                return Err(ToolFailure::Message("`blocks` (array) is required".into()));
+            };
+            let mut planned = Vec::with_capacity(blocks.len());
+            for b in blocks {
+                let start = b.get("start").and_then(Value::as_str).ok_or_else(|| {
+                    ToolFailure::Message("every block needs a `start` ('HH:MM')".into())
+                })?;
+                let end = b.get("end").and_then(Value::as_str).ok_or_else(|| {
+                    ToolFailure::Message("every block needs an `end` ('HH:MM')".into())
+                })?;
+                let label = b.get("label").and_then(Value::as_str).ok_or_else(|| {
+                    ToolFailure::Message("every block needs a `label`".into())
+                })?;
+                planned.push(scheduling_proto::PlannedBlock {
+                    id: scheduling_proto::TimeBlockId(uuid::Uuid::new_v4().to_string()),
+                    start: parse_hhmm(start, "start")?,
+                    end: parse_hhmm(end, "end")?,
+                    label: label.to_string(),
+                    category: match b.get("category").and_then(Value::as_str) {
+                        Some(c) => parse_block_category(c)?,
+                        None => scheduling_proto::BlockCategory::Other,
+                    },
+                    note: b
+                        .get("note")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    assignment: None,
+                    fixed: b.get("fixed").and_then(Value::as_bool).unwrap_or(false),
+                });
+            }
+            let count = planned.len();
+            let plan = scheduling_proto::DayPlan {
+                date: date.clone(),
+                from_template: None,
+                blocks: planned.into(),
+            };
+            org.scheduling
+                .upsert_day_plan(&plan)
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
+            Ok(json!({ "date": date, "blocks": count, "written": true }))
+        }
+
+        "list_bookings" => {
+            let mut rows = org
+                .scheduling
+                .list_bookings()
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
+            rows.sort_by(|a, b| a.start_utc.cmp(&b.start_utc));
+            let out: Vec<Value> = rows.iter().take(arg_limit(args)).map(booking_json).collect();
+            Ok(json!({ "count": out.len(), "bookings": out }))
+        }
+
+        "list_open_slots" => {
+            let query = scheduling_proto::SlotQuery {
+                event_type_id: scheduling_proto::EventTypeId(required_str(
+                    args,
+                    "event_type_id",
+                )?),
+                from_utc: required_str(args, "from")?,
+                to_utc: required_str(args, "to")?,
+            };
+            let slots = org
+                .scheduling
+                .list_open_slots(&query)
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
+            let out: Vec<Value> = slots
+                .iter()
+                .take(arg_limit(args))
+                .map(|s| json!({ "start": s.start_utc, "end": s.end_utc }))
+                .collect();
+            Ok(json!({ "count": out.len(), "slots": out }))
+        }
+
+        "book_slot" => {
+            let new = scheduling_proto::NewBooking {
+                event_type_id: scheduling_proto::EventTypeId(required_str(
+                    args,
+                    "event_type_id",
+                )?),
+                start_utc: required_str(args, "start")?,
+                end_utc: required_str(args, "end")?,
+                attendee_name: required_str(args, "attendee_name")?,
+                attendee_email: required_str(args, "attendee_email")?,
+                note: arg_str(args, "note"),
+            };
+            let start = new.start_utc.clone();
+            let booked = org
+                .scheduling
+                .create_booking(&new)
+                .map_err(|e| backend_err("booking", &start, &e))?;
+            Ok(booking_json(&booked))
+        }
+
+        "cancel_booking" => {
+            let id = required_str(args, "id")?;
+            org.scheduling
+                .update_booking_status(
+                    &scheduling_proto::BookingId(id.clone()),
+                    scheduling_proto::BookingStatus::Cancelled,
+                )
+                .map_err(|e| backend_err("booking", &id, &e))?;
+            Ok(json!({ "cancelled": id }))
+        }
+
+        // ── Contacts ─────────────────────────────────────────────
+        "list_contacts" => {
+            let query = arg_str(args, "query").map(|q| q.to_lowercase());
+            let rows = org
+                .contacts
+                .list_contacts()
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
+            let out: Vec<Value> = rows
+                .iter()
+                .filter(|c| {
+                    query.as_ref().is_none_or(|q| {
+                        c.full_name.to_lowercase().contains(q)
+                            || c.emails.to_lowercase().contains(q)
+                            || c.organization
+                                .as_deref()
+                                .is_some_and(|o| o.to_lowercase().contains(q))
+                    })
+                })
+                .take(arg_limit(args))
+                .map(contact_json)
+                .collect();
+            Ok(json!({ "count": out.len(), "contacts": out }))
+        }
+
+        "upsert_contact" => {
+            let mut contact = match arg_str(args, "id") {
+                Some(id) => org
+                    .contacts
+                    .get_contact(id.clone())
+                    .map_err(|e| backend_err("contact", &id, &e))?
+                    .ok_or_else(|| {
+                        ToolFailure::Message(format!(
+                            "no contact with id `{id}` — list_contacts first, or omit `id` to create"
+                        ))
+                    })?,
+                None => {
+                    let name = arg_str(args, "name").ok_or_else(|| {
+                        ToolFailure::Message("`name` is required when creating a contact".into())
+                    })?;
+                    contacts_proto::Contact::create(
+                        uuid::Uuid::new_v4().to_string(),
+                        name,
+                        chrono::Utc::now().to_rfc3339(),
+                    )
+                }
+            };
+            if let Some(name) = arg_str(args, "name") {
+                contact.full_name = name;
+            }
+            if let Some(emails) = arg_str_list(args, "emails")? {
+                contact.emails = emails.join("\n");
+            }
+            if let Some(phones) = arg_str_list(args, "phones")? {
+                contact.phones = phones.join("\n");
+            }
+            if let Some(org_name) = arg_str(args, "organization") {
+                contact.organization = Some(org_name);
+            }
+            if let Some(notes) = arg_str(args, "notes") {
+                contact.notes = Some(notes);
+            }
+            contact.updated = Some(chrono::Utc::now().to_rfc3339());
+            org.contacts
+                .upsert_contact(&contact)
+                .map_err(|e| backend_err("contact", &contact.id, &e))?;
+            Ok(contact_json(&contact))
+        }
+
+        // ── Email (read + draft; no send by design) ──────────────
+        "list_email_accounts" => {
+            let accounts = org
+                .email
+                .accounts()
+                .map_err(email_err)?;
+            let out: Vec<Value> = accounts
+                .iter()
+                .map(|a| {
+                    let folders = org
+                        .email
+                        .list_folders(&a.id.0)
+                        .map(|fs| {
+                            fs.iter()
+                                .map(|f| {
+                                    json!({
+                                        "name": f.name,
+                                        "unread": f.unread_count,
+                                        "messages": f.message_count,
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    json!({
+                        "id": a.id.0,
+                        "name": a.name,
+                        "address": a.address,
+                        "folders": folders,
+                    })
+                })
+                .collect();
+            Ok(json!({ "count": out.len(), "accounts": out }))
+        }
+
+        "list_envelopes" => {
+            let account = required_str(args, "account")?;
+            let folder = arg_str(args, "folder").unwrap_or_else(|| "INBOX".into());
+            let limit = arg_limit(args);
+            let mut rows = org
+                .email
+                .fetch_envelopes(
+                    &account,
+                    &folder,
+                    email_proto::SeqRange::Recent(limit as u32),
+                )
+                .map_err(email_err)?;
+            // Newest first for the model, whatever the backend's order.
+            rows.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
+            let out: Vec<Value> = rows.iter().take(limit).map(envelope_json).collect();
+            Ok(json!({ "account": account, "folder": folder, "count": out.len(), "messages": out }))
+        }
+
+        "read_email" => {
+            let account = required_str(args, "account")?;
+            let message_id = required_str(args, "message_id")?;
+            let msg = org
+                .email
+                .fetch_message(&account, &message_id)
+                .map_err(email_err)?;
+            let body = msg
+                .body_text
+                .clone()
+                .or_else(|| msg.body_html.clone())
+                .unwrap_or_default();
+            let mut out = envelope_json(&msg.envelope);
+            out["body"] = json!(body);
+            out["attachments"] = json!(
+                msg.attachments
+                    .iter()
+                    .map(|a| json!({ "name": a.filename, "part": a.part }))
+                    .collect::<Vec<_>>()
+            );
+            Ok(out)
+        }
+
+        "draft_email" => {
+            let account = required_str(args, "account")?;
+            let to = arg_str_list(args, "to")?.unwrap_or_default();
+            if to.is_empty() {
+                return Err(ToolFailure::Message("`to` needs at least one address".into()));
+            }
+            let draft = email_proto::Draft {
+                from: account_addr(org, &account)?,
+                to: to.into_iter().map(bare_addr).collect(),
+                cc: arg_str_list(args, "cc")?
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(bare_addr)
+                    .collect(),
+                bcc: Vec::new(),
+                subject: required_str(args, "subject")?,
+                body_text: required_str(args, "body")?,
+                body_html: None,
+                in_reply_to: None,
+                references: Vec::new(),
+                attachments: Vec::new(),
+            };
+            let id = org
+                .email
+                .append_draft(&account, draft)
+                .map_err(email_err)?;
+            Ok(json!({
+                "draft_id": id,
+                "note": "saved to Drafts — the user reviews and sends it from their mail client",
+            }))
+        }
+
+        "draft_reply" => {
+            let account = required_str(args, "account")?;
+            let message_id = required_str(args, "message_id")?;
+            let original = org
+                .email
+                .fetch_message(&account, &message_id)
+                .map_err(email_err)?;
+            let env = &original.envelope;
+            let subject = if env.subject.to_lowercase().starts_with("re:") {
+                env.subject.clone()
+            } else {
+                format!("Re: {}", env.subject)
+            };
+            let mut references = original.references.clone();
+            references.push(env.message_id.clone());
+            let draft = email_proto::Draft {
+                from: account_addr(org, &account)?,
+                to: env.from.clone(),
+                cc: if arg_bool(args, "reply_all") {
+                    env.to.iter().chain(env.cc.iter()).cloned().collect()
+                } else {
+                    Vec::new()
+                },
+                bcc: Vec::new(),
+                subject,
+                body_text: required_str(args, "body")?,
+                body_html: None,
+                in_reply_to: Some(env.message_id.clone()),
+                references,
+                attachments: Vec::new(),
+            };
+            let id = org
+                .email
+                .append_draft(&account, draft)
+                .map_err(email_err)?;
+            Ok(json!({
+                "draft_id": id,
+                "in_reply_to": message_id,
+                "note": "saved to Drafts — the user reviews and sends it from their mail client",
+            }))
+        }
+
         _ => Err(ToolFailure::Unknown),
+    }
+}
+
+/// The sender identity for a draft: the account's own address.
+fn account_addr(
+    org: &crate::OrgAppState,
+    account: &str,
+) -> Result<email_proto::Addr, ToolFailure> {
+    use email_proto::EmailSync as _;
+    let accounts = org.email.accounts().map_err(email_err)?;
+    let acct = accounts
+        .iter()
+        .find(|a| a.id.0 == account)
+        .ok_or_else(|| {
+            ToolFailure::Message(format!(
+                "no mail account `{account}` — call list_email_accounts first"
+            ))
+        })?;
+    Ok(email_proto::Addr {
+        name: acct.display_name.clone(),
+        email: acct.address.clone(),
+    })
+}
+
+fn bare_addr(email: String) -> email_proto::Addr {
+    email_proto::Addr { name: None, email }
+}
+
+/// Email backend errors, with the one common capability gap named
+/// instead of debug-dumped.
+fn email_err(e: email_proto::EmailSyncError) -> ToolFailure {
+    let raw = format!("{e:?}");
+    if raw.starts_with("Unsupported") {
+        ToolFailure::Message(format!(
+            "this org's mail backend doesn't support that operation yet: {raw}"
+        ))
+    } else {
+        ToolFailure::Message(raw)
     }
 }
 
@@ -1087,6 +2251,9 @@ fn task_json(t: &task::TaskInfo) -> Value {
         "tags": t.tags.0,
         "contexts": t.contexts.0,
         "projects": t.projects.0,
+        "assignees": t.workflow.as_ref().map(|w| {
+            w.assignees.0.iter().map(|a| a.short_label()).collect::<Vec<_>>()
+        }),
         "path": t.path,
     })
 }
@@ -1099,6 +2266,98 @@ fn event_json(e: &scheduling_proto::CalEvent) -> Value {
         "end": e.end,
         "all_day": e.all_day,
         "description": e.description,
+    })
+}
+
+fn project_json(p: &project::ProjectInfo) -> Value {
+    json!({
+        "id": p.id.to_string(),
+        "title": p.title,
+        "status": p.status,
+        "priority": p.priority,
+        "path": p.path,
+    })
+}
+
+fn goal_json(g: &goal::Goal) -> Value {
+    json!({
+        "id": g.id.to_string(),
+        "title": g.title,
+        "kind": g.kind,
+        "status": g.status,
+        "target_date": g.target_date.map(|d| d.to_string()),
+        "path": g.path,
+    })
+}
+
+fn milestone_json(m: &milestone::Milestone) -> Value {
+    json!({
+        "id": m.id.to_string(),
+        "title": m.title,
+        "project_id": m.project_id.to_string(),
+        "goal_id": m.goal_id.map(|g| g.to_string()),
+        "status": m.status,
+        "due_date": m.due_date.map(|d| d.to_string()),
+        "path": m.path,
+    })
+}
+
+fn day_plan_json(p: &scheduling_proto::DayPlan) -> Value {
+    let hhmm = |t: scheduling_proto::TimeOfDay| format!("{:02}:{:02}", t.hours(), t.minutes());
+    json!({
+        "date": p.date,
+        "blocks": p.blocks.iter().map(|b| json!({
+            "start": hhmm(b.start),
+            "end": hhmm(b.end),
+            "label": b.label,
+            "category": format!("{:?}", b.category).to_lowercase(),
+            "note": b.note,
+            "fixed": b.fixed,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn booking_json(b: &scheduling_proto::Booking) -> Value {
+    json!({
+        "id": b.id.0,
+        "event_type": b.event_type_id.0,
+        "start": b.start_utc,
+        "end": b.end_utc,
+        "attendee": b.attendee_name,
+        "email": b.attendee_email,
+        "status": format!("{:?}", b.status).to_lowercase(),
+        "note": b.note,
+    })
+}
+
+fn contact_json(c: &contacts_proto::Contact) -> Value {
+    json!({
+        "id": c.id,
+        "name": c.full_name,
+        "emails": c.email_list(),
+        "phones": c.phones.lines().collect::<Vec<_>>(),
+        "organization": c.organization,
+        "notes": c.notes,
+    })
+}
+
+fn envelope_json(e: &email_proto::Envelope) -> Value {
+    let addr = |a: &email_proto::Addr| match &a.name {
+        Some(n) => format!("{n} <{}>", a.email),
+        None => a.email.clone(),
+    };
+    json!({
+        "message_id": e.message_id,
+        "folder": e.folder,
+        "subject": e.subject,
+        "from": e.from.iter().map(addr).collect::<Vec<_>>(),
+        "to": e.to.iter().map(addr).collect::<Vec<_>>(),
+        "date": chrono::DateTime::from_timestamp_millis(e.date_ms)
+            .map(|d| d.to_rfc3339())
+            .unwrap_or_default(),
+        "unread": !e.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen") || f.eq_ignore_ascii_case("Seen")),
+        "has_attachments": e.has_attachments,
+        "snippet": e.snippet,
     })
 }
 
