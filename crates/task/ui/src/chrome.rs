@@ -436,6 +436,8 @@ pub fn TopBar() -> Element {
             // Who's here — avatar group opening the full roster.
             crate::presence::PresenceAvatarBar {}
 
+            NotificationBell {}
+
             button {
                 r#type: "button",
                 class: if agent_panel.read().0 {
@@ -1069,4 +1071,177 @@ async fn sleep_one_second() {
 #[cfg(not(target_arch = "wasm32"))]
 async fn sleep_one_second() {
     futures_util::future::pending::<()>().await;
+}
+
+// ── notification bell ───────────────────────────────────────────────
+
+/// The bell: unread badge + dropdown of recent notifications, fed by
+/// the shared notification store (fetch-once-then-fold off the
+/// `Notify` events stream, so the badge is live). Clicking a row
+/// marks it read and navigates to its source `href`; the header
+/// offers mark-all-read. Rows are written server-side by the
+/// notifier — this surface only reads and flips read-state.
+#[component]
+pub fn NotificationBell() -> Element {
+    let selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let target = use_memo(move || resolve_org(&selection.read(), &org_list.read()));
+    let rows = crate::stores::use_notification_list();
+    let store = crate::stores::use_notification_store();
+    let mut open = use_signal(|| false);
+
+    let mut items: Vec<notify_proto::Notification> = rows
+        .value()
+        .map(|r| r.iter().map(|(_, n)| n.clone()).collect())
+        .unwrap_or_default();
+    items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    let unread = items.iter().filter(|n| n.read_at.is_none()).count();
+    items.truncate(15);
+
+    let mark_all = move |_: MouseEvent| {
+        let Some((slug, _)) = target() else { return };
+        // Optimistic: flip every visible unread now; the stream's
+        // folds re-assert the server truth row by row.
+        let now = Utc::now();
+        if let Some(rows) = rows.value() {
+            for (_, n) in rows.iter() {
+                if n.read_at.is_none() {
+                    let mut read = n.clone();
+                    read.read_at = Some(now);
+                    store.put(read);
+                }
+            }
+        }
+        spawn(async move {
+            if let Err(e) = crate::feeds::mark_all_notifications_read(&slug).await {
+                tracing::warn!(error = %e, "mark all notifications read failed");
+            }
+        });
+    };
+
+    rsx! {
+        div { class: "relative",
+            button {
+                r#type: "button",
+                class: if open() {
+                    "relative flex h-7 w-7 items-center justify-center rounded-md bg-accent text-foreground"
+                } else {
+                    "relative flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                },
+                title: "Notifications",
+                aria_label: "Notifications",
+                onclick: move |_| {
+                    let cur = *open.peek();
+                    open.set(!cur);
+                },
+                fts_ui::lucide_dioxus::Bell { size: 15 }
+                if unread > 0 {
+                    span {
+                        class: "absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold leading-none text-primary-foreground",
+                        {if unread > 99 { "99+".to_string() } else { unread.to_string() }}
+                    }
+                }
+            }
+            if open() {
+                // Backdrop — click-away closes the panel.
+                div {
+                    class: "fixed inset-0 z-30",
+                    onclick: move |_| open.set(false),
+                }
+                div { class: "absolute right-0 top-full z-40 mt-1 flex w-80 flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-xl",
+                    div { class: "flex items-center justify-between border-b border-border/60 px-3 py-2",
+                        span { class: "text-xs font-semibold text-foreground", "Notifications" }
+                        if unread > 0 {
+                            button {
+                                r#type: "button",
+                                class: "text-[11px] text-muted-foreground hover:text-foreground",
+                                onclick: mark_all,
+                                "Mark all read"
+                            }
+                        }
+                    }
+                    if items.is_empty() {
+                        div { class: "px-3 py-6 text-center text-xs text-muted-foreground",
+                            "Nothing yet — task completions, agent turns and bookings land here."
+                        }
+                    } else {
+                        div { class: "flex max-h-96 flex-col overflow-y-auto",
+                            for n in items.clone() {
+                                NotificationRow { n, on_open: move |_| open.set(false) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One dropdown row. Click = mark read (optimistically, then over the
+/// wire) + navigate to the source href + close the panel.
+#[component]
+fn NotificationRow(n: notify_proto::Notification, on_open: EventHandler<()>) -> Element {
+    let selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let target = use_memo(move || resolve_org(&selection.read(), &org_list.read()));
+    let store = crate::stores::use_notification_store();
+    let nav = use_navigator();
+
+    let unread = n.read_at.is_none();
+    let when = fmt_rel_time(n.created_at);
+    let row = n.clone();
+    let click = move |_: MouseEvent| {
+        if row.read_at.is_none() {
+            let mut read = row.clone();
+            read.read_at = Some(Utc::now());
+            store.put(read);
+            if let Some((slug, _)) = target() {
+                let id = row.id;
+                spawn(async move {
+                    if let Err(e) = crate::feeds::mark_notification_read(&slug, id).await {
+                        tracing::warn!(error = %e, "mark notification read failed");
+                    }
+                });
+            }
+        }
+        if !row.source.href.is_empty() {
+            nav.push(row.source.href.as_str());
+        }
+        on_open.call(());
+    };
+
+    rsx! {
+        button {
+            r#type: "button",
+            class: "flex w-full items-start gap-2 border-b border-border/40 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-accent",
+            onclick: click,
+            span {
+                class: if unread {
+                    "mt-1.5 size-1.5 shrink-0 rounded-full bg-primary"
+                } else {
+                    "mt-1.5 size-1.5 shrink-0 rounded-full bg-transparent"
+                },
+            }
+            div { class: "min-w-0 flex-1",
+                div { class: "truncate text-xs font-medium text-foreground", "{n.title}" }
+                if !n.body.is_empty() {
+                    div { class: "truncate text-[11px] text-muted-foreground", "{n.body}" }
+                }
+            }
+            span { class: "shrink-0 pt-px text-[10px] text-muted-foreground", "{when}" }
+        }
+    }
+}
+
+/// Compact relative timestamp for the bell ("now", "5m", "2h", "3d",
+/// else the date).
+fn fmt_rel_time(t: chrono::DateTime<Utc>) -> String {
+    let secs = (Utc::now() - t).num_seconds().max(0);
+    match secs {
+        0..60 => "now".to_string(),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86_400 => format!("{}h", secs / 3600),
+        86_400..604_800 => format!("{}d", secs / 86_400),
+        _ => t.date_naive().to_string(),
+    }
 }
