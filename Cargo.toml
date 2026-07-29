@@ -163,6 +163,7 @@ members = [
     # ── features/engraver ─────────────────────────────────────────────
     "features/engraver/engraver",
     "features/engraver/proto",
+    "features/engraver/score",
     # ── features/dynamic-template (subtree-imported, wave 3) ──────────
     "features/dynamic-template/dynamic-template",
     "features/dynamic-template/dynamic-template-proto",
@@ -184,6 +185,7 @@ members = [
     "crates/signal/import",
     "crates/signal/browser",
     "crates/signal/space",
+    "crates/signal/space/proto",
     "crates/signal/grid",
     "crates/signal/grid-ui",
     "crates/signal/daw-bridge",
@@ -500,6 +502,7 @@ tree-sitter-keyflow = { path = "crates/keyflow/tree-sitter-keyflow" }
 # wgpu/vello + PDF export); consumers opt into `svg`/`wgpu`/`engraver`.
 engraver = { path = "features/engraver/engraver", default-features = false }
 engraver-proto = { path = "features/engraver/proto", default-features = false }
+engraver-score = { path = "features/engraver/score" }
 
 # ── signal domain (wave 4) ────────────────────────────────────────────
 # `signal` is the facade — the only public API surface for the signal
@@ -515,6 +518,7 @@ signal-ui = { path = "crates/signal/ui", default-features = false }
 # that need the filesystem scanner opt in with `features = ["native"]`.
 signal-browser = { path = "crates/signal/browser", default-features = false }
 signal-space = { path = "crates/signal/space" }
+signal-space-proto = { path = "crates/signal/space/proto" }
 signal-grid = { path = "crates/signal/grid" }
 signal-grid-ui = { path = "crates/signal/grid-ui" }
 signal-controller = { path = "crates/signal/controller" }
