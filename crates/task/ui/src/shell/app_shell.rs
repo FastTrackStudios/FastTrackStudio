@@ -277,18 +277,31 @@ fn ConnectionBanner() -> Element {
     let conn = architect::use_connection::<vox_core::Caller>();
     let notices = architect::use_notifications();
     let mut was_down = use_signal(|| false);
+    // Sticky worst-state: the supervisor alternates Failed ↔ Connecting
+    // on every retry, which would flip the pill red ↔ amber. Once an
+    // attempt has failed during THIS outage, hold the red variant (and
+    // its last error, for the hover) until the connection is Ready
+    // again.
+    let mut last_failure = use_signal(|| None::<String>);
 
     use_effect(move || {
         let generation = conn.generation();
         match conn.state() {
             architect::ConnectionState::Ready(_) => {
+                last_failure.set(None);
                 if *was_down.peek() {
                     was_down.set(false);
                     notices.success("Reconnected to your workspace");
                 }
             }
             architect::ConnectionState::Connecting if generation == 0 => {}
-            _ => {
+            architect::ConnectionState::Failed(e) => {
+                last_failure.set(Some(e));
+                if !*was_down.peek() {
+                    was_down.set(true);
+                }
+            }
+            architect::ConnectionState::Connecting => {
                 if !*was_down.peek() {
                     was_down.set(true);
                 }
@@ -297,23 +310,25 @@ fn ConnectionBanner() -> Element {
     });
 
     let generation = conn.generation();
-    let (cls, label, title) = match conn.state() {
+    match conn.state() {
         architect::ConnectionState::Ready(_) => return rsx! {},
         architect::ConnectionState::Connecting if generation == 0 => return rsx! {},
-        architect::ConnectionState::Connecting => (
+        _ => {}
+    }
+    let (cls, label, title) = match last_failure.read().clone() {
+        Some(e) => (
+            "border-destructive/40 bg-destructive/15 text-destructive",
+            if generation == 0 {
+                "Can't reach the server — retrying"
+            } else {
+                "Connection lost — retrying"
+            },
+            e,
+        ),
+        None => (
             "border-amber-400/40 bg-amber-500/15 text-amber-200",
             "Reconnecting to your workspace…",
             "Connection lost — re-establishing".to_string(),
-        ),
-        architect::ConnectionState::Failed(e) if generation == 0 => (
-            "border-destructive/40 bg-destructive/15 text-destructive",
-            "Can't reach the server — retrying",
-            e,
-        ),
-        architect::ConnectionState::Failed(e) => (
-            "border-destructive/40 bg-destructive/15 text-destructive",
-            "Connection lost — retrying",
-            e,
         ),
     };
     rsx! {
