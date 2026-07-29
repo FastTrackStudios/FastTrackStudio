@@ -124,6 +124,15 @@ pub(crate) async fn run_setup(cmd: SetupCmd) -> eyre::Result<()> {
 
 /// Read the per-org webhook secret, generating + persisting one
 /// (64 hex chars) if it doesn't exist yet.
+///
+/// Vox-unification judgment: STAYS a direct file write, on
+/// purpose. The secret is SERVER-side config — the task-server
+/// validates incoming forge webhooks against this exact file
+/// under its own data root — so `task setup forge` only makes
+/// sense co-resident with the server (or its embedded stand-in).
+/// Provisioning a REMOTE server's webhook secret needs an
+/// org-management RPC; until then this is honest local setup, not
+/// a bypass.
 fn ensure_webhook_secret(org_slug: &str) -> eyre::Result<String> {
     let home = std::env::var_os("HOME").ok_or_else(|| eyre::eyre!("HOME not set"))?;
     let path = std::path::Path::new(&home)

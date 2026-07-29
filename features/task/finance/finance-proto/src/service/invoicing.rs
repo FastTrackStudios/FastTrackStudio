@@ -124,4 +124,29 @@ pub trait Invoicing {
     /// Returns the generated invoice's id, or `None` if not due
     /// / paused / completed.
     fn run_schedule_once(&self, id: Uuid) -> Result<Option<Uuid>, FinanceError>;
+
+    /// Persist a **client-built** invoice and stamp its source
+    /// sessions as billed — the counterpart of
+    /// [`Invoicing::generate_invoice`] for callers that assemble
+    /// the invoice themselves (the CLI's `task finance invoice`
+    /// numbering + PDF flow). Upserts `book` / `party`
+    /// (insert-if-missing by id), rejects a duplicate invoice
+    /// number, inserts the invoice as-is, and sets
+    /// `work_sessions.invoice_id` on `session_ids`. Returns the
+    /// number of sessions stamped.
+    fn commit_invoice(
+        &self,
+        book: crate::book::Book,
+        party: crate::party::Party,
+        invoice: Invoice,
+        session_ids: Vec<Uuid>,
+    ) -> Result<u64, FinanceError>;
+
+    /// Plain void (no credit note): set the invoice to
+    /// `Cancelled` and un-stamp its sessions so the hours become
+    /// re-billable. Refuses when payments have been recorded
+    /// against it — issue a credit note instead
+    /// ([`Invoicing::void_with_credit`]). Returns the number of
+    /// sessions un-stamped.
+    fn void_invoice(&self, id: Uuid) -> Result<u64, FinanceError>;
 }

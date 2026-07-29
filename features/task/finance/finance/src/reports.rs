@@ -99,16 +99,25 @@ pub async fn hours_by_project(
         q = q.filter(WorkSessionColumn::UserId.eq(uid));
     }
     let rows = q.all(conn).await?;
+    Ok(rollup_sessions(
+        rows.into_iter().map(timer_proto::WorkSession::from),
+    ))
+}
+
+/// Pure fold behind [`hours_by_project`], over the wire shape —
+/// so callers that fetch their sessions over vox
+/// (`TimerService::list_sessions`) get the identical rollup
+/// without a DB connection. Open sessions (no `end_time`) are
+/// skipped.
+pub fn rollup_sessions(
+    sessions: impl IntoIterator<Item = timer_proto::WorkSession>,
+) -> Vec<ProjectRollup> {
     let mut by_project: std::collections::BTreeMap<(Option<Uuid>, String), ProjectRollup> =
         std::collections::BTreeMap::new();
-    for s in rows {
+    for s in sessions {
+        let Some(end) = s.end_time else { continue };
         let key = (s.project_id, s.project_path.clone());
-        let elapsed = s
-            .end_time
-            .unwrap_or(s.start_time)
-            .signed_duration_since(s.start_time)
-            .num_seconds()
-            .max(0);
+        let elapsed = end.signed_duration_since(s.start_time).num_seconds().max(0);
         // billable amount = (elapsed_seconds / 3600) * rate_cents
         let billable_cents = if s.billable {
             (i128::from(elapsed) * i128::from(s.rate_cents) / 3600)
@@ -138,7 +147,7 @@ pub async fn hours_by_project(
     }
     let mut out: Vec<ProjectRollup> = by_project.into_values().collect();
     out.sort_by(|a, b| b.total_seconds.cmp(&a.total_seconds));
-    Ok(out)
+    out
 }
 
 /// Weekly summary — hours per project + invoice totals.
@@ -203,6 +212,18 @@ pub async fn weekly_summary(
 ) -> Result<WeeklySummary, sea_orm::DbErr> {
     let range = DateRange::week_of(week_of);
     let projects = hours_by_project(timer_conn, user_id, range).await?;
+    Ok(weekly_summary_from_rollups(projects, range.since.date_naive()))
+}
+
+/// Pure totals fold behind [`weekly_summary`] — pair with
+/// [`rollup_sessions`] when the sessions arrive over vox instead
+/// of a DB connection. `week_of` should be the Monday the range
+/// started ([`DateRange::week_of`]`.since.date_naive()`).
+#[must_use]
+pub fn weekly_summary_from_rollups(
+    projects: Vec<ProjectRollup>,
+    week_of: NaiveDate,
+) -> WeeklySummary {
     let total_seconds: i64 = projects.iter().map(|p| p.total_seconds).sum();
     let total_billable_seconds: i64 = projects.iter().map(|p| p.billable_seconds).sum();
     let total_billable_amount_minor: i64 = projects.iter().map(|p| p.billable_amount_minor).sum();
@@ -211,14 +232,14 @@ pub async fn weekly_summary(
         .find(|p| !p.currency.is_empty())
         .map(|p| p.currency.clone())
         .unwrap_or_default();
-    Ok(WeeklySummary {
-        week_of: range.since.date_naive(),
+    WeeklySummary {
+        week_of,
         projects,
         total_seconds,
         total_billable_seconds,
         total_billable_amount_minor,
         currency,
-    })
+    }
 }
 
 // ── Accounts receivable ─────────────────────────────────────────────

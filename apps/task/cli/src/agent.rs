@@ -1627,6 +1627,19 @@ fn render_subtask_checklist(children: &[task::TaskInfo]) -> String {
 }
 
 /// `~/.task/orgs/<slug>/workflows` — the orchestrator store dir.
+///
+/// DELIBERATELY machine-local, not vox: this is the goal-loop
+/// runtime's own state (sessions, subgoals, per-turn heartbeats),
+/// and the loop it belongs to runs HERE — `goal run` spawns
+/// worker / evaluator subprocesses on this machine, against this
+/// machine's checkouts. No workflows service exists on the org
+/// router (workflows-proto is types-only; the mounted agent
+/// services are the Codex/Hermes chat + task-queue surfaces), so
+/// there is nothing to route these through — and steering a
+/// subprocess loop on ANOTHER box through org data would be wrong
+/// anyway. If goal sessions ever need remote visibility, that's a
+/// new `#[architect::rpc]` surface over this store, served by
+/// whichever machine hosts the loop.
 fn org_workflows_dir(org_slug: &str) -> eyre::Result<std::path::PathBuf> {
     let home = std::env::var_os("HOME").ok_or_else(|| eyre::eyre!("HOME not set"))?;
     Ok(std::path::Path::new(&home)

@@ -371,12 +371,15 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             if let Some(entry) = sess.servers.remove(&key) {
                 // Server-side revoke, best effort — over the
                 // entry's OWN server (remote logout). Legacy
-                // `"local"` entries go straight at the org's
-                // on-disk auth.sqlite.
-                let revoked: eyre::Result<()> = if entry.url == crate::session_store::LOCAL_URL {
-                    revoke_local_session(&entry).await
-                } else {
-                    let url = resolve_org_vox_url(Some(entry.url.clone()), &entry.slug);
+                // `"local"` entries ride the same per-org vox
+                // route: the localhost default resolves to the
+                // embedded backend when no server is running,
+                // which reaches the org's own auth store — no
+                // direct auth.sqlite open.
+                let revoked: eyre::Result<()> = {
+                    let base = (entry.url != crate::session_store::LOCAL_URL)
+                        .then(|| entry.url.clone());
+                    let url = resolve_org_vox_url(base, &entry.slug);
                     match Box::pin(establish_for_url::<AuthServiceClient>(&url)).await {
                         Ok(client) => client
                             .sign_out(entry.token.clone())
@@ -411,6 +414,8 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             }
         }
         AuthCmd::Org(AuthOrgCmd::List) => {
+            // Local-only (documented on `local_org_ctx`): no
+            // membership-listing RPC on AuthService yet.
             let ctx = local_org_ctx(org_override, "auth org list")?;
             let auth_db_path = ctx.root.auth_db();
             let Some(sess) = crate::session_store::load()? else {
@@ -442,6 +447,8 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             }
         }
         AuthCmd::Org(AuthOrgCmd::Use { org_id }) => {
+            // Local-only (documented on `local_org_ctx`): no
+            // set-active-organization RPC on AuthService yet.
             let ctx = local_org_ctx(org_override, "auth org use")?;
             let auth_db_path = ctx.root.auth_db();
             let Some(sess) = crate::session_store::load()? else {
@@ -469,19 +476,25 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             println!("Architect-auth active membership set to {resolved}");
         }
         AuthCmd::Users => {
-            use architect_auth::db::AuthUserEntity;
-            use sea_orm::{Database, EntityTrait};
-            let ctx = local_org_ctx(org_override, "auth users")?;
-            let auth_db_path = ctx.root.auth_db();
-            if !auth_db_path.exists() {
-                return Err(eyre::eyre!("no auth.sqlite at {}", auth_db_path.display()));
-            }
-            let url = format!("sqlite://{}?mode=ro", auth_db_path.display());
-            let db = Database::connect(&url)
-                .await
-                .map_err(|e| eyre::eyre!("open {url}: {e}"))?;
-            let users = AuthUserEntity::find()
-                .all(&db)
+            // Over vox via `AuthService::list_org_members` — works
+            // against a remote org now, and (via the embedded
+            // fallback) against a local org with no server running.
+            // The stored session token is attached when present; the
+            // service's tokenless fallback enumerates the org
+            // store's users, which is exactly what the old direct
+            // auth.sqlite read produced.
+            let slug = match crate::resolve_active_org(org_override.map(str::to_owned)) {
+                Ok(s) => s,
+                Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
+            };
+            let url = resolve_org_vox_url(None, &slug);
+            let client: AuthServiceClient = establish_for_url(&url).await?;
+            let token = crate::session_store::load()?
+                .as_ref()
+                .and_then(|s| s.active_server().map(|e| e.token.clone()))
+                .unwrap_or_default();
+            let users = client
+                .list_org_members(token)
                 .await
                 .map_err(|e| eyre::eyre!("query auth_users: {e}"))?;
             if users.is_empty() {
@@ -489,12 +502,7 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             }
             println!("{:<38}  {:<24}  email", "user_id", "name");
             for u in users {
-                println!(
-                    "{:<38}  {:<24}  {}",
-                    u.id,
-                    u.name.unwrap_or_default(),
-                    u.email.unwrap_or_default()
-                );
+                println!("{:<38}  {:<24}  {}", u.user_id, u.name, u.email);
             }
         }
     }
@@ -556,11 +564,14 @@ fn match_session_entry(
     }
 }
 
-/// Resolve a LOCAL on-disk org for the auth verbs that read the
-/// org's `auth.sqlite` directly (`auth users`, `auth org …`).
-/// Distinguishes "this command is local-only" from "you're not
-/// signed in": a remote session can never serve these — they need
-/// an org dir under the data root.
+/// Resolve a LOCAL on-disk org for the two remaining auth verbs
+/// that read the org's `auth.sqlite` directly: `auth org list` and
+/// `auth org use`. These stay local because `AuthService` has no
+/// membership-listing or set-active-organization RPC yet (the
+/// per-user membership walk and the `auth_session
+/// .active_organization_id` write have no wire surface — a known
+/// gap, to be closed alongside the vox client-middleware auth
+/// work). Everything else in `task auth` is remote-capable.
 fn local_org_ctx(
     org_override: Option<&str>,
     what: &str,
@@ -576,25 +587,6 @@ fn local_org_ctx(
         )
         .report()
     })
-}
-
-/// Best-effort server-side revocation for a legacy `"local"`
-/// session entry: open the org's `auth.sqlite` directly, like the
-/// old local-first `auth logout` did.
-async fn revoke_local_session(entry: &crate::session_store::ServerEntry) -> eyre::Result<()> {
-    use architect_auth::commands::SignOut;
-    let root =
-        org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("resolve data root: {e}"))?;
-    let (org, _) = root
-        .load_org(&entry.slug)
-        .map_err(|e| eyre::eyre!("no local org dir for `{}`: {e}", entry.slug))?;
-    let auth = open_local_auth(&org.auth_db()).await?;
-    auth.sign_out(SignOut {
-        token: entry.token.clone(),
-    })
-    .await
-    .map_err(|e| eyre::eyre!("{e}"))?;
-    Ok(())
 }
 
 async fn open_auth_db(auth_db_path: &std::path::Path) -> eyre::Result<sea_orm::DatabaseConnection> {

@@ -310,24 +310,37 @@ pub(crate) fn timer_owner_id(org_id: uuid::Uuid) -> uuid::Uuid {
 }
 
 pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()> {
-    use sea_orm::Database;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use sea_orm_migration::MigratorTrait;
-    use std::sync::Arc;
-    use timer::entity::{TagColumn, TagEntity, WorkSessionTagColumn, WorkSessionTagEntity};
-    use timer::store::{Store, VaultProjectDefaults};
-    use timer_proto::service::{LogSessionRequest, StartTimerRequest, TimerService};
+    use timer_proto::service::{LogSessionRequest, StartTimerRequest};
 
-    // OrgRoot-driven path resolution. `TASK_TIMER_DB` /
-    // `TASK_VAULT_ROOT` still win as hard overrides for
-    // test fixtures. User/org ids come from the active
-    // server entry in `session.json`; falls back to env vars
-    // and finally dev nil-uuids for fresh setups.
-    let ctx = crate::org_ctx::resolve_active(org_override)?;
-    let db_url = std::env::var("TASK_TIMER_DB")
-        .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
-    let vault_root = std::env::var("TASK_VAULT_ROOT")
-        .map_or_else(|_| ctx.root.vault_dir(), std::path::PathBuf::from);
+    // The timer DATA lives behind the org's `TimerService` — remote
+    // server or embedded in-process backend alike (the localhost
+    // default falls back to embedded when no server is running; see
+    // `establish_for_url`). The CLI no longer opens timer.sqlite.
+    let slug = match crate::resolve_active_org(org_override.map(str::to_owned)) {
+        Ok(s) => s,
+        // No --org and no session: fall back to the local resolver's
+        // single-org disambiguation / fresh-install auto-bootstrap of
+        // `default`, exactly as the old direct-disk path did.
+        Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
+    };
+    forward_timer_db_override();
+    // Local org tree — OPTIONAL now. When present (co-resident org)
+    // it supplies the manifest org-id, the vault root for
+    // project-path display scans, and the best-effort auth.sqlite
+    // name join; when absent (remote-only session) the id comes from
+    // the server's well-known doc and the local joins degrade
+    // gracefully. `TASK_VAULT_ROOT` stays a fixture override.
+    let data_root = org_proto::DataRoot::from_env().ok();
+    let local = data_root.as_ref().and_then(|r| r.load_org(&slug).ok());
+    let vault_root = std::env::var("TASK_VAULT_ROOT").map_or_else(
+        |_| {
+            data_root.as_ref().map_or_else(
+                || std::path::PathBuf::from("."),
+                |r| r.org(&slug).vault_dir(),
+            )
+        },
+        std::path::PathBuf::from,
+    );
     // Unified identity. The org id is the org's *manifest* id (the
     // same value the web UI gets from `.well-known` → `OrgMeta.id`),
     // and the default user is the deterministic "local owner" derived
@@ -336,33 +349,26 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
     // keyspace so both surfaces see the same data. `TASK_ORG_ID` /
     // `TASK_USER_ID` still override (e.g. logging a contractor's time
     // under a distinct user id).
-    let org_id = std::env::var("TASK_ORG_ID")
+    let org_id = match std::env::var("TASK_ORG_ID")
         .ok()
         .and_then(|s| s.parse::<uuid::Uuid>().ok())
-        .or_else(|| ctx.root.manifest().ok().map(|m| m.id))
-        .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap());
+        .or_else(|| local.as_ref().map(|(_, m)| m.id))
+    {
+        Some(id) => id,
+        None => crate::remote_org_id(&slug).await.unwrap_or_else(|| {
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap()
+        }),
+    };
     let user_id = std::env::var("TASK_USER_ID")
         .ok()
         .and_then(|s| s.parse::<uuid::Uuid>().ok())
         .unwrap_or_else(|| timer_owner_id(org_id));
 
-    let conn = Database::connect(&db_url)
-        .await
-        .map_err(|e| eyre::eyre!("connect timer db `{db_url}`: {e}"))?;
-    timer::Migrator::up(&conn, None)
-        .await
-        .map_err(|e| eyre::eyre!("timer migrations: {e}"))?;
-    let defaults = Arc::new(VaultProjectDefaults {
-        vault_root: vault_root.clone(),
-    });
-    let store = Store::new(conn, defaults);
-
-    // Per-org vox URL for `--task` / `--project` reference
-    // resolution. `establish_for_url` honors `TASK_EMBED` (in-process
-    // backend) vs a running server; the URL is only dialed when a
-    // flag actually needs resolving, so plain local timer use (raw
-    // uuids / no flags) keeps working fully offline.
-    let vox_url = resolve_org_vox_url(None, ctx.root.slug());
+    let vox_url = resolve_org_vox_url(None, &slug);
+    // One typed client for every session/rate/tag operation below —
+    // named `store` to keep the call sites reading the same as the
+    // old direct-store code.
+    let store: timer_proto::TimerServiceClient = establish_for_url(&vox_url).await?;
     // `--task <id|prefix|path>` → TaskInfo, used to default the
     // description / project / task-note on start | switch | log.
     let resolve_task_flag = |flag: Option<String>| {
@@ -427,7 +433,12 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 })
                 .await
                 .map_err(|e| eyre::eyre!("start: {e}"))?;
-            attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
+            if !tags.is_empty() {
+                store
+                    .attach_tags(session.id, org_id, tags.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("attach tags: {e:?}"))?;
+            }
             if json {
                 crate::json_out::print_json(&crate::json_out::session_json(&session))?;
             } else {
@@ -570,7 +581,12 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 })
                 .await
                 .map_err(|e| eyre::eyre!("switch: {e}"))?;
-            attach_tags_by_name(store.conn(), org_id, started.id, &tags).await?;
+            if !tags.is_empty() {
+                store
+                    .attach_tags(started.id, org_id, tags.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("attach tags: {e:?}"))?;
+            }
             if json {
                 crate::json_out::print_json(&serde_json::json!({
                     "stopped": closed.as_ref().map(crate::json_out::session_json),
@@ -633,7 +649,12 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 })
                 .await
                 .map_err(|e| eyre::eyre!("log: {e}"))?;
-            attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
+            if !tags.is_empty() {
+                store
+                    .attach_tags(session.id, org_id, tags.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("attach tags: {e:?}"))?;
+            }
             if json {
                 crate::json_out::print_json(&crate::json_out::session_json(&session))?;
             } else {
@@ -647,7 +668,7 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
             json,
         } => {
             store
-                .set_org_member_rate(org_id, user_id, cents, &currency)
+                .set_org_member_rate(org_id, user_id, cents, currency.clone())
                 .await
                 .map_err(|e| eyre::eyre!("set rate: {e}"))?;
             if json {
@@ -692,6 +713,7 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                     start_time: from,
                     end_time: to,
                     billable,
+                    preserve_rate: false,
                 })
                 .await
                 .map_err(|e| eyre::eyre!("edit: {e}"))?;
@@ -749,7 +771,7 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 open,
             };
             let rows = store
-                .query_sessions(&filter)
+                .list_sessions(filter.clone())
                 .await
                 .map_err(|e| eyre::eyre!("list: {e}"))?;
             if json {
@@ -786,7 +808,7 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
         TimerCmd::Users { json } => {
             // All sessions in scope; aggregate per user_id.
             let rows = store
-                .query_sessions(&timer_proto::WorkSessionFilter::default())
+                .list_sessions(timer_proto::WorkSessionFilter::default())
                 .await
                 .map_err(|e| eyre::eyre!("list: {e}"))?;
             let mut agg: std::collections::BTreeMap<uuid::Uuid, (usize, i64, i64)> =
@@ -804,15 +826,17 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 e.2 +=
                     i64::try_from(i128::from(secs) * i128::from(s.rate_cents) / 3600).unwrap_or(0);
             }
-            // Resolve names from auth.sqlite — same lookup
-            // the invoice path uses.
+            // Resolve names from the LOCAL org's auth.sqlite — same
+            // lookup the invoice path uses. Best-effort presentation
+            // join: with no co-resident org dir (remote-only
+            // session) names simply come back unresolved.
             let names = {
                 use architect_auth::db::{AuthUserColumn, AuthUserEntity};
                 use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
                 let mut map: std::collections::HashMap<uuid::Uuid, String> =
                     std::collections::HashMap::new();
-                let auth_path = ctx.root.auth_db();
-                if auth_path.exists() {
+                let auth_path = local.as_ref().map(|(o, _)| o.auth_db());
+                if let Some(auth_path) = auth_path.filter(|p| p.exists()) {
                     let url = format!("sqlite://{}?mode=ro", auth_path.display());
                     if let Ok(db) = Database::connect(&url).await {
                         let ids: Vec<uuid::Uuid> = agg.keys().copied().collect();
@@ -887,7 +911,7 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 open: None,
             };
             let rows = store
-                .query_sessions(&filter)
+                .list_sessions(filter.clone())
                 .await
                 .map_err(|e| eyre::eyre!("list: {e}"))?;
             let needle = description_contains.map(|s| s.to_lowercase());
@@ -942,19 +966,18 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                         .await
                         .map_err(|e| eyre::eyre!("reassign {}: {e}", s.id))?;
                 } else {
-                    // Preserve the historical rate snapshot
-                    // — only swap user_id. Direct SeaORM
-                    // update bypasses cascade re-resolution.
-                    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-                    use timer::entity::{WorkSessionActive, WorkSessionEntity};
-                    let row = WorkSessionEntity::find_by_id(s.id)
-                        .one(store.conn())
-                        .await?
-                        .ok_or_else(|| eyre::eyre!("session {} disappeared", s.id))?;
-                    let mut active: WorkSessionActive = row.into();
-                    active.user_id = Set(to);
-                    active.updated_at = Set(chrono::Utc::now());
-                    active.update(store.conn()).await?;
+                    // Preserve the historical rate snapshot — only
+                    // swap user_id. `preserve_rate` tells the server
+                    // to skip the cascade re-resolution.
+                    store
+                        .update_session(timer_proto::service::UpdateSessionRequest {
+                            id: s.id,
+                            user_id: Some(to),
+                            preserve_rate: true,
+                            ..Default::default()
+                        })
+                        .await
+                        .map_err(|e| eyre::eyre!("reassign {}: {e}", s.id))?;
                 }
                 updated += 1;
             }
@@ -995,16 +1018,13 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
         }
         TimerCmd::Tag(sub) => match sub {
             TimerTagCmd::List { json } => {
-                let rows = TagEntity::find()
-                    .filter(TagColumn::OrgId.eq(org_id))
-                    .all(store.conn())
+                let rows = store
+                    .list_tags(org_id)
                     .await
                     .map_err(|e| eyre::eyre!("list tags: {e}"))?;
                 if json {
-                    let out: Vec<serde_json::Value> = rows
-                        .into_iter()
-                        .map(|t| crate::json_out::tag_json(&timer_proto::Tag::from(t)))
-                        .collect();
+                    let out: Vec<serde_json::Value> =
+                        rows.iter().map(crate::json_out::tag_json).collect();
                     crate::json_out::print_json(&out)?;
                     return Ok(());
                 }
@@ -1021,32 +1041,29 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 }
             }
             TimerTagCmd::Create { name, color, json } => {
-                let tag = ensure_tag(store.conn(), org_id, &name, &color).await?;
+                let tag = store
+                    .create_tag(org_id, name, color)
+                    .await
+                    .map_err(|e| eyre::eyre!("create tag: {e}"))?;
                 if json {
-                    crate::json_out::print_json(&crate::json_out::tag_json(
-                        &timer_proto::Tag::from(tag),
-                    ))?;
+                    crate::json_out::print_json(&crate::json_out::tag_json(&tag))?;
                 } else {
                     println!("{}  {}", tag.id, tag.name);
                 }
             }
             TimerTagCmd::Rm { name, json } => {
-                let existing = TagEntity::find()
-                    .filter(TagColumn::OrgId.eq(org_id))
-                    .filter(TagColumn::Name.eq(name.clone()))
-                    .one(store.conn())
-                    .await
-                    .map_err(|e| eyre::eyre!("find tag: {e}"))?;
-                let Some(tag) = existing else {
-                    return Err(eyre::eyre!("no such tag: {name}"));
-                };
-                TagEntity::delete_by_id(tag.id)
-                    .exec(store.conn())
-                    .await
-                    .map_err(|e| eyre::eyre!("delete tag: {e}"))?;
+                let tag = store.delete_tag(org_id, name.clone()).await.map_err(|e| {
+                    if matches!(&e, vox::VoxError::User(inner)
+                        if matches!(**inner, timer_proto::TimerError::TagNotFound(_)))
+                    {
+                        eyre::eyre!("no such tag: {name}")
+                    } else {
+                        eyre::eyre!("delete tag: {e}")
+                    }
+                })?;
                 if json {
                     crate::json_out::print_json(&serde_json::json!({
-                        "deleted": crate::json_out::tag_json(&timer_proto::Tag::from(tag)),
+                        "deleted": crate::json_out::tag_json(&tag),
                     }))?;
                 } else {
                     println!("Deleted tag {} ({})", tag.name, tag.id);
@@ -1057,7 +1074,10 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 tags,
                 json,
             } => {
-                attach_tags_by_name(store.conn(), org_id, session_id, &tags).await?;
+                store
+                    .attach_tags(session_id, org_id, tags.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("attach tags: {e}"))?;
                 if json {
                     crate::json_out::print_json(&serde_json::json!({
                         "session_id": session_id,
@@ -1074,9 +1094,8 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 json,
             } => {
                 if all {
-                    WorkSessionTagEntity::delete_many()
-                        .filter(WorkSessionTagColumn::WorkSessionId.eq(session_id))
-                        .exec(store.conn())
+                    store
+                        .detach_tags(session_id, org_id, Vec::new(), true)
                         .await
                         .map_err(|e| eyre::eyre!("detach all: {e}"))?;
                     if json {
@@ -1090,22 +1109,13 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
                 } else if tags.is_empty() {
                     return Err(eyre::eyre!("pass --tag <name> or --all"));
                 } else {
-                    let tag_rows = TagEntity::find()
-                        .filter(TagColumn::OrgId.eq(org_id))
-                        .filter(TagColumn::Name.is_in(tags.clone()))
-                        .all(store.conn())
-                        .await
-                        .map_err(|e| eyre::eyre!("lookup tags: {e}"))?;
-                    let ids: Vec<uuid::Uuid> = tag_rows.iter().map(|t| t.id).collect();
-                    if ids.is_empty() {
-                        return Err(eyre::eyre!("no matching tags"));
-                    }
-                    WorkSessionTagEntity::delete_many()
-                        .filter(WorkSessionTagColumn::WorkSessionId.eq(session_id))
-                        .filter(WorkSessionTagColumn::TagId.is_in(ids))
-                        .exec(store.conn())
+                    let matched = store
+                        .detach_tags(session_id, org_id, tags.clone(), false)
                         .await
                         .map_err(|e| eyre::eyre!("detach: {e}"))?;
+                    if matched == 0 {
+                        return Err(eyre::eyre!("no matching tags"));
+                    }
                     if json {
                         crate::json_out::print_json(&serde_json::json!({
                             "session_id": session_id,
@@ -1121,70 +1131,21 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
     Ok(())
 }
 
-/// Idempotent tag upsert by `(org_id, name)`. Returns the
-/// existing or freshly inserted row.
-async fn ensure_tag(
-    conn: &sea_orm::DatabaseConnection,
-    org_id: uuid::Uuid,
-    name: &str,
-    color: &str,
-) -> eyre::Result<timer::entity::TagModel> {
-    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-    if let Some(existing) = timer::entity::TagEntity::find()
-        .filter(timer::entity::TagColumn::OrgId.eq(org_id))
-        .filter(timer::entity::TagColumn::Name.eq(name.to_string()))
-        .one(conn)
-        .await
-        .map_err(|e| eyre::eyre!("find tag: {e}"))?
-    {
-        return Ok(existing);
-    }
-    let now = chrono::Utc::now();
-    let am = timer::entity::TagActive {
-        id: Set(uuid::Uuid::new_v4()),
-        org_id: Set(org_id),
-        name: Set(name.to_string()),
-        color: Set(color.to_string()),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-    am.insert(conn)
-        .await
-        .map_err(|e| eyre::eyre!("insert tag: {e}"))
-}
-
-/// Ensure each tag in `names` exists in `org_id` and attach
-/// it to `session_id`. Already-attached pairs are skipped
-/// (uniqueness index guards the join).
-async fn attach_tags_by_name(
-    conn: &sea_orm::DatabaseConnection,
-    org_id: uuid::Uuid,
-    session_id: uuid::Uuid,
-    names: &[String],
-) -> eyre::Result<()> {
-    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-    for name in names {
-        let tag = ensure_tag(conn, org_id, name, "").await?;
-        let already = timer::entity::WorkSessionTagEntity::find()
-            .filter(timer::entity::WorkSessionTagColumn::WorkSessionId.eq(session_id))
-            .filter(timer::entity::WorkSessionTagColumn::TagId.eq(tag.id))
-            .one(conn)
-            .await
-            .map_err(|e| eyre::eyre!("check join: {e}"))?;
-        if already.is_some() {
-            continue;
+/// Fixture compat: `TASK_TIMER_DB` used to point the CLI's direct
+/// sqlite open at a scratch db. The CLI no longer opens the db —
+/// forward the override to the embedded server's own knob
+/// (`TASK_SERVER_TIMER_URL`) so scratch-db flows keep working when
+/// the backend boots in-process. Against a running (remote) server
+/// it has, and had, no effect on the server's storage.
+pub(crate) fn forward_timer_db_override() {
+    if let Ok(url) = std::env::var("TASK_TIMER_DB") {
+        if !url.is_empty() && std::env::var_os("TASK_SERVER_TIMER_URL").is_none() {
+            // SAFETY: single process-config write, performed before
+            // the embedded backend boots (first `establish`) and
+            // before anything reads the forwarded variable.
+            unsafe { std::env::set_var("TASK_SERVER_TIMER_URL", url) };
         }
-        let am = timer::entity::WorkSessionTagActive {
-            id: Set(uuid::Uuid::new_v4()),
-            work_session_id: Set(session_id),
-            tag_id: Set(tag.id),
-            created_at: Set(chrono::Utc::now()),
-        };
-        am.insert(conn)
-            .await
-            .map_err(|e| eyre::eyre!("insert join: {e}"))?;
     }
-    Ok(())
 }
 
 /// Resolve the project markdown path from its frontmatter

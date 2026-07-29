@@ -458,10 +458,10 @@ async fn mark_inbox_item(
 //          `task::infer_project_id`, `TaskService::create`, then the
 //          inbox item is marked processed with `processed_into` =
 //          the created task's vault path.
-//   note → written into the active org's local vault via
-//          `vault_obsidian::create_page` when `<org>/vault/` exists
-//          locally; otherwise printed for manual creation and marked
-//          processed only on explicit confirm.
+//   note → materialized into the org vault over the vault-sync
+//          surface (`VaultSync::put_file`, `vault_id = "default"`,
+//          `CreateOnly`) — remote server or embedded backend alike;
+//          no local checkout required.
 //   skip → offer `archived`.
 
 #[allow(clippy::too_many_lines)]
@@ -525,10 +525,6 @@ async fn run_inbox_process(
     let local_org_root = crate::org_ctx::resolve_active(Some(slug.as_str()))
         .ok()
         .map(|ctx| ctx.root.path().to_path_buf());
-    let vault_dir = local_org_root
-        .as_ref()
-        .map(|r| r.join("vault"))
-        .filter(|p| p.is_dir());
 
     // ── Propose ────────────────────────────────────────────────
     let proposals: Vec<agent_inbox::Proposal> = if heuristic {
@@ -581,6 +577,7 @@ async fn run_inbox_process(
     let mut left_open = 0usize;
 
     let mut task_client: Option<task::TaskServiceClient> = None;
+    let mut vault_sync: Option<vault_proto::VaultSyncClient> = None;
     'items: for (idx, item) in items.iter().enumerate() {
         let first_line = item.body.lines().next().unwrap_or("").trim();
         println!(
@@ -678,60 +675,42 @@ async fn run_inbox_process(
                 } else {
                     body.as_str()
                 };
-                if let Some(dir) = &vault_dir {
-                    let mut v = vault_obsidian::Vault::open(dir)
-                        .map_err(|e| eyre::eyre!("open vault {}: {e}", dir.display()))?;
-                    let guard = vault_obsidian::SelfWriteGuard::new();
-                    match vault_obsidian::create_page(&mut v, path, &[], content, &guard) {
-                        Ok(()) => {
-                            println!("  wrote note {path}");
-                            mark_inbox_item(
-                                &inbox,
-                                item,
-                                inbox_proto::InboxItem::STATUS_PROCESSED,
-                                Some(path.clone()),
-                            )
-                            .await?;
-                            notes_written += 1;
-                        }
-                        Err(e) => {
-                            println!("  could not write {path}: {e} — left open");
-                            left_open += 1;
-                        }
+                // Materialize through the org's vault-sync surface
+                // (`vault_id = "default"` is the org vault) — remote
+                // server or embedded backend alike, no local
+                // checkout needed. `CreateOnly` keeps the old
+                // `create_page` never-clobber semantics. This
+                // replaces both the direct `vault_obsidian` write
+                // and the "no local vault — create it yourself"
+                // manual flow.
+                if vault_sync.is_none() {
+                    vault_sync =
+                        Some(establish_for_url::<vault_proto::VaultSyncClient>(&url).await?);
+                }
+                let vs = vault_sync.as_ref().expect("vault sync connected above");
+                match vs
+                    .put_file(
+                        "default".to_owned(),
+                        path.clone(),
+                        content.as_bytes().to_vec(),
+                        vault_proto::IfMatch::CreateOnly,
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        println!("  wrote note {path}");
+                        mark_inbox_item(
+                            &inbox,
+                            item,
+                            inbox_proto::InboxItem::STATUS_PROCESSED,
+                            Some(path.clone()),
+                        )
+                        .await?;
+                        notes_written += 1;
                     }
-                } else {
-                    // No local vault checkout for this org — print the
-                    // note for manual creation; only an explicit
-                    // confirm marks the item processed.
-                    println!("  no local vault at <org>/vault — create it yourself:");
-                    println!("  ── {path} ──");
-                    for line in content.lines() {
-                        println!("  {line}");
-                    }
-                    println!("  ──");
-                    if yes {
-                        println!("  (--yes: not marking processed without the note written)");
+                    Err(e) => {
+                        println!("  could not write {path}: {e} — left open");
                         left_open += 1;
-                    } else {
-                        println!("  mark processed once you've created it?");
-                        match prompt_process_decision(false)? {
-                            ProcessDecision::Accept | ProcessDecision::EditTitle(_) => {
-                                mark_inbox_item(
-                                    &inbox,
-                                    item,
-                                    inbox_proto::InboxItem::STATUS_PROCESSED,
-                                    Some(path.clone()),
-                                )
-                                .await?;
-                                notes_written += 1;
-                            }
-                            ProcessDecision::Quit => {
-                                println!("stopping — remaining items left open");
-                                left_open += total - idx;
-                                break 'items;
-                            }
-                            ProcessDecision::Decline => left_open += 1,
-                        }
                     }
                 }
             }

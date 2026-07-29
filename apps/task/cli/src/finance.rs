@@ -153,33 +153,57 @@ pub(crate) enum FinanceCmd {
 }
 
 pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Result<()> {
-    use sea_orm::Database;
-    use sea_orm_migration::MigratorTrait;
-
-    let ctx = crate::org_ctx::resolve_active(org_override)?;
-    // `TASK_TIMER_DB` still wins as a hard override (lets a
-    // fixture point at a fresh sqlite); else use the org's
-    // resolver.
-    let db_url = std::env::var("TASK_TIMER_DB")
-        .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
-    let timer_conn = Database::connect(&db_url)
-        .await
-        .map_err(|e| eyre::eyre!("connect timer db `{db_url}`: {e}"))?;
-    timer::Migrator::up(&timer_conn, None).await.ok();
-    // `TASK_VAULT_ROOT` is a fixture override; the real
-    // default is the active org's vault. (Was a cwd-relative
-    // `examples/vault` fallback in the invoice arm, which
-    // silently exported invoices into whatever repo you
-    // happened to run from.)
-    let vault_root = std::env::var("TASK_VAULT_ROOT")
-        .map_or_else(|_| ctx.root.vault_dir(), std::path::PathBuf::from);
+    // The DATA comes over vox: timer sessions via `TimerService`,
+    // invoices via `Invoicing` — remote server or the embedded
+    // in-process backend alike (see `establish_for_url`). What stays
+    // local is PRESENTATION: the `task-pdf-render` shell-out, the
+    // vault export of the markdown stub, and the issuer-profile /
+    // auth-name joins (each documented at its site).
+    let slug = match crate::resolve_active_org(org_override.map(str::to_owned)) {
+        Ok(s) => s,
+        // No --org and no session: local single-org disambiguation /
+        // auto-bootstrap, as the old direct-disk path did.
+        Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
+    };
+    // `TASK_TIMER_DB` fixture override → the embedded server's knob.
+    crate::timer::forward_timer_db_override();
+    let data_root = org_proto::DataRoot::from_env().ok();
+    let local = data_root.as_ref().and_then(|r| r.load_org(&slug).ok());
+    // `TASK_VAULT_ROOT` is a fixture override; the real default is
+    // the active org's LOCAL vault (invoice PDFs/stubs are exported
+    // to this machine's disk — presentation, not org data).
+    let vault_root = std::env::var("TASK_VAULT_ROOT").map_or_else(
+        |_| {
+            data_root.as_ref().map_or_else(
+                || std::path::PathBuf::from("."),
+                |r| r.org(&slug).vault_dir(),
+            )
+        },
+        std::path::PathBuf::from,
+    );
+    let vox_url = crate::resolve_org_vox_url(None, &slug);
+    let timer_svc: timer_proto::TimerServiceClient = crate::establish_for_url(&vox_url).await?;
+    let invoicing: finance_proto::InvoicingClient = crate::establish_for_url(&vox_url).await?;
 
     match cmd {
         FinanceCmd::Weekly { week_of, json } => {
             let day = week_of.unwrap_or_else(|| chrono::Utc::now().date_naive());
-            let summary = finance::reports::weekly_summary(&timer_conn, None, day)
+            let range = finance::reports::DateRange::week_of(day);
+            // Same fold as the DB-backed report — the sessions just
+            // arrive over the wire.
+            let sessions = timer_svc
+                .list_sessions(timer_proto::WorkSessionFilter {
+                    since: Some(range.since),
+                    until: Some(range.until),
+                    open: Some(false),
+                    ..Default::default()
+                })
                 .await
                 .map_err(|e| eyre::eyre!("weekly: {e}"))?;
+            let summary = finance::reports::weekly_summary_from_rollups(
+                finance::reports::rollup_sessions(sessions),
+                range.since.date_naive(),
+            );
             if json {
                 crate::json_out::print_json(&summary)?;
             } else {
@@ -198,9 +222,16 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
                 let s = since.unwrap_or(u - chrono::Duration::days(7));
                 DateRange { since: s, until: u }
             };
-            let rows = finance::reports::hours_by_project(&timer_conn, None, range)
+            let sessions = timer_svc
+                .list_sessions(timer_proto::WorkSessionFilter {
+                    since: Some(range.since),
+                    until: Some(range.until),
+                    open: Some(false),
+                    ..Default::default()
+                })
                 .await
                 .map_err(|e| eyre::eyre!("project: {e}"))?;
+            let rows = finance::reports::rollup_sessions(sessions);
             if json {
                 // Rollup rows + the same resolved display label
                 // the human rendering computes.
@@ -291,15 +322,15 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
             // lands.
             let book_id = uuid::Uuid::new_v5(
                 &uuid::Uuid::NAMESPACE_DNS,
-                format!("task-finance-book/{}", ctx.root.slug()).as_bytes(),
+                format!("task-finance-book/{slug}").as_bytes(),
             );
             let party_id = uuid::Uuid::new_v5(
                 &uuid::Uuid::NAMESPACE_DNS,
-                format!("task-finance-party/{}/{}", ctx.root.slug(), client_name).as_bytes(),
+                format!("task-finance-party/{slug}/{client_name}").as_bytes(),
             );
             let book = finance_proto::book::Book {
                 id: book_id,
-                name: format!("{} Book", ctx.root.slug()),
+                name: format!("{slug} Book"),
                 kind: finance_proto::book::BookKind::Personal,
                 base_currency: "USD".into(),
                 settings_json: "{}".into(),
@@ -324,32 +355,18 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
-            // Open the org's finance.sqlite up-front (even
-            // for --no-commit) so we can pre-check the
-            // invoice number against the unique index and
-            // fail before spending render time on a dupe.
-            let finance_conn = {
-                use sea_orm_migration::MigratorTrait;
-                let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
-                let conn = Database::connect(&url)
-                    .await
-                    .map_err(|e| eyre::eyre!("connect finance db `{url}`: {e}"))?;
-                finance_db::Migrator::up(&conn, None)
-                    .await
-                    .map_err(|e| eyre::eyre!("finance migrations: {e}"))?;
-                conn
-            };
+            // Existing invoices over the wire — the dup pre-check
+            // (fail before spending render time) and the --prefix
+            // auto-increment both fold over this list. The server
+            // re-checks the number on commit.
+            let existing_invoices = invoicing
+                .list_invoices()
+                .await
+                .map_err(|e| eyre::eyre!("check invoice number: {e:?}"))?;
             // Resolve the final invoice number: explicit
             // --number, or auto-incremented from --prefix.
             let final_number: String = if let Some(n) = number.clone() {
-                use finance_db::entity::{InvoiceColumn, InvoiceEntity};
-                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-                let existing = InvoiceEntity::find()
-                    .filter(InvoiceColumn::Number.eq(n.clone()))
-                    .one(&finance_conn)
-                    .await
-                    .map_err(|e| eyre::eyre!("check invoice number: {e}"))?;
-                if existing.is_some() {
+                if existing_invoices.iter().any(|r| r.number == n) {
                     return Err(eyre::eyre!(
                         "invoice number `{n}` is already in finance.sqlite. Pick a new --number, or pass --no-commit to render-only."
                     ));
@@ -357,64 +374,52 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
                 n
             } else {
                 let p = prefix.clone().expect("validated above");
-                next_invoice_number(&finance_conn, &p, pad).await?
+                next_invoice_number(&existing_invoices, &p, pad)
             };
 
-            // When `--project` is set we delegate to the
-            // pipeline's per-engagement query. Without it,
-            // load every billable + uninvoiced session in
-            // the window and hand the list to
-            // `build_from_models`.
-            let build = if let Some(pid) = project {
-                finance::invoice_from_sessions::build_invoice_from_sessions(
-                    &timer_conn,
-                    finance::invoice_from_sessions::BuildInvoiceArgs {
-                        book: book.clone(),
-                        party: party.clone(),
-                        project_id: pid,
-                        since,
-                        until,
-                        net_days,
-                        number: final_number.clone(),
-                        notes_public: String::new(),
-                        notes_private: String::new(),
-                        terms: String::new(),
-                    },
-                )
+            // Billable, closed, not-yet-invoiced sessions in the
+            // window — fetched over the wire, uninvoiced-filtered
+            // client-side (the wire filter has no invoice_id arm),
+            // then handed to the same `build_from_models` pipeline
+            // the direct-DB path used.
+            let sessions: Vec<timer::entity::WorkSessionModel> = timer_svc
+                .list_sessions(timer_proto::WorkSessionFilter {
+                    project_id: project,
+                    billable: Some(true),
+                    open: Some(false),
+                    since: Some(since),
+                    until: Some(until),
+                    user_id: None,
+                })
                 .await
-                .map_err(|e| eyre::eyre!("build invoice: {e}"))?
-            } else {
-                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
-                let sessions = WorkSessionEntity::find()
-                    .filter(WorkSessionColumn::Billable.eq(true))
-                    .filter(WorkSessionColumn::EndTime.is_not_null())
-                    .filter(WorkSessionColumn::InvoiceId.is_null())
-                    .filter(WorkSessionColumn::StartTime.gte(since))
-                    .filter(WorkSessionColumn::StartTime.lt(until))
-                    .all(&timer_conn)
-                    .await
-                    .map_err(|e| eyre::eyre!("query sessions: {e}"))?;
-                finance::invoice_from_sessions::build_from_models(
-                    book.clone(),
-                    party.clone(),
-                    sessions,
-                    net_days,
-                    final_number.clone(),
-                    String::new(),
-                    String::new(),
-                    String::new(),
-                )
-                .map_err(|e| eyre::eyre!("build invoice: {e}"))?
-            };
+                .map_err(|e| eyre::eyre!("query sessions: {e}"))?
+                .into_iter()
+                .filter(|s| s.invoice_id.is_none())
+                .map(session_to_model)
+                .collect();
+            let build = finance::invoice_from_sessions::build_from_models(
+                book.clone(),
+                party.clone(),
+                sessions,
+                net_days,
+                final_number.clone(),
+                String::new(),
+                String::new(),
+                String::new(),
+            )
+            .map_err(|e| eyre::eyre!("build invoice: {e}"))?;
 
-            // Issuer ("From" block): `<org>/issuer.toml` is
-            // the durable source; `TASK_ISSUER_*` env vars
-            // override per-field for fixtures. "Your Name"
-            // placeholder only when neither is set.
-            let stored = org_proto::IssuerProfile::load(&ctx.root.issuer_path())
-                .map_err(|e| eyre::eyre!("issuer.toml: {e}"))?
-                .unwrap_or_default();
+            // Issuer ("From" block): the LOCAL org's issuer.toml when
+            // the org lives on this machine; `TASK_ISSUER_*` env vars
+            // override per-field for fixtures. Presentation config,
+            // not org data — a remote-only session falls back to the
+            // env vars / "Your Name" placeholder.
+            let stored = match local.as_ref() {
+                Some((org, _)) => org_proto::IssuerProfile::load(&org.issuer_path())
+                    .map_err(|e| eyre::eyre!("issuer.toml: {e}"))?
+                    .unwrap_or_default(),
+                None => org_proto::IssuerProfile::default(),
+            };
             let field = |env: &str, file: String, default: &str| {
                 std::env::var(env).unwrap_or(if file.is_empty() {
                     default.to_string()
@@ -430,17 +435,20 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
                 tax_id: field("TASK_ISSUER_TAX_ID", stored.tax_id, ""),
             };
             let mut ifp = finance::pdf_adapter::invoice_for_pdf(&build.invoice, &issuer, &party);
-            // Resolve user_id → display name from the org's
-            // auth.sqlite. Missing rows fall back to a
+            // Resolve user_id → display name from the LOCAL org's
+            // auth.sqlite. Best-effort presentation join (remote-only
+            // sessions just miss it); missing rows fall back to a
             // short-id label so a stranded id still reads.
             let mut names_by_id = {
                 use architect_auth::db::{AuthUserColumn, AuthUserEntity};
                 use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
-                let auth_path = ctx.root.auth_db();
+                let auth_path = local.as_ref().map(|(o, _)| o.auth_db());
                 let mut map: std::collections::HashMap<uuid::Uuid, String> =
                     std::collections::HashMap::new();
                 let ids: Vec<uuid::Uuid> = build.line_meta.iter().map(|m| m.user_id).collect();
-                if !ids.is_empty() && auth_path.exists() {
+                if let (false, Some(auth_path)) =
+                    (ids.is_empty(), auth_path.filter(|p| p.exists()))
+                {
                     let url = format!("sqlite://{}?mode=ro", auth_path.display());
                     if let Ok(db) = Database::connect(&url).await {
                         if let Ok(rows) = AuthUserEntity::find()
@@ -569,66 +577,30 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
                 }
                 md_out = Some(md_path);
             }
-            // Persist to finance.sqlite + stamp the
-            // contributing sessions so the same range can't
-            // re-bill the same hours. SQLite-per-DB means
-            // we can't span a tx across the two; finance
-            // first (atomic insert), then timer stamp. If
-            // the stamp fails mid-way the worst case is a
-            // partial set of sessions linked to a real
-            // invoice — re-running `--no-commit=false` will
-            // pick up the leftovers next time because the
-            // invoice number now collides.
+            // Persist + stamp over the wire: `commit_invoice` upserts
+            // the book/party, inserts the invoice (re-checking the
+            // number), and sets `invoice_id` on the contributing
+            // sessions — so the same range can't re-bill the same
+            // hours, exactly as the old two-connection dance did.
             let mut stamped_sessions: u64 = 0;
             if no_commit {
                 if !json {
                     println!("Skipped commit (--no-commit). Sessions remain unbilled.");
                 }
             } else {
-                use finance_db::entity::{
-                    BookColumn, BookEntity, InvoiceEntity, PartyColumn, PartyEntity,
-                };
-                use sea_orm::sea_query::OnConflict;
-                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
-                // Insert-if-missing book + party (do-nothing
-                // on conflict). The first invoice in a fresh
-                // finance.sqlite is what creates these.
-                BookEntity::insert(finance::billing::book_to_active(&book))
-                    .on_conflict(OnConflict::column(BookColumn::Id).do_nothing().to_owned())
-                    .do_nothing()
-                    .exec(&finance_conn)
-                    .await
-                    .map_err(|e| eyre::eyre!("upsert book: {e}"))?;
-                PartyEntity::insert(finance::billing::party_to_active(&party))
-                    .on_conflict(OnConflict::column(PartyColumn::Id).do_nothing().to_owned())
-                    .do_nothing()
-                    .exec(&finance_conn)
-                    .await
-                    .map_err(|e| eyre::eyre!("upsert party: {e}"))?;
-                let active = finance::billing::invoice_to_active(&build.invoice);
-                InvoiceEntity::insert(active)
-                    .exec(&finance_conn)
-                    .await
-                    .map_err(|e| eyre::eyre!("insert invoice: {e}"))?;
-                let stamped = WorkSessionEntity::update_many()
-                    .col_expr(
-                        WorkSessionColumn::InvoiceId,
-                        sea_orm::sea_query::Expr::value(build.invoice.id),
+                stamped_sessions = invoicing
+                    .commit_invoice(
+                        book.clone(),
+                        party.clone(),
+                        build.invoice.clone(),
+                        build.source_session_ids.clone(),
                     )
-                    .col_expr(
-                        WorkSessionColumn::UpdatedAt,
-                        sea_orm::sea_query::Expr::value(chrono::Utc::now()),
-                    )
-                    .filter(WorkSessionColumn::Id.is_in(build.source_session_ids.clone()))
-                    .exec(&timer_conn)
                     .await
-                    .map_err(|e| eyre::eyre!("stamp sessions: {e}"))?;
-                stamped_sessions = stamped.rows_affected;
+                    .map_err(|e| eyre::eyre!("insert invoice: {e:?}"))?;
                 if !json {
                     println!(
                         "Persisted invoice {} + stamped {} session(s).",
-                        build.invoice.id, stamped.rows_affected
+                        build.invoice.id, stamped_sessions
                     );
                 }
             }
@@ -662,25 +634,21 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
             limit,
             json,
         } => {
-            use finance_db::entity::{InvoiceColumn, InvoiceEntity};
-            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
-            use sea_orm_migration::MigratorTrait;
-            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
-            let conn = Database::connect(&url)
+            // Same ordering + windowing as the old SQL query, folded
+            // client-side over the wire listing.
+            let mut rows = invoicing
+                .list_invoices()
                 .await
-                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
-            finance_db::Migrator::up(&conn, None).await.ok();
-            let mut q = InvoiceEntity::find()
-                .order_by_desc(InvoiceColumn::IssueDate)
-                .order_by_desc(InvoiceColumn::CreatedAt)
-                .limit(limit);
+                .map_err(|e| eyre::eyre!("list invoices: {e:?}"))?;
             if let Some(p) = party {
-                q = q.filter(InvoiceColumn::PartyId.eq(p));
+                rows.retain(|r| r.party_id == p);
             }
-            let rows = q
-                .all(&conn)
-                .await
-                .map_err(|e| eyre::eyre!("list invoices: {e}"))?;
+            rows.sort_by(|a, b| {
+                b.issue_date
+                    .cmp(&a.issue_date)
+                    .then(b.created_at.cmp(&a.created_at))
+            });
+            rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
             let status_needle = status.map(|s| s.to_lowercase());
             let filtered: Vec<_> = rows
                 .into_iter()
@@ -715,35 +683,31 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
             }
         }
         FinanceCmd::InvoiceShow { number, json } => {
-            use finance_db::entity::{InvoiceColumn, InvoiceEntity};
-            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-            use sea_orm_migration::MigratorTrait;
-            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
-            let conn = Database::connect(&url)
+            // The wire surface fetches by id; numbers resolve over
+            // the listing.
+            let row = invoicing
+                .list_invoices()
                 .await
-                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
-            finance_db::Migrator::up(&conn, None).await.ok();
-            let row = InvoiceEntity::find()
-                .filter(InvoiceColumn::Number.eq(number.clone()))
-                .one(&conn)
-                .await
-                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .map_err(|e| eyre::eyre!("query: {e:?}"))?
+                .into_iter()
+                .find(|r| r.number == number)
                 .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
-            // Sessions stamped to this invoice (best-effort).
-            let sessions = {
-                use timer::entity::{WorkSessionColumn, WorkSessionEntity};
-                WorkSessionEntity::find()
-                    .filter(WorkSessionColumn::InvoiceId.eq(row.id))
-                    .all(&timer_conn)
-                    .await
-                    .unwrap_or_default()
-            };
+            // Sessions stamped to this invoice (best-effort) — the
+            // wire filter has no invoice_id arm, so filter the
+            // listing client-side.
+            let sessions: Vec<timer_proto::WorkSession> = timer_svc
+                .list_sessions(timer_proto::WorkSessionFilter::default())
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|s| s.invoice_id == Some(row.id))
+                .collect();
             if json {
                 let mut v = crate::json_out::invoice_json(&row);
                 if let serde_json::Value::Object(map) = &mut v {
                     let rows: Vec<serde_json::Value> = sessions
                         .into_iter()
-                        .map(|m| crate::json_out::session_json(&timer_proto::WorkSession::from(m)))
+                        .map(|s| crate::json_out::session_json(&s))
                         .collect();
                     map.insert("sessions".into(), serde_json::Value::Array(rows));
                 }
@@ -787,21 +751,12 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
             memo,
             json,
         } => {
-            use finance_db::entity::{InvoiceActive, InvoiceColumn, InvoiceEntity};
-            use sea_orm::{
-                ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
-            };
-            use sea_orm_migration::MigratorTrait;
-            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
-            let conn = Database::connect(&url)
+            let row = invoicing
+                .list_invoices()
                 .await
-                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
-            finance_db::Migrator::up(&conn, None).await.ok();
-            let row = InvoiceEntity::find()
-                .filter(InvoiceColumn::Number.eq(number.clone()))
-                .one(&conn)
-                .await
-                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .map_err(|e| eyre::eyre!("query: {e:?}"))?
+                .into_iter()
+                .find(|r| r.number == number)
                 .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
             let outstanding = row.balance_minor;
             if outstanding <= 0 {
@@ -830,15 +785,13 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
             };
             let on_date = on.unwrap_or_else(|| chrono::Utc::now().date_naive());
             let id = row.id;
-            let mut active: InvoiceActive = row.into();
-            active.amount_paid_minor = Set(new_paid);
-            active.balance_minor = Set(new_balance);
-            active.status = Set(new_status);
-            active.updated_at = Set(chrono::Utc::now());
-            active
-                .update(&conn)
+            // The server applies the same paid/balance/status update
+            // (and, unlike the old direct write, also posts the
+            // Cash ↔ AR ledger entries).
+            invoicing
+                .record_invoice_payment(id, pay, on_date.to_string())
                 .await
-                .map_err(|e| eyre::eyre!("update invoice: {e}"))?;
+                .map_err(|e| eyre::eyre!("update invoice: {e:?}"))?;
             if json {
                 crate::json_out::print_json(&serde_json::json!({
                     "id": id,
@@ -863,21 +816,12 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
             }
         }
         FinanceCmd::InvoiceVoid { number, json } => {
-            use finance_db::entity::{InvoiceActive, InvoiceColumn, InvoiceEntity};
-            use sea_orm::{
-                ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
-            };
-            use sea_orm_migration::MigratorTrait;
-            let url = format!("sqlite://{}?mode=rwc", ctx.root.finance_db().display());
-            let conn = Database::connect(&url)
+            let row = invoicing
+                .list_invoices()
                 .await
-                .map_err(|e| eyre::eyre!("connect finance db: {e}"))?;
-            finance_db::Migrator::up(&conn, None).await.ok();
-            let row = InvoiceEntity::find()
-                .filter(InvoiceColumn::Number.eq(number.clone()))
-                .one(&conn)
-                .await
-                .map_err(|e| eyre::eyre!("query: {e}"))?
+                .map_err(|e| eyre::eyre!("query: {e:?}"))?
+                .into_iter()
+                .find(|r| r.number == number)
                 .ok_or_else(|| eyre::eyre!("invoice `{number}` not found"))?;
             if row.amount_paid_minor > 0 {
                 return Err(eyre::eyre!(
@@ -886,47 +830,21 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
                 ));
             }
             let invoice_id = row.id;
-            let mut active: InvoiceActive = row.into();
-            active.status = Set(finance_proto::invoice::InvoiceStatus::Cancelled);
-            active.updated_at = Set(chrono::Utc::now());
-            active
-                .update(&conn)
+            // `void_invoice` sets Cancelled and un-stamps the
+            // contributing sessions so they become re-billable.
+            let cleared = invoicing
+                .void_invoice(invoice_id)
                 .await
-                .map_err(|e| eyre::eyre!("update invoice: {e}"))?;
-            // Un-stamp the contributing sessions so they
-            // become re-billable.
-            use sea_orm::Database;
-            let timer_url = std::env::var("TASK_TIMER_DB")
-                .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
-            let tc = Database::connect(&timer_url)
-                .await
-                .map_err(|e| eyre::eyre!("connect timer db: {e}"))?;
-            use timer::entity::{WorkSessionColumn, WorkSessionEntity};
-            let cleared = WorkSessionEntity::update_many()
-                .col_expr(
-                    WorkSessionColumn::InvoiceId,
-                    sea_orm::sea_query::Expr::value(Option::<uuid::Uuid>::None),
-                )
-                .col_expr(
-                    WorkSessionColumn::UpdatedAt,
-                    sea_orm::sea_query::Expr::value(chrono::Utc::now()),
-                )
-                .filter(WorkSessionColumn::InvoiceId.eq(invoice_id))
-                .exec(&tc)
-                .await
-                .map_err(|e| eyre::eyre!("un-stamp sessions: {e}"))?;
+                .map_err(|e| eyre::eyre!("update invoice: {e:?}"))?;
             if json {
                 crate::json_out::print_json(&serde_json::json!({
                     "id": invoice_id,
                     "number": number,
                     "status": "cancelled",
-                    "sessions_unstamped": cleared.rows_affected,
+                    "sessions_unstamped": cleared,
                 }))?;
             } else {
-                println!(
-                    "Voided `{number}` and un-stamped {} session(s).",
-                    cleared.rows_affected
-                );
+                println!("Voided `{number}` and un-stamped {} session(s).", cleared);
             }
         }
     }
@@ -962,23 +880,11 @@ fn fmt_minor(c: i64) -> String {
 /// Single-assignee invoices are left untouched (no column,
 /// no summary, no charts) — the breakdown is only useful
 /// when the work is split across people.
-/// Scan `finance_invoices.number` for rows whose number
-/// starts with `prefix` and whose suffix parses as an
-/// integer; return `<prefix><next>` zero-padded to `pad`.
-/// Starts at 1 if no match exists.
-async fn next_invoice_number(
-    conn: &sea_orm::DatabaseConnection,
-    prefix: &str,
-    pad: usize,
-) -> eyre::Result<String> {
-    use finance_db::entity::{InvoiceColumn, InvoiceEntity};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    let rows = InvoiceEntity::find()
-        .filter(InvoiceColumn::Number.starts_with(prefix))
-        .all(conn)
-        .await
-        .map_err(|e| eyre::eyre!("scan invoice numbers: {e}"))?;
-    let highest = rows
+/// Scan the invoice listing for numbers that start with `prefix`
+/// and whose suffix parses as an integer; return `<prefix><next>`
+/// zero-padded to `pad`. Starts at 1 if no match exists.
+fn next_invoice_number(existing: &[finance_proto::Invoice], prefix: &str, pad: usize) -> String {
+    let highest = existing
         .iter()
         .filter_map(|r| {
             r.number
@@ -988,7 +894,30 @@ async fn next_invoice_number(
         .max()
         .unwrap_or(0);
     let next = highest + 1;
-    Ok(format!("{prefix}{next:0>pad$}"))
+    format!("{prefix}{next:0>pad$}")
+}
+
+/// Wire session → the entity-model shape
+/// `finance::invoice_from_sessions::build_from_models` consumes.
+/// Field-for-field identical; only the type differs.
+fn session_to_model(s: timer_proto::WorkSession) -> timer::entity::WorkSessionModel {
+    timer::entity::WorkSessionModel {
+        id: s.id,
+        org_id: s.org_id,
+        user_id: s.user_id,
+        project_id: s.project_id,
+        project_path: s.project_path,
+        description: s.description,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        billable: s.billable,
+        rate_cents: s.rate_cents,
+        currency: s.currency,
+        task_note_path: s.task_note_path,
+        invoice_id: s.invoice_id,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+    }
 }
 
 fn enrich_invoice_with_assignees(
