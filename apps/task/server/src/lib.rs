@@ -875,19 +875,23 @@ pub(crate) async fn build_org_state(
             .map(|e| email_product::ProductAccount {
                 id: e.account.id.0.clone(),
                 root: e.root.clone(),
+                address: e.account.address.clone(),
             })
             .collect();
         let email = email_maildir::Backend::with_configured_accounts(mail_accounts);
 
         // Email product layer — outbox with human-in-the-loop
-        // approval. Shares the maildir backend's `EmailChange`
-        // hub (one stream for mailbox + outbox events) and
-        // delivers approved entries through `EmailSync::send`
-        // on a 30s poller (approval wakes it immediately).
+        // approval + the bounded triage pass. Shares the maildir
+        // backend's `EmailChange` hub (one stream for mailbox +
+        // outbox + derivation events), delivers approved entries
+        // through `EmailSync::send` on a 30s poller (approval
+        // wakes it immediately), and scores senders against the
+        // org's contacts.
         let email_product = email_product::ProductBackend::new(
             product_accounts,
             std::sync::Arc::new(email.clone()),
             email_proto::EmailSyncStreamSource::changes_hub(&email).clone(),
+            std::sync::Arc::new(VaultContactLookup(contacts.clone())),
         )
         .map_err(|e| eyre::eyre!("email product stores: {e}"))?;
         let _email_poller = email_product.spawn_poller(std::time::Duration::from_secs(30));
@@ -1201,6 +1205,28 @@ pub(crate) async fn build_org_state(
 /// An absent or empty `mail_root` yields an empty vec — the
 /// backend then serves no accounts, which is a valid
 /// "operational but unconfigured" state.
+/// `email-product` known-sender lookup over the org's vault
+/// contacts. One `list_contacts` walk per triage pass (the pass
+/// snapshots the result), lower-cased addresses.
+struct VaultContactLookup(contacts::VaultContacts);
+
+impl email_product::ContactLookup for VaultContactLookup {
+    fn known_addresses(&self) -> std::collections::BTreeSet<String> {
+        use contacts_proto::Contacts as _;
+        match self.0.list_contacts() {
+            Ok(list) => list
+                .iter()
+                .flat_map(contacts_proto::Contact::email_list)
+                .map(str::to_ascii_lowercase)
+                .collect(),
+            Err(err) => {
+                tracing::debug!(%err, "contact lookup failed; treating senders as unknown");
+                std::collections::BTreeSet::new()
+            }
+        }
+    }
+}
+
 fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::AccountEntry> {
     let Ok(entries) = std::fs::read_dir(mail_root) else {
         return Vec::new();

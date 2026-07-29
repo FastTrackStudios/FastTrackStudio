@@ -87,6 +87,23 @@ pub fn EmailView() -> Element {
         }
     });
 
+    // Triage derivations (urgency / tags) for the listed
+    // envelopes. Reads the envelopes resource, so it re-fetches
+    // whenever the list does; `DerivationsUpdated` restarts it
+    // directly.
+    let mut derivs = use_resource(move || async move {
+        let ids: Vec<String> = match &*envelopes.read() {
+            Some(Ok(list)) => list.iter().map(|e| e.message_id.clone()).collect(),
+            _ => Vec::new(),
+        };
+        match (slug(), selected_account()) {
+            (Some(s), Some(acct)) if !ids.is_empty() => {
+                fetch_email_derivations(&s, &acct, ids).await
+            }
+            _ => Ok(Vec::new()),
+        }
+    });
+
     // ── Live changes ──────────────────────────────────────────
     // One `EmailChange` stream carries mailbox AND outbox events
     // (shared hub server-side). Events name what changed, not the
@@ -112,12 +129,13 @@ pub fn EmailView() -> Element {
         move |change: email_proto::EmailChange| {
             let mut envelopes = envelopes;
             let mut outbox = outbox;
+            let mut derivs = derivs;
             if selected_account.peek().as_deref() != Some(change.account.as_str()) {
                 return;
             }
             match change.event {
                 email_proto::EmailEvent::OutboxChanged { .. } => outbox.restart(),
-                email_proto::EmailEvent::DerivationsUpdated { .. } => {}
+                email_proto::EmailEvent::DerivationsUpdated { .. } => derivs.restart(),
                 _ => envelopes.restart(),
             }
         },
@@ -140,6 +158,24 @@ pub fn EmailView() -> Element {
     let outbox_rows: Vec<OutboxEntry> = match &*outbox.read() {
         Some(Ok(list)) => list.clone(),
         _ => Vec::new(),
+    };
+    // message_id → (urgency, tags) from the derivation cache.
+    let deriv_map: std::collections::HashMap<String, (Option<u8>, Vec<String>)> = {
+        let mut map = std::collections::HashMap::new();
+        if let Some(Ok(rows)) = &*derivs.read() {
+            for d in rows {
+                let entry = map
+                    .entry(d.message_id.clone())
+                    .or_insert((None, Vec::new()));
+                match d.kind {
+                    email_proto::DerivationKind::Urgency => entry.0 = d.urgency(),
+                    email_proto::DerivationKind::Tags => {
+                        entry.1 = d.tags().into_iter().map(str::to_string).collect();
+                    }
+                }
+            }
+        }
+        map
     };
     let loading = envelopes.read().is_none() && current.is_some();
 
@@ -250,6 +286,8 @@ pub fn EmailView() -> Element {
                             snippet: env.snippet.clone().filter(|s| !s.is_empty()),
                             date: format_date(env.date_ms),
                             unread: !env.flags.iter().any(|f| f == "\\Seen" || f == "Seen"),
+                            urgency: deriv_map.get(&env.message_id).and_then(|(u, _)| *u),
+                            tags: deriv_map.get(&env.message_id).map(|(_, t)| t.clone()).unwrap_or_default(),
                             on_reply: {
                                 let sender = env.from.first().map(|a| a.email.clone()).unwrap_or_default();
                                 let subject = reply_subject(&env.subject);
@@ -296,24 +334,53 @@ fn AccountChip(
     }
 }
 
-/// One message summary row: sender, subject, date, reply action.
-/// Primitive props for the same reason as [`AccountChip`].
+/// One message summary row: sender, subject, date, triage chips,
+/// reply action. Primitive props for the same reason as
+/// [`AccountChip`].
 #[component]
+#[allow(clippy::too_many_arguments)]
 fn EnvelopeRow(
     from: String,
     subject: String,
     snippet: Option<String>,
     date: String,
     unread: bool,
+    urgency: Option<u8>,
+    tags: Vec<String>,
     on_reply: EventHandler<()>,
 ) -> Element {
     let weight = if unread { "font-medium" } else { "" };
+    // Chips stay quiet for the boring cases: urgency 0 and the
+    // `other` tag render nothing.
+    let urgency_chip = urgency.filter(|u| *u > 0).map(|u| {
+        let cls = match u {
+            1 => "border-border text-muted-foreground",
+            2 => "border-amber-500/50 text-amber-600 dark:text-amber-400",
+            _ => "border-destructive/60 text-destructive",
+        };
+        (format!("!{u}"), cls)
+    });
+    let shown_tags: Vec<String> = tags.into_iter().filter(|t| t != "other").collect();
 
     rsx! {
         div { class: "group flex items-baseline gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
             span { class: "w-40 shrink-0 truncate text-sm {weight} text-foreground", "{from}" }
             div { class: "flex min-w-0 flex-1 flex-col",
-                span { class: "truncate text-sm {weight} text-foreground", "{subject}" }
+                div { class: "flex min-w-0 items-baseline gap-1.5",
+                    if let Some((label, cls)) = urgency_chip {
+                        span { class: "shrink-0 rounded-full border px-1.5 text-[10px] font-semibold {cls}",
+                            "{label}"
+                        }
+                    }
+                    span { class: "truncate text-sm {weight} text-foreground", "{subject}" }
+                    for tag in shown_tags {
+                        span {
+                            key: "{tag}",
+                            class: "shrink-0 rounded-full border border-border px-1.5 text-[10px] text-muted-foreground",
+                            "{tag}"
+                        }
+                    }
+                }
                 if let Some(snippet) = snippet.as_ref().filter(|s| !s.is_empty()) {
                     span { class: "truncate text-xs text-muted-foreground", "{snippet}" }
                 }
@@ -647,6 +714,22 @@ pub async fn fetch_email_envelopes(
     // across implementations, so sort defensively on the date.
     envelopes.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
     Ok(envelopes)
+}
+
+/// Cached triage derivations (urgency / tags) for the given
+/// message-ids. Messages the background pass hasn't reached yet
+/// simply have no rows.
+pub async fn fetch_email_derivations(
+    slug: &str,
+    account: &str,
+    ids: Vec<String>,
+) -> Result<Vec<email_proto::Derivation>, String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailProductClient>(slug).await?;
+    client
+        .derivations(account.to_owned(), ids)
+        .await
+        .map_err(|e| format!("{slug}: derivations: {e:?}"))
 }
 
 /// The account's outbox, newest first (terminal entries included).

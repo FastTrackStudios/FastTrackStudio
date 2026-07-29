@@ -68,6 +68,21 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS idx_outbox_status
     ON outbox(status, next_attempt_ms);
 
+-- Derivation cache: per-message computed facts (urgency, tags,
+-- later summaries/draft replies). Keyed by (message_id, kind);
+-- `version` stamps the computing code — stale-version rows are
+-- recomputed lazily by the triage pass. The store is per
+-- account, which supplies the (account, message_id, kind,
+-- version) scoping the wire key describes.
+CREATE TABLE IF NOT EXISTS derivations (
+    message_id TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    version    INTEGER NOT NULL,
+    payload    TEXT NOT NULL,
+    created_ms INTEGER NOT NULL,
+    PRIMARY KEY (message_id, kind)
+);
+
 DROP TABLE IF EXISTS pending_ops;
 "#;
 

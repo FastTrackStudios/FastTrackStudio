@@ -77,9 +77,11 @@ async fn submit_approve_deliver_roundtrip() {
         [ProductAccount {
             id: "acct".into(),
             root: dir.path().to_path_buf(),
+            address: "you@example.com".into(),
         }],
         Arc::new(mailbox.clone()),
         hub.clone(),
+        Arc::new(email_product::NoContacts),
     )
     .expect("open product stores");
     let poller = product.spawn_poller(Duration::from_millis(25));

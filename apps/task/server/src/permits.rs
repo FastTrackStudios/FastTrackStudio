@@ -408,6 +408,7 @@ table!(EMAIL, "email", "email/**", [
 ]);
 table!(EMAIL_PRODUCT, "email-product", "email/outbox/**", [
     rd "list_outbox", wr "submit_draft", wa "approve", wr "cancel",
+    rd "derivations",
 ]);
 table!(FORGE_REPOS, "forge-repos", "forge/repos/**", [rd "list_repos", rd "get_repo"]);
 table!(FORGE_ISSUES, "forge-issues", "forge/issues/**", [

@@ -5,10 +5,21 @@
 //! (`EmailEvent::OutboxChanged`), so there is no second stream to
 //! subscribe to.
 
-use crate::{Draft, EmailSyncError, OutboxEntry};
+use crate::{Derivation, Draft, EmailSyncError, OutboxEntry};
 
 #[architect::rpc]
 pub trait EmailProduct {
+    /// Cached derivations (urgency / tags / …) for the given
+    /// message-ids on `account`. Only rows that exist are
+    /// returned — a message the triage pass hasn't reached yet
+    /// simply has none (the UI renders no chips). Computation
+    /// happens in the bounded background pass, never here.
+    fn derivations(
+        &self,
+        account: &str,
+        ids: Vec<String>,
+    ) -> Result<Vec<Derivation>, EmailSyncError>;
+
     /// Every outbox entry for `account`, newest first. Includes
     /// terminal entries (`Sent` / `Failed` / `Cancelled`) so the
     /// panel shows outcomes, not just the queue.

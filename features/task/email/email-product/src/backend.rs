@@ -7,17 +7,21 @@ use std::time::Duration;
 
 use architect::vox;
 use email_proto::{
-    Draft, EmailChange, EmailEvent, EmailProduct, EmailSync, EmailSyncError, OutboxEntry,
-    OutboxStatus,
+    DERIVATION_VERSION, Derivation, DerivationKind, Draft, EmailChange, EmailEvent, EmailProduct,
+    EmailSync, EmailSyncError, OutboxEntry, OutboxStatus, SeqRange,
 };
 use email_store::{Store, StoreError};
 
+use crate::triage::{ContactLookup, DerivationEngine, DerivationInput, HeuristicEngine};
+
 /// One account the product layer serves: the account id (must
-/// match the `EmailSync` backend's) and the account root the
-/// store lives under (`<root>/index.db`).
+/// match the `EmailSync` backend's), the account root the store
+/// lives under (`<root>/index.db`), and the account's own
+/// address (triage's self-mail guard + direct-address scoring).
 pub struct ProductAccount {
     pub id: String,
     pub root: PathBuf,
+    pub address: String,
 }
 
 /// Store-backed `EmailProduct` backend + delivery poller. Cheap
@@ -31,6 +35,13 @@ struct Inner {
     /// Per-account product store (outbox + derivation + notify
     /// tables in the account's `index.db`).
     stores: HashMap<String, Mutex<Store>>,
+    /// Account id → its own address (triage self-mail guard).
+    addresses: HashMap<String, String>,
+    /// Derivation engine (heuristics in v1; the agent plugin may
+    /// swap in one whose `derive_llm` is real).
+    engine: Arc<dyn DerivationEngine>,
+    /// Known-contact resolution for the triage pass.
+    contacts: Arc<dyn ContactLookup>,
     /// The mounted mailbox backend — delivery calls its `send`,
     /// so the Sent copy + `NewMessage` event come for free.
     sync: Arc<dyn EmailSync + Send + Sync>,
@@ -52,29 +63,61 @@ const MAX_BACKOFF: Duration = Duration::from_secs(3600);
 /// pass bounded (mirrors the triage pass budget).
 const DRAIN_BUDGET: u32 = 5;
 
+/// Messages triaged per account per pass (the odysseus
+/// `max_process` idea — bound the per-pass work, catch up over
+/// successive passes).
+const TRIAGE_BUDGET: usize = 5;
+
+/// How many recent INBOX envelopes one triage pass considers.
+const TRIAGE_SCAN: u32 = 50;
+
 impl ProductBackend {
-    /// Open the per-account stores and build the backend.
+    /// Open the per-account stores and build the backend with the
+    /// v1 [`HeuristicEngine`].
     ///
     /// `sync` is the mounted `EmailSync` backend delivery goes
     /// through; `hub` is that backend's `EmailChange` hub
     /// (`EmailSyncStreamSource::changes_hub(&b).clone()`), so
     /// outbox events interleave with mailbox events on the one
-    /// stream subscribers already hold.
+    /// stream subscribers already hold. `contacts` feeds the
+    /// triage pass's known-sender scoring
+    /// ([`crate::triage::NoContacts`] when the org has none).
     pub fn new<I>(
         accounts: I,
         sync: Arc<dyn EmailSync + Send + Sync>,
         hub: architect::PubSub<EmailChange>,
+        contacts: Arc<dyn ContactLookup>,
+    ) -> Result<Self, StoreError>
+    where
+        I: IntoIterator<Item = ProductAccount>,
+    {
+        Self::with_engine(accounts, sync, hub, contacts, Arc::new(HeuristicEngine))
+    }
+
+    /// [`Self::new`] with an explicit engine — the seam the agent
+    /// plugin uses to supply one whose `derive_llm` is real.
+    pub fn with_engine<I>(
+        accounts: I,
+        sync: Arc<dyn EmailSync + Send + Sync>,
+        hub: architect::PubSub<EmailChange>,
+        contacts: Arc<dyn ContactLookup>,
+        engine: Arc<dyn DerivationEngine>,
     ) -> Result<Self, StoreError>
     where
         I: IntoIterator<Item = ProductAccount>,
     {
         let mut stores = HashMap::new();
+        let mut addresses = HashMap::new();
         for acct in accounts {
+            addresses.insert(acct.id.clone(), acct.address);
             stores.insert(acct.id, Mutex::new(Store::open(acct.root)?));
         }
         Ok(Self {
             inner: Arc::new(Inner {
                 stores,
+                addresses,
+                engine,
+                contacts,
                 sync,
                 hub,
                 wake: tokio::sync::Notify::new(),
@@ -113,8 +156,125 @@ impl ProductBackend {
                     () = tokio::time::sleep(interval) => {}
                 }
                 backend.drain_outbox_once().await;
+                backend.triage_once().await;
             }
         })
+    }
+
+    /// One bounded triage pass over every account: consider the
+    /// newest [`TRIAGE_SCAN`] INBOX envelopes, compute
+    /// derivations for at most [`TRIAGE_BUDGET`] messages that
+    /// lack current-version rows, publish `DerivationsUpdated`
+    /// per message (publish-after-write). Catch-up happens over
+    /// successive passes — cost stays flat however big the
+    /// backlog.
+    pub async fn triage_once(&self) {
+        let accounts: Vec<String> = self.inner.stores.keys().cloned().collect();
+        for account in accounts {
+            if let Err(err) = self.triage_account(&account).await {
+                tracing::warn!(account, %err, "triage pass failed");
+            }
+        }
+    }
+
+    async fn triage_account(&self, account: &str) -> Result<(), EmailSyncError> {
+        // Newest envelopes + the missing-work set, off the async
+        // thread.
+        let backend = self.clone();
+        let account_owned = account.to_string();
+        let (envelopes, missing) = tokio::task::spawn_blocking(
+            move || -> Result<_, EmailSyncError> {
+                let envelopes = backend.inner.sync.fetch_envelopes(
+                    &account_owned,
+                    "INBOX",
+                    SeqRange::Recent(TRIAGE_SCAN),
+                )?;
+                let ids: Vec<String> =
+                    envelopes.iter().map(|e| e.message_id.clone()).collect();
+                let store = backend.store(&account_owned)?;
+                let store = store.lock().expect("store mutex");
+                let missing = store
+                    .derivations_missing(&ids, DerivationKind::Urgency, DERIVATION_VERSION)
+                    .map_err(map_store)?;
+                Ok((envelopes, missing))
+            },
+        )
+        .await
+        .map_err(|e| EmailSyncError::Internal(e.to_string()))??;
+
+        if missing.is_empty() {
+            return Ok(());
+        }
+
+        // One contacts snapshot per pass, not per message.
+        let known = {
+            let contacts = self.inner.contacts.clone();
+            tokio::task::spawn_blocking(move || contacts.known_addresses())
+                .await
+                .map_err(|e| EmailSyncError::Internal(e.to_string()))?
+        };
+        let address = self
+            .inner
+            .addresses
+            .get(account)
+            .cloned()
+            .unwrap_or_default();
+
+        for message_id in missing.into_iter().take(TRIAGE_BUDGET) {
+            let Some(envelope) = envelopes.iter().find(|e| e.message_id == message_id) else {
+                continue;
+            };
+
+            // Headers for the header-based heuristics; tolerate a
+            // fetch failure (the envelope alone still triages).
+            let backend = self.clone();
+            let acct = account.to_string();
+            let mid = message_id.clone();
+            let message = tokio::task::spawn_blocking(move || {
+                backend.inner.sync.fetch_message(&acct, &mid).ok()
+            })
+            .await
+            .map_err(|e| EmailSyncError::Internal(e.to_string()))?;
+            let headers_raw = message.as_ref().map(|m| m.headers_raw.as_str()).unwrap_or("");
+            let body_text = message.as_ref().and_then(|m| m.body_text.as_deref());
+
+            let sender_known = envelope
+                .from
+                .first()
+                .is_some_and(|a| known.contains(&a.email.to_ascii_lowercase()));
+            let input = DerivationInput {
+                account_address: &address,
+                envelope,
+                headers_raw,
+                body_text,
+                sender_known,
+            };
+            let rows = self.inner.engine.derive(&input);
+
+            // Persist, then publish.
+            {
+                let store = self.store(account)?;
+                let mut store = store.lock().expect("store mutex");
+                for (kind, payload) in &rows {
+                    store
+                        .derivation_upsert(
+                            &message_id,
+                            *kind,
+                            DERIVATION_VERSION,
+                            payload,
+                            now_ms(),
+                        )
+                        .map_err(map_store)?;
+                }
+            }
+            self.inner.hub.publish(EmailChange {
+                account: account.to_string(),
+                event: EmailEvent::DerivationsUpdated {
+                    message_id: message_id.clone(),
+                },
+            });
+        }
+        Ok(())
     }
 
     /// One delivery pass over every account. Public so tests (and
@@ -202,6 +362,17 @@ impl ProductBackend {
 }
 
 impl EmailProduct for ProductBackend {
+    fn derivations(
+        &self,
+        account: &str,
+        ids: Vec<String>,
+    ) -> Result<Vec<Derivation>, EmailSyncError> {
+        let store = self.store(account)?.lock().expect("store mutex");
+        store
+            .derivations_for(&ids, DERIVATION_VERSION)
+            .map_err(map_store)
+    }
+
     fn list_outbox(&self, account: &str) -> Result<Vec<OutboxEntry>, EmailSyncError> {
         let store = self.store(account)?.lock().expect("store mutex");
         store.outbox_list(account).map_err(map_store)

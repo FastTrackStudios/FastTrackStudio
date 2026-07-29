@@ -20,6 +20,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+mod derivations;
 mod error;
 mod jwz;
 mod outbox;

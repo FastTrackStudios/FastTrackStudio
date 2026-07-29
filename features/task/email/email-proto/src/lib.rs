@@ -21,6 +21,7 @@
 //! Mirrors the shape of `vault-proto`.
 
 mod account;
+mod derivation;
 mod draft;
 mod envelope;
 mod error;
@@ -34,6 +35,7 @@ mod range;
 mod service;
 
 pub use account::{Account, AccountId};
+pub use derivation::{DERIVATION_VERSION, Derivation, DerivationKind, TAG_TAXONOMY};
 pub use draft::{Attachment, AttachmentMeta, Draft};
 pub use envelope::{Addr, Envelope};
 pub use error::EmailSyncError;
