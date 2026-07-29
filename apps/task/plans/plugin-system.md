@@ -129,12 +129,66 @@ and watch (fasttrackstudio — the setlist/song session surfaces are
 vault-note embeds and widgets, already gated via the widget registry;
 the Watch nav tab retagged from core to fasttrackstudio to match).
 
-Other remaining work:
+Cargo features per plugin: DONE for `task-server` (complete) and
+`task-cli` (partial — see the entanglement notes); NOT attempted for
+`crates/task/ui` (blocked, see below).
 
-- **Cargo features per plugin** on `task-server`, the app crates, and
-  the CLI (build-time exclusion; CI matrix minimal/full). The mount
-  groups in `org_layer_router` and the registration sites are already
-  shaped for `#[cfg(feature = "plugin-…")]` wrapping.
+- **task-server** — thirteen `plugin-*` features, default = all (a
+  plain build is behaviour-identical to the pre-feature tree). A
+  feature gates: the plugin's dependency crates (`optional = true`),
+  its `OrgAppState` fields + backend construction in `build_org_state`,
+  its mount group in `org_layer_router`, and its permit tables + the
+  matching `permits::mounts()` entries — so the catalog, the stamps,
+  and the router shrink together and `permits_cover_router` keeps
+  proving they agree under ANY feature set. Cross-cuts that needed a
+  finer knife: `link_sync` (core) only mints `note → verse` edges under
+  `plugin-scripture` (note→note wikilink sync stays core); the MCP
+  calendar tools (`list_events` / `create_event` / `reschedule_event` /
+  `cancel_event` + `task_context`'s event count) ride
+  `plugin-scheduling`; the forge webhook route, the forge-sync poll
+  loop, and the `ForgeSyncTaskService` decorator on TaskService ride
+  `plugin-forge` (without it the raw `TaskBackend` serves directly).
+  Plugin-owned integration tests carry `#![cfg(feature = …)]`.
+- **task-cli** — the same thirteen features, each forwarding to the
+  matching `task-server/plugin-*` (the `TASK_EMBED=1` in-process server
+  loses exactly what a remote build would). A compiled-out plugin's
+  command still parses (hidden `NotCompiled` trailing-args variant) and
+  fails with "the `<x>` plugin is not compiled into this build". Fully
+  excluded crates: wiki (wiki-live/-graph/-search/-archive/-proto,
+  agent-wiki), fasttrackstudio (collection-proto, song), finance
+  (finance, finance-proto, finance-db), fitness (body, exercises,
+  workouts, intake), mealplan's recipe-import + cooklang, and
+  locations/pantry/cookbook (each compiled for whichever of home /
+  mealplan / fitness is on). **Deps pinned by CORE commands, gated at
+  the command surface only**: `mealplan` + `scheduling-proto` (`task
+  brief` reads meals, day plans and bookings; `plan.rs` helpers back
+  `brief`), `agent-proto`/`agent-codex`/`agent-inbox` (`task inbox`
+  talks to agent backends; `task issue` renders agent prompts), and
+  `git-proto`/`git-config`/`git-forgejo`/`git-github` (`task issue` /
+  `code` / `setup` are forge-native workflow commands, deliberately
+  core).
+- **crates/task/ui** — deliberately NOT feature-gated. The blocker is
+  structural, not a dependency cycle: `stores.rs` + `feeds.rs` register
+  every slice's stores/feeds in single blocks, the pages cross-reference
+  plugin protos from core surfaces (`project_detail` → finance + forge +
+  agent; `invoices` → contacts; `schedule` → mealplan; `note_view` →
+  scripture), and the `Route` enum + pages live in one crate. Build-time
+  UI exclusion needs the pages and store registrations to move into
+  per-plugin `-ui` crates first; until then the runtime gates (nav,
+  widgets, `PluginGate`) are the UI story. Revisit after a pages split.
+
+CI check commands (all must stay green; add to the checks workflow):
+
+```bash
+# default = all plugins — byte-identical pre-feature behaviour
+cargo test -p task-server --test permits_cover_router
+# core-only — catalog, stamps, router and permit tables shrink together
+cargo test -p task-server --no-default-features --test permits_cover_router
+cargo check -p task-server --no-default-features
+cargo check -p task-cli --no-default-features
+```
+
+Other remaining work:
 - **Settings panel** — the org-admin UI over the same manifest field
   the CLI writes (needs a server RPC to edit `org.toml` remotely; the
   CLI path is local-only today).
@@ -156,9 +210,10 @@ Other remaining work:
    plugins), `task org plugins list|enable|disable`, and
    `/org/{slug}/api` gaining a `plugin` field per service.~~ DONE
    except the settings panel (see above).
-3. **Then**: cargo features per plugin on `task-server`, the three app
-   crates, and the CLI; CI matrix job compiling the minimal (core-only)
-   and full sets.
+3. ~~**Then**: cargo features per plugin on `task-server` and the
+   CLI.~~ DONE (server complete, CLI partial — see above); the CI
+   matrix job (minimal/full) still needs wiring into the checks
+   workflow, and the ui-crate gating waits on a pages split.
 
 ## Non-goals
 

@@ -176,21 +176,25 @@ table!(DOC_PRESENCE, "doc-presence", "doc/presence/**", [rd "presence"]);
 
 // ── Agent lane ───────────────────────────────────────────────────────────
 
+#[cfg(feature = "plugin-agent")]
 table!(AGENT_TASKS, "agent-tasks", "agent/tasks/**", [
     rd "read_queue", wr "claim_agent_task", wr "set_agent_task_status",
     wr "complete_agent_task", wr "link_agent_task_to_session", rd "list_agent_task_links",
 ]);
 
+#[cfg(feature = "plugin-agent")]
 table!(AGENT_SESSIONS, "agent-sessions", "agent/sessions/**", [
     wr "create_session", rd "read_session", rd "list_sessions", wr "rename_session",
     wr "pin_session", wr "archive_session", wa "delete_session", wr "save_composer_draft",
 ]);
 
 // `dispatch_turn` runs a model turn (spends tokens, may touch the repo).
+#[cfg(feature = "plugin-agent")]
 table!(AGENT_TURNS, "agent-turns", "agent/turns/**", [
     wa "dispatch_turn", wr "cancel_turn", wr "resume_session",
 ]);
 
+#[cfg(feature = "plugin-agent")]
 table!(AGENT_THREADS, "agent-threads", "agent/threads/**", [
     rd "list_messages", rd "read_message", cm "append_note",
 ]);
@@ -198,14 +202,17 @@ table!(AGENT_THREADS, "agent-threads", "agent/threads/**", [
 // The three `subscribe_*(id, tx)` calls collapsed into one unfiltered
 // `#[subscribe]` stream — the envelope names its session and subscribers
 // filter client-side — so this is now one read over every agent event.
+#[cfg(feature = "plugin-agent")]
 table!(AGENT_SUBSCRIPTIONS, "agent-subscriptions", "agent/events/**", [
     rd "events",
 ]);
 
+#[cfg(feature = "plugin-agent")]
 table!(AGENT_DISCOVERY, "agent-discovery", "agent/discovery/**", [
     rd "list_models", rd "list_skills", rd "list_capabilities", rd "backend_health",
 ]);
 
+#[cfg(feature = "plugin-agent")]
 table!(AGENT_ROUTINES, "agent-routines", "agent/routines/**", [
     rd "list_routines", wr "create_routine", wr "set_routine_paused",
     wa "run_routine", wa "delete_routine",
@@ -253,29 +260,37 @@ table!(PREFS, "prefs", "prefs/**", [rd "get", wr "set"]);
 
 // ── Scheduling lane ──────────────────────────────────────────────────────
 
+#[cfg(feature = "plugin-scheduling")]
 table!(DAY_TEMPLATES, "day-templates", "scheduling/day-templates/**", [
     rd "list_day_templates", rd "get_day_template", wr "upsert_day_template",
     wa "delete_day_template",
 ]);
+#[cfg(feature = "plugin-scheduling")]
 table!(DAY_PLANS, "day-plans", "scheduling/day-plans/**", [
     rd "get_day_plan", wr "upsert_day_plan", wa "delete_day_plan",
 ]);
+#[cfg(feature = "plugin-scheduling")]
 table!(CALENDAR_EVENTS, "calendar-events", "scheduling/events/**", [
     rd "list_events", wr "upsert_event", wa "delete_event",
 ]);
+#[cfg(feature = "plugin-scheduling")]
 table!(EVENT_TYPES, "event-types", "scheduling/event-types/**", [
     rd "list_event_types", rd "get_event_type", wr "upsert_event_type", wa "delete_event_type",
 ]);
+#[cfg(feature = "plugin-scheduling")]
 table!(SCHEDULES, "schedules", "scheduling/schedules/**", [
     rd "list_schedules", rd "get_schedule", wr "upsert_schedule", wa "delete_schedule",
 ]);
+#[cfg(feature = "plugin-scheduling")]
 table!(SLOTS, "slots", "scheduling/slots/**", [rd "list_open_slots"]);
+#[cfg(feature = "plugin-scheduling")]
 table!(BOOKINGS, "bookings", "scheduling/bookings/**", [
     rd "list_bookings", rd "get_booking", wr "create_booking", wr "update_booking_status",
 ]);
 // The slice's one stream: attaching is a read over the whole
 // scheduling resource — the event names the sub-resource and
 // subscribers filter client-side.
+#[cfg(feature = "plugin-scheduling")]
 table!(SCHEDULING_STREAM, "scheduling-events", "scheduling/**", [rd "events"]);
 
 // ── Knowledge lane ───────────────────────────────────────────────────────
@@ -285,18 +300,23 @@ table!(INBOX, "inbox", "inbox/**", [
     wr "upsert_inbox_item", wa "delete_inbox_item",
 ]);
 table!(INBOX_STREAM, "inbox-stream", "inbox/**", [rd "events"]);
+#[cfg(feature = "plugin-recall")]
 table!(RECALL, "recall", "recall/**", [
     rd "list_cards", rd "review_queue", wr "upsert_card", wa "delete_card",
 ]);
+#[cfg(feature = "plugin-recall")]
 table!(RECALL_STREAM, "recall-stream", "recall/**", [rd "events"]);
+#[cfg(feature = "plugin-contacts")]
 table!(CONTACTS, "contacts", "contacts/**", [
     rd "list_contacts", rd "get_contact", wr "upsert_contact", wa "delete_contact",
     rd "list_accounts", wr "upsert_account", wa "delete_account", wa "sync_account",
 ]);
+#[cfg(feature = "plugin-contacts")]
 table!(CONTACTS_STREAM, "contacts-stream", "contacts/**", [rd "events"]);
 table!(TAGS, "tags", "tags/**", [
     rd "list_tags", rd "get_tag", wr "upsert_tag", wa "delete_tag",
 ]);
+#[cfg(feature = "plugin-scripture")]
 table!(SCRIPTURE, "scripture", "scripture/**", [
     rd "translations", rd "chapter", rd "verse", rd "compare", rd "chapter_backlinks",
     rd "lexicon", rd "word_study", rd "occurrences", rd "original_editions", rd "interlinear",
@@ -305,6 +325,7 @@ table!(SCRIPTURE, "scripture", "scripture/**", [
 table!(LINKS, "links", "links/**", [
     wr "create", wa "delete", rd "get", rd "links_for", rd "graph",
 ]);
+#[cfg(feature = "plugin-fasttrackstudio")]
 table!(COLLECTION, "collection", "collections/**", [
     wr "create", rd "get", rd "list", wr "add_item", wr "remove_item", wr "reorder",
 ]);
@@ -312,88 +333,112 @@ table!(RESOURCES, "resources", "resources/**", [rd "transcript"]);
 
 // ── Finance lane (every mutation audited) ────────────────────────────────
 
+#[cfg(feature = "plugin-finance")]
 table!(INVOICING, "invoicing", "finance/invoicing/**", [
     wa "generate_invoice", rd "list_invoices", rd "get_invoice", wa "delete_invoice",
     wa "record_invoice_payment", rd "uninvoiced", wa "mark_sent", wa "void_with_credit",
     wa "record_payment", wa "refund_payment", wa "run_schedule_once",
 ]);
+#[cfg(feature = "plugin-finance")]
 table!(LEDGER, "ledger", "finance/ledger/**", [
     wa "post_transaction", rd "account_transactions", rd "balances", rd "books", rd "accounts",
 ]);
 
 // ── Wiki lane ────────────────────────────────────────────────────────────
 
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_SCHEMA, "wiki-schema", "wiki/schema/**", [
     wa "bootstrap", rd "read_schema", rd "read_purpose", wr "write_schema",
     wr "write_purpose", rd "health",
 ]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_CATALOG, "wiki-catalog", "wiki/catalog/**", [
     rd "read_index", wa "rebuild_index", wr "append_log",
 ]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_RAW, "wiki-raw", "wiki/raw/**", [
     wa "import_raw_source", rd "list_raw_sources", rd "read_raw_source",
     wa "delete_raw_source", wr "rescan_sources",
 ]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_GRAPH, "wiki-graph", "wiki/graph/**", [
     wr "build_graph", rd "relevance", rd "clusters", rd "gaps",
 ]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_PAGES, "wiki-pages", "wiki/pages/**", [
     rd "list_pages", rd "read_page", wr "write_page",
 ]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_INGEST, "wiki-ingest", "wiki/ingest/**", [
     wr "enqueue_ingest", rd "list_ingest", wr "claim_next_ingest", wr "record_analysis",
     wr "record_pages", wr "fail_ingest", wr "cancel_ingest", wr "retry_ingest",
 ]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_LINT, "wiki-lint", "wiki/lint/**", [
     wr "lint", rd "list_findings", wr "resolve_finding",
 ]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_SEARCH, "wiki-search", "wiki/search/**", [rd "search"]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_WATCHER, "wiki-watcher", "wiki/watcher/**", [wr "set_watch", rd "is_watching"]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_MULTIMODAL, "wiki-multimodal", "wiki/multimodal/**", [wr "extract_images"]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_REVIEW, "wiki-review", "wiki/review/**", [
     wr "enqueue_review", rd "list_review", wa "apply_review",
 ]);
 
 // ── Home lane (locations / inventory / meals / fitness) ──────────────────
 
+#[cfg(feature = "plugin-home")]
 table!(LOCATIONS, "locations", "locations/**", [
     rd "list", rd "get", wr "create", wr "update", wr "rename", wa "delete",
 ]);
+#[cfg(feature = "plugin-home")]
 table!(INVENTORY, "inventory", "inventory/**", [
     rd "list", rd "list_at", rd "get", wr "create", wr "update", wr "rename", wa "delete",
     wr "set_status", wr "set_condition", wr "set_location",
 ]);
+#[cfg(feature = "plugin-mealplan")]
 table!(COOKBOOK, "cookbook", "mealplan/cookbook/**", [
     rd "list", rd "get", wr "create", wr "update", wr "rename", wa "delete", wr "import",
 ]);
+#[cfg(feature = "plugin-mealplan")]
 table!(MEALPLAN, "mealplan", "mealplan/plan/**", [
     rd "list", rd "get", wr "create", wr "update", wr "rename", wa "delete",
     wr "cook", wr "skip", rd "can_cook", wr "cook_recipe",
 ]);
+#[cfg(feature = "plugin-mealplan")]
 table!(PANTRY, "pantry", "mealplan/pantry/**", [
     rd "list", rd "get", wr "create", wr "update", wr "rename", wa "delete",
     wr "consume", wr "restock", wr "open", rd "find_by_barcode", rd "resolve_barcode",
     wr "add_stock", wr "consume_stock", wr "transfer_stock", wr "inventory_set",
 ]);
+#[cfg(feature = "plugin-mealplan")]
 table!(SHOPPING, "shopping", "mealplan/shopping/**", [
     rd "list", rd "get", wr "create", wr "update", wa "delete",
     wr "add_missing_for_recipe", wr "add_low_stock", wr "add_expired_or_overdue",
     wr "clear", wr "mark_purchased",
 ]);
+#[cfg(feature = "plugin-mealplan")]
 table!(SUBSTITUTIONS, "substitutions", "mealplan/substitutions/**", [
     rd "list", rd "get", wr "create", wr "update", wa "delete", rd "for_item",
 ]);
+#[cfg(feature = "plugin-fitness")]
 table!(BODY, "body", "fitness/body/**", [
     rd "list", rd "get", rd "find_by_kind", wr "create", wr "update", wa "delete", wr "log_entry",
 ]);
+#[cfg(feature = "plugin-fitness")]
 table!(EXERCISES, "exercises", "fitness/exercises/**", [
     rd "list", rd "get", rd "find_by_name", wr "create", wr "update", wr "rename", wa "delete",
 ]);
+#[cfg(feature = "plugin-fitness")]
 table!(WORKOUTS, "workouts", "fitness/workouts/**", [
     rd "list_routines", rd "get_routine", wr "create_routine", wr "update_routine",
     wa "delete_routine", rd "list_sessions", rd "get_session", wr "create_session",
     wr "update_session", wa "delete_session", wr "log_set", wr "start_from_routine",
 ]);
+#[cfg(feature = "plugin-fitness")]
 table!(INTAKE, "intake", "fitness/intake/**", [
     rd "list", rd "get", rd "for_day", wr "create", wr "update", wa "delete",
     wr "log_recipe", wr "log_pantry", wr "log_freeform", wr "log_entry",
@@ -401,21 +446,26 @@ table!(INTAKE, "intake", "fitness/intake/**", [
 
 // ── Outside-world lane (email / forge) ───────────────────────────────────
 
+#[cfg(feature = "plugin-email")]
 table!(EMAIL, "email", "email/**", [
     rd "accounts", rd "list_folders", rd "fetch_envelopes", rd "fetch_message",
     dl "fetch_attachment", wr "set_flags", wr "move_message", wa "delete_message",
     wr "append_draft", wa "send",
 ]);
+#[cfg(feature = "plugin-forge")]
 table!(FORGE_REPOS, "forge-repos", "forge/repos/**", [rd "list_repos", rd "get_repo"]);
+#[cfg(feature = "plugin-forge")]
 table!(FORGE_ISSUES, "forge-issues", "forge/issues/**", [
     rd "list_issues", rd "get_issue", wr "create_issue", wr "update_issue",
     rd "list_comments", cm "add_comment",
 ]);
+#[cfg(feature = "plugin-forge")]
 table!(FORGE_REVIEWS, "forge-reviews", "forge/reviews/**", [
     rd "list_pull_requests", rd "get_pull_request", wr "create_pull_request",
     wr "update_pull_request", rd "list_reviews", wr "request_reviewers",
     wa "merge_pull_request",
 ]);
+#[cfg(feature = "plugin-forge")]
 table!(FORGE_CONNECTIONS, "forge-connections", "forge/connections/**", [
     rd "list_connected_repos", rd "repos_for_project",
 ]);
@@ -427,9 +477,13 @@ table!(FORGE_CONNECTIONS, "forge-connections", "forge/connections/**", [
 // resource: the streams are unfiltered — subscribers filter client-side —
 // so a subscriber sees every change the org produces for that domain.
 table!(VAULT_STREAM, "vault-sync-stream", "vault/**", [rd "changes"]);
+#[cfg(feature = "plugin-wiki")]
 table!(WIKI_STREAM, "wiki-events", "wiki/**", [rd "changes"]);
+#[cfg(feature = "plugin-email")]
 table!(EMAIL_STREAM, "email-stream", "email/**", [rd "changes"]);
+#[cfg(feature = "plugin-forge")]
 table!(FORGE_ISSUES_STREAM, "forge-issues-stream", "forge/issues/**", [rd "issue_events"]);
+#[cfg(feature = "plugin-forge")]
 table!(FORGE_REVIEWS_STREAM, "forge-reviews-stream", "forge/reviews/**", [rd "review_events"]);
 
 // ── The mount list ───────────────────────────────────────────────────────
@@ -475,7 +529,7 @@ const fn m(
 /// build's stamp (skew detection is build-level, not org-level).
 #[must_use]
 pub fn mounts() -> Vec<Mount> {
-    vec![
+    let mut v: Vec<Mount> = vec![
         // Platform
         m("core", architect_auth::auth_service_service_descriptor(), AUTH),
         m(
@@ -495,6 +549,9 @@ pub fn mounts() -> Vec<Mount> {
         m("core", share_proto::share_service_service_descriptor(), SHARE),
         m("core", crdt::sync::doc_sync_service_descriptor(), DOC_SYNC),
         m("core", crdt::sync::doc_presence_service_descriptor(), DOC_PRESENCE),
+    ];
+    #[cfg(feature = "plugin-agent")]
+    v.extend([
         // Agent
         m(
             "agent",
@@ -531,6 +588,8 @@ pub fn mounts() -> Vec<Mount> {
             agent_proto::service::routines::routines_rpc_service_descriptor(),
             AGENT_ROUTINES,
         ),
+    ]);
+    v.extend([
         // Work
         m("core", project::project_service_descriptor(), PROJECT),
         m("core", project::project_stream_descriptor(), PROJECT_STREAM),
@@ -554,6 +613,9 @@ pub fn mounts() -> Vec<Mount> {
             THREADS,
         ),
         m("core", prefs_proto::service::prefs_service_rpc_service_descriptor(), PREFS),
+    ]);
+    #[cfg(feature = "plugin-scheduling")]
+    v.extend([
         // Scheduling
         m(
             "scheduling",
@@ -595,30 +657,53 @@ pub fn mounts() -> Vec<Mount> {
             scheduling_proto::scheduling_events_stream_descriptor(),
             SCHEDULING_STREAM,
         ),
+    ]);
+    v.extend([
         // Knowledge
         m("core", inbox_proto::service::inbox::inbox_rpc_service_descriptor(), INBOX),
         m("core", inbox_proto::inbox_stream_descriptor(), INBOX_STREAM),
+    ]);
+    #[cfg(feature = "plugin-recall")]
+    v.extend([
         m(
             "recall",
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             RECALL,
         ),
         m("recall", recall_proto::recall_stream_descriptor(), RECALL_STREAM),
+    ]);
+    #[cfg(feature = "plugin-contacts")]
+    v.extend([
         m(
             "contacts",
             contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
             CONTACTS,
         ),
         m("contacts", contacts_proto::contacts_stream_descriptor(), CONTACTS_STREAM),
+    ]);
+    v.extend([
         m("core", tag_proto::service::tags::tag_service_rpc_service_descriptor(), TAGS),
+    ]);
+    #[cfg(feature = "plugin-scripture")]
+    v.extend([
         m("scripture", scripture::scripture_service_descriptor(), SCRIPTURE),
+    ]);
+    v.extend([
         m("core", links::links_service_descriptor(), LINKS),
+    ]);
+    #[cfg(feature = "plugin-fasttrackstudio")]
+    v.extend([
         m("fasttrackstudio", collection::collection_service_descriptor(), COLLECTION),
+    ]);
+    v.extend([
         m(
             "core",
             resources_proto::resources_service_rpc_service_descriptor(),
             RESOURCES,
         ),
+    ]);
+    #[cfg(feature = "plugin-finance")]
+    v.extend([
         // Finance
         m(
             "finance",
@@ -630,6 +715,9 @@ pub fn mounts() -> Vec<Mount> {
             finance_proto::service::ledger::ledger_rpc_service_descriptor(),
             LEDGER,
         ),
+    ]);
+    #[cfg(feature = "plugin-wiki")]
+    v.extend([
         // Wiki
         m("wiki", wiki_proto::service::schema::schema_rpc_service_descriptor(), WIKI_SCHEMA),
         m(
@@ -675,9 +763,15 @@ pub fn mounts() -> Vec<Mount> {
             wiki_proto::service::review::review_rpc_service_descriptor(),
             WIKI_REVIEW,
         ),
+    ]);
+    #[cfg(feature = "plugin-home")]
+    v.extend([
         // Home
         m("home", locations::locations_service_descriptor(), LOCATIONS),
         m("home", inventory::inventory_service_descriptor(), INVENTORY),
+    ]);
+    #[cfg(feature = "plugin-mealplan")]
+    v.extend([
         m("mealplan", cookbook::cookbook_service_descriptor(), COOKBOOK),
         m("mealplan", mealplan::mealplan_service_descriptor(), MEALPLAN),
         m("mealplan", pantry::pantry_service_descriptor(), PANTRY),
@@ -691,13 +785,22 @@ pub fn mounts() -> Vec<Mount> {
             mealplan::substitutions::substitution_service_rpc_service_descriptor(),
             SUBSTITUTIONS,
         ),
+    ]);
+    #[cfg(feature = "plugin-fitness")]
+    v.extend([
         m("fitness", body::body_service_descriptor(), BODY),
         m("fitness", exercises::exercises_service_descriptor(), EXERCISES),
         m("fitness", workouts::workouts_service_descriptor(), WORKOUTS),
         m("fitness", intake::intake_service_descriptor(), INTAKE),
+    ]);
+    #[cfg(feature = "plugin-email")]
+    v.extend([
         // Outside world
         m("email", email_proto::descriptor(), EMAIL),
         m("email", email_proto::stream_descriptor(), EMAIL_STREAM),
+    ]);
+    #[cfg(feature = "plugin-forge")]
+    v.extend([
         m("forge", git_proto::repo::repo_catalog_rpc_service_descriptor(), FORGE_REPOS),
         m(
             "forge",
@@ -724,7 +827,8 @@ pub fn mounts() -> Vec<Mount> {
             git_proto::connections::repo_connections_rpc_service_descriptor(),
             FORGE_CONNECTIONS,
         ),
-    ]
+    ]);
+    v
 }
 
 /// The mounts an org with plugin set `set` actually serves — what

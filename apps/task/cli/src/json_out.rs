@@ -84,6 +84,7 @@ pub fn tag_json(t: &timer_proto::Tag) -> serde_json::Value {
 /// Persisted invoice row → JSON. The architect-generated storage
 /// `Model` doesn't derive `Serialize`, so build the object by hand
 /// (status rendered as the same lowercase slug the table view uses).
+#[cfg(feature = "plugin-finance")]
 pub fn invoice_json(r: &finance_db::entity::InvoiceModel) -> serde_json::Value {
     serde_json::json!({
         "id": r.id,

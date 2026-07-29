@@ -45,25 +45,25 @@ attachments-proto = { workspace = true }
 media-proto = { workspace = true }
 vault-proto = { workspace = true, features = ["vox"] }
 vault = { workspace = true }
-wiki-proto = { workspace = true }
-wiki-live = { workspace = true }
-agent-proto = { workspace = true, features = ["server", "vox"] }
-agent-tasks = { workspace = true }
-agent-dispatch = { workspace = true }
+wiki-proto = { workspace = true, optional = true }
+wiki-live = { workspace = true, optional = true }
+agent-proto = { workspace = true, features = ["server", "vox"], optional = true }
+agent-tasks = { workspace = true, optional = true }
+agent-dispatch = { workspace = true, optional = true }
 # Codex backend — in-process agent session/turn host. Mounted for
 # the `Sessions` + `TurnDispatch` vox services (the /agents surface).
-agent-codex = { workspace = true }
-agent-hermes = { workspace = true }
+agent-codex = { workspace = true, optional = true }
+agent-hermes = { workspace = true, optional = true }
 task = { workspace = true, features = ["vox"] }
 # Forge webhook receiver — IssueLink lookup maps an inbound
 # forge issue/PR event back to the local TaskInfo to mutate.
-git-config = { workspace = true }
+git-config = { workspace = true, optional = true }
 # Forge services mounted on `/org/<slug>/vox`: RepoCatalog +
 # IssueTracker + ReviewSurface, served by the Forgejo backend
 # (the org's primary forge). `git-proto` carries the wire
 # contract; `git-forgejo` the REST-backed impl.
-git-proto = { workspace = true }
-git-forgejo = { workspace = true }
+git-proto = { workspace = true, optional = true }
+git-forgejo = { workspace = true, optional = true }
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
 milestone = { workspace = true, features = ["vox"] }
@@ -71,24 +71,24 @@ workstream = { workspace = true, features = ["vox"] }
 # Entity-CRUD services additionally mounted on `/org/<slug>/vox`.
 # All four expose architect-generated clients agents + the CLI
 # consume directly.
-locations = { workspace = true, features = ["vox"] }
-inventory = { workspace = true, features = ["vox"] }
-scripture = { workspace = true, features = ["vox"] }
+locations = { workspace = true, features = ["vox"], optional = true }
+inventory = { workspace = true, features = ["vox"], optional = true }
+scripture = { workspace = true, features = ["vox"], optional = true }
 links = { workspace = true, features = ["vox"] }
 # Ordered-collection primitive (song Library / Setlist / Show /
 # Playlist) — one `CollectionService` mounted per org, JSONL-backed.
-collection = { workspace = true, features = ["vox"] }
+collection = { workspace = true, features = ["vox"], optional = true }
 resources = { workspace = true, features = ["vox"] }
 resources-proto = { workspace = true, features = ["vox"] }
-cookbook = { workspace = true, features = ["vox"] }
-mealplan = { workspace = true, features = ["vox"] }
-pantry = { workspace = true, features = ["vox"] }
+cookbook = { workspace = true, features = ["vox"], optional = true }
+mealplan = { workspace = true, features = ["vox"], optional = true }
+pantry = { workspace = true, features = ["vox"], optional = true }
 # Fitness suite — body metrics, exercise library, workout
 # routines+sessions, food intake. All four mount per-org.
-body = { workspace = true, features = ["vox"] }
-exercises = { workspace = true, features = ["vox"] }
-workouts = { workspace = true, features = ["vox"] }
-intake = { workspace = true, features = ["vox"] }
+body = { workspace = true, features = ["vox"], optional = true }
+exercises = { workspace = true, features = ["vox"], optional = true }
+workouts = { workspace = true, features = ["vox"], optional = true }
+intake = { workspace = true, features = ["vox"], optional = true }
 # Org-root layout: this server picks one org's dir at boot
 # and routes all its sqlites + vault through OrgRoot. PR 4
 # will scan + serve every org under <data_root>/orgs/.
@@ -114,31 +114,31 @@ identity = { workspace = true }
 # Scheduling: day-template service mounted over vox so the app can
 # overlay the daily plan on the calendar. Read-mostly; bookings/slots
 # use in-memory stores until they're surfaced.
-scheduling-proto = { workspace = true, features = ["vox"] }
-scheduling = { workspace = true }
+scheduling-proto = { workspace = true, features = ["vox"], optional = true }
+scheduling = { workspace = true, optional = true }
 inbox-proto = { workspace = true, features = ["vox"] }
 inbox = { workspace = true }
-recall-proto = { workspace = true, features = ["vox"] }
-recall = { workspace = true }
-contacts-proto = { workspace = true, features = ["vox"] }
-contacts = { workspace = true }
+recall-proto = { workspace = true, features = ["vox"], optional = true }
+recall = { workspace = true, optional = true }
+contacts-proto = { workspace = true, features = ["vox"], optional = true }
+contacts = { workspace = true, optional = true }
 tag-proto = { workspace = true, features = ["vox"] }
 tag = { workspace = true }
 # Finance: SQLite + migrations only at this slice; service
 # traits (Invoicing / Ledger) get mounted in a follow-up
 # once their SeaORM-backed impls land.
-finance-proto = { workspace = true, features = ["server", "vox"] }
-finance-db = { workspace = true }
-finance = { workspace = true }
+finance-proto = { workspace = true, features = ["server", "vox"], optional = true }
+finance-db = { workspace = true, optional = true }
+finance = { workspace = true, optional = true }
 # Email: the canonical `EmailSync` wire trait + a Maildir-backed
 # backend impl. Mounted per-org so the app can list synced
 # accounts + envelopes. The Maildir root lives under the org's
 # vault (`Mail/`); an unconfigured org just serves an empty
 # account set.
-email-proto = { workspace = true, features = ["vox"] }
-email-maildir = { workspace = true }
+email-proto = { workspace = true, features = ["vox"], optional = true }
+email-maildir = { workspace = true, optional = true }
 # `FolderAliases` for the per-account Maildir registration.
-email-config = { workspace = true }
+email-config = { workspace = true, optional = true }
 vox = { workspace = true }
 # Org-wide presence: `crdt::sync::PresenceHost` + the `DocPresence`
 # vox service mounted per org (`vox` feature = the sync/presence
@@ -155,6 +155,50 @@ architect-auth = { workspace = true, features = ["full"] }
 architect-permissions.workspace = true
 architect-permissions-proto.workspace = true
 share-proto.workspace = true
+
+[features]
+# One feature per non-core plugin (`task_plugin::CATALOG` ids with the
+# `plugin-` prefix). Default = everything, so a plain build is
+# byte-identical in behaviour to the pre-feature tree; a deploy that
+# wants a smaller binary opts out (`--no-default-features --features
+# plugin-wiki,…`). Gating removes the crates, the `OrgAppState`
+# fields/backends, the router mounts, and the permit-table entries —
+# `permits_cover_router` proves the three views stay in lockstep under
+# any feature set. See apps/task/plans/plugin-system.md.
+default = [
+    "plugin-mealplan",
+    "plugin-fitness",
+    "plugin-fasttrackstudio",
+    "plugin-wiki",
+    "plugin-scripture",
+    "plugin-email",
+    "plugin-forge",
+    "plugin-agent",
+    "plugin-scheduling",
+    "plugin-finance",
+    "plugin-contacts",
+    "plugin-recall",
+    "plugin-home",
+]
+plugin-mealplan = ["dep:cookbook", "dep:mealplan", "dep:pantry"]
+plugin-fitness = ["dep:body", "dep:exercises", "dep:workouts", "dep:intake"]
+plugin-fasttrackstudio = ["dep:collection"]
+plugin-wiki = ["dep:wiki-proto", "dep:wiki-live"]
+plugin-scripture = ["dep:scripture"]
+plugin-email = ["dep:email-proto", "dep:email-maildir", "dep:email-config"]
+plugin-forge = ["dep:git-proto", "dep:git-forgejo", "dep:git-config"]
+plugin-agent = [
+    "dep:agent-proto",
+    "dep:agent-tasks",
+    "dep:agent-dispatch",
+    "dep:agent-codex",
+    "dep:agent-hermes",
+]
+plugin-scheduling = ["dep:scheduling-proto", "dep:scheduling"]
+plugin-finance = ["dep:finance-proto", "dep:finance-db", "dep:finance"]
+plugin-contacts = ["dep:contacts-proto", "dep:contacts"]
+plugin-recall = ["dep:recall-proto", "dep:recall"]
+plugin-home = ["dep:locations", "dep:inventory"]
 
 [dev-dependencies]
 vox = { workspace = true, features = ["transport-websocket"] }

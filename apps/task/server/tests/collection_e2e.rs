@@ -1,3 +1,7 @@
+// This test exercises services owned by the `fasttrackstudio` plugin;
+// a build without it has nothing to cover.
+#![cfg(feature = "plugin-fasttrackstudio")]
+
 #![allow(clippy::large_futures)]
 //! End-to-end check for the `CollectionService` architect-rpc service
 //! against a live `task-server`. Boots `AppState` on an ephemeral TCP

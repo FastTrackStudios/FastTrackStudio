@@ -140,7 +140,7 @@ fn b_(desc: &str) -> Value {
 /// correct selection.
 #[must_use]
 pub fn tool_catalog() -> Vec<ToolDef> {
-    vec![
+    let mut v = vec![
         ToolDef {
             name: "task_context",
             description: "Orient yourself: today's date and time, the org you're working in, \
@@ -203,6 +203,10 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                 )
             },
         },
+    ];
+    // Calendar tools ride the scheduling plugin.
+    #[cfg(feature = "plugin-scheduling")]
+    v.extend([
         ToolDef {
             name: "list_events",
             description: "List calendar events, optionally windowed by date. Always call this \
@@ -259,6 +263,8 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                           cancelling anything you didn't create in this conversation.",
             schema: || obj(json!({ "id": s_("Event id from list_events.") }), &["id"]),
         },
+    ]);
+    v.extend([
         ToolDef {
             name: "capture_inbox",
             description: "Capture a thought, reminder, or follow-up into the inbox — the right \
@@ -352,7 +358,8 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                 )
             },
         },
-    ]
+    ]);
+    v
 }
 
 /// The catalog as MCP's `tools/list` payload.
@@ -650,6 +657,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
     use goal::GoalService as _;
     use inbox_proto::Inbox as _;
     use project::ProjectService as _;
+    #[cfg(feature = "plugin-scheduling")]
     use scheduling_proto::service::calendar_events::CalendarEvents as _;
     use task::TaskService as _;
     use vault_proto::VaultSync as _;
@@ -676,11 +684,14 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                             .is_some_and(|d| date_of(d) <= today.as_str())
                 })
                 .count();
+            #[cfg(feature = "plugin-scheduling")]
             let events_today = org
                 .scheduling
                 .list_events()
                 .map(|evs| evs.iter().filter(|e| date_of(&e.start) == today).count())
                 .unwrap_or(0);
+            #[cfg(not(feature = "plugin-scheduling"))]
+            let events_today = 0;
             let inbox_open = org
                 .inbox
                 .review_queue(today.clone())
@@ -776,6 +787,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(task_json(&saved))
         }
 
+        #[cfg(feature = "plugin-scheduling")]
         "list_events" => {
             let from = arg_str(args, "from");
             let to = arg_str(args, "to");
@@ -792,6 +804,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(json!({ "count": out.len(), "events": out }))
         }
 
+        #[cfg(feature = "plugin-scheduling")]
         "create_event" => {
             let event = scheduling_proto::CalEvent {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -809,6 +822,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(event_json(&event))
         }
 
+        #[cfg(feature = "plugin-scheduling")]
         "reschedule_event" => {
             let id = required_str(args, "id")?;
             let start = required_str(args, "start")?;
@@ -831,6 +845,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(out)
         }
 
+        #[cfg(feature = "plugin-scheduling")]
         "cancel_event" => {
             let id = required_str(args, "id")?;
             org.scheduling
@@ -1024,6 +1039,7 @@ fn task_json(t: &task::TaskInfo) -> Value {
     })
 }
 
+#[cfg(feature = "plugin-scheduling")]
 fn event_json(e: &scheduling_proto::CalEvent) -> Value {
     json!({
         "id": e.id,
