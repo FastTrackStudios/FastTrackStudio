@@ -185,8 +185,11 @@ pub fn AgentPanel() -> Element {
         }
         div { class: "max-h-44 shrink-0 overflow-y-auto px-1.5 pb-2",
             if !fetch_err.is_empty() {
-                div { class: "mx-1.5 mb-1 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs",
-                    "Can't reach the agent service. {fetch_err}"
+                div { class: "mx-1.5 mb-1",
+                    crate::states::InlineError {
+                        message: fetch_err.clone(),
+                        label: "Agents".to_string(),
+                    }
                 }
             }
             if rows.is_empty() && fetch_err.is_empty() {

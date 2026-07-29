@@ -182,15 +182,44 @@ pub fn AppShell() -> Element {
         // DocumentSession report failures here so they outlive the
         // screen that caused them.
         NotificationTray {}
+        // Slim connection pill: visible only while the supervised vox
+        // connection is down or re-establishing.
+        ConnectionBanner {}
     }
 }
 
-/// Fixed bottom-right toast stack over the notification queue.
-/// Errors render destructive; info renders muted. Dismiss is
-/// per-notice.
+/// Fixed bottom-right toast stack over the notification queue —
+/// severity accent + icon, ×N dedupe badge, and per-notice TTL expiry
+/// (the queue carries `ttl_ms`; this tray arms one dismiss task per
+/// `(id, count)` so a re-pushed notice restarts its clock).
 #[component]
 fn NotificationTray() -> Element {
+    use fts_ui::lucide_dioxus::{CircleCheck, Info, TriangleAlert};
+
     let notices = architect::use_notifications();
+    // (id, count) pairs that already have a dismiss timer in flight.
+    let mut armed = use_signal(std::collections::HashSet::<(u64, u32)>::new);
+    use_effect(move || {
+        let list = notices.list();
+        for n in &list {
+            let Some(ttl) = n.ttl_ms else { continue };
+            let key = (n.id, n.count);
+            if armed.peek().contains(&key) {
+                continue;
+            }
+            armed.write().insert(key);
+            let (id, count) = key;
+            spawn(async move {
+                architect::platform::sleep(std::time::Duration::from_millis(u64::from(ttl)))
+                    .await;
+                notices.dismiss_if(id, count);
+            });
+        }
+        // Drop bookkeeping for notices that left the queue.
+        let live: std::collections::HashSet<u64> = list.iter().map(|n| n.id).collect();
+        armed.write().retain(|(id, _)| live.contains(id));
+    });
+
     let list = notices.list();
     if list.is_empty() {
         return rsx! {};
@@ -198,21 +227,102 @@ fn NotificationTray() -> Element {
     rsx! {
         div { class: "pointer-events-none fixed bottom-20 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 md:bottom-4",
             for n in list {
-                div {
-                    key: "{n.id}",
-                    class: if n.level == architect::NoticeLevel::Error {
-                        "pointer-events-auto flex items-start justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive shadow-md backdrop-blur"
-                    } else {
-                        "pointer-events-auto flex items-start justify-between gap-2 rounded-md border border-border bg-background/95 px-3 py-2 text-sm shadow-md backdrop-blur"
-                    },
-                    span { class: "min-w-0 break-words", "{n.message}" }
-                    button {
-                        class: "shrink-0 text-muted-foreground hover:text-foreground",
-                        aria_label: "Dismiss",
-                        onclick: move |_| notices.dismiss(n.id),
-                        "×"
+                {
+                    let (accent, icon_cls) = match n.level {
+                        architect::NoticeLevel::Error => ("border-l-destructive", "text-destructive"),
+                        architect::NoticeLevel::Warning => ("border-l-amber-400", "text-amber-400"),
+                        architect::NoticeLevel::Success => ("border-l-emerald-500", "text-emerald-500"),
+                        architect::NoticeLevel::Info => ("border-l-border", "text-muted-foreground"),
+                    };
+                    let count = n.count;
+                    rsx! {
+                        div {
+                            key: "{n.id}",
+                            class: "pointer-events-auto flex items-start gap-2.5 rounded-lg border border-border border-l-4 {accent} bg-popover/95 px-3 py-2.5 text-sm text-popover-foreground shadow-lg backdrop-blur",
+                            span { class: "mt-0.5 shrink-0 {icon_cls}",
+                                match n.level {
+                                    architect::NoticeLevel::Error
+                                    | architect::NoticeLevel::Warning => rsx! { TriangleAlert { size: 15 } },
+                                    architect::NoticeLevel::Success => rsx! { CircleCheck { size: 15 } },
+                                    architect::NoticeLevel::Info => rsx! { Info { size: 15 } },
+                                }
+                            }
+                            span { class: "min-w-0 flex-1 break-words", "{n.message}" }
+                            if count > 1 {
+                                span { class: "shrink-0 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground",
+                                    "×{count}"
+                                }
+                            }
+                            button {
+                                class: "shrink-0 text-muted-foreground transition-colors hover:text-foreground",
+                                aria_label: "Dismiss",
+                                onclick: move |_| notices.dismiss(n.id),
+                                "×"
+                            }
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Slim top-center pill shown while the supervised vox connection is
+/// down: amber while re-establishing, red once an attempt has failed
+/// (hover for the raw error). Boot-time connecting shows nothing —
+/// pages render their own skeletons. Flipping back to Ready after an
+/// outage drops a success toast.
+#[component]
+fn ConnectionBanner() -> Element {
+    let conn = architect::use_connection::<vox_core::Caller>();
+    let notices = architect::use_notifications();
+    let mut was_down = use_signal(|| false);
+
+    use_effect(move || {
+        let generation = conn.generation();
+        match conn.state() {
+            architect::ConnectionState::Ready(_) => {
+                if *was_down.peek() {
+                    was_down.set(false);
+                    notices.success("Reconnected to your workspace");
+                }
+            }
+            architect::ConnectionState::Connecting if generation == 0 => {}
+            _ => {
+                if !*was_down.peek() {
+                    was_down.set(true);
+                }
+            }
+        }
+    });
+
+    let generation = conn.generation();
+    let (cls, label, title) = match conn.state() {
+        architect::ConnectionState::Ready(_) => return rsx! {},
+        architect::ConnectionState::Connecting if generation == 0 => return rsx! {},
+        architect::ConnectionState::Connecting => (
+            "border-amber-400/40 bg-amber-500/15 text-amber-200",
+            "Reconnecting to your workspace…",
+            "Connection lost — re-establishing".to_string(),
+        ),
+        architect::ConnectionState::Failed(e) if generation == 0 => (
+            "border-destructive/40 bg-destructive/15 text-destructive",
+            "Can't reach the server — retrying",
+            e,
+        ),
+        architect::ConnectionState::Failed(e) => (
+            "border-destructive/40 bg-destructive/15 text-destructive",
+            "Connection lost — retrying",
+            e,
+        ),
+    };
+    rsx! {
+        div { class: "pointer-events-none fixed left-1/2 top-2 z-50 -translate-x-1/2",
+            div {
+                class: "pointer-events-auto flex items-center gap-2 rounded-full border {cls} px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur",
+                title: "{title}",
+                span { class: "size-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" }
+                "{label}"
             }
         }
     }

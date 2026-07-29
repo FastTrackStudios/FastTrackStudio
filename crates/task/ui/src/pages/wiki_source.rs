@@ -304,8 +304,9 @@ pub fn WikiSourcesView() -> Element {
             }
         },
         Some(Err(e)) => rsx! {
-            div { class: "rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm",
-                "Couldn't list sources: {e}"
+            crate::states::ErrorState {
+                title: "Couldn't list sources",
+                message: e.clone(),
             }
         },
         None => rsx! {
@@ -350,8 +351,9 @@ pub fn WikiSourceView(name: String) -> Element {
             render_source(&prov, &blocks)
         }
         Some(Err(e)) => rsx! {
-            div { class: "rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm",
-                "Couldn't load `{name}`: {e}"
+            crate::states::ErrorState {
+                title: "Couldn't load this source",
+                message: e.clone(),
             }
         },
         None => rsx! {

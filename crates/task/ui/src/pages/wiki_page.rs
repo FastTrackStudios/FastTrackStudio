@@ -285,8 +285,9 @@ pub fn WikiPageView(path: String) -> Element {
             }
         }
         Some(Err(e)) => rsx! {
-            div { class: "rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm",
-                "Couldn't load `{path}`: {e}"
+            crate::states::ErrorState {
+                title: "Couldn't load this page",
+                message: e.clone(),
             }
         },
         None => rsx! {
