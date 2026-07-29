@@ -79,8 +79,9 @@ pub fn ReposView() -> Element {
             }
 
             if let Some(err) = load_err {
-                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
-                    "Couldn't load repos: {err}"
+                crate::states::InlineError {
+                    message: err,
+                    label: "Repos".to_string(),
                 }
             }
 

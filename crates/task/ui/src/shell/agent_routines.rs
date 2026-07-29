@@ -136,8 +136,9 @@ pub fn RoutinesPanel(slug: String) -> Element {
                 }
             }
             if !fetch_err.is_empty() {
-                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs",
-                    "Couldn't load routines: {fetch_err}"
+                crate::states::InlineError {
+                    message: fetch_err.clone(),
+                    label: "Routines".to_string(),
                 }
             }
 

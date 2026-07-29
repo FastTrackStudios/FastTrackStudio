@@ -264,8 +264,13 @@ pub fn HomeView() -> Element {
             }
         }
         (_, _, Some(e)) => rsx! {
-            div { class: "rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm",
-                "Couldn't load your workspace: {e}"
+            crate::states::ErrorState {
+                title: "Couldn't load your workspace",
+                message: e,
+                on_retry: move |()| {
+                    project_store.reload();
+                    task_store.reload();
+                },
             }
         },
         _ => render_loading(),

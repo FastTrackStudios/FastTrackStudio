@@ -248,8 +248,11 @@ pub fn ScheduleView() -> Element {
         div { class: "flex h-[calc(100dvh-8rem)] flex-col overflow-hidden pb-14 md:h-[calc(100vh-3.5rem)] md:pb-0 lg:h-screen",
             match &*templates.read_unchecked() {
                 Some(Err(e)) => rsx! {
-                    div { class: "mx-3 mt-2 shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                        "Couldn't load day-plan templates: {e}"
+                    div { class: "mx-3 mt-2 shrink-0",
+                        crate::states::InlineError {
+                            message: e.clone(),
+                            label: "Day-plan templates".to_string(),
+                        }
                     }
                 },
                 Some(Ok(t)) if t.is_empty() => rsx! {
@@ -260,8 +263,11 @@ pub fn ScheduleView() -> Element {
                 _ => rsx! {},
             }
             if let Some(e) = plans_err {
-                div { class: "mx-3 mt-2 shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                    "Couldn't load day plans: {e}"
+                div { class: "mx-3 mt-2 shrink-0",
+                    crate::states::InlineError {
+                        message: e,
+                        label: "Day plans".to_string(),
+                    }
                 }
             }
             Calendar {

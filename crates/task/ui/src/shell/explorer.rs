@@ -167,7 +167,7 @@ pub fn VaultExplorer() -> Element {
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
     let active = use_memo(move || crate::orgs::active_slug(&selection.read(), &org_list.read()));
-    let files = use_resource(move || {
+    let mut files = use_resource(move || {
         let slug = active();
         async move { fetch_folder_index(slug).await }
     });
@@ -277,7 +277,13 @@ pub fn VaultExplorer() -> Element {
                         }
                     }
                     Some(Err(e)) => rsx! {
-                        div { class: "px-3 py-2 text-xs text-destructive", "Vault unreachable: {e}" }
+                        div { class: "px-1.5 py-1",
+                            crate::states::InlineError {
+                                message: e.clone(),
+                                label: "Vault".to_string(),
+                                on_retry: move |()| files.restart(),
+                            }
+                        }
                     },
                     None => rsx! {
                         div { class: "flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground",
