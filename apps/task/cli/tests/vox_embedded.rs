@@ -29,6 +29,11 @@ fn task(data_root: &Path, args: &[&str]) -> Output {
         .env_remove("TASK_SERVER_WIKI_ROOT")
         .env_remove("TASK_SERVER_ORG")
         .env_remove("TASK_SERVER_VAULT_ROOT")
+        .env_remove("TASK_TIMER_DB")
+        .env_remove("TASK_SERVER_TIMER_URL")
+        .env_remove("TASK_ORG_ID")
+        .env_remove("TASK_USER_ID")
+        .env_remove("TASK_VAULT_ROOT")
         .output()
         .expect("spawn task binary")
 }
@@ -49,6 +54,76 @@ fn scratch_org() -> tempfile::TempDir {
     let out = task(tmp.path(), &["org", "init", "t", "--name", "T"]);
     ok(&out);
     tmp
+}
+
+#[test]
+fn timer_lifecycle_over_embedded_vox() {
+    let tmp = scratch_org();
+
+    // start → active → stop, plus a --tag that exercises the new
+    // TimerService tag RPCs. The CLI opens no timer.sqlite itself —
+    // everything goes through the embedded backend.
+    let out = task(
+        tmp.path(),
+        &[
+            "--org",
+            "t",
+            "timer",
+            "start",
+            "hello world",
+            "--tag",
+            "focus",
+        ],
+    );
+    let stdout = ok(&out);
+    assert!(stdout.contains("Started "), "{stdout}");
+    assert!(stdout.contains("description: hello world"), "{stdout}");
+    assert!(stdout.contains("tags:        focus"), "{stdout}");
+
+    let out = task(tmp.path(), &["--org", "t", "timer", "active"]);
+    assert!(ok(&out).contains("Running for"));
+
+    let out = task(tmp.path(), &["--org", "t", "timer", "stop"]);
+    assert!(ok(&out).contains("Stopped "));
+
+    let out = task(tmp.path(), &["--org", "t", "timer", "list"]);
+    assert!(ok(&out).contains("hello world"));
+
+    let out = task(tmp.path(), &["--org", "t", "timer", "tag", "list"]);
+    assert!(ok(&out).contains("focus"));
+
+    // The rows really landed in the org's timer.sqlite — written by
+    // the embedded server, not by a CLI-side connection.
+    assert!(tmp.path().join("orgs/t/timer.sqlite").is_file());
+}
+
+#[test]
+fn finance_reports_over_embedded_vox() {
+    let tmp = scratch_org();
+
+    // Retro-log a closed session, then pull the finance rollups —
+    // sessions arrive via TimerService, invoices via Invoicing.
+    let now = chrono::Utc::now();
+    let from = (now - chrono::Duration::hours(2)).to_rfc3339();
+    let to = (now - chrono::Duration::hours(1)).to_rfc3339();
+    let out = task(
+        tmp.path(),
+        &[
+            "--org", "t", "timer", "log", "editing", "--from", &from, "--to", &to,
+        ],
+    );
+    assert!(ok(&out).contains("Logged "));
+
+    let out = task(tmp.path(), &["--org", "t", "finance", "project"]);
+    let stdout = ok(&out);
+    assert!(stdout.contains("(unscoped)"), "{stdout}");
+    assert!(stdout.contains("sessions: 1"), "{stdout}");
+
+    let out = task(tmp.path(), &["--org", "t", "finance", "weekly"]);
+    assert!(ok(&out).contains("Time tracked — week of"));
+
+    let out = task(tmp.path(), &["--org", "t", "finance", "invoices"]);
+    assert!(ok(&out).contains("(no invoices)"));
 }
 
 #[test]

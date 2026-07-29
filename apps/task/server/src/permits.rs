@@ -241,6 +241,7 @@ table!(TIMER, "timer", "timer/**", [
     rd "resolve_rate", rd "list_sessions", wr "update_session", wa "delete_session",
     wa "set_org_member_rate", wa "set_project_member_rate",
     rd "list_org_member_rates", rd "list_project_member_rates",
+    rd "list_tags", wr "create_tag", wa "delete_tag", wr "attach_tags", wr "detach_tags",
 ]);
 table!(TIMER_STREAM, "timer-stream", "timer/**", [rd "events"]);
 
@@ -316,6 +317,7 @@ table!(INVOICING, "invoicing", "finance/invoicing/**", [
     wa "generate_invoice", rd "list_invoices", rd "get_invoice", wa "delete_invoice",
     wa "record_invoice_payment", rd "uninvoiced", wa "mark_sent", wa "void_with_credit",
     wa "record_payment", wa "refund_payment", wa "run_schedule_once",
+    wa "commit_invoice", wa "void_invoice",
 ]);
 table!(LEDGER, "ledger", "finance/ledger/**", [
     wa "post_transaction", rd "account_transactions", rd "balances", rd "books", rd "accounts",

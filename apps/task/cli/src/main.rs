@@ -752,6 +752,27 @@ fn resolve_server_base(explicit: Option<&str>) -> String {
     pick_server_base(flag_or_env.as_deref(), session_url.as_deref())
 }
 
+/// Look up an org's manifest id from the resolved server's
+/// `/.well-known/task-server.json` — the remote counterpart of
+/// reading `<org>/org.toml` off the local data root. Best-effort:
+/// `None` on any failure (offline, older server, unknown slug).
+/// Meaningless in embedded mode (the org IS the local data root, so
+/// the manifest read already answered).
+pub(crate) async fn remote_org_id(slug: &str) -> Option<uuid::Uuid> {
+    if embed_enabled() {
+        return None;
+    }
+    let origin = resolve_server_http_base(None);
+    let url = format!("{origin}/.well-known/task-server.json");
+    let doc: serde_json::Value = reqwest::get(&url).await.ok()?.json().await.ok()?;
+    doc.get("orgs")?.as_array()?.iter().find_map(|o| {
+        if o.get("slug")?.as_str()? != slug {
+            return None;
+        }
+        o.get("id")?.as_str()?.parse().ok()
+    })
+}
+
 /// HTTP(S) base for the server's plain HTTP routes (`/blobs/*`),
 /// derived from the resolved vox base (`ws→http`, `wss→https`).
 fn resolve_server_http_base(explicit: Option<&str>) -> String {
@@ -792,8 +813,15 @@ static EMBEDDED: tokio::sync::OnceCell<Embedded> = tokio::sync::OnceCell::const_
 
 /// True when the CLI should host the backend in-process instead of
 /// talking to a running `task-server`. Opt-in via `TASK_EMBED`.
-fn embed_enabled() -> bool {
+pub(crate) fn embed_enabled() -> bool {
     std::env::var("TASK_EMBED").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+}
+
+/// Can `slug` be served in-process? True when the org exists under
+/// the local data root — the precondition for the embedded fallback
+/// in [`establish_for_url`].
+fn org_on_disk(slug: &str) -> bool {
+    org_proto::DataRoot::from_env().is_ok_and(|r| r.orgs_dir().join(slug).is_dir())
 }
 
 /// Lazily build (once) and return the embedded backend.
@@ -817,14 +845,8 @@ async fn establish_client<C>(server: Option<String>, slug: &str) -> eyre::Result
 where
     C: vox_core::FromVoxLane,
 {
-    if embed_enabled() {
-        establish_embedded(slug).await
-    } else {
-        let url = resolve_org_vox_url(server, slug);
-        Box::pin(vox::connect_lane(&url).establish())
-            .await
-            .map_err(|e| connect_error(&url, &e))
-    }
+    let url = resolve_org_vox_url(server, slug);
+    establish_for_url(&url).await
 }
 
 /// Tag a vox connect/establish failure with the `Connection` exit
@@ -837,26 +859,41 @@ fn connect_error<E: std::fmt::Debug>(url: &str, e: &E) -> eyre::Report {
 }
 
 /// Establish a typed client given an already-resolved per-org vox URL
-/// (`…/org/<slug>/vox`). In embedded mode the slug is recovered from the
-/// URL and served in-process; otherwise it's a plain WebSocket connect.
-/// The choke point for the `connect_*_client` helpers, which only carry
-/// a URL.
+/// (`…/org/<slug>/vox`). The choke point every per-org command goes
+/// through. Transport resolution:
+///
+/// 1. `TASK_EMBED` set — serve the slug in-process, always.
+/// 2. Otherwise dial the URL.
+/// 3. Dial failed AND the target is the localhost default (nothing
+///    remote was configured via `--server` / `TASK_VOX_URL` / a
+///    remote session) AND the org exists under the local data root —
+///    boot the embedded backend and serve in-process. This is what
+///    keeps "no server running" workflows (timer, finance, wiki on a
+///    laptop) working now that every command talks vox; an explicit
+///    remote target still fails loud.
 async fn establish_for_url<C>(url: &str) -> eyre::Result<C>
 where
     C: vox_core::FromVoxLane,
 {
+    let slug = url
+        .rsplit_once("/org/")
+        .and_then(|(_, rest)| rest.strip_suffix("/vox"));
     if embed_enabled() {
-        let slug = url
-            .rsplit_once("/org/")
-            .and_then(|(_, rest)| rest.strip_suffix("/vox"))
-            .ok_or_else(|| {
-                eyre::eyre!("can't recover an org slug from `{url}` for embedded mode")
-            })?;
-        establish_embedded(slug).await
-    } else {
-        Box::pin(vox::connect_lane(url).establish())
-            .await
-            .map_err(|e| connect_error(url, &e))
+        let slug = slug.ok_or_else(|| {
+            eyre::eyre!("can't recover an org slug from `{url}` for embedded mode")
+        })?;
+        return establish_embedded(slug).await;
+    }
+    match Box::pin(vox::connect_lane(url).establish()).await {
+        Ok(client) => Ok(client),
+        Err(e) => {
+            if let Some(slug) = slug {
+                if url.starts_with(session_store::DEFAULT_LOCAL_VOX) && org_on_disk(slug) {
+                    return establish_embedded(slug).await;
+                }
+            }
+            Err(connect_error(url, &e))
+        }
     }
 }
 
