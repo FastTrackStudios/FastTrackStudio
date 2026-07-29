@@ -72,7 +72,7 @@ impl OutboxStatus {
 }
 
 /// One staged outgoing message.
-#[derive(Debug, Clone, Facet, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
 pub struct OutboxEntry {
     /// Store-assigned id, unique per account.
     pub id: u64,

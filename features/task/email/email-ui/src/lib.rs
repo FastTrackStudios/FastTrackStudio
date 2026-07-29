@@ -1,22 +1,36 @@
-//! `/email` — synced-mail reader over the org's `EmailSync` service.
+//! `/email` — mail over the org's `EmailSync` + `EmailProduct`
+//! services.
 //!
-//! First slice: list the mail accounts the org's backend serves, let the
-//! user pick one, and show that account's recent `INBOX` envelopes
-//! (from / subject / date). Read-only — compose / reply / flag come
-//! later. Org-scoped: it reads the first selected org's `EmailSync`
-//! backend.
+//! v1 product surface: account chips, the account's recent
+//! `INBOX` envelopes, a minimal compose (new message + reply)
+//! that *stages* drafts into the outbox, and the outbox panel
+//! where staged mail is approved or cancelled — the
+//! human-in-the-loop gate. Everything re-reads on the one
+//! `EmailChange` stream (changes-only contract): mailbox events
+//! re-list envelopes, `OutboxChanged` re-lists the outbox.
 //!
-//! The backend is a Maildir-backed `EmailSync` impl; an org with no
-//! configured mailbox returns an empty account list, which renders as an
-//! empty state rather than an error. Per-account fetch errors surface
-//! inline so a misconfigured mailbox doesn't blank the page.
+//! The backend is a Maildir-backed `EmailSync` impl; an org with
+//! no configured mailbox returns an empty account list, which
+//! renders as an empty state rather than an error. Sending
+//! requires the account's `account.json` to configure an SMTP
+//! `submit` endpoint — a staged entry on an account without one
+//! surfaces the delivery error in the outbox panel.
 
 use dioxus::prelude::*;
-use email_proto::{Account, Envelope};
+use email_proto::{Account, Addr, Draft, Envelope, OutboxEntry, OutboxStatus};
 use fts_ui::prelude::*;
 
 use task_ui_core::feeds;
 use task_ui_core::orgs::{OrgMeta, OrgSelection};
+
+/// What the compose form opens with. `None` reply fields = a
+/// fresh message.
+#[derive(Clone, PartialEq)]
+struct ComposeSeed {
+    to: String,
+    subject: String,
+    in_reply_to: Option<String>,
+}
 
 #[component]
 pub fn EmailView() -> Element {
@@ -33,6 +47,8 @@ pub fn EmailView() -> Element {
     // Which account is selected (its id). `None` until accounts load;
     // we default to the first account once they arrive.
     let mut selected_account = use_signal(|| None::<String>);
+    // Open compose form, if any.
+    let mut composing = use_signal(|| None::<ComposeSeed>);
 
     let accounts = use_resource(move || async move {
         match slug() {
@@ -63,18 +79,19 @@ pub fn EmailView() -> Element {
         }
     });
 
-    // ── Live mailbox changes ──────────────────────────────────
-    // `EmailSync`'s `#[subscribe]` stream. Mail is the archetypal
-    // push surface — new mail should land in the list, not wait for
-    // a revisit. Events name what changed, not the new value (an
-    // `Envelope` is a mailbox read, and IMAP's IDLE only reports
-    // *that* something changed), so a hit for the selected account
-    // re-lists.
-    //
-    // How live this actually is depends on the mounted backend:
-    // `email-imap` publishes from its IDLE loop; the maildir
-    // backend the server mounts today has no watcher and no
-    // supported mutations, so its stream is silent until one lands.
+    // Outbox entries for the selected account, newest first.
+    let mut outbox = use_resource(move || async move {
+        match (slug(), selected_account()) {
+            (Some(s), Some(acct)) => fetch_email_outbox(&s, &acct).await,
+            _ => Ok(Vec::new()),
+        }
+    });
+
+    // ── Live changes ──────────────────────────────────────────
+    // One `EmailChange` stream carries mailbox AND outbox events
+    // (shared hub server-side). Events name what changed, not the
+    // new value — a hit for the selected account re-reads the
+    // touched list.
     architect::use_stream(
         move |tx| {
             let slug = slug();
@@ -94,12 +111,15 @@ pub fn EmailView() -> Element {
         },
         move |change: email_proto::EmailChange| {
             let mut envelopes = envelopes;
-            // One stream carries every account the backend serves —
-            // keep the mailbox on screen.
+            let mut outbox = outbox;
             if selected_account.peek().as_deref() != Some(change.account.as_str()) {
                 return;
             }
-            envelopes.restart();
+            match change.event {
+                email_proto::EmailEvent::OutboxChanged { .. } => outbox.restart(),
+                email_proto::EmailEvent::DerivationsUpdated { .. } => {}
+                _ => envelopes.restart(),
+            }
         },
     );
 
@@ -108,20 +128,46 @@ pub fn EmailView() -> Element {
         _ => None,
     };
     let current = selected_account();
+    let current_address = account_list
+        .iter()
+        .find(|a| Some(a.id.0.as_str()) == current.as_deref())
+        .map(|a| a.address.clone());
     let (rows, rows_err): (Vec<Envelope>, Option<String>) = match &*envelopes.read() {
         Some(Ok(list)) => (list.clone(), None),
         Some(Err(e)) => (Vec::new(), Some(e.clone())),
         None => (Vec::new(), None),
     };
+    let outbox_rows: Vec<OutboxEntry> = match &*outbox.read() {
+        Some(Ok(list)) => list.clone(),
+        _ => Vec::new(),
+    };
     let loading = envelopes.read().is_none() && current.is_some();
 
     rsx! {
         div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-4 sm:p-6 lg:p-10",
-            Heading { level: HeadingLevel::H1, "Email" }
+            div { class: "flex items-baseline justify-between gap-3",
+                Heading { level: HeadingLevel::H1, "Email" }
+                if current.is_some() {
+                    Button {
+                        size: ButtonSize::Small,
+                        on_click: move |_| {
+                            composing
+                                .set(
+                                    Some(ComposeSeed {
+                                        to: String::new(),
+                                        subject: String::new(),
+                                        in_reply_to: None,
+                                    }),
+                                )
+                        },
+                        "New message"
+                    }
+                }
+            }
             Text {
                 variant: TextVariant::Muted,
                 class: "text-sm -mt-2",
-                "Synced mail for the selected org. Pick an account to read its recent inbox.",
+                "Synced mail for the selected org. Compose stages into the outbox; approval sends.",
             }
 
             if let Some(err) = accounts_err {
@@ -152,6 +198,37 @@ pub fn EmailView() -> Element {
                 }
             }
 
+            // ── Compose ────────────────────────────────────────────
+            if let (Some(seed), Some(slug_now), Some(acct), Some(from)) = (
+                composing(),
+                slug(),
+                current.clone(),
+                current_address.clone(),
+            ) {
+                ComposeForm {
+                    // Keyed on the seed so switching between "new"
+                    // and a specific reply remounts the form (its
+                    // field signals initialize from the seed).
+                    key: "{seed.in_reply_to:?}|{seed.to}",
+                    slug: slug_now,
+                    account: acct,
+                    from,
+                    seed_to: seed.to.clone(),
+                    seed_subject: seed.subject.clone(),
+                    in_reply_to: seed.in_reply_to.clone(),
+                    on_done: move |_| composing.set(None),
+                }
+            }
+
+            // ── Outbox ─────────────────────────────────────────────
+            if !outbox_rows.is_empty() {
+                OutboxPanel {
+                    slug: slug().unwrap_or_default(),
+                    account: current.clone().unwrap_or_default(),
+                    entries: outbox_rows,
+                }
+            }
+
             // ── Recent messages ────────────────────────────────────
             if let Some(err) = rows_err {
                 div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
@@ -173,6 +250,21 @@ pub fn EmailView() -> Element {
                             snippet: env.snippet.clone().filter(|s| !s.is_empty()),
                             date: format_date(env.date_ms),
                             unread: !env.flags.iter().any(|f| f == "\\Seen" || f == "Seen"),
+                            on_reply: {
+                                let sender = env.from.first().map(|a| a.email.clone()).unwrap_or_default();
+                                let subject = reply_subject(&env.subject);
+                                let message_id = env.message_id.clone();
+                                move |_| {
+                                    composing
+                                        .set(
+                                            Some(ComposeSeed {
+                                                to: sender.clone(),
+                                                subject: subject.clone(),
+                                                in_reply_to: Some(message_id.clone()),
+                                            }),
+                                        )
+                                }
+                            },
                         }
                     }
                 }
@@ -204,8 +296,8 @@ fn AccountChip(
     }
 }
 
-/// One message summary row: sender, subject, date. Primitive props for
-/// the same reason as [`AccountChip`].
+/// One message summary row: sender, subject, date, reply action.
+/// Primitive props for the same reason as [`AccountChip`].
 #[component]
 fn EnvelopeRow(
     from: String,
@@ -213,11 +305,12 @@ fn EnvelopeRow(
     snippet: Option<String>,
     date: String,
     unread: bool,
+    on_reply: EventHandler<()>,
 ) -> Element {
     let weight = if unread { "font-medium" } else { "" };
 
     rsx! {
-        div { class: "flex items-baseline gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
+        div { class: "group flex items-baseline gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
             span { class: "w-40 shrink-0 truncate text-sm {weight} text-foreground", "{from}" }
             div { class: "flex min-w-0 flex-1 flex-col",
                 span { class: "truncate text-sm {weight} text-foreground", "{subject}" }
@@ -225,8 +318,241 @@ fn EnvelopeRow(
                     span { class: "truncate text-xs text-muted-foreground", "{snippet}" }
                 }
             }
+            button {
+                class: "shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100",
+                onclick: move |_| on_reply.call(()),
+                "Reply"
+            }
             span { class: "shrink-0 text-xs text-muted-foreground", "{date}" }
         }
+    }
+}
+
+/// Minimal compose: to / subject / body. "Send" stages the draft
+/// AND approves it in one go (the poller delivers moments later);
+/// "Stage" leaves it pending in the outbox for review — the shape
+/// agent-drafted mail always takes.
+#[component]
+fn ComposeForm(
+    slug: String,
+    account: String,
+    from: String,
+    seed_to: String,
+    seed_subject: String,
+    in_reply_to: Option<String>,
+    on_done: EventHandler<()>,
+) -> Element {
+    let to = use_signal(|| seed_to.clone());
+    let subject = use_signal(|| seed_subject.clone());
+    let body = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+    let mut error = use_signal(|| None::<String>);
+
+    let title = if in_reply_to.is_some() { "Reply" } else { "New message" };
+
+    let submit = move |approve_now: bool| {
+        let slug = slug.clone();
+        let account = account.clone();
+        let from = from.clone();
+        let in_reply_to = in_reply_to.clone();
+        spawn(async move {
+            let recipients = parse_addr_list(&to.peek());
+            if recipients.is_empty() {
+                error.set(Some("Add at least one recipient.".into()));
+                return;
+            }
+            busy.set(true);
+            error.set(None);
+            let draft = Draft {
+                from: Addr {
+                    name: None,
+                    email: from,
+                },
+                to: recipients,
+                cc: vec![],
+                bcc: vec![],
+                subject: subject.peek().clone(),
+                body_text: body.peek().clone(),
+                body_html: None,
+                in_reply_to: in_reply_to.clone(),
+                references: in_reply_to.clone().into_iter().collect(),
+                attachments: vec![],
+            };
+            let result = stage_email_draft(&slug, &account, draft, approve_now).await;
+            busy.set(false);
+            match result {
+                Ok(()) => on_done.call(()),
+                Err(e) => error.set(Some(e)),
+            }
+        });
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2 rounded-lg border border-border bg-card/60 p-3",
+            div { class: "flex items-center justify-between",
+                Text { class: "text-sm font-medium", "{title}" }
+                button {
+                    class: "text-xs text-muted-foreground hover:text-foreground",
+                    onclick: move |_| on_done.call(()),
+                    "Close"
+                }
+            }
+            Input { value: to, placeholder: "To (comma-separated)" }
+            Input { value: subject, placeholder: "Subject" }
+            Textarea { value: body, placeholder: "Write…", rows: 6 }
+            if let Some(err) = error() {
+                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive",
+                    "{err}"
+                }
+            }
+            div { class: "flex items-center justify-end gap-2",
+                Button {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Small,
+                    disabled: busy(),
+                    on_click: {
+                        let mut submit = submit.clone();
+                        move |_| submit(false)
+                    },
+                    "Stage for approval"
+                }
+                Button {
+                    size: ButtonSize::Small,
+                    disabled: busy(),
+                    on_click: {
+                        let mut submit = submit.clone();
+                        move |_| submit(true)
+                    },
+                    "Send"
+                }
+            }
+        }
+    }
+}
+
+/// The outbox: staged sends with their status and the
+/// approve / cancel gates. Rendered whenever the account has
+/// entries (terminal ones included, so outcomes stay visible).
+#[component]
+fn OutboxPanel(slug: String, account: String, entries: Vec<OutboxEntry>) -> Element {
+    rsx! {
+        div { class: "flex flex-col gap-1.5",
+            SectionHeader { label: "Outbox".to_string() }
+            for entry in entries {
+                OutboxRow {
+                    key: "{entry.id}",
+                    slug: slug.clone(),
+                    account: account.clone(),
+                    id: entry.id,
+                    status: entry.status,
+                    subject: if entry.draft.subject.is_empty() { "(no subject)".to_owned() } else { entry.draft.subject.clone() },
+                    to: entry.draft.to.iter().map(|a| a.email.clone()).collect::<Vec<_>>().join(", "),
+                    origin: entry.origin.clone(),
+                    error: entry.last_error.clone(),
+                    retries: entry.retries,
+                }
+            }
+        }
+    }
+}
+
+/// One outbox entry. The approve / cancel buttons show only in
+/// the states where the transition is legal; the stream's
+/// `OutboxChanged` events keep the row fresh.
+#[component]
+#[allow(clippy::too_many_arguments)]
+fn OutboxRow(
+    slug: String,
+    account: String,
+    id: u64,
+    status: OutboxStatus,
+    subject: String,
+    to: String,
+    origin: String,
+    error: Option<String>,
+    retries: u32,
+) -> Element {
+    let mut busy = use_signal(|| false);
+    let (badge, badge_variant) = status_badge(status);
+    let approvable = matches!(
+        status,
+        OutboxStatus::PendingApproval | OutboxStatus::Failed
+    );
+    let cancellable = matches!(
+        status,
+        OutboxStatus::Draft
+            | OutboxStatus::PendingApproval
+            | OutboxStatus::Approved
+            | OutboxStatus::Failed
+    );
+    let from_agent = origin != "user";
+
+    let act = move |approve: bool| {
+        let slug = slug.clone();
+        let account = account.clone();
+        spawn(async move {
+            busy.set(true);
+            // Errors surface via the refreshed list (the row's
+            // status simply won't change); keep the panel dumb.
+            let _ = outbox_action(&slug, &account, id, approve).await;
+            busy.set(false);
+        });
+    };
+
+    rsx! {
+        div { class: "flex items-baseline gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
+            Badge { variant: badge_variant, "{badge}" }
+            div { class: "flex min-w-0 flex-1 flex-col",
+                span { class: "truncate text-sm text-foreground", "{subject}" }
+                span { class: "truncate text-xs text-muted-foreground",
+                    "to {to}"
+                    if from_agent {
+                        " · staged by {origin}"
+                    }
+                    if retries > 0 {
+                        " · {retries} attempts"
+                    }
+                }
+                if let Some(err) = error.as_ref() {
+                    span { class: "truncate text-xs text-destructive", "{err}" }
+                }
+            }
+            if approvable {
+                Button {
+                    size: ButtonSize::Small,
+                    disabled: busy(),
+                    on_click: {
+                        let mut act = act.clone();
+                        move |_| act(true)
+                    },
+                    if status == OutboxStatus::Failed { "Retry" } else { "Approve" }
+                }
+            }
+            if cancellable {
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    disabled: busy(),
+                    on_click: {
+                        let mut act = act.clone();
+                        move |_| act(false)
+                    },
+                    "Cancel"
+                }
+            }
+        }
+    }
+}
+
+fn status_badge(status: OutboxStatus) -> (&'static str, BadgeVariant) {
+    match status {
+        OutboxStatus::Draft => ("draft", BadgeVariant::Outline),
+        OutboxStatus::PendingApproval => ("pending", BadgeVariant::Secondary),
+        OutboxStatus::Approved => ("approved", BadgeVariant::Default),
+        OutboxStatus::Sending => ("sending", BadgeVariant::Default),
+        OutboxStatus::Sent => ("sent", BadgeVariant::Outline),
+        OutboxStatus::Failed => ("failed", BadgeVariant::Destructive),
+        OutboxStatus::Cancelled => ("cancelled", BadgeVariant::Outline),
     }
 }
 
@@ -242,6 +568,28 @@ fn sender_label(env: &Envelope) -> String {
                 .unwrap_or_else(|| a.email.clone())
         },
     )
+}
+
+/// `Re:`-prefix a subject exactly once.
+fn reply_subject(subject: &str) -> String {
+    if subject.trim_start().to_ascii_lowercase().starts_with("re:") {
+        subject.to_string()
+    } else {
+        format!("Re: {subject}")
+    }
+}
+
+/// Comma/space-separated address list → `Addr`s (bare emails,
+/// display names come later).
+fn parse_addr_list(raw: &str) -> Vec<Addr> {
+    raw.split([',', ';'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|email| Addr {
+            name: None,
+            email: email.to_string(),
+        })
+        .collect()
 }
 
 /// Format a unix-ms timestamp as a short local date. Falls back to an
@@ -299,4 +647,60 @@ pub async fn fetch_email_envelopes(
     // across implementations, so sort defensively on the date.
     envelopes.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
     Ok(envelopes)
+}
+
+/// The account's outbox, newest first (terminal entries included).
+pub async fn fetch_email_outbox(slug: &str, account: &str) -> Result<Vec<OutboxEntry>, String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailProductClient>(slug).await?;
+    client
+        .list_outbox(account.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: list outbox: {e:?}"))
+}
+
+/// Stage a draft into the outbox; when `approve_now`, immediately
+/// approve it too (the user pressing "Send" is the approval).
+pub async fn stage_email_draft(
+    slug: &str,
+    account: &str,
+    draft: Draft,
+    approve_now: bool,
+) -> Result<(), String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailProductClient>(slug).await?;
+    let entry = client
+        .submit_draft(account.to_owned(), draft, "user".to_owned())
+        .await
+        .map_err(|e| format!("{slug}: stage draft: {e:?}"))?;
+    if approve_now {
+        client
+            .approve(account.to_owned(), entry.id)
+            .await
+            .map_err(|e| format!("{slug}: approve: {e:?}"))?;
+    }
+    Ok(())
+}
+
+/// Approve (`true`) or cancel (`false`) one outbox entry.
+pub async fn outbox_action(
+    slug: &str,
+    account: &str,
+    id: u64,
+    approve: bool,
+) -> Result<(), String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailProductClient>(slug).await?;
+    if approve {
+        client
+            .approve(account.to_owned(), id)
+            .await
+            .map_err(|e| format!("{slug}: approve: {e:?}"))?;
+    } else {
+        client
+            .cancel(account.to_owned(), id)
+            .await
+            .map_err(|e| format!("{slug}: cancel: {e:?}"))?;
+    }
+    Ok(())
 }
