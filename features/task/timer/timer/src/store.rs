@@ -103,6 +103,14 @@ impl ProjectDefaults for VaultProjectDefaults {
 pub struct Store {
     conn: DatabaseConnection,
     project_defaults: Arc<dyn ProjectDefaults>,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful *session* mutation publishes the post-write
+    /// row here ([`timer_proto::TimerEvent`]); rate edits don't
+    /// stream. Sliding mailbox: a slow subscriber loses its *oldest*
+    /// queued events, which is correct for state-shaped payloads.
+    /// Clones share the hub (`Arc` inside), so the service mount and
+    /// the stream mount can each hold a store clone.
+    events: architect::PubSub<timer_proto::TimerEvent>,
 }
 
 impl Store {
@@ -112,7 +120,16 @@ impl Store {
         Self {
             conn,
             project_defaults,
+            events: architect::PubSub::sliding(256),
         }
+    }
+
+    /// Publish a session change to every `events` subscriber. Call
+    /// only after the write succeeded — subscribers fold these into
+    /// state fetched via `list_sessions()`, so a phantom event would
+    /// desync them.
+    fn publish(&self, event: timer_proto::TimerEvent) {
+        self.events.publish(event);
     }
 
     #[must_use]
@@ -356,13 +373,15 @@ impl Store {
 impl TimerService for Store {
     async fn start_timer(&self, req: StartTimerRequest) -> Result<WorkSession, TimerError> {
         let now = Utc::now();
-        self.insert_session(&req, now, None, None)
-            .await
-            .map_err(Into::into)
+        let started = self.insert_session(&req, now, None, None).await?;
+        self.publish(timer_proto::TimerEvent::Upserted(started.clone()));
+        Ok(started)
     }
 
     async fn stop_timer(&self, user_id: Uuid) -> Result<WorkSession, TimerError> {
-        self.close_active(user_id).await.map_err(Into::into)
+        let closed = self.close_active(user_id).await?;
+        self.publish(timer_proto::TimerEvent::Upserted(closed.clone()));
+        Ok(closed)
     }
 
     async fn active_timer(&self, user_id: Uuid) -> Result<Option<WorkSession>, TimerError> {
@@ -387,6 +406,13 @@ impl TimerService for Store {
             .insert_session(&req, now, None, None)
             .await
             .map_err(TimerError::from)?;
+        // Two events, in write order: the closed row (if any), then
+        // the fresh open one — subscribers see the same sequence the
+        // DB went through.
+        if let Some(closed) = &closed {
+            self.publish(timer_proto::TimerEvent::Upserted(closed.clone()));
+        }
+        self.publish(timer_proto::TimerEvent::Upserted(started.clone()));
         Ok((closed, started))
     }
 
@@ -407,14 +433,16 @@ impl TimerService for Store {
             task_note_path: req.task_note_path,
             description: req.description,
         };
-        self.insert_session(
-            &synthetic,
-            req.start_time,
-            Some(req.end_time),
-            req.billable_override,
-        )
-        .await
-        .map_err(Into::into)
+        let logged = self
+            .insert_session(
+                &synthetic,
+                req.start_time,
+                Some(req.end_time),
+                req.billable_override,
+            )
+            .await?;
+        self.publish(timer_proto::TimerEvent::Upserted(logged.clone()));
+        Ok(logged)
     }
 
     async fn resolve_rate(
@@ -522,7 +550,9 @@ impl TimerService for Store {
             .update(&self.conn)
             .await
             .map_err(|e| TimerError::Backend(e.to_string()))?;
-        Ok(model_to_session(updated))
+        let session = model_to_session(updated);
+        self.publish(timer_proto::TimerEvent::Upserted(session.clone()));
+        Ok(session)
     }
 
     async fn delete_session(&self, id: Uuid) -> Result<(), TimerError> {
@@ -530,6 +560,7 @@ impl TimerService for Store {
             .exec(&self.conn)
             .await
             .map_err(|e| TimerError::Backend(e.to_string()))?;
+        self.publish(timer_proto::TimerEvent::Deleted(id));
         Ok(())
     }
 
@@ -613,6 +644,15 @@ impl TimerService for Store {
             .into_iter()
             .map(project_member_rate_from_model)
             .collect())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// `TimerService` impl above, on every successful session mutation.
+impl timer_proto::TimerServiceStreamSource for Store {
+    fn events_hub(&self) -> &architect::PubSub<timer_proto::TimerEvent> {
+        &self.events
     }
 }
 

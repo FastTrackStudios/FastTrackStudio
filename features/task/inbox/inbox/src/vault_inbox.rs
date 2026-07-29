@@ -32,6 +32,14 @@ pub enum VaultInboxError {
 pub struct VaultInbox {
     root: PathBuf,
     write_lock: Arc<Mutex<()>>,
+    /// Fan-out hub behind the `#[subscribe] fn events` stream —
+    /// every successful mutation publishes the post-write state here
+    /// ([`inbox_proto::InboxEvent`]). Sliding mailbox: a slow
+    /// subscriber loses its *oldest* queued events, which is correct
+    /// for state-shaped payloads. Clones share the hub (`Arc`
+    /// inside), so the service mount and the stream mount can each
+    /// hold a backend clone.
+    events: architect::PubSub<inbox_proto::InboxEvent>,
 }
 
 impl VaultInbox {
@@ -46,6 +54,7 @@ impl VaultInbox {
         Ok(Self {
             root,
             write_lock: Arc::new(Mutex::new(())),
+            events: architect::PubSub::sliding(256),
         })
     }
 
@@ -149,11 +158,29 @@ impl Inbox for VaultInbox {
         let body = serialize_inbox_item(item).map_err(|e| InboxError::Backend {
             message: e.to_string(),
         })?;
-        self.write_file(&format!("{INBOX_DIR}/{}.md", sanitize(&item.id)), &body)
+        self.write_file(&format!("{INBOX_DIR}/{}.md", sanitize(&item.id)), &body)?;
+        // Publish only after the write landed — subscribers fold
+        // these into state fetched via `list_inbox()`, so a phantom
+        // event would desync them.
+        self.events
+            .publish(inbox_proto::InboxEvent::Upserted(item.clone()));
+        Ok(())
     }
 
     fn delete_inbox_item(&self, id: &str) -> Result<(), InboxError> {
-        self.delete_file(&format!("{INBOX_DIR}/{}.md", sanitize(id)))
+        self.delete_file(&format!("{INBOX_DIR}/{}.md", sanitize(id)))?;
+        self.events
+            .publish(inbox_proto::InboxEvent::Deleted(id.to_owned()));
+        Ok(())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// [`Inbox`] impl above, on every successful mutation.
+impl inbox_proto::InboxStreamSource for VaultInbox {
+    fn events_hub(&self) -> &architect::PubSub<inbox_proto::InboxEvent> {
+        &self.events
     }
 }
 

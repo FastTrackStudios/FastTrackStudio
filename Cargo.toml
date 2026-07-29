@@ -164,6 +164,7 @@ members = [
     # ── features/engraver ─────────────────────────────────────────────
     "features/engraver/engraver",
     "features/engraver/proto",
+    "features/engraver/score",
     # ── features/dynamic-template (subtree-imported, wave 3) ──────────
     "features/dynamic-template/dynamic-template",
     "features/dynamic-template/dynamic-template-proto",
@@ -184,6 +185,8 @@ members = [
     "crates/signal/controller",
     "crates/signal/import",
     "crates/signal/browser",
+    "crates/signal/space",
+    "crates/signal/space/proto",
     "crates/signal/grid",
     "crates/signal/grid-ui",
     "crates/signal/daw-bridge",
@@ -503,6 +506,7 @@ tree-sitter-keyflow = { path = "crates/keyflow/tree-sitter-keyflow" }
 # wgpu/vello + PDF export); consumers opt into `svg`/`wgpu`/`engraver`.
 engraver = { path = "features/engraver/engraver", default-features = false }
 engraver-proto = { path = "features/engraver/proto", default-features = false }
+engraver-score = { path = "features/engraver/score" }
 
 # ── signal domain (wave 4) ────────────────────────────────────────────
 # `signal` is the facade — the only public API surface for the signal
@@ -517,6 +521,8 @@ signal-ui = { path = "crates/signal/ui", default-features = false }
 # workspace dependency unless the workspace entry sets it too. Consumers
 # that need the filesystem scanner opt in with `features = ["native"]`.
 signal-browser = { path = "crates/signal/browser", default-features = false }
+signal-space = { path = "crates/signal/space" }
+signal-space-proto = { path = "crates/signal/space/proto" }
 signal-grid = { path = "crates/signal/grid" }
 signal-grid-ui = { path = "crates/signal/grid-ui" }
 signal-controller = { path = "crates/signal/controller" }
@@ -847,9 +853,14 @@ libc = "0.2"
 # wasm-clean surface keep `default-features = false` (the consumer opts
 # into `vox`/`server`/`native`), mirroring Task's original table.
 # crates/task/
+task-plugin = { path = "crates/task/plugin" }
 task-telemetry = { path = "crates/task/telemetry" }
 task-ui-core = { path = "crates/task/ui-core" }
 task-player-ui = { path = "crates/task/player-ui" }
+# The note-widget extension contract (spec/registry/fullscreen chrome)
+# and the section-tabs widget provider it hosts.
+task-widgets = { path = "crates/task/widgets" }
+task-note-tabs = { path = "crates/task/note-tabs" }
 ui = { path = "crates/task/ui" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }

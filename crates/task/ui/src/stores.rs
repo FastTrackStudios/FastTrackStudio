@@ -59,6 +59,15 @@ use crate::orgs::{OrgMeta, OrgSelection};
 // only declares the handle, never the operations.
 
 /// Declare the feature stores. See the shape notes above.
+///
+/// The optional `stream:` line makes the store **live**: on provide
+/// it subscribes to the named `#[subscribe]` stream client on each
+/// selected org (`all` for the multi-org slug-tagged stores, `first`
+/// for the single-org registers — match the list hook's scope!) and
+/// folds every event into the store through the given `fold` fn
+/// (`fn(&Store, &str /* slug */, Event)`). The subscription heals
+/// itself and re-runs the backing fetch on re-establishment — see
+/// [`use_org_event_streams`].
 macro_rules! stores {
     ($(
         $(#[$smeta:meta])*
@@ -69,6 +78,11 @@ macro_rules! stores {
                 list:
                 $(#[$lmeta:meta])*
                 $list:ident -> $key:ty = $fetch:path,
+            )?
+            $(
+                stream:
+                $(#[$stmeta:meta])*
+                $sscope:ident $sclient:ty => $sfold:path,
             )?
             $(
                 mutations:
@@ -91,7 +105,28 @@ macro_rules! stores {
             #[doc = concat!("Install the shared [`", stringify!($alias), "`] at the app root.")]
             pub fn $provide() -> $alias {
                 let store = use_store();
-                use_context_provider(move || store)
+                let store = use_context_provider(move || store);
+                $(
+                    // Doc lines on the `stream:` table row ($stmeta)
+                    // document the table; nothing to attach them to
+                    // in expansion (statement doc-comments warn).
+                    use_org_event_streams(
+                        store,
+                        stream_scope::$sscope(),
+                        |slug: String, tx| async move {
+                            let Ok(client) = task_ui_core::vox_clients::establish_for::<$sclient>(
+                                &slug,
+                            )
+                            .await
+                            else {
+                                return false;
+                            };
+                            client.events(tx).await.is_ok()
+                        },
+                        $sfold,
+                    );
+                )?
+                store
             }
 
             #[doc = concat!("Handle to the app-root [`", stringify!($alias), "`].")]
@@ -127,11 +162,20 @@ stores! {
     TaskStore: OrgTask {
         provide: provide_task_store,
         handle: use_task_store,
+        stream:
+            /// Live board: every `TaskEvent` from every selected org
+            /// folds into the shared store, so the `/tasks` board and
+            /// each project-detail board update without refetching.
+            all task_proto::TaskServiceStreamClient => fold_task_event,
     }
 
     ProjectStore: OrgProject {
         provide: provide_project_store,
         handle: use_project_store,
+        stream:
+            /// Live project axis — Upserted/Deleted `ProjectEvent`s
+            /// keep `/projects` and the board's grouping current.
+            all project_proto::ProjectServiceStreamClient => fold_project_event,
         mutations:
             /// Optimistic writes for projects (full-record update).
             ProjectMutations via use_project_mutations,
@@ -151,10 +195,20 @@ stores! {
         mutations: ItemMutations via use_item_mutations,
     }
 
+    GoalStore: OrgGoal {
+        provide: provide_goal_store,
+        handle: use_goal_store,
+        stream:
+            /// Live goal hierarchy — Upserted/Deleted `GoalEvent`s
+            /// from every selected org fold into the merged list.
+            all goal::GoalServiceStreamClient => fold_goal_event,
+    }
+
     MilestoneStore: milestone_proto::Milestone {
         provide: provide_milestone_store,
         handle: use_milestone_store,
         list: use_milestone_list -> Uuid = crate::feeds::fetch_milestones,
+        stream: first milestone_proto::MilestoneServiceStreamClient => fold_milestone_event,
         mutations: MilestoneMutations via use_milestone_mutations,
     }
 
@@ -190,6 +244,10 @@ stores! {
         provide: provide_inbox_store,
         handle: use_inbox_store,
         list: use_inbox_list -> String = crate::feeds::fetch_inbox,
+        stream:
+            /// Live capture queue — an item captured on another
+            /// device (CLI, watch, phone) appears without a refetch.
+            first inbox_proto::InboxStreamClient => fold_inbox_event,
         mutations:
             /// Optimistic writes for the capture queue. Upserts return unit on the
             /// wire, so the row we sent doubles as the reconciled value (the id is
@@ -201,6 +259,7 @@ stores! {
         provide: provide_recall_store,
         handle: use_recall_store,
         list: use_recall_list -> String = crate::feeds::fetch_recall_cards,
+        stream: first recall_proto::RecallStreamClient => fold_recall_event,
         mutations:
             /// Optimistic writes for the deck. Upserts return unit on the wire, so
             /// the row we sent doubles as the reconciled value (the id is
@@ -212,6 +271,10 @@ stores! {
         provide: provide_contact_store,
         handle: use_contact_store,
         list: use_contact_list -> String = crate::feeds::fetch_contacts,
+        stream:
+            /// Live directory — a CardDAV sync run's writes stream in
+            /// card by card.
+            first contacts_proto::ContactsStreamClient => fold_contact_event,
         mutations:
             /// Optimistic writes for the directory. Upserts return unit on the
             /// wire, so the row we sent doubles as the reconciled value (the id is
@@ -222,6 +285,10 @@ stores! {
     BookingStore: scheduling_proto::Booking {
         provide: provide_booking_store,
         handle: use_booking_store,
+        stream:
+            /// Live bookings off the slice's one `SchedulingEvent`
+            /// stream (ignores the other sub-resource variants).
+            first scheduling_proto::SchedulingEventsStreamClient => fold_booking_event,
         mutations: BookingMutations via use_booking_mutations,
     }
 
@@ -229,6 +296,9 @@ stores! {
         provide: provide_event_type_store,
         handle: use_event_type_store,
         list: use_event_type_list -> String = crate::feeds::fetch_event_types,
+        stream:
+            /// Live event types off the same `SchedulingEvent` stream.
+            first scheduling_proto::SchedulingEventsStreamClient => fold_event_type_event,
         mutations: EventTypeMutations via use_event_type_mutations,
     }
 
@@ -246,6 +316,11 @@ stores! {
     SessionStore: OrgSession {
         provide: provide_session_store,
         handle: use_session_store,
+        stream:
+            /// Live sessions: the running timer is *derived* (the
+            /// open row), so folding `TimerEvent`s makes another
+            /// device's start/stop/switch show up instantly.
+            all timer_proto::TimerServiceStreamClient => fold_timer_event,
         mutations: TimerMutations via use_timer_mutations,
     }
 
@@ -270,6 +345,259 @@ stores! {
 /// The org-selection contexts every list hook keys its fetch off.
 fn use_org_scope() -> (Signal<OrgSelection>, Signal<Vec<OrgMeta>>) {
     (use_context(), use_context())
+}
+
+// ── live store streams (fetch-once-then-fold, per org) ──────────────
+
+/// Which orgs a store's live subscription attaches to — mirrors the
+/// fetch scope of its list hook, so events only ever fold into a
+/// store that holds (or will hold) that org's rows.
+#[derive(Clone, Copy, PartialEq)]
+enum StreamScope {
+    /// Every selected org (multi-org, slug-tagged stores).
+    All,
+    /// Just the first selected org (single-org register stores —
+    /// their list hook fetches only the first selected slug, so an
+    /// event from any other org would desync the cache).
+    First,
+}
+
+/// Lowercase constructors so the [`stores!`] table reads
+/// `stream: all …` / `stream: first …`.
+mod stream_scope {
+    pub(super) fn all() -> super::StreamScope {
+        super::StreamScope::All
+    }
+    pub(super) fn first() -> super::StreamScope {
+        super::StreamScope::First
+    }
+}
+
+/// Live-store subscription driver: one healing event pump per
+/// selected org, folding every received event into the shared store.
+///
+/// The generic behind the [`stores!`] `stream:` line — the store
+/// version of `architect::use_stream`, extended for Task's multi-org
+/// fan-out (a store under "All" holds rows from several orgs, so it
+/// needs one subscription *per org*, and the fold must know which
+/// org's stream an event came from — the `slug` parameter).
+///
+/// Semantics (mirroring the `/vault` + `/wiki` page consumers):
+/// - `subscribe(slug, tx)` establishes that org's stream client and
+///   holds the subscribe call in flight — the future staying pending
+///   *is* the healthy state; it resolving means the subscription
+///   ended (`false` = never established).
+/// - an ended subscription is retried after a backoff (~400 ms when
+///   it had been live, 1s→8s doubling when it never established);
+/// - every *re*-subscribe first re-runs the store's backing fetch
+///   ([`Store::reload`] — the `subscribed_once` recovery pattern):
+///   the hubs are sliding mailboxes, nothing is replayed, so events
+///   published while detached are recovered by refetching. No-op
+///   until a list hook has mounted, which is also correct — a page
+///   that mounts later starts with its own fresh fetch.
+/// - changing the org selection re-runs the whole hook (the closure
+///   reads the selection signals), dropping every pump and
+///   subscribing against the new slug set. The list hooks refetch on
+///   the same signal change, so no reload is needed for that case.
+fn use_org_event_streams<T, Ev, F, Fut>(
+    store: Store<T, String>,
+    scope: StreamScope,
+    subscribe: F,
+    fold: fn(&Store<T, String>, &str, Ev),
+) where
+    T: StoreEntity,
+    Ev: Clone + vox::facet::Facet<'static> + 'static,
+    F: Fn(String, vox::Tx<Ev>) -> Fut + Clone + 'static,
+    Fut: std::future::Future<Output = bool> + 'static,
+{
+    let (selection, orgs) = use_org_scope();
+    use_resource(move || {
+        let mut slugs = crate::orgs::selected_slugs(&selection.read(), &orgs.read());
+        if scope == StreamScope::First {
+            slugs.truncate(1);
+        }
+        let subscribe = subscribe.clone();
+        async move {
+            // One endless, self-healing pump per selected org. The
+            // future never resolves; it is dropped (cancelling every
+            // in-flight subscribe) when the selection changes or the
+            // app unmounts.
+            let pumps: Vec<_> = slugs
+                .into_iter()
+                .map(|slug| pump_org_events(store, slug, subscribe.clone(), fold))
+                .collect();
+            futures_util::future::join_all(pumps).await;
+        }
+    });
+}
+
+/// One org's endless subscribe → pump → backoff → resubscribe loop.
+/// See [`use_org_event_streams`] for the recovery contract.
+async fn pump_org_events<T, Ev, F, Fut>(
+    store: Store<T, String>,
+    slug: String,
+    subscribe: F,
+    fold: fn(&Store<T, String>, &str, Ev),
+) where
+    T: StoreEntity,
+    Ev: Clone + vox::facet::Facet<'static> + 'static,
+    F: Fn(String, vox::Tx<Ev>) -> Fut + Clone + 'static,
+    Fut: std::future::Future<Output = bool> + 'static,
+{
+    let mut first_attempt = true;
+    // Consecutive failures to establish — the backoff's only state.
+    let mut misses = 0u32;
+    loop {
+        if !first_attempt {
+            // Re-subscribing after a gap: refetch so events published
+            // while we were detached (sliding hubs replay nothing)
+            // are recovered. Same restart-then-resubscribe ordering
+            // the `/vault` page uses.
+            store.reload();
+        }
+        first_attempt = false;
+
+        let (tx, mut rx) = vox::channel::<Ev>();
+        let call = subscribe(slug.clone(), tx);
+        let pump = async {
+            while let Ok(Some(event)) = rx.recv().await {
+                // `SelfRef` has no owned extraction; `map` lends the
+                // value while the receive buffer is alive, so cloning
+                // out is sound — events own their data.
+                let mut owned: Option<Ev> = None;
+                let _ = event.map(|ev| owned = Some(ev.clone()));
+                if let Some(ev) = owned {
+                    fold(&store, &slug, ev);
+                }
+            }
+        };
+        // Race the in-flight subscribe call against the pump: the
+        // call resolving means the subscription is over (couldn't
+        // establish, server error, or server-side stream end).
+        let mut call = core::pin::pin!(call);
+        let mut pump = core::pin::pin!(pump);
+        let outcome = core::future::poll_fn(move |cx| {
+            use core::future::Future;
+            use core::task::Poll;
+            if let Poll::Ready(established) = call.as_mut().poll(cx) {
+                return Poll::Ready(Some(established));
+            }
+            pump.as_mut().poll(cx).map(|()| None)
+        })
+        .await;
+
+        // A pump that ended had events flowing — treat it as a live
+        // stream that stopped rather than one that never started.
+        let was_live = !matches!(outcome, Some(false));
+        let wait_ms = if was_live {
+            misses = 0;
+            400
+        } else {
+            let n = misses;
+            misses = (n + 1).min(4);
+            1000u64 << n.min(3)
+        };
+        architect::platform::sleep(core::time::Duration::from_millis(wait_ms)).await;
+    }
+}
+
+// ── event folds ─────────────────────────────────────────────────────
+//
+// One per live store: the server's fetch-once-then-fold subscriber
+// contract, aimed at the shared optimistic cache. `Upserted` events
+// carry the full post-write record → `Store::put` (idempotent);
+// `Deleted` carries the key → `Store::remove_real`. Multi-org stores
+// re-tag the row with the slug of the stream it arrived on.
+
+fn fold_task_event(store: &TaskStore, slug: &str, ev: task_proto::TaskEvent) {
+    match ev {
+        task_proto::TaskEvent::Upserted(task) => store.put(OrgTask {
+            slug: slug.to_owned(),
+            task,
+        }),
+        task_proto::TaskEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+fn fold_project_event(store: &ProjectStore, slug: &str, ev: project_proto::ProjectEvent) {
+    match ev {
+        project_proto::ProjectEvent::Upserted(project) => store.put(OrgProject {
+            slug: slug.to_owned(),
+            project,
+        }),
+        project_proto::ProjectEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+fn fold_goal_event(store: &GoalStore, slug: &str, ev: goal::GoalEvent) {
+    match ev {
+        goal::GoalEvent::Upserted(goal) => store.put(OrgGoal {
+            slug: slug.to_owned(),
+            goal,
+        }),
+        goal::GoalEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+fn fold_milestone_event(store: &MilestoneStore, _slug: &str, ev: milestone_proto::MilestoneEvent) {
+    match ev {
+        milestone_proto::MilestoneEvent::Upserted(ms) => store.put(ms),
+        milestone_proto::MilestoneEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+fn fold_inbox_event(store: &InboxStore, _slug: &str, ev: inbox_proto::InboxEvent) {
+    match ev {
+        inbox_proto::InboxEvent::Upserted(item) => store.put(item),
+        inbox_proto::InboxEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+fn fold_recall_event(store: &RecallStore, _slug: &str, ev: recall_proto::RecallEvent) {
+    match ev {
+        recall_proto::RecallEvent::Upserted(card) => store.put(card),
+        recall_proto::RecallEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+fn fold_contact_event(store: &ContactStore, _slug: &str, ev: contacts_proto::ContactsEvent) {
+    match ev {
+        contacts_proto::ContactsEvent::Upserted(contact) => store.put(contact),
+        contacts_proto::ContactsEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+fn fold_timer_event(store: &SessionStore, slug: &str, ev: timer_proto::TimerEvent) {
+    match ev {
+        timer_proto::TimerEvent::Upserted(session) => store.put(OrgSession {
+            slug: slug.to_owned(),
+            session,
+        }),
+        timer_proto::TimerEvent::Deleted(id) => store.remove_real(&id),
+    }
+}
+
+/// Bookings off the slice-wide [`scheduling_proto::SchedulingEvent`]
+/// stream — the other sub-resource variants are for other stores
+/// (event types below; day plans stay fetch-shaped, see
+/// [`use_dayplan_list`]).
+fn fold_booking_event(store: &BookingStore, _slug: &str, ev: scheduling_proto::SchedulingEvent) {
+    if let scheduling_proto::SchedulingEvent::BookingUpserted(b) = ev {
+        store.put(b);
+    }
+}
+
+/// Event types off the same stream (see [`fold_booking_event`]).
+fn fold_event_type_event(
+    store: &EventTypeStore,
+    _slug: &str,
+    ev: scheduling_proto::SchedulingEvent,
+) {
+    match ev {
+        scheduling_proto::SchedulingEvent::EventTypeUpserted(et) => store.put(et),
+        scheduling_proto::SchedulingEvent::EventTypeDeleted(id) => store.remove_real(&id),
+        _ => {}
+    }
 }
 
 /// Store-backed list scoped to the **first selected org** (or home) —
@@ -663,6 +991,36 @@ impl ProjectMutations {
             },
         );
     }
+}
+
+// ── goals (multi-org, slug-tagged) ──────────────────────────────────
+
+/// One goal tagged with its owning org's slug — the tag keys the
+/// live stream fold (and any future write-back), like [`OrgTask`].
+#[derive(Clone, PartialEq)]
+pub struct OrgGoal {
+    pub slug: String,
+    pub goal: goal::Goal,
+}
+
+impl StoreEntity for OrgGoal {
+    type Key = Uuid;
+    fn key(&self) -> Uuid {
+        self.goal.id
+    }
+}
+
+/// Goals across the selected orgs as one [`AtomResult`]. The `/goals`
+/// page renders the merged hierarchy from this store, which the
+/// app-root `GoalService` stream subscription keeps live.
+pub fn use_goal_list() -> AtomResult<Vec<(Id<Uuid>, OrgGoal)>, String> {
+    use_multi_org_list(use_goal_store(), |slugs| async move {
+        crate::feeds::fetch_goals_tagged(&slugs).await.map(|rows| {
+            rows.into_iter()
+                .map(|(slug, goal)| OrgGoal { slug, goal })
+                .collect()
+        })
+    })
 }
 
 // ── locations ───────────────────────────────────────────────────────

@@ -29,6 +29,32 @@ pub struct OrgMeta {
     /// that don't surface it. Needed by org-scoped services like the
     /// timer that key on `org_id`.
     pub id: Option<uuid::Uuid>,
+    /// Plugin ids this org has turned off (`org.toml`
+    /// `disabled_plugins`, relayed through the well-known doc). Empty
+    /// for older servers — everything on. Resolve through
+    /// [`plugin_set_for`] / [`active_plugin_set`] rather than reading
+    /// raw (resolution handles unknown ids + always-on core).
+    pub disabled_plugins: Vec<String>,
+}
+
+/// The effective plugin set of the org with `slug` (unknown slug or a
+/// pre-plugin server = everything on; core is always on either way).
+#[must_use]
+pub fn plugin_set_for(orgs: &[OrgMeta], slug: &str) -> task_plugin::PluginSet {
+    let disabled = orgs
+        .iter()
+        .find(|o| o.slug == slug)
+        .map(|o| task_plugin::PluginChoice::Disabled(o.disabled_plugins.clone()));
+    task_plugin::PluginSet::resolve(disabled.as_ref())
+}
+
+/// The plugin set the shell gates nav / widgets / routes on: the
+/// ACTIVE org's (see [`active_slug`] — the selected org, or home under
+/// "All"). Before discovery resolves this is "everything on", so
+/// nothing flickers off while the org list loads.
+#[must_use]
+pub fn active_plugin_set(sel: &OrgSelection, orgs: &[OrgMeta]) -> task_plugin::PluginSet {
+    plugin_set_for(orgs, &active_slug(sel, orgs))
 }
 
 /// What the org switcher is pointed at. `All` aggregates every hosted

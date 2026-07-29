@@ -33,6 +33,7 @@ pub mod write;
 
 pub use model::{Milestone, Status, Tags};
 pub use service::{MilestoneError, MilestoneService};
+pub use milestone_proto::MilestoneEvent;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::MilestoneBackend;
@@ -47,6 +48,12 @@ pub use write::{WriteError, default_milestone_path, serialize_milestone, write_m
 pub use milestone_proto::{
     MilestoneServiceBridge, MilestoneServiceClient, milestone_service_descriptor,
     milestone_service_layer, serve_milestone_service,
+};
+// `#[subscribe] fn events` stream sibling — live milestone changes.
+#[cfg(feature = "vox")]
+pub use milestone_proto::{
+    MilestoneServiceStream, MilestoneServiceStreamClient, MilestoneServiceStreamSource,
+    milestone_service_stream_layer, milestone_stream_descriptor, serve_milestone_service_stream,
 };
 #[cfg(feature = "vox")]
 pub use service::{MilestoneServiceRpc, MilestoneServiceRpcDispatcher as MilestoneDispatcher};

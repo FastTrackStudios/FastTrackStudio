@@ -19,6 +19,10 @@ pub struct NavTab {
     pub label: &'static str,
     pub icon: fn() -> Element,
     pub route: Route,
+    /// Owning plugin's `task-plugin` catalog id (`"core"` = always
+    /// shown). [`nav_tabs_for`] hides tabs whose plugin is off for the
+    /// active org.
+    pub plugin: &'static str,
 }
 
 fn icon_house() -> Element {
@@ -113,38 +117,45 @@ pub fn nav_tabs() -> Vec<NavTab> {
     vec![
         NavTab {
             label: "Home",
+            plugin: "core",
             icon: icon_house,
             route: Route::DashboardRoute {},
         },
         NavTab {
             label: "Inbox",
+            plugin: "core",
             icon: icon_inbox,
             route: Route::InboxRoute {},
         },
         // Recall — spaced-repetition deck (adjacent to Inbox).
         NavTab {
             label: "Recall",
+            plugin: "recall",
             icon: icon_recall,
             route: Route::RecallRoute {},
         },
         // Contacts — the people directory (adjacent to Recall).
         NavTab {
             label: "Contacts",
+            plugin: "contacts",
             icon: icon_contacts,
             route: Route::ContactsRoute {},
         },
         NavTab {
             label: "Email",
+            plugin: "email",
             icon: icon_email,
             route: Route::EmailRoute {},
         },
         NavTab {
             label: "Projects",
+            plugin: "core",
             icon: icon_projects,
             route: Route::ProjectsRoute {},
         },
         NavTab {
             label: "Goals",
+            plugin: "core",
             icon: icon_goals,
             route: Route::GoalsRoute {},
         },
@@ -153,6 +164,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
         // route — [[Views/Tasks]] and this tab open the same thing.
         NavTab {
             label: "Tasks",
+            plugin: "core",
             icon: icon_tasks,
             route: Route::VaultRoute {
                 path: "Views/Tasks.base".into(),
@@ -161,6 +173,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
         },
         NavTab {
             label: "Vault",
+            plugin: "core",
             icon: icon_vault,
             route: Route::VaultRoute {
                 path: String::new(),
@@ -169,81 +182,97 @@ pub fn nav_tabs() -> Vec<NavTab> {
         },
         NavTab {
             label: "Locations",
+            plugin: "home",
             icon: icon_locations,
             route: Route::LocationsRoute {},
         },
         NavTab {
             label: "Inventory",
+            plugin: "home",
             icon: icon_inventory,
             route: Route::InventoryRoute {},
         },
         NavTab {
             label: "Scripture",
+            plugin: "scripture",
             icon: icon_scripture,
             route: Route::ScriptureRoute { reference: String::new() },
         },
         NavTab {
             label: "Milestones",
+            plugin: "core",
             icon: icon_milestones,
             route: Route::MilestonesRoute {},
         },
         NavTab {
             label: "Fitness",
+            plugin: "fitness",
             icon: icon_fitness,
             route: Route::FitnessRoute {},
         },
         NavTab {
             label: "Mealplan",
+            plugin: "mealplan",
             icon: icon_mealplan,
             route: Route::MealplanRoute {},
         },
         NavTab {
             label: "Schedule",
+            plugin: "scheduling",
             icon: icon_schedule,
             route: Route::ScheduleRoute {},
         },
         NavTab {
             label: "Bookings",
+            plugin: "scheduling",
             icon: icon_bookings,
             route: Route::BookingsRoute {},
         },
         NavTab {
             label: "Gantt",
+            plugin: "core",
             icon: icon_gantt,
             route: Route::GanttRoute {},
         },
         NavTab {
             label: "Timer",
+            plugin: "core",
             icon: icon_timer,
             route: Route::TimerRoute {},
         },
         NavTab {
             label: "Finances",
+            plugin: "finance",
             icon: icon_finances,
             route: Route::FinancesRoute {},
         },
         NavTab {
             label: "Invoices",
+            plugin: "finance",
             icon: icon_invoices,
             route: Route::InvoicesRoute {},
         },
         NavTab {
             label: "Members",
+            plugin: "core",
             icon: icon_members,
             route: Route::MembersRoute {},
         },
         NavTab {
             label: "Ledger",
+            plugin: "finance",
             icon: icon_ledger,
             route: Route::LedgerRoute {},
         },
         NavTab {
             label: "Wiki",
+            plugin: "wiki",
             icon: icon_wiki,
             route: Route::WikiRoute {},
         },
         NavTab {
             label: "Connections",
+            plugin: "forge",
             icon: icon_connections,
             route: Route::ConnectionsRoute {},
         },
@@ -251,6 +280,7 @@ pub fn nav_tabs() -> Vec<NavTab> {
         // renders its tables), so no dedicated tab — Obsidian-style.
         NavTab {
             label: "Watch",
+            plugin: "core",
             icon: icon_watch,
             route: Route::WatchRoute {
                 v: String::new(),
@@ -259,20 +289,45 @@ pub fn nav_tabs() -> Vec<NavTab> {
         },
         NavTab {
             label: "Agents",
+            plugin: "agent",
             icon: icon_agents,
             route: Route::AgentsRoute { session: String::new() },
         },
         NavTab {
             label: "Repos",
+            plugin: "forge",
             icon: icon_repos,
             route: Route::ReposRoute {},
         },
         NavTab {
             label: "Settings",
+            plugin: "core",
             icon: icon_settings,
             route: Route::SettingsRoute {},
         },
     ]
+}
+
+/// [`nav_tabs`] with the tabs of disabled plugins hidden — what every
+/// nav surface (sidebar, rail, mobile "More", command palette) renders.
+#[must_use]
+pub fn nav_tabs_for(set: &task_plugin::PluginSet) -> Vec<NavTab> {
+    nav_tabs()
+        .into_iter()
+        .filter(|t| set.contains(t.plugin))
+        .collect()
+}
+
+/// The ACTIVE org's enabled plugin set, read from the discovery + org
+/// switcher contexts the app root provides. Call from components under
+/// the router; reading the signals subscribes the caller, so an org
+/// switch (or discovery landing) re-renders the nav. Everything-on
+/// until discovery resolves.
+#[must_use]
+pub fn use_active_plugins() -> task_plugin::PluginSet {
+    let orgs = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let sel = use_context::<Signal<crate::orgs::OrgSelection>>();
+    crate::orgs::active_plugin_set(&sel.read(), &orgs.read())
 }
 
 /// The bottom-tab-bar set: four primary destinations. Everything else
@@ -281,21 +336,25 @@ pub fn primary_mobile_tabs() -> Vec<NavTab> {
     vec![
         NavTab {
             label: "Home",
+            plugin: "core",
             icon: icon_house,
             route: Route::DashboardRoute {},
         },
         NavTab {
             label: "Tasks",
+            plugin: "core",
             icon: icon_tasks,
             route: Route::TasksRoute {},
         },
         NavTab {
             label: "Projects",
+            plugin: "core",
             icon: icon_projects,
             route: Route::ProjectsRoute {},
         },
         NavTab {
             label: "Schedule",
+            plugin: "scheduling",
             icon: icon_schedule,
             route: Route::ScheduleRoute {},
         },

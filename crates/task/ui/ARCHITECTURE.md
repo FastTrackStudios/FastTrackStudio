@@ -171,6 +171,20 @@ out of each page.
   left because `routes::Route` appears in each and each wants a
   different `nav` builder. That is a small, mechanical follow-up.
 
+## Note widgets: the other way out
+
+Pages leave the shell through the recipe above; **note embeds** leave it
+through the widget registry. `crates/task/widgets` (`task-widgets`) is
+the contract: provider crates expose `widgets() -> Vec<WidgetSpec>`
+(keyed by note type / `experience:` / frontmatter flag / embed target
+type), the app root registers them (`app.rs` — the one place providers
+are named), and `note_view` mounts/dispatches through the registry
+without knowing who provided what. The player's song/setlist embeds and
+the section tabs (`crates/task/note-tabs`) already live behind it — see
+`crates/task/widgets/README.md` for the authoring contract and match
+precedence. Widgets are one contribution type of the plugin system
+(`task-plugin`); each spec names its owning plugin id.
+
 ## Also here
 
 - `crates/task/player-ui` — the browser session player (Web Audio, the

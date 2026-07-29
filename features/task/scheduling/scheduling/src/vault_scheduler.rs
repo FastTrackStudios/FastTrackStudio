@@ -64,6 +64,14 @@ pub struct VaultScheduler {
     /// fine for the desktop use case. `Arc`'d so clones share one
     /// lock (and thus one serialization point).
     write_lock: Arc<Mutex<()>>,
+    /// Fan-out hub behind the slice's ONE `#[subscribe]` stream
+    /// ([`scheduling_proto::SchedulingEvents`]) — every successful
+    /// mutation across every sub-resource publishes its post-write
+    /// state here; the event names which sub-resource changed.
+    /// Sliding mailbox: a slow subscriber loses its *oldest* queued
+    /// events, which is correct for state-shaped payloads. Clones
+    /// share the hub (`Arc` inside).
+    events: architect::PubSub<scheduling_proto::SchedulingEvent>,
 }
 
 impl VaultScheduler {
@@ -80,11 +88,20 @@ impl VaultScheduler {
         Ok(Self {
             root,
             write_lock: Arc::new(Mutex::new(())),
+            events: architect::PubSub::sliding(256),
         })
     }
 
     pub fn root(&self) -> &std::path::Path {
         &self.root
+    }
+
+    /// Publish a scheduling change to every `events` subscriber.
+    /// Call only after the write succeeded — subscribers fold these
+    /// into state fetched via the per-capability list verbs, so a
+    /// phantom event would desync them.
+    fn publish(&self, event: scheduling_proto::SchedulingEvent) {
+        self.events.publish(event);
     }
 
     /// Every booking audit entry recorded in this vault, oldest
@@ -201,11 +218,19 @@ impl DayTemplates for VaultScheduler {
         self.write_file(
             &format!("{TEMPLATES_DIR}/{}.md", sanitize(&template.id.0)),
             &body,
-        )
+        )?;
+        self.publish(scheduling_proto::SchedulingEvent::DayTemplateUpserted(
+            template.clone(),
+        ));
+        Ok(())
     }
 
     fn delete_day_template(&self, id: &DayTemplateId) -> Result<(), SchedulingError> {
-        self.delete_file(&format!("{TEMPLATES_DIR}/{}.md", sanitize(&id.0)))
+        self.delete_file(&format!("{TEMPLATES_DIR}/{}.md", sanitize(&id.0)))?;
+        self.publish(scheduling_proto::SchedulingEvent::DayTemplateDeleted(
+            id.0.clone(),
+        ));
+        Ok(())
     }
 }
 
@@ -233,11 +258,19 @@ impl DayPlans for VaultScheduler {
         self.write_file(
             &format!("{DAYPLANS_DIR}/{}.md", sanitize(&plan.date)),
             &body,
-        )
+        )?;
+        self.publish(scheduling_proto::SchedulingEvent::DayPlanUpserted(
+            plan.clone(),
+        ));
+        Ok(())
     }
 
     fn delete_day_plan(&self, date: &str) -> Result<(), SchedulingError> {
-        self.delete_file(&format!("{DAYPLANS_DIR}/{}.md", sanitize(date)))
+        self.delete_file(&format!("{DAYPLANS_DIR}/{}.md", sanitize(date)))?;
+        self.publish(scheduling_proto::SchedulingEvent::DayPlanDeleted(
+            date.to_owned(),
+        ));
+        Ok(())
     }
 }
 
@@ -249,11 +282,19 @@ impl CalendarEvents for VaultScheduler {
 
     fn upsert_event(&self, event: &CalEvent) -> Result<(), SchedulingError> {
         let body = serialize_cal_event(event).map_err(write_err)?;
-        self.write_file(&format!("{EVENTS_DIR}/{}.md", sanitize(&event.id)), &body)
+        self.write_file(&format!("{EVENTS_DIR}/{}.md", sanitize(&event.id)), &body)?;
+        self.publish(scheduling_proto::SchedulingEvent::CalendarEventUpserted(
+            event.clone(),
+        ));
+        Ok(())
     }
 
     fn delete_event(&self, id: &str) -> Result<(), SchedulingError> {
-        self.delete_file(&format!("{EVENTS_DIR}/{}.md", sanitize(id)))
+        self.delete_file(&format!("{EVENTS_DIR}/{}.md", sanitize(id)))?;
+        self.publish(scheduling_proto::SchedulingEvent::CalendarEventDeleted(
+            id.to_owned(),
+        ));
+        Ok(())
     }
 }
 
@@ -282,17 +323,28 @@ impl EventTypes for VaultScheduler {
                 })
             ),
             &body,
-        )
+        )?;
+        self.publish(scheduling_proto::SchedulingEvent::EventTypeUpserted(
+            event_type.clone(),
+        ));
+        Ok(())
     }
 
     fn delete_event_type(&self, id: &EventTypeId) -> Result<(), SchedulingError> {
         // Caller may pass the slug; fall back to id for backwards
         // compat. We just try to remove every file whose parsed
         // event type matches the id.
+        let mut removed = false;
         for et in self.list_event_types()? {
             if et.id.0 == id.0 {
                 self.delete_file(&et.path)?;
+                removed = true;
             }
+        }
+        if removed {
+            self.publish(scheduling_proto::SchedulingEvent::EventTypeDeleted(
+                id.0.clone(),
+            ));
         }
         Ok(())
     }
@@ -316,11 +368,19 @@ impl Schedules for VaultScheduler {
         self.write_file(
             &format!("{SCHEDULES_DIR}/{}.md", sanitize(&schedule.id.0)),
             &body,
-        )
+        )?;
+        self.publish(scheduling_proto::SchedulingEvent::ScheduleUpserted(
+            schedule.clone(),
+        ));
+        Ok(())
     }
 
     fn delete_schedule(&self, id: &ScheduleId) -> Result<(), SchedulingError> {
-        self.delete_file(&format!("{SCHEDULES_DIR}/{}.md", sanitize(&id.0)))
+        self.delete_file(&format!("{SCHEDULES_DIR}/{}.md", sanitize(&id.0)))?;
+        self.publish(scheduling_proto::SchedulingEvent::ScheduleDeleted(
+            id.0.clone(),
+        ));
+        Ok(())
     }
 }
 
@@ -371,6 +431,9 @@ impl Bookings for VaultScheduler {
         let body = serialize_booking(&persisted).map_err(write_err)?;
         self.write_file(&persisted.path, &body)?;
         self.audit(&BookingAuditEntry::created(&persisted.id.0));
+        self.publish(scheduling_proto::SchedulingEvent::BookingUpserted(
+            persisted.clone(),
+        ));
         Ok(persisted)
     }
 
@@ -387,7 +450,19 @@ impl Bookings for VaultScheduler {
             &id.0,
             format!("{status:?}"),
         ));
+        // Status changes surface as an upsert with the post-write
+        // row — bookings are never deleted, only transitioned.
+        self.publish(scheduling_proto::SchedulingEvent::BookingUpserted(booking));
         Ok(())
+    }
+}
+
+/// The `#[subscribe]` backend contract: hand the emitted stream host
+/// the hub it attaches subscriber sinks to. Publishing happens in the
+/// capability impls above, on every successful mutation.
+impl scheduling_proto::SchedulingEventsStreamSource for VaultScheduler {
+    fn events_hub(&self) -> &architect::PubSub<scheduling_proto::SchedulingEvent> {
+        &self.events
     }
 }
 

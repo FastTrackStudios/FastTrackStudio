@@ -11,7 +11,7 @@
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::Feather;
 
-use crate::nav::{nav_tabs, tabs_match};
+use crate::nav::{nav_tabs_for, tabs_match, use_active_plugins};
 use crate::routes::Route;
 
 /// The rail is a shortlist, not a directory: core destinations only.
@@ -28,7 +28,7 @@ const RAIL_TABS: &[&str] = &[
 #[component]
 pub fn IconRail(current: Route) -> Element {
     let nav = use_navigator();
-    let tabs = nav_tabs();
+    let tabs = nav_tabs_for(&use_active_plugins());
     let mut open = crate::chrome::use_fleeting_open();
 
     let tab_button = |tab: &crate::nav::NavTab| {

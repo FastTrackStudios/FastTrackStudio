@@ -155,6 +155,7 @@ goal = { workspace = true, features = ["vox"] }
 # Owns `task org init|list` + the `DataRoot` / `OrgRoot` path
 # resolvers. Existing auth/timer/finance paths keep working at
 # their XDG locations until PR 2 migrates them through OrgRoot.
+task-plugin = { workspace = true }
 org-proto = { workspace = true }
 # Mount registry — `task mount add|list|rm` reads/writes
 # `mounts.toml` and resolves project-id → local path.

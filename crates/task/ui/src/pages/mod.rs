@@ -30,7 +30,6 @@ pub mod recipe_edit;
 pub mod repos;
 pub mod schedule;
 pub mod share_panel;
-pub mod experience;
 pub mod note_properties;
 pub mod settings;
 pub mod task_detail;

@@ -26,6 +26,10 @@ struct RawOrg {
     is_home: bool,
     #[serde(default)]
     id: Option<uuid::Uuid>,
+    /// Plugin deny-list from the org's manifest. Absent on servers
+    /// predating the plugin toggle — everything on.
+    #[serde(default)]
+    disabled_plugins: Vec<String>,
 }
 
 fn parse_orgs(body: &str) -> Result<Vec<OrgMeta>, String> {
@@ -38,6 +42,7 @@ fn parse_orgs(body: &str) -> Result<Vec<OrgMeta>, String> {
             name: o.display_name,
             is_home: o.is_home,
             id: o.id,
+            disabled_plugins: o.disabled_plugins,
         })
         .collect())
 }

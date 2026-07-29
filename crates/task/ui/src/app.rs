@@ -194,6 +194,29 @@ pub fn App() -> Element {
     // on boot, mirror picker changes back (localStorage + server).
     crate::theming::use_theme_prefs_sync();
 
+    // ── Note-widget registry ──────────────────────────────────
+    // The ONE site where widget provider crates are named. Everything
+    // else in the shell (note_view, collab decorations, link clicks)
+    // goes through the `task_widgets::WidgetRegistry` context and never
+    // learns who provided a widget. Registration is explicit — no
+    // linker magic — so this list IS the app's widget roster.
+    let widget_registry = use_context_provider(|| {
+        let registry = task_widgets::WidgetRegistry::new();
+        registry.register(task_player_ui::widgets());
+        registry.register(task_note_tabs::widgets());
+        registry
+    });
+    // Keep the registry pointed at the ACTIVE org's enabled plugin set
+    // (specs of disabled plugins stop matching/decorating). Registration
+    // stays as-is — the filter is read-time, so an org switch retunes
+    // the same registry.
+    use_effect(move || {
+        widget_registry.set_plugin_set(crate::orgs::active_plugin_set(
+            &org_selection.read(),
+            &org_list.read(),
+        ));
+    });
+
     // Org-wide presence: join the active org's `DocPresence` channel
     // over the shared connection above (the hook reads the
     // `Connection<vox::Caller>` context, so this must come AFTER

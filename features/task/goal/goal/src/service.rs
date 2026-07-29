@@ -27,6 +27,37 @@ pub enum GoalError {
     Io(String),
 }
 
+/// One goal change, broadcast to every [`GoalService`] subscriber on
+/// each successful mutation.
+///
+/// ## Subscriber contract (no snapshot variant, v1)
+///
+/// The stream carries *changes only* — there is no `Snapshot`
+/// variant. A subscriber that wants the full state fetches it once
+/// via [`GoalService::list`] (after subscribing, so nothing is
+/// missed in between) and then folds events into that local copy:
+///
+/// - [`GoalEvent::Upserted`] carries the **full post-write**
+///   [`Goal`] — replace (or insert) the row with a matching `id`.
+///   Re-applying an event already reflected in the fetched list is
+///   harmless (idempotent re-application).
+/// - [`GoalEvent::Deleted`] — remove the row with that `id`.
+///
+/// `Upserted` fires for every write path: create, update, and rename
+/// (the new `path` is in the payload).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+// Upserted carries the full Goal by design (idempotent full-state
+// payloads) — same trade-off as `task_proto::TaskEvent`.
+#[allow(clippy::large_enum_variant)]
+pub enum GoalEvent {
+    /// A goal was created or modified — the payload is the complete
+    /// state after the write.
+    Upserted(Goal),
+    /// The goal with this id (and its backing file) was removed.
+    Deleted(Uuid),
+}
+
 #[architect::rpc]
 pub trait GoalService {
     /// Every `type: goal` page under the org's vault.
@@ -55,4 +86,10 @@ pub trait GoalService {
     /// Remove the backing file. `NotFound` if already gone.
     /// Refuses if any other goal lists this one as `parent_id`.
     fn delete(&self, id: Uuid) -> Result<(), GoalError>;
+
+    /// Every goal change, as it happens — fires on each successful
+    /// create / update / rename / delete. See [`GoalEvent`] for the
+    /// fetch-once-then-fold subscriber contract.
+    #[subscribe]
+    fn events(&self) -> GoalEvent;
 }

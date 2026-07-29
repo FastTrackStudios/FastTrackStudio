@@ -38,12 +38,21 @@ task-ui.workspace = true
 # display formatting, vault frontmatter reads. Re-exported from `lib.rs`
 # as `crate::format` / `crate::vox_session`.
 task-ui-core.workspace = true
+# Plugin vocabulary — nav/route gating on the active org's enabled set.
+task-plugin.workspace = true
 # `type: song` / `type: setlist` vault views — the browser multitrack
 # session player, extracted whole into its own crate. ONE dependency
 # instead of the audio stack: `session-ui`, `session-proto`, `daw-proto`,
 # `keyflow` (engraver), `editor-keyflow{,-lang}` and — on wasm — `daw`,
 # `daw-standalone` and `session` are all its business now, not ours.
 task-player-ui.workspace = true
+# The note-widget contract: the registry the note view consults, the
+# WidgetCtx it builds, and the shared FullscreenExperience chrome. The
+# provider crates below are named ONLY at the app-root registration
+# site (app.rs).
+task-widgets.workspace = true
+# Widget provider: in-note section tabs (type: event / tabs: true).
+task-note-tabs.workspace = true
 share-proto = { workspace = true }
 # `vox` for the `DayTemplatesClient` the schedule page calls to load
 # the day-plan overlay. Wasm-clean (serde-only client side).
@@ -104,6 +113,10 @@ scripture-ui.workspace = true
 # browser graph entirely — the protos are the whole contract.
 project-proto = { workspace = true, features = ["vox"] }
 task-proto = { workspace = true, features = ["vox"] }
+# Goal wire model + `GoalService(Stream)Client` for the live goal
+# store behind `/goals`. The goal crate is its own proto (wasm-clean
+# model + rpc trait; the vault-backed modules are cfg'd off on wasm).
+goal = { workspace = true, features = ["vox"] }
 # Timer service client for the `/timer` time-tracking page.
 timer-proto = { workspace = true, features = ["vox"] }
 # Agent service clients for the `/agents` page — `SessionsClient`

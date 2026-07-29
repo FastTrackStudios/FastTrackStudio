@@ -21,6 +21,38 @@ pub enum MilestoneError {
     Io(String),
 }
 
+/// One milestone change, broadcast to every [`MilestoneService`]
+/// subscriber on each successful mutation.
+///
+/// ## Subscriber contract (no snapshot variant, v1)
+///
+/// The stream carries *changes only* — there is no `Snapshot`
+/// variant. A subscriber that wants the full state fetches it once
+/// via [`MilestoneService::list`] (after subscribing, so nothing is
+/// missed in between) and then folds events into that local copy:
+///
+/// - [`MilestoneEvent::Upserted`] carries the **full post-write**
+///   [`Milestone`] — replace (or insert) the row with a matching
+///   `id`. Re-applying an event already reflected in the fetched
+///   list is harmless (idempotent re-application).
+/// - [`MilestoneEvent::Deleted`] — remove the row with that `id`.
+///
+/// `Upserted` fires for every write path: create, update, and rename
+/// (the new `path` is in the payload).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+// Upserted carries the full Milestone by design (idempotent
+// full-state payloads) — same trade-off as `task_proto::TaskEvent`.
+#[allow(clippy::large_enum_variant)]
+pub enum MilestoneEvent {
+    /// A milestone was created or modified — the payload is the
+    /// complete state after the write.
+    Upserted(Milestone),
+    /// The milestone with this id (and its backing file) was
+    /// removed.
+    Deleted(Uuid),
+}
+
 #[architect::rpc]
 pub trait MilestoneService {
     /// Every milestone under the org's vault. Filter
@@ -44,4 +76,11 @@ pub trait MilestoneService {
     /// Remove. Refuses if any task carries this `milestone_id`
     /// — clear the link on those tasks first.
     fn delete(&self, id: Uuid) -> Result<(), MilestoneError>;
+
+    /// Every milestone change, as it happens — fires on each
+    /// successful create / update / rename / delete. See
+    /// [`MilestoneEvent`] for the fetch-once-then-fold subscriber
+    /// contract.
+    #[subscribe]
+    fn events(&self) -> MilestoneEvent;
 }
