@@ -283,6 +283,8 @@ members = [
     "apps/plugins/signal",
     "apps/plugins/gate",
     "apps/plugins/limiter",
+    "apps/plugins/meter",
+    "apps/plugins/pitch",
     "apps/plugins/trigger",
     "apps/plugins/xtask",
     "apps/plugins/host",
