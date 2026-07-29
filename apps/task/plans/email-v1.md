@@ -11,11 +11,23 @@ never opened, only the research doc's descriptions.
 
 | # | Item | State |
 |---|------|-------|
-| 1 | Wire send (SMTP through the mounted maildir backend) | in progress |
-| 2 | Outbox + approval state machine + poller | pending |
-| 3 | Compose UI (reply/new) + outbox panel | pending |
-| 4 | Triage pass (derivation cache, heuristics only) | pending |
-| 5 | Baseline + alert-once notification surface | pending |
+| 1 | Wire send (SMTP through the mounted maildir backend) | DONE |
+| 2 | Outbox + approval state machine + poller | DONE |
+| 3 | Compose UI (reply/new) + outbox panel | DONE |
+| 4 | Triage pass (derivation cache, heuristics only) | DONE |
+| 5 | Baseline + alert-once notification surface | DONE |
+
+Gates green as of 2026-07-28: workspace check (`--exclude
+vox-discover`), `task-app-web` on wasm32 (after `just css`),
+`task-server` tests, `ui --lib`, all email slice tests incl. the
+outbox round-trip e2e (`email-product/tests/outbox_roundtrip.rs`)
+and the baseline/alert-once e2e (`tests/notify_baseline.rs`).
+
+To make a real account sendable: drop an `account.json`
+(`email_config::AccountConfig`, JSON) into
+`<org>/vault/Mail/<account>/` with `backend.kind = "maildir"` and
+a `submit` block (host/port/tls/username/password secret) — the
+server's account discovery wires the SMTP submitter from it.
 
 ## Design decisions
 

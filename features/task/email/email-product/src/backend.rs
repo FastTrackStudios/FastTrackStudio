@@ -71,6 +71,10 @@ const TRIAGE_BUDGET: usize = 5;
 /// How many recent INBOX envelopes one triage pass considers.
 const TRIAGE_SCAN: u32 = 50;
 
+/// New notification marks per account per pass — a mail flood
+/// (or a mis-detected baseline) can't stampede the notifier.
+const NOTIFY_CAP: usize = 50;
+
 impl ProductBackend {
     /// Open the per-account stores and build the backend with the
     /// v1 [`HeuristicEngine`].
@@ -156,30 +160,36 @@ impl ProductBackend {
                     () = tokio::time::sleep(interval) => {}
                 }
                 backend.drain_outbox_once().await;
-                backend.triage_once().await;
+                backend.background_pass_once().await;
             }
         })
     }
 
-    /// One bounded triage pass over every account: consider the
-    /// newest [`TRIAGE_SCAN`] INBOX envelopes, compute
-    /// derivations for at most [`TRIAGE_BUDGET`] messages that
-    /// lack current-version rows, publish `DerivationsUpdated`
-    /// per message (publish-after-write). Catch-up happens over
-    /// successive passes — cost stays flat however big the
-    /// backlog.
-    pub async fn triage_once(&self) {
+    /// One bounded background pass over every account, sharing a
+    /// single envelope scan per account:
+    ///
+    /// - **notify**: first sight of the account baselines
+    ///   silently; afterwards genuinely-new messages get their
+    ///   one notification mark ([`NOTIFY_CAP`]/pass).
+    /// - **triage**: compute derivations for at most
+    ///   [`TRIAGE_BUDGET`] messages lacking current-version rows,
+    ///   publishing `DerivationsUpdated` per message
+    ///   (publish-after-write).
+    ///
+    /// Catch-up happens over successive passes — cost stays flat
+    /// however big the backlog.
+    pub async fn background_pass_once(&self) {
         let accounts: Vec<String> = self.inner.stores.keys().cloned().collect();
         for account in accounts {
-            if let Err(err) = self.triage_account(&account).await {
-                tracing::warn!(account, %err, "triage pass failed");
+            if let Err(err) = self.background_account_pass(&account).await {
+                tracing::warn!(account, %err, "email background pass failed");
             }
         }
     }
 
-    async fn triage_account(&self, account: &str) -> Result<(), EmailSyncError> {
-        // Newest envelopes + the missing-work set, off the async
-        // thread.
+    async fn background_account_pass(&self, account: &str) -> Result<(), EmailSyncError> {
+        // Newest envelopes + the notify step + the missing-work
+        // set, off the async thread in one hop.
         let backend = self.clone();
         let account_owned = account.to_string();
         let (envelopes, missing) = tokio::task::spawn_blocking(
@@ -192,7 +202,20 @@ impl ProductBackend {
                 let ids: Vec<String> =
                     envelopes.iter().map(|e| e.message_id.clone()).collect();
                 let store = backend.store(&account_owned)?;
-                let store = store.lock().expect("store mutex");
+                let mut store = store.lock().expect("store mutex");
+
+                // Alert-once bookkeeping.
+                let id_refs = ids.iter().map(String::as_str);
+                if store.notify_is_baselined().map_err(map_store)? {
+                    store
+                        .notify_observe(id_refs, now_ms(), NOTIFY_CAP)
+                        .map_err(map_store)?;
+                } else {
+                    // First sight: everything pre-existing is
+                    // seen-for-notification; fire nothing.
+                    store.notify_baseline(id_refs, now_ms()).map_err(map_store)?;
+                }
+
                 let missing = store
                     .derivations_missing(&ids, DerivationKind::Urgency, DERIVATION_VERSION)
                     .map_err(map_store)?;
@@ -415,6 +438,18 @@ impl EmailProduct for ProductBackend {
         };
         self.publish_outbox(account, &entry);
         Ok(entry)
+    }
+
+    fn unnotified(&self, account: &str, limit: u32) -> Result<Vec<String>, EmailSyncError> {
+        let store = self.store(account)?.lock().expect("store mutex");
+        store.notify_unnotified(limit).map_err(map_store)
+    }
+
+    fn mark_notified(&self, account: &str, ids: Vec<String>) -> Result<u32, EmailSyncError> {
+        let mut store = self.store(account)?.lock().expect("store mutex");
+        store
+            .notify_mark(ids.iter().map(String::as_str))
+            .map_err(map_store)
     }
 }
 

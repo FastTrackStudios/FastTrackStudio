@@ -23,6 +23,7 @@
 mod derivations;
 mod error;
 mod jwz;
+mod notify;
 mod outbox;
 mod query;
 mod schema;

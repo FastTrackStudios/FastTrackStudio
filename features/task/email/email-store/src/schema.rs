@@ -83,6 +83,27 @@ CREATE TABLE IF NOT EXISTS derivations (
     PRIMARY KEY (message_id, kind)
 );
 
+-- Notification state: first-sync baselining + alert-once. The
+-- first pass over an account inserts every existing message
+-- already `notified` (silent baseline — adding an account with
+-- years of mail fires nothing); afterwards genuinely-new
+-- messages get exactly one `notified = 0` mark (capped per
+-- pass), which the notifications system drains via
+-- `unnotified` / `mark_notified`.
+CREATE TABLE IF NOT EXISTS notify_state (
+    message_id    TEXT PRIMARY KEY,
+    first_seen_ms INTEGER NOT NULL,
+    notified      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_notify_unnotified
+    ON notify_state(notified, first_seen_ms DESC);
+
+CREATE TABLE IF NOT EXISTS notify_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 DROP TABLE IF EXISTS pending_ops;
 "#;
 

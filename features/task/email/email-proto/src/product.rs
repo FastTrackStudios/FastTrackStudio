@@ -44,4 +44,17 @@ pub trait EmailProduct {
     /// `Approved` / `Failed` → `Cancelled`). Publishes
     /// `OutboxChanged`. Cancelling a terminal entry is an error.
     fn cancel(&self, account: &str, id: u64) -> Result<OutboxEntry, EmailSyncError>;
+
+    /// Message-ids holding an undrained notification mark, newest
+    /// first. The alert-once contract: an account's first sync
+    /// baselines silently (nothing ever shows up here for
+    /// pre-existing mail), and each genuinely-new message appears
+    /// exactly once — until [`Self::mark_notified`] drains it.
+    /// This is the surface the notifications system consumes.
+    fn unnotified(&self, account: &str, limit: u32) -> Result<Vec<String>, EmailSyncError>;
+
+    /// Drain notification marks. Returns how many actually
+    /// flipped (already-drained / unknown ids are no-ops), so a
+    /// consumer racing another drain can tell who won.
+    fn mark_notified(&self, account: &str, ids: Vec<String>) -> Result<u32, EmailSyncError>;
 }
