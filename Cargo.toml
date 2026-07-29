@@ -702,6 +702,9 @@ lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", branch = "
 clsx = "0.1.1"
 tw_merge = "0.1.21"
 nucleo-matcher = "0.3"
+# fff's fuzzy scorer (SIMD Smith-Waterman, scalar fallback on wasm) —
+# the everything-search window's matcher.
+neo_frizbee = { version = "0.11", features = ["match_end_col"] }
 palette = "0.7.6"
 linkme = "0.3"
 

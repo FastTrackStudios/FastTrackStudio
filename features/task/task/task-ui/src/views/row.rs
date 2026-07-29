@@ -271,7 +271,7 @@ pub fn CheckboxButton(props: CheckboxButtonProps) -> Element {
 }
 
 /// Convert a `[[Wikilink]]` into the bare page name.
-fn strip_wikilink(s: &str) -> String {
+pub(super) fn strip_wikilink(s: &str) -> String {
     s.trim_start_matches("[[")
         .trim_end_matches("]]")
         .to_string()

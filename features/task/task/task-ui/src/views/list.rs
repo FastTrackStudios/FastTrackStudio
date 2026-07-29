@@ -16,6 +16,11 @@ use super::row::TaskRow;
 #[derive(Props, Clone, PartialEq)]
 pub struct TaskListProps {
     pub tasks: Vec<TaskInfo>,
+    /// Per-project condensation leftovers: `(representative task id,
+    /// the project's other tasks)`. The representative's row grows a
+    /// "N more in {project}" expander that reveals them inline.
+    #[props(default)]
+    pub more: Vec<(Uuid, Vec<TaskInfo>)>,
     pub on_toggle: EventHandler<Uuid>,
     pub on_open: EventHandler<Uuid>,
     pub on_event: EventHandler<TaskMutation>,
@@ -105,7 +110,9 @@ pub fn TaskList(props: TaskListProps) -> Element {
         .filter(|(_, items)| !items.is_empty())
         .partition(|(g, _)| matches!(g, Group::Overdue | Group::Today | Group::NoDate));
 
-    let lane = |groups: Vec<(Group, Vec<TaskInfo>)>| {
+    let more = props.more.clone();
+    let lane = move |groups: Vec<(Group, Vec<TaskInfo>)>| {
+        let more = more.clone();
         rsx! {
             div { class: "flex min-w-0 flex-col gap-3",
                 for (group, items) in groups.into_iter() {
@@ -116,7 +123,7 @@ pub fn TaskList(props: TaskListProps) -> Element {
                         // The Done section starts collapsed —
                         // typical Things 3 / Todoist behaviour.
                         initially_open: group != Group::Done,
-                        TaskList_Children { items, on_toggle: props.on_toggle, on_open: props.on_open, on_event: props.on_event }
+                        TaskList_Children { items, more: more.clone(), on_toggle: props.on_toggle, on_open: props.on_open, on_event: props.on_event }
                     }
                 }
             }
@@ -138,6 +145,8 @@ pub fn TaskList(props: TaskListProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct TaskListChildrenProps {
     items: Vec<TaskInfo>,
+    #[props(default)]
+    more: Vec<(Uuid, Vec<TaskInfo>)>,
     on_toggle: EventHandler<Uuid>,
     on_open: EventHandler<Uuid>,
     on_event: EventHandler<TaskMutation>,
@@ -152,16 +161,87 @@ fn TaskList_Children(props: TaskListChildrenProps) -> Element {
     rsx! {
         div { class: "flex flex-col gap-0.5 pl-1",
             for (depth, t) in arranged.into_iter() {
-                div {
-                    key: "{t.id}",
-                    // Subtasks hang off a hairline rail — family
-                    // membership as structure, not fat indentation.
-                    class: if depth > 0 { "ml-2.5 border-l border-border/60 pl-2.5" } else { "" },
-                    TaskRow {
-                        task: t,
-                        on_toggle: props.on_toggle,
-                        on_open: props.on_open,
-                        on_event: props.on_event,
+                {
+                    let extra = props
+                        .more
+                        .iter()
+                        .find(|(id, _)| *id == t.id)
+                        .map(|(_, rest)| rest.clone())
+                        .filter(|rest| !rest.is_empty());
+                    let project = t
+                        .projects
+                        .0
+                        .first()
+                        .map(|p| super::row::strip_wikilink(p))
+                        .unwrap_or_else(|| "this project".to_owned());
+                    rsx! {
+                        div {
+                            key: "{t.id}",
+                            // Subtasks hang off a hairline rail — family
+                            // membership as structure, not fat indentation.
+                            class: if depth > 0 { "ml-2.5 border-l border-border/60 pl-2.5" } else { "" },
+                            TaskRow {
+                                task: t,
+                                on_toggle: props.on_toggle,
+                                on_open: props.on_open,
+                                on_event: props.on_event,
+                            }
+                            if let Some(extra) = extra {
+                                ProjectMore {
+                                    project,
+                                    extra,
+                                    on_toggle: props.on_toggle,
+                                    on_open: props.on_open,
+                                    on_event: props.on_event,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The condensed list's expander: "N more in {project}" under a
+/// project's representative task, revealing the rest of that
+/// project's queue inline on the same hairline rail as subtasks.
+#[component]
+fn ProjectMore(
+    project: String,
+    extra: Vec<TaskInfo>,
+    on_toggle: EventHandler<Uuid>,
+    on_open: EventHandler<Uuid>,
+    on_event: EventHandler<TaskMutation>,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let n = extra.len();
+    let icon_rotation = if open() { "rotate-90" } else { "" };
+    rsx! {
+        div { class: "ml-2.5 border-l border-border/60 pl-2.5",
+            button {
+                r#type: "button",
+                class: "flex items-center gap-1 rounded px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground",
+                onclick: move |_| open.toggle(),
+                span { class: "transition-transform {icon_rotation}",
+                    ChevronRight { size: 11 }
+                }
+                if open() {
+                    "hide the {project} queue"
+                } else {
+                    "{n} more in {project}"
+                }
+            }
+            if open() {
+                div { class: "flex flex-col gap-0.5",
+                    for t in extra.into_iter() {
+                        TaskRow {
+                            key: "{t.id}",
+                            task: t,
+                            on_toggle,
+                            on_open,
+                            on_event,
+                        }
                     }
                 }
             }

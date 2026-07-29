@@ -367,11 +367,18 @@ fn explorer_node(
                 class: "{row_cls}",
                 style: "padding-left: {indent + 6}px",
                 onclick: move |_| {
-                    // Clicking the row OPENS the note. For a folder it also
-                    // ensures the folder is expanded (never collapses — the
-                    // chevron owns collapse), so a click both opens the
-                    // folder-note and reveals its children.
+                    // Clicking the row OPENS the note and reveals a folder's
+                    // children. Clicking the row of the note that's ALREADY
+                    // open toggles the dropdown instead — so collapsing
+                    // doesn't require hunting the tiny chevron.
                     if is_folder {
+                        if is_selected {
+                            let mut set = expanded.write();
+                            if !set.remove(&row_key) {
+                                set.insert(row_key.clone());
+                            }
+                            return;
+                        }
                         expanded.write().insert(row_key.clone());
                     }
                     nav.push(Route::VaultRoute { path: path.clone(), org: String::new() });

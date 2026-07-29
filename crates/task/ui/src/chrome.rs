@@ -34,6 +34,18 @@ use crate::routes::Route;
 #[derive(Clone, Copy)]
 pub struct FleetingOpen(pub Signal<bool>);
 
+/// Visibility of the telescope-style everything-search window
+/// (`<space> <space>`, [`crate::search::SearchOverlay`]).
+#[derive(Clone, Copy)]
+pub struct SearchOpen(pub Signal<bool>);
+
+/// A vault path whose note header should open straight into title-edit
+/// mode (text pre-selected) the next time it mounts. Set by the
+/// new-note flow so a fresh "Untitled" note can be named by just
+/// typing; taken (cleared) by the header when it fires.
+#[derive(Clone, Copy)]
+pub struct PendingTitleEdit(pub Signal<Option<String>>);
+
 /// Zen mode: hide ALL desktop chrome (top bar, icon rail, explorer,
 /// status bar) so the open view gets the full viewport. Toggled by
 /// Ctrl+Shift+Z ([`crate::shortcuts`]) and exited from the hover
@@ -86,6 +98,8 @@ fn detect_share_mode() -> bool {
 /// Install the chrome contexts. Call once in the app shell.
 pub fn provide_chrome_contexts() {
     use_context_provider(|| FleetingOpen(Signal::new(false)));
+    use_context_provider(|| SearchOpen(Signal::new(false)));
+    use_context_provider(|| PendingTitleEdit(Signal::new(None)));
     use_context_provider(|| StatusBarInfo(Signal::new(None)));
     use_context_provider(|| ZenMode(Signal::new(false)));
     use_context_provider(|| ShareMode(detect_share_mode()));
