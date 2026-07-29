@@ -2112,6 +2112,19 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         // sibling, served from the hub on the `VaultInbox` above.
         .merge(inbox_proto::inbox_stream_layer(org.inbox.clone()));
 
+    router = router
+        // Notifications — the bell's queue (list / mark_read /
+        // mark_all_read / delete). Rows are written by the in-process
+        // notifier (`crate::notifier`), not by clients.
+        .with(
+            notify_proto::notify_rpc_service_descriptor(),
+            notify_proto::notify_serve(org.notify.clone()),
+        )
+        // Live notification changes — `Notify`'s `#[subscribe]`
+        // stream sibling, served from the hub on the notify `Store`
+        // above. The bell folds these (fetch-once-then-fold).
+        .merge(notify_proto::notify_stream_layer(org.notify.clone()));
+
     // ── Recall plugin ────────────────────────────────────────────
     if on("recall") {
         router = router

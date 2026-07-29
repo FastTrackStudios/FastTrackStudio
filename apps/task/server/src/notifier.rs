@@ -89,11 +89,17 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
                 let tasks = tasks.clone();
                 let cache = Arc::clone(&cache);
                 async move {
-                    // Re-seed on every (re)subscribe: the hub replays
-                    // nothing, so transitions that happened while
-                    // detached must not fire as fresh news — and
-                    // unknown-id events fire nothing, so the seed is
-                    // what arms the rule.
+                    // Subscribe FIRST, then seed (the fetch-once-then-
+                    // fold contract): events landing during the seed
+                    // wait in the rx mailbox and replay over a cache
+                    // that already contains their effect — idempotent.
+                    // Seeding re-runs on every resubscribe because the
+                    // hub replays nothing, and unknown-id events fire
+                    // nothing — the seed is what arms the rule.
+                    let client: task::TaskServiceStreamClient = local.establish().await.ok()?;
+                    let (tx, rx) = vox::channel::<TaskEvent>();
+                    let call = tokio::spawn(async move { client.events(tx).await.is_ok() });
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                     let seeded = tokio::task::spawn_blocking(move || {
                         task::service::TaskService::list(&tasks)
                     })
@@ -108,10 +114,7 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
                         Ok(Err(e)) => tracing::warn!(error = ?e, "notifier: task seed failed"),
                         Err(e) => tracing::warn!(error = %e, "notifier: task seed panicked"),
                     }
-                    let client: task::TaskServiceStreamClient = local.establish().await.ok()?;
-                    let (tx, rx) = vox::channel::<TaskEvent>();
-                    let call: SubCall =
-                        Box::pin(async move { client.events(tx).await.is_ok() });
+                    let call: SubCall = Box::pin(async move { call.await.unwrap_or(false) });
                     Some((call, rx))
                 }
             }
@@ -160,8 +163,14 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
                 let scheduler = scheduler.clone();
                 let cache = Arc::clone(&cache);
                 async move {
-                    // Seed known bookings so an edit to a pre-existing
-                    // one doesn't read as "new booking".
+                    // Subscribe first, then seed — see the task pump.
+                    // The seed keeps an edit to a pre-existing booking
+                    // from reading as "new booking".
+                    let client: scheduling_proto::SchedulingEventsStreamClient =
+                        local.establish().await.ok()?;
+                    let (tx, rx) = vox::channel::<SchedulingEvent>();
+                    let call = tokio::spawn(async move { client.events(tx).await.is_ok() });
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                     let seeded = tokio::task::spawn_blocking(move || {
                         scheduling_proto::service::bookings::Bookings::list_bookings(&scheduler)
                     })
@@ -174,11 +183,7 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
                         Ok(Err(e)) => tracing::warn!(error = ?e, "notifier: booking seed failed"),
                         Err(e) => tracing::warn!(error = %e, "notifier: booking seed panicked"),
                     }
-                    let client: scheduling_proto::SchedulingEventsStreamClient =
-                        local.establish().await.ok()?;
-                    let (tx, rx) = vox::channel::<SchedulingEvent>();
-                    let call: SubCall =
-                        Box::pin(async move { client.events(tx).await.is_ok() });
+                    let call: SubCall = Box::pin(async move { call.await.unwrap_or(false) });
                     Some((call, rx))
                 }
             }
