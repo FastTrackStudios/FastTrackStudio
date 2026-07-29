@@ -183,6 +183,7 @@ members = [
     "crates/signal/controller",
     "crates/signal/import",
     "crates/signal/browser",
+    "crates/signal/space",
     "crates/signal/grid",
     "crates/signal/grid-ui",
     "crates/signal/daw-bridge",
@@ -513,6 +514,7 @@ signal-ui = { path = "crates/signal/ui", default-features = false }
 # workspace dependency unless the workspace entry sets it too. Consumers
 # that need the filesystem scanner opt in with `features = ["native"]`.
 signal-browser = { path = "crates/signal/browser", default-features = false }
+signal-space = { path = "crates/signal/space" }
 signal-grid = { path = "crates/signal/grid" }
 signal-grid-ui = { path = "crates/signal/grid-ui" }
 signal-controller = { path = "crates/signal/controller" }
