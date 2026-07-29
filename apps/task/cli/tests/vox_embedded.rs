@@ -168,6 +168,56 @@ fn finance_reports_over_embedded_vox() {
 }
 
 #[test]
+fn vault_mirror_over_embedded_vox() {
+    let tmp = scratch_org();
+
+    // Seed the ORG vault (the tree the embedded server serves).
+    let vault = tmp.path().join("orgs/t/vault");
+    std::fs::create_dir_all(vault.join("Notes")).unwrap();
+    std::fs::write(vault.join("Notes/a.md"), "# A\n\nhello vault\n").unwrap();
+
+    // A missing positional path routes to the org vault over vox
+    // (mirror + identical FS logic) instead of erroring.
+    let out = task(tmp.path(), &["--org", "t", "vault", "pages", "no-such-dir"]);
+    assert!(ok(&out).contains("Notes/a.md"));
+
+    let out = task(
+        tmp.path(),
+        &["--org", "t", "vault", "cat", "no-such-dir", "Notes/a.md"],
+    );
+    assert!(ok(&out).contains("hello vault"));
+
+    // A mutation on the vox route pushes back into the org vault.
+    let out = task(
+        tmp.path(),
+        &[
+            "--org",
+            "t",
+            "vault",
+            "create",
+            "no-such-dir",
+            "Notes/b.md",
+            "--body",
+            "created over vox",
+        ],
+    );
+    ok(&out);
+    let created = std::fs::read_to_string(vault.join("Notes/b.md")).expect("pushed back");
+    assert!(created.contains("created over vox"));
+
+    // --fs pins the old direct behaviour: the missing path is
+    // walked as an (empty) on-disk vault, never routed to vox.
+    let out = task(
+        tmp.path(),
+        &["--org", "t", "vault", "--fs", "pages", "no-such-dir"],
+    );
+    assert!(
+        !ok(&out).contains("Notes/a.md"),
+        "--fs must not fall back to vox"
+    );
+}
+
+#[test]
 fn wiki_bootstrap_and_health_over_embedded_vox() {
     let tmp = scratch_org();
 

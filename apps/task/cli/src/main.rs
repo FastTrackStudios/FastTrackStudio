@@ -140,8 +140,17 @@ enum Commands {
     /// `apps/task/docs/api-reference.md`; `--json` mirrors
     /// `GET /org/{slug}/api`.
     Api(ApiArgs),
-    /// FS-native vault queries — no server, no CRDT.
+    /// Vault queries + edits. An existing local `<path>` (or
+    /// `--fs`) works the directory on disk; otherwise the active
+    /// org's vault is mirrored over vox and edits are pushed back.
     Vault {
+        /// Force the direct-filesystem path: treat `<path>` as a
+        /// plain on-disk vault, exactly as before the vox
+        /// unification. Recovery / offline-inspection hatch —
+        /// bypasses the org router (no permissions, no plugins,
+        /// no CRDT presence).
+        #[arg(long)]
+        fs: bool,
         #[command(subcommand)]
         cmd: VaultCmd,
     },
@@ -595,14 +604,13 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         Commands::Api(args) => {
             return run_api(args);
         }
-        Commands::Vault { cmd } => match cmd {
-            // Sync ops touch vox and need async; everything
-            // else stays in the sync path.
+        Commands::Vault { fs, cmd } => match cmd {
+            // Sync ops have their own vox orchestration.
             VaultCmd::Sync { .. } | VaultCmd::Pull { .. } | VaultCmd::Push { .. } => {
                 return Box::pin(run_vault_sync(cmd)).await;
             }
             other => {
-                return run_vault(other);
+                return Box::pin(run_vault(other, fs)).await;
             }
         },
         Commands::Task(cmd) => {

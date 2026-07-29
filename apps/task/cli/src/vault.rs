@@ -1,13 +1,20 @@
-//! `task vault …` — FS-native vault queries + sync.
+//! `task vault …` — vault queries/edits + sync.
 //!
-//! Moved verbatim out of `main.rs`; behaviour unchanged.
+//! The query/edit subcommands address a vault by positional path.
+//! Routing (see [`run_vault`]): an EXISTING local directory — or
+//! `task vault --fs …` — runs the original FS-native logic
+//! directly on it; a missing path routes to the ACTIVE ORG's
+//! vault over vox (`VaultSync`, `vault_id = "default"`), by
+//! mirroring it into a scratch dir, running the very same logic,
+//! and pushing any mutations back file-by-file. Same commands,
+//! same output, local and remote.
 
 use clap::Subcommand;
 use std::collections::HashMap;
 
 use crate::establish_for_url;
 
-// ── FS-native Obsidian vault subcommands ─────────────────────────────
+// ── Obsidian vault subcommands ───────────────────────────────────────
 
 #[derive(Subcommand)]
 pub(crate) enum VaultCmd {
@@ -204,7 +211,151 @@ pub(crate) enum VaultCmd {
     },
 }
 
-pub(crate) fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
+/// Server-side vault id for the flat commands' vox route — the
+/// one-vault-per-org convention (`<org>/vault/`).
+const ORG_VAULT_ID: &str = "default";
+
+/// The positional vault path of a query/edit subcommand (the sync
+/// ops have none).
+fn cmd_path_mut(cmd: &mut VaultCmd) -> Option<&mut std::path::PathBuf> {
+    match cmd {
+        VaultCmd::Open { path }
+        | VaultCmd::Pages { path, .. }
+        | VaultCmd::Tags { path }
+        | VaultCmd::Bases { path }
+        | VaultCmd::Cat { path, .. }
+        | VaultCmd::Grep { path, .. }
+        | VaultCmd::Backlinks { path, .. }
+        | VaultCmd::Links { path, .. }
+        | VaultCmd::Orphans { path }
+        | VaultCmd::Deadends { path }
+        | VaultCmd::Unresolved { path }
+        | VaultCmd::Outline { path, .. }
+        | VaultCmd::Properties { path }
+        | VaultCmd::PropertyRead { path, .. }
+        | VaultCmd::PropertySet { path, .. }
+        | VaultCmd::PropertyRemove { path, .. }
+        | VaultCmd::Aliases { path }
+        | VaultCmd::Tasks { path }
+        | VaultCmd::Wordcount { path, .. }
+        | VaultCmd::BaseQuery { path, .. }
+        | VaultCmd::Create { path, .. }
+        | VaultCmd::Append { path, .. }
+        | VaultCmd::Prepend { path, .. }
+        | VaultCmd::Delete { path, .. }
+        | VaultCmd::Move { path, .. } => Some(path),
+        VaultCmd::Sync { .. } | VaultCmd::Pull { .. } | VaultCmd::Push { .. } => None,
+    }
+}
+
+/// Does this subcommand write the vault? Decides whether the vox
+/// route pushes the mirror back after running.
+fn cmd_mutates(cmd: &VaultCmd) -> bool {
+    matches!(
+        cmd,
+        VaultCmd::PropertySet { .. }
+            | VaultCmd::PropertyRemove { .. }
+            | VaultCmd::Create { .. }
+            | VaultCmd::Append { .. }
+            | VaultCmd::Prepend { .. }
+            | VaultCmd::Delete { .. }
+            | VaultCmd::Move { .. }
+    )
+}
+
+/// Route a query/edit subcommand:
+///
+/// - `--fs`, or the positional path names an existing directory →
+///   [`run_vault_fs`] on that directory, byte-identical to the
+///   pre-vox behaviour. An explicit on-disk path is authoritative
+///   (these commands work on ANY Obsidian vault, org or not); the
+///   flag pins it for recovery / offline inspection even though
+///   it is also the default for existing paths.
+/// - the path does not exist (previously a hard `open:` error) →
+///   the active org's vault over vox: mirror it into a scratch
+///   dir via `VaultSync::manifest` + `get_file` (remote server or
+///   embedded backend alike), run the identical FS logic on the
+///   mirror, then push mutations back (`put_file` sha-guarded /
+///   create-only, `delete_file` for removals). Data over the
+///   wire; computation local; output unchanged.
+pub(crate) async fn run_vault(mut cmd: VaultCmd, force_fs: bool) -> eyre::Result<()> {
+    use vault_proto::{IfMatch, VaultSyncClient};
+
+    let path = cmd_path_mut(&mut cmd).expect("sync ops never reach run_vault");
+    if force_fs || path.exists() {
+        return run_vault_fs(cmd);
+    }
+
+    let slug = crate::resolve_active_org(None)?;
+    let url = crate::resolve_org_vox_url(None, &slug);
+    let client: VaultSyncClient = establish_for_url(&url).await?;
+    let manifest = client
+        .manifest(ORG_VAULT_ID.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("fetch manifest: {e:?}"))?;
+
+    // Mirror the org vault into a scratch dir.
+    let tmp = tempfile::tempdir().map_err(|e| eyre::eyre!("scratch dir: {e}"))?;
+    for entry in &manifest.files {
+        let bytes = client
+            .get_file(ORG_VAULT_ID.to_owned(), entry.path.clone())
+            .await
+            .map_err(|e| eyre::eyre!("get {}: {e:?}", entry.path))?;
+        let abs = tmp.path().join(&entry.path);
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| eyre::eyre!("mirror {}: {e}", entry.path))?;
+        }
+        std::fs::write(&abs, &bytes.0).map_err(|e| eyre::eyre!("mirror {}: {e}", entry.path))?;
+    }
+
+    let mutating = cmd_mutates(&cmd);
+    *cmd_path_mut(&mut cmd).expect("still a query/edit cmd") = tmp.path().to_path_buf();
+    run_vault_fs(cmd)?;
+
+    if mutating {
+        // Push the mirror's delta back: sha-guarded overwrites,
+        // create-only for new pages, delete for removals (a
+        // `move` shows up as one of each).
+        let before: HashMap<&str, &str> = manifest
+            .files
+            .iter()
+            .map(|e| (e.path.as_str(), e.sha256.as_str()))
+            .collect();
+        let after = vault_sync_client::index_local(tmp.path())
+            .map_err(|e| eyre::eyre!("index mirror: {e}"))?;
+        let mut seen = std::collections::HashSet::new();
+        for entry in &after {
+            seen.insert(entry.path.clone());
+            let if_match = match before.get(entry.path.as_str()) {
+                Some(sha) if *sha == entry.sha256 => continue,
+                Some(sha) => IfMatch::Sha((*sha).to_owned()),
+                None => IfMatch::CreateOnly,
+            };
+            let bytes = std::fs::read(tmp.path().join(&entry.path))
+                .map_err(|e| eyre::eyre!("read mirror {}: {e}", entry.path))?;
+            client
+                .put_file(ORG_VAULT_ID.to_owned(), entry.path.clone(), bytes, if_match)
+                .await
+                .map_err(|e| eyre::eyre!("put {}: {e:?}", entry.path))?;
+        }
+        for entry in &manifest.files {
+            if !seen.contains(&entry.path) {
+                client
+                    .delete_file(
+                        ORG_VAULT_ID.to_owned(),
+                        entry.path.clone(),
+                        IfMatch::Sha(entry.sha256.clone()),
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("delete {}: {e:?}", entry.path))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn run_vault_fs(cmd: VaultCmd) -> eyre::Result<()> {
     use vault_obsidian::Vault;
     match cmd {
         VaultCmd::Open { path } => {
