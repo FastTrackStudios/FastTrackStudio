@@ -16,6 +16,7 @@ use tokio::sync::{RwLock, broadcast};
 
 use crate::folder::{FolderName, infer_role};
 use crate::parse;
+use crate::submit::Submit;
 
 /// Filesystem-backed `EmailSync` implementation. Cheap to
 /// `Clone` — internals are `Arc`'d. One backend serves
@@ -37,6 +38,24 @@ pub struct Backend {
     /// oldest queued events and re-pulls on reconnect, which is
     /// what `EmailEvent::Resync` asks for anyway.
     changes: architect::PubSub<email_proto::EmailChange>,
+    /// Tokio runtime handle for the sync `send` method's hop into
+    /// the async submitter (`Handle::block_on` is safe because
+    /// the trait methods run on the blocking pool via
+    /// `TokioBlockingDispatcher`). `None` when the backend was
+    /// built outside a runtime — read paths don't need it, and
+    /// `send` then reports `Internal`.
+    runtime: Option<tokio::runtime::Handle>,
+}
+
+/// One account as [`Backend::with_configured_accounts`] consumes
+/// it: identity + maildir root + folder aliases + an optional
+/// outbound submitter (SMTP in production, a mock in tests). An
+/// account without a submitter can't send.
+pub struct AccountEntry {
+    pub account: Account,
+    pub root: PathBuf,
+    pub aliases: FolderAliases,
+    pub submit: Option<Arc<dyn Submit>>,
 }
 
 struct AccountState {
@@ -45,6 +64,9 @@ struct AccountState {
     /// Wire-side ↔ backend-side folder name translation. Empty
     /// by default; populated from `AccountConfig::folder_aliases`.
     aliases: FolderAliases,
+    /// Outbound transport for `send`. `None` = sending
+    /// unsupported for this account.
+    submit: Option<Arc<dyn Submit>>,
 }
 
 impl Backend {
@@ -76,30 +98,54 @@ impl Backend {
                 account,
                 root,
                 aliases,
+                submit: None,
             },
         );
         Ok(Self {
             accounts: Arc::new(accounts),
             channels: Arc::new(RwLock::new(HashMap::new())),
             changes: architect::PubSub::sliding(256),
+            runtime: tokio::runtime::Handle::try_current().ok(),
         })
     }
 
     /// Build a backend from a pre-built `(Account, root, aliases)`
     /// set. All roots must exist as Maildir trees (use
-    /// [`Backend::single_with_aliases`] to bootstrap).
+    /// [`Backend::single_with_aliases`] to bootstrap). No
+    /// submitters — accounts built this way can't send; use
+    /// [`Backend::with_configured_accounts`] when the account
+    /// config carries an SMTP submit endpoint.
     pub fn with_accounts<I>(entries: I) -> Self
     where
         I: IntoIterator<Item = (Account, PathBuf, FolderAliases)>,
     {
+        Self::with_configured_accounts(entries.into_iter().map(|(account, root, aliases)| {
+            AccountEntry {
+                account,
+                root,
+                aliases,
+                submit: None,
+            }
+        }))
+    }
+
+    /// Build a backend from full [`AccountEntry`] descriptions —
+    /// the constructor the server uses once account discovery has
+    /// resolved each account's config (aliases + optional SMTP
+    /// submitter).
+    pub fn with_configured_accounts<I>(entries: I) -> Self
+    where
+        I: IntoIterator<Item = AccountEntry>,
+    {
         let mut accounts = HashMap::new();
-        for (account, root, aliases) in entries {
+        for entry in entries {
             accounts.insert(
-                account.id.0.clone(),
+                entry.account.id.0.clone(),
                 AccountState {
-                    account,
-                    root,
-                    aliases,
+                    account: entry.account,
+                    root: entry.root,
+                    aliases: entry.aliases,
+                    submit: entry.submit,
                 },
             );
         }
@@ -107,6 +153,7 @@ impl Backend {
             accounts: Arc::new(accounts),
             channels: Arc::new(RwLock::new(HashMap::new())),
             changes: architect::PubSub::sliding(256),
+            runtime: tokio::runtime::Handle::try_current().ok(),
         }
     }
 
@@ -378,10 +425,66 @@ impl EmailSync for Backend {
         ))
     }
 
-    fn send(&self, _account: &str, _draft: Draft) -> Result<String, EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "maildir: send lives in `email-smtp`".into(),
-        ))
+    /// Submit `draft` through the account's configured
+    /// [`Submit`] transport, write the sent copy into the
+    /// account's `Sent` maildir, and publish
+    /// `EmailEvent::NewMessage { folder: "Sent" }` on the changes
+    /// stream — publish-after-write, so subscribers re-reading on
+    /// the event see the sent copy.
+    fn send(&self, account: &str, draft: Draft) -> Result<String, EmailSyncError> {
+        let state = self.state(account)?;
+        let submit = state.submit.clone().ok_or_else(|| {
+            EmailSyncError::Unsupported(
+                "maildir: no SMTP submitter configured for this account \
+                 (set `submit` in the account config)"
+                    .into(),
+            )
+        })?;
+        let runtime = self.runtime.clone().ok_or_else(|| {
+            EmailSyncError::Internal("maildir: send needs a tokio runtime".into())
+        })?;
+
+        let (bytes, message_id) = email_smtp::build_message(&draft)
+            .map_err(|e| EmailSyncError::Protocol(format!("draft build: {e}")))?;
+        let recipients: Vec<String> = draft
+            .to
+            .iter()
+            .chain(&draft.cc)
+            .chain(&draft.bcc)
+            .map(|a| a.email.clone())
+            .collect();
+        if recipients.is_empty() {
+            return Err(EmailSyncError::Protocol("draft has no recipients".into()));
+        }
+
+        // Submit first — the message hitting the wire is the
+        // thing that must not happen twice, so any failure below
+        // (sent-copy write) is reported but doesn't retract the
+        // submission.
+        let message_id = runtime
+            .block_on(submit.submit_raw(&draft.from.email, &recipients, &bytes, message_id))
+            .map_err(|e| EmailSyncError::Protocol(format!("submit: {e}")))?;
+
+        // Sent copy into the maildir. Alias-resolve the
+        // conventional `Sent` name; create the folder on demand.
+        let sent_backend = state.aliases.resolve("Sent").to_string();
+        let path = FolderName(sent_backend)
+            .to_path(&state.root)
+            .ok_or_else(|| EmailSyncError::Internal("bad Sent folder name".into()))?;
+        ensure_maildir(&path).map_err(|e| EmailSyncError::Io(e.to_string()))?;
+        Maildir::from(path)
+            .store_cur_with_flags(&bytes, "S")
+            .map_err(|e| EmailSyncError::Io(format!("sent copy: {e}")))?;
+
+        runtime.block_on(self.emit(
+            account,
+            EmailEvent::NewMessage {
+                folder: "Sent".into(),
+                message_id: message_id.clone(),
+            },
+        ));
+
+        Ok(message_id)
     }
 }
 
@@ -389,11 +492,13 @@ impl EmailSync for Backend {
 /// attaches subscriber sinks to. Publishing happens in
 /// [`Backend::emit`].
 ///
-/// Nothing publishes yet on this backend: every maildir mutation
-/// (`set_flags` / `move_message` / `delete_message`) is still
-/// `Unsupported`, and there is no filesystem watcher on the mail
-/// root — so the stream is correct and silent until one of those
-/// lands. `email-imap` already publishes from its IDLE loop.
+/// Publishers today: `send` (a `NewMessage` for the Sent copy)
+/// and the `email-product` backend (outbox / derivation events,
+/// via a clone of this hub). The remaining maildir mutations
+/// (`set_flags` / `move_message` / `delete_message`) are still
+/// `Unsupported` and there is no filesystem watcher on the mail
+/// root, so inbound new-mail events wait on those landing.
+/// `email-imap` already publishes from its IDLE loop.
 impl email_proto::EmailSyncStreamSource for Backend {
     fn changes_hub(&self) -> &architect::PubSub<email_proto::EmailChange> {
         &self.changes
@@ -582,6 +687,133 @@ mod tests {
             .fetch_message(&account.id.0, "<c@example.com>")
             .unwrap();
         assert_eq!(msg.envelope.folder, "Sent");
+    }
+
+    /// Recording mock transport — captures the envelope + raw
+    /// bytes `send` would have put on the wire.
+    struct MockSubmit {
+        calls: std::sync::Mutex<Vec<(String, Vec<String>, Vec<u8>)>>,
+    }
+
+    impl crate::submit::Submit for MockSubmit {
+        fn submit_raw<'a>(
+            &'a self,
+            from: &'a str,
+            recipients: &'a [String],
+            raw: &'a [u8],
+            message_id: String,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>,
+        > {
+            self.calls.lock().unwrap().push((
+                from.to_string(),
+                recipients.to_vec(),
+                raw.to_vec(),
+            ));
+            Box::pin(async move { Ok(message_id) })
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn send_submits_writes_sent_copy_and_publishes() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = Account {
+            id: AccountId("scratch".into()),
+            name: "scratch".into(),
+            address: "you@example.com".into(),
+            display_name: None,
+        };
+        let mock = Arc::new(MockSubmit {
+            calls: std::sync::Mutex::new(Vec::new()),
+        });
+        let backend = Backend::with_configured_accounts([AccountEntry {
+            account: account.clone(),
+            root: dir.path().to_path_buf(),
+            aliases: FolderAliases::new(),
+            submit: Some(mock.clone()),
+        }]);
+
+        // Subscribe before sending so the event can't be missed.
+        let mut rx = backend.channel("scratch").await.subscribe();
+
+        let draft = Draft {
+            from: email_proto::Addr {
+                name: None,
+                email: "you@example.com".into(),
+            },
+            to: vec![email_proto::Addr {
+                name: Some("Bob".into()),
+                email: "bob@example.com".into(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Wired send".into(),
+            body_text: "hello from the maildir backend".into(),
+            body_html: None,
+            in_reply_to: None,
+            references: vec![],
+            attachments: vec![],
+        };
+
+        // The sync trait method blocks on the runtime handle, so
+        // hop onto the blocking pool like the dispatcher does.
+        let b = backend.clone();
+        let mid = tokio::task::spawn_blocking(move || b.send("scratch", draft))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!mid.is_empty());
+
+        // Transport saw the envelope.
+        let calls = mock.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "you@example.com");
+        assert_eq!(calls[0].1, vec!["bob@example.com".to_string()]);
+        drop(calls);
+
+        // Sent copy is on disk and readable through the trait.
+        let envs = backend
+            .fetch_envelopes("scratch", "Sent", SeqRange::All)
+            .unwrap();
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].subject, "Wired send");
+        assert!(envs[0].flags.iter().any(|f| f == "S"));
+
+        // Publish-after-write: the NewMessage event names the
+        // Sent copy.
+        let event = rx.try_recv().unwrap();
+        match event {
+            EmailEvent::NewMessage { folder, message_id } => {
+                assert_eq!(folder, "Sent");
+                assert_eq!(message_id, mid);
+            }
+            other => panic!("expected NewMessage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn send_without_submitter_is_unsupported() {
+        let (_dir, backend, account) = fixture();
+        let draft = Draft {
+            from: email_proto::Addr {
+                name: None,
+                email: "you@example.com".into(),
+            },
+            to: vec![email_proto::Addr {
+                name: None,
+                email: "bob@example.com".into(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "nope".into(),
+            body_text: String::new(),
+            body_html: None,
+            in_reply_to: None,
+            references: vec![],
+            attachments: vec![],
+        };
+        let err = backend.send(&account.id.0, draft).unwrap_err();
+        assert!(matches!(err, EmailSyncError::Unsupported(_)), "{err:?}");
     }
 
     #[test]

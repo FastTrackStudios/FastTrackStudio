@@ -852,15 +852,18 @@ pub(crate) async fn build_org_state(
         // Email backend — Maildir-backed `EmailSync`. The mail
         // root lives at `<org>/vault/Mail/` (override via
         // `TASK_SERVER_MAIL_ROOT`); each top-level subdir there
-        // is one account (its dir name is the account id). No
-        // IMAP creds are wired in this slice, so an org with no
+        // is one account (its dir name is the account id). An
+        // account dir may carry an `account.json`
+        // (`email_config::AccountConfig`) supplying the real
+        // address, folder aliases, and — for `Maildir` backends —
+        // an optional SMTP `submit` endpoint that makes
+        // `EmailSync::send` work end to end. An org with no
         // `Mail/` tree just serves an empty account list — the
-        // `/email` UI tolerates that. Each discovered account
-        // maps to a Maildir++ root; `Backend::with_accounts`
-        // creates the `cur/new/tmp` dirs on demand.
+        // `/email` UI tolerates that.
         let mail_root = std::env::var("TASK_SERVER_MAIL_ROOT")
             .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
-        let email = email_maildir::Backend::with_accounts(discover_mail_accounts(&mail_root));
+        let email =
+            email_maildir::Backend::with_configured_accounts(discover_mail_accounts(&mail_root));
 
         // Forge backend — Forgejo, the org's primary forge. Base
         // URL + token come from the same env vars the CLI's forge
@@ -1159,17 +1162,18 @@ pub(crate) async fn build_org_state(
 }
 
 /// Discover Maildir accounts under `mail_root`. Each immediate
-/// subdirectory is one account: its dir name is the account id +
-/// display name, and the address defaults to the same (the
-/// IMAP/JMAP config that would carry a real address isn't wired
-/// in this slice). Returns the `(Account, root, aliases)` tuples
-/// `email_maildir::Backend::with_accounts` consumes. An absent
-/// or empty `mail_root` yields an empty vec — the backend then
-/// serves no accounts, which is a valid "operational but
-/// unconfigured" state.
-fn discover_mail_accounts(
-    mail_root: &std::path::Path,
-) -> Vec<(email_proto::Account, PathBuf, email_config::FolderAliases)> {
+/// subdirectory is one account: its dir name is the account id
+/// (and the default display name / address). When the dir
+/// carries an `account.json` (`email_config::AccountConfig`,
+/// JSON), the config supplies the real address / display name /
+/// folder aliases — and, for a `Maildir` backend kind with a
+/// `submit` block, an SMTP submitter so `EmailSync::send` works
+/// for that account. A broken `account.json` is logged and the
+/// account falls back to the bare-directory defaults (read-only).
+/// An absent or empty `mail_root` yields an empty vec — the
+/// backend then serves no accounts, which is a valid
+/// "operational but unconfigured" state.
+fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::AccountEntry> {
     let Ok(entries) = std::fs::read_dir(mail_root) else {
         return Vec::new();
     };
@@ -1182,13 +1186,46 @@ fn discover_mail_accounts(
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
-        let account = email_proto::Account {
+
+        let mut account = email_proto::Account {
             id: email_proto::AccountId(name.to_owned()),
             name: name.to_owned(),
             address: name.to_owned(),
             display_name: None,
         };
-        accounts.push((account, path, email_config::FolderAliases::new()));
+        let mut aliases = email_config::FolderAliases::new();
+        let mut submit: Option<std::sync::Arc<dyn email_maildir::Submit>> = None;
+
+        match email_config::AccountConfig::load_json(&path.join("account.json")) {
+            Ok(Some(cfg)) => {
+                // Keep the directory name as the account id (the
+                // maildir root is keyed by it); take identity +
+                // aliases + submit from the config.
+                account.name = cfg.name.clone();
+                account.address = cfg.address.clone();
+                account.display_name = cfg.display_name.clone();
+                aliases = cfg.folder_aliases.clone();
+                if let email_config::BackendKind::Maildir {
+                    submit: Some(smtp), ..
+                } = &cfg.backend
+                {
+                    submit = Some(std::sync::Arc::new(email_smtp::SmtpSender::new(
+                        smtp.clone(),
+                    )));
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(account = name, %err, "invalid account.json; using defaults");
+            }
+        }
+
+        accounts.push(email_maildir::AccountEntry {
+            account,
+            root: path,
+            aliases,
+            submit,
+        });
     }
     accounts
 }
