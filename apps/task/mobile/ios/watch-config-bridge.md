@@ -1,8 +1,8 @@
 # iOS → Watch config bridge (WCSession) — implementation guide
 
-**Status: watch-side DONE, iOS-side is open R&D that must be built + verified on
-airlock (Xcode).** This is subtask **S6** of the federated-account epic
-(Task issue `8821acac`).
+**Status: watch-side DONE, iOS-side sender BUILT (pure Rust, see below) —
+remaining: on-device acceptance test via TestFlight.** This is subtask **S6**
+of the federated-account epic (Task issue `8821acac`).
 
 ## Goal
 
@@ -36,84 +36,39 @@ The watch will inherit config the moment an iOS sender exists. Manual Settings
 stays as the fallback. (Verify the watch build on airlock — no watchOS SDK in
 the Linux dev shell.)
 
-## iOS side — TODO (needs airlock; no precedent in this repo)
+## iOS side — BUILT (pure Rust over objc2; no Swift shim needed)
 
-The dx (Dioxus mobile) Task iOS app currently has **zero native code**, and
-neither does the audio app (`apps/fasttrackstudio/ios` is deploy scripts +
-icons only — its watch talks straight to the rig over BLE/HTTP, so it never
-needed a phone shim). So injecting a native `WCSession` host into the
-dx-generated iOS app is unsolved here and needs experimentation on the Mac.
+The "hosting native Swift in the dx app" problem dissolved: the `WCSession`
+host is plain Rust via `objc2-watch-connectivity` (crates.io, matches the
+tree's objc2 0.6 / objc2-foundation 0.3), linked only on iOS. No Xcode
+project surgery, no AppDelegate injection, no `watch-config.json` file —
+the trigger lives in Rust where the config actually changes.
 
-### Two things the iOS shim must do
+Two halves, split on a platform seam:
 
-1. **Read the Rust app's active config.** The Rust UI already persists, in the
-   iOS app container:
-   - `$HOME/.local/share/task/servers.json` + `active-server`
-     (`crates/task/ui/src/server_registry.rs`) — the active `ServerEntry`
-     (`server_url`, `session_token`, …).
-   - the FileTokenStore under `.../task/ui-tokens/`.
-   Simplest robust option: have the Rust side write a dedicated
-   `watch-config.json` (`{baseURL, orgSlug, token}`, http base already derived)
-   into the container whenever the active server/session changes — a tiny,
-   stable file the native shim reads without parsing the registry. (Add this
-   write next to `set_active_server` / `sync_active_server_entry`.)
+1. **Observer (shared UI)** — `crates/task/ui/src/watch_sync.rs`.
+   `use_watch_config_publisher()` mounts in `App` (after `provide_auth`) and
+   recomputes `{baseURL, orgSlug, token}` on every change of the active
+   server registry entry, the org selection/discovery, or the signed-in
+   account — including boot restore. `baseURL` is derived from the registry's
+   vox URL (`wss://host/vox` → `https://host`); the token prefers the live
+   session (Guest excluded, mirroring `sync_active_server_entry`) and falls
+   back to the entry's persisted token. Incomplete configs are never
+   published (matches PhoneSync's non-empty-only application); identical
+   repeats are deduped. The config goes to a registered *sink* — with no
+   sink (desktop/web/wasm) the whole thing is a no-op.
 
-2. **Push it over WCSession** whenever it changes, via a native
-   `WCSessionDelegate` that calls `updateApplicationContext`.
+2. **Sender (iOS shell)** — `apps/task/mobile/src/watch_sync.rs`.
+   `watch_sync::init()` (called from `main`, before launch) activates
+   `WCSession.default` with a minimal delegate and registers the sink, which
+   parks the latest config and calls `updateApplicationContext`. Guarded by
+   `isSupported` / activation state / `isWatchAppInstalled`, fail-silent
+   (log only); the activation-complete callback replays the parked config,
+   and `sessionDidDeactivate` re-activates for a newly-paired watch.
+   Everything is `#[cfg(target_os = "ios")]` (deps target-gated in
+   `apps/task/mobile/Cargo.toml`); other targets get a no-op `init()`.
 
-### Reference iOS shim (adapt when wiring into the dx build)
-
-```swift
-import Foundation
-import WatchConnectivity
-
-final class WatchConfigBridge: NSObject, WCSessionDelegate {
-    static let shared = WatchConfigBridge()
-
-    func start() {
-        guard WCSession.isSupported() else { return }
-        let s = WCSession.default
-        s.delegate = self
-        s.activate()
-    }
-
-    /// Call whenever the active server/session changes (or on a timer / file
-    /// watch of watch-config.json). Idempotent: WCSession dedups identical
-    /// contexts.
-    func push(baseURL: String, orgSlug: String, token: String) {
-        guard WCSession.default.activationState == .activated,
-              WCSession.default.isWatchAppInstalled else { return }
-        try? WCSession.default.updateApplicationContext([
-            "baseURL": baseURL, "orgSlug": orgSlug, "token": token,
-        ])
-    }
-
-    // iOS requires all three; no-ops are fine for a one-way sender.
-    func session(_ s: WCSession, activationDidCompleteWith st: WCSessionActivationState, error: Error?) {}
-    func sessionDidBecomeInactive(_ s: WCSession) {}
-    func sessionDidDeactivate(_ s: WCSession) { s.activate() }
-}
-```
-
-### The hard part: hosting native Swift in the dx iOS app
-
-`dx build --platform ios` generates the Xcode project; there is no `AppDelegate`
-to hook (the entry is the Rust `main`). Options to investigate on airlock, in
-rough order of preference:
-
-1. **dx bundle-time inclusion** — check whether Dioxus 0.7 supports adding
-   native sources / a plist `UIApplicationDelegate` via `Dioxus.toml` or an
-   `ios/` overlay that survives regeneration. If so, drop in
-   `WatchConfigBridge.swift` + an `@objc` `AppDelegate` that calls `start()` +
-   installs a file-watch of `watch-config.json`.
-2. **FFI from Rust** — expose the bridge to Rust via a tiny Swift/ObjC static
-   lib linked into the app, called from the Rust side when config changes
-   (`swift-bridge` / a C ABI shim). Heaviest, but keeps the trigger in Rust
-   where the config actually changes.
-3. **Post-build injection** in `deploy-testflight.sh` — least clean; only if 1/2
-   fail.
-
-Whichever wins, the acceptance test is: sign in on the phone → within a few
+Remaining acceptance test (on device): sign in on the phone → within a few
 seconds the watch's Settings auto-populate and `Test connection` succeeds,
 with no manual entry. Then drop the manual Settings fields to read-only
 (inherited) with a manual-override escape hatch.

@@ -188,6 +188,11 @@ pub fn App() -> Element {
     // org-list signal above (auth talks to the home org's endpoint);
     // must precede the router so pages/presence can read the account.
     crate::auth::provide_auth();
+    // Watch config publisher: mirror the active {server, org, session}
+    // to the paired Apple Watch via the platform sink (a no-op unless
+    // the iOS shell registered one). After provide_auth — it reads the
+    // active-account context.
+    crate::watch_sync::use_watch_config_publisher();
     // Per-user prefs (server-backed) — after auth, which it watches.
     crate::prefs::provide_prefs();
     // Theme persistence: seed the org-theme overrides above from prefs

@@ -1037,13 +1037,7 @@ async fn authenticate(
     slug: &str,
     headers: &HeaderMap,
 ) -> Result<crate::OrgAppState, String> {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(str::to_owned)
-        .filter(|t| !t.is_empty())
-        .ok_or("missing bearer token")?;
+    let token = crate::watch_bridge::bearer(headers).ok_or("missing bearer token")?;
     let org = state
         .org(slug)
         .ok_or_else(|| format!("org `{slug}` not hosted"))?;
