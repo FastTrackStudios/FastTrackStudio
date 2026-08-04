@@ -22,9 +22,11 @@ server:
     # The FTS org that owns the song library + setlists.
     TASK_SERVER_ORG: fasttrackstudio
     # Traces + logs + metrics → the cluster's OTel collector, which fans
-    # out to Tempo / Loki / Prometheus. Unset this to go telemetry-dark.
-    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-opentelemetry-collector.observability.svc:4318
-    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    # out to Tempo / Loki / Prometheus. Commented until the collector is
+    # actually deployed (see apps/task/plans/observability.md) — pointing
+    # at a missing service just burns retries. Uncomment to light it up:
+    # OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-opentelemetry-collector.observability.svc:4318
+    # OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
     # Interim song-media dir (stems + manifest.json) served at /media.
     # Goes away once stems are content-addressed attachments on the
     # song notes (issue #30 item 2) — then the /blobs route carries

@@ -789,9 +789,13 @@ tracing-appender = "0.2"
 # crates/task/telemetry) — http/protobuf OTLP to the cluster collector.
 opentelemetry = "0.30"
 opentelemetry_sdk = { version = "0.30", features = ["rt-tokio"] }
+# NOTE: the BLOCKING reqwest client is deliberate. The SDK's batch
+# processors run on their own dedicated OS threads, which have no Tokio
+# reactor — pairing them with the async client panics the exporter
+# thread with "there is no reactor running".
 opentelemetry-otlp = { version = "0.30", default-features = false, features = [
   "http-proto",
-  "reqwest-client",
+  "reqwest-blocking-client",
   "reqwest-rustls",
   "trace",
   "logs",

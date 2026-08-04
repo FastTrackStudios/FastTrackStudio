@@ -185,12 +185,23 @@ pub mod otel {
             .build();
         global::set_meter_provider(meter_provider.clone());
 
+        // The log bridge MUST NOT ingest the OTel SDK's own diagnostics.
+        // The SDK reports export problems through `tracing`; if the
+        // bridge turns those into log records it emits more diagnostics,
+        // which the bridge ingests again — an unbounded feedback loop
+        // that overflows the stack and aborts the process (observed
+        // with an unreachable collector). Drop anything originating in
+        // the OTel crates before it reaches the bridge.
+        let no_otel_feedback = tracing_subscriber::filter::FilterFn::new(|meta| {
+            !meta.target().starts_with("opentelemetry")
+        });
         let layers: Vec<Box<dyn Layer<S> + Send + Sync>> = vec![
             Box::new(tracing_opentelemetry::layer().with_tracer(tracer)),
             Box::new(
                 opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
                     &logger_provider,
-                ),
+                )
+                .with_filter(no_otel_feedback),
             ),
         ];
         Some((
