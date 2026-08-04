@@ -144,6 +144,13 @@ email-proto = { workspace = true, features = ["vox"], optional = true }
 email-maildir = { workspace = true, optional = true }
 # `FolderAliases` for the per-account Maildir registration.
 email-config = { workspace = true, optional = true }
+# SMTP submitter wired into discovered maildir accounts whose
+# `account.json` carries a `submit` endpoint — makes
+# `EmailSync::send` real for those accounts.
+email-smtp = { workspace = true, optional = true }
+# The email product layer: staged-send outbox (`EmailProduct`)
+# with human-in-the-loop approval + the delivery poller.
+email-product = { workspace = true, optional = true }
 vox = { workspace = true }
 # Org-wide presence: `crdt::sync::PresenceHost` + the `DocPresence`
 # vox service mounted per org (`vox` feature = the sync/presence
@@ -190,7 +197,13 @@ plugin-fitness = ["dep:body", "dep:exercises", "dep:workouts", "dep:intake"]
 plugin-fasttrackstudio = ["dep:collection"]
 plugin-wiki = ["dep:wiki-proto", "dep:wiki-live"]
 plugin-scripture = ["dep:scripture"]
-plugin-email = ["dep:email-proto", "dep:email-maildir", "dep:email-config"]
+plugin-email = [
+    "dep:email-proto",
+    "dep:email-maildir",
+    "dep:email-config",
+    "dep:email-smtp",
+    "dep:email-product",
+]
 plugin-forge = ["dep:git-proto", "dep:git-forgejo", "dep:git-config"]
 plugin-agent = [
     "dep:agent-proto",

@@ -276,6 +276,14 @@ pub struct OrgAppState {
     /// envelopes).
     #[cfg(feature = "plugin-email")]
     pub email: email_maildir::Backend,
+    /// Email product layer — the staged-send outbox
+    /// (`EmailProduct`: submit / approve / cancel, human-in-the-
+    /// loop gate) over the same accounts. Shares the `email`
+    /// backend's `EmailChange` hub so outbox events ride the one
+    /// stream; its delivery poller sends through `email`'s
+    /// `EmailSync::send`.
+    #[cfg(feature = "plugin-email")]
+    pub email_product: email_product::ProductBackend,
     /// Forge backend (Forgejo) serving `RepoCatalog` +
     /// `IssueTracker` + `ReviewSurface`. Built from
     /// `TASK_FORGEJO_BASE_URL` + `TASK_FORGEJO_TOKEN`; when either
@@ -926,17 +934,58 @@ pub(crate) async fn build_org_state(
         // Email backend — Maildir-backed `EmailSync`. The mail
         // root lives at `<org>/vault/Mail/` (override via
         // `TASK_SERVER_MAIL_ROOT`); each top-level subdir there
-        // is one account (its dir name is the account id). No
-        // IMAP creds are wired in this slice, so an org with no
+        // is one account (its dir name is the account id). An
+        // account dir may carry an `account.json`
+        // (`email_config::AccountConfig`) supplying the real
+        // address, folder aliases, and — for `Maildir` backends —
+        // an optional SMTP `submit` endpoint that makes
+        // `EmailSync::send` work end to end. An org with no
         // `Mail/` tree just serves an empty account list — the
-        // `/email` UI tolerates that. Each discovered account
-        // maps to a Maildir++ root; `Backend::with_accounts`
-        // creates the `cur/new/tmp` dirs on demand.
+        // `/email` UI tolerates that.
         #[cfg(feature = "plugin-email")]
         let mail_root = std::env::var("TASK_SERVER_MAIL_ROOT")
             .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
         #[cfg(feature = "plugin-email")]
-        let email = email_maildir::Backend::with_accounts(discover_mail_accounts(&mail_root));
+        let mail_accounts = discover_mail_accounts(&mail_root);
+        #[cfg(feature = "plugin-email")]
+        let product_accounts: Vec<email_product::ProductAccount> = mail_accounts
+            .iter()
+            .map(|e| email_product::ProductAccount {
+                id: e.account.id.0.clone(),
+                root: e.root.clone(),
+                address: e.account.address.clone(),
+            })
+            .collect();
+        #[cfg(feature = "plugin-email")]
+        let email = email_maildir::Backend::with_configured_accounts(mail_accounts);
+
+        // Known-sender scoring rides the org's contacts when that
+        // plugin is compiled in; without it every sender is scored
+        // "unknown" (the trait's empty set).
+        #[cfg(all(feature = "plugin-email", feature = "plugin-contacts"))]
+        let email_contacts: std::sync::Arc<dyn email_product::ContactLookup> =
+            std::sync::Arc::new(VaultContactLookup(contacts.clone()));
+        #[cfg(all(feature = "plugin-email", not(feature = "plugin-contacts")))]
+        let email_contacts: std::sync::Arc<dyn email_product::ContactLookup> =
+            std::sync::Arc::new(NoContactLookup);
+
+        // Email product layer — outbox with human-in-the-loop
+        // approval + the bounded triage pass. Shares the maildir
+        // backend's `EmailChange` hub (one stream for mailbox +
+        // outbox + derivation events), delivers approved entries
+        // through `EmailSync::send` on a 30s poller (approval
+        // wakes it immediately), and scores senders against the
+        // org's contacts.
+        #[cfg(feature = "plugin-email")]
+        let email_product = email_product::ProductBackend::new(
+            product_accounts,
+            std::sync::Arc::new(email.clone()),
+            email_proto::EmailSyncStreamSource::changes_hub(&email).clone(),
+            email_contacts,
+        )
+        .map_err(|e| eyre::eyre!("email product stores: {e}"))?;
+        #[cfg(feature = "plugin-email")]
+        let _email_poller = email_product.spawn_poller(std::time::Duration::from_secs(30));
 
         // Forge backend — Forgejo, the org's primary forge. Base
         // URL + token come from the same env vars the CLI's forge
@@ -1282,6 +1331,8 @@ pub(crate) async fn build_org_state(
             ledger_backend,
             #[cfg(feature = "plugin-email")]
             email,
+            #[cfg(feature = "plugin-email")]
+            email_product,
             #[cfg(feature = "plugin-forge")]
             forge,
             #[cfg(feature = "plugin-forge")]
@@ -1298,18 +1349,56 @@ pub(crate) async fn build_org_state(
 }
 
 /// Discover Maildir accounts under `mail_root`. Each immediate
-/// subdirectory is one account: its dir name is the account id +
-/// display name, and the address defaults to the same (the
-/// IMAP/JMAP config that would carry a real address isn't wired
-/// in this slice). Returns the `(Account, root, aliases)` tuples
-/// `email_maildir::Backend::with_accounts` consumes. An absent
-/// or empty `mail_root` yields an empty vec — the backend then
-/// serves no accounts, which is a valid "operational but
-/// unconfigured" state.
+/// subdirectory is one account: its dir name is the account id
+/// (and the default display name / address). When the dir
+/// carries an `account.json` (`email_config::AccountConfig`,
+/// JSON), the config supplies the real address / display name /
+/// folder aliases — and, for a `Maildir` backend kind with a
+/// `submit` block, an SMTP submitter so `EmailSync::send` works
+/// for that account. A broken `account.json` is logged and the
+/// account falls back to the bare-directory defaults (read-only).
+/// An absent or empty `mail_root` yields an empty vec — the
+/// backend then serves no accounts, which is a valid
+/// "operational but unconfigured" state.
+/// `email-product` known-sender lookup over the org's vault
+/// contacts. One `list_contacts` walk per triage pass (the pass
+/// snapshots the result), lower-cased addresses.
+#[cfg(all(feature = "plugin-email", feature = "plugin-contacts"))]
+struct VaultContactLookup(contacts::VaultContacts);
+
+#[cfg(all(feature = "plugin-email", feature = "plugin-contacts"))]
+impl email_product::ContactLookup for VaultContactLookup {
+    fn known_addresses(&self) -> std::collections::BTreeSet<String> {
+        use contacts_proto::Contacts as _;
+        match self.0.list_contacts() {
+            Ok(list) => list
+                .iter()
+                .flat_map(contacts_proto::Contact::email_list)
+                .map(str::to_ascii_lowercase)
+                .collect(),
+            Err(err) => {
+                tracing::debug!(%err, "contact lookup failed; treating senders as unknown");
+                std::collections::BTreeSet::new()
+            }
+        }
+    }
+}
+
+/// The contacts plugin is compiled out: every sender scores
+/// "unknown" — triage still runs, it just never grants the
+/// known-sender boost.
+#[cfg(all(feature = "plugin-email", not(feature = "plugin-contacts")))]
+struct NoContactLookup;
+
+#[cfg(all(feature = "plugin-email", not(feature = "plugin-contacts")))]
+impl email_product::ContactLookup for NoContactLookup {
+    fn known_addresses(&self) -> std::collections::BTreeSet<String> {
+        std::collections::BTreeSet::new()
+    }
+}
+
 #[cfg(feature = "plugin-email")]
-fn discover_mail_accounts(
-    mail_root: &std::path::Path,
-) -> Vec<(email_proto::Account, PathBuf, email_config::FolderAliases)> {
+fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::AccountEntry> {
     let Ok(entries) = std::fs::read_dir(mail_root) else {
         return Vec::new();
     };
@@ -1322,13 +1411,46 @@ fn discover_mail_accounts(
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
-        let account = email_proto::Account {
+
+        let mut account = email_proto::Account {
             id: email_proto::AccountId(name.to_owned()),
             name: name.to_owned(),
             address: name.to_owned(),
             display_name: None,
         };
-        accounts.push((account, path, email_config::FolderAliases::new()));
+        let mut aliases = email_config::FolderAliases::new();
+        let mut submit: Option<std::sync::Arc<dyn email_maildir::Submit>> = None;
+
+        match email_config::AccountConfig::load_json(&path.join("account.json")) {
+            Ok(Some(cfg)) => {
+                // Keep the directory name as the account id (the
+                // maildir root is keyed by it); take identity +
+                // aliases + submit from the config.
+                account.name = cfg.name.clone();
+                account.address = cfg.address.clone();
+                account.display_name = cfg.display_name.clone();
+                aliases = cfg.folder_aliases.clone();
+                if let email_config::BackendKind::Maildir {
+                    submit: Some(smtp), ..
+                } = &cfg.backend
+                {
+                    submit = Some(std::sync::Arc::new(email_smtp::SmtpSender::new(
+                        smtp.clone(),
+                    )));
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(account = name, %err, "invalid account.json; using defaults");
+            }
+        }
+
+        accounts.push(email_maildir::AccountEntry {
+            account,
+            root: path,
+            aliases,
+            submit,
+        });
     }
     accounts
 }
@@ -2512,6 +2634,14 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 email_proto::descriptor(),
                 email_proto::serve(org.email.clone()),
+            )
+            // Product layer — the staged-send outbox
+            // (`EmailProduct`: list / submit / approve / cancel).
+            // Its events ride the `EmailSync` changes stream
+            // below (shared hub), so there's no second stream.
+            .with(
+                email_proto::product_descriptor(),
+                email_proto::product_serve(org.email_product.clone()),
             )
             // Live mailbox changes — `EmailSync`'s `#[subscribe]`
             // stream sibling, served from the backend's hub.

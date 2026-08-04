@@ -461,6 +461,11 @@ table!(EMAIL, "email", "email/**", [
     dl "fetch_attachment", wr "set_flags", wr "move_message", wa "delete_message",
     wr "append_draft", wa "send",
 ]);
+#[cfg(feature = "plugin-email")]
+table!(EMAIL_PRODUCT, "email-product", "email/outbox/**", [
+    rd "list_outbox", wr "submit_draft", wa "approve", wr "cancel",
+    rd "derivations", rd "unnotified", wr "mark_notified",
+]);
 #[cfg(feature = "plugin-forge")]
 table!(FORGE_REPOS, "forge-repos", "forge/repos/**", [rd "list_repos", rd "get_repo"]);
 #[cfg(feature = "plugin-forge")]
@@ -808,6 +813,7 @@ pub fn mounts() -> Vec<Mount> {
     v.extend([
         // Outside world
         m("email", email_proto::descriptor(), EMAIL),
+        m("email", email_proto::product_descriptor(), EMAIL_PRODUCT),
         m("email", email_proto::stream_descriptor(), EMAIL_STREAM),
     ]);
     #[cfg(feature = "plugin-forge")]

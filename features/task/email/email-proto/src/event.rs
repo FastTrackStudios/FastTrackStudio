@@ -25,6 +25,20 @@ pub enum EmailEvent {
         message_id: String,
     },
     FolderListChanged,
+    /// An outbox entry changed state (staged / approved / sending
+    /// / sent / failed / cancelled). Changes-only: the event
+    /// names the entry and its new status; re-read via
+    /// `EmailProduct::list_outbox`.
+    OutboxChanged {
+        id: u64,
+        status: crate::OutboxStatus,
+    },
+    /// The derivation cache gained/updated rows for a message
+    /// (urgency / tags / …). Re-read via
+    /// `EmailProduct::derivations`.
+    DerivationsUpdated {
+        message_id: String,
+    },
     /// Subscriber missed events because the broadcast lapped.
     /// Re-pull folder listings + envelopes to catch up.
     Resync,

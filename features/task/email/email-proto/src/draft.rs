@@ -4,8 +4,9 @@
 
 use crate::Addr;
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
 pub struct AttachmentMeta {
     /// Backend-specific part address used by
     /// [`crate::EmailSync::fetch_attachment`].
@@ -16,7 +17,7 @@ pub struct AttachmentMeta {
 }
 
 /// In-memory attachment carried on a [`Draft`] before send.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
 pub struct Attachment {
     pub meta: AttachmentMeta,
     pub data: Vec<u8>,
@@ -24,7 +25,7 @@ pub struct Attachment {
 
 /// Outgoing message. Empty `references` + `in_reply_to` =
 /// fresh thread; populated = a reply.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
 pub struct Draft {
     pub from: Addr,
     pub to: Vec<Addr>,

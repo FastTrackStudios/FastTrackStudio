@@ -11,11 +11,13 @@
 //!   in the name with `.` separators
 //!   (`.Lists.rust-users`).
 //!
-//! Phase 1 implements the read side
-//! (`list_folders` / `fetch_envelopes` / `fetch_message` /
-//! `fetch_attachment`) so the example harness can walk a fixture
-//! maildir. Writes (`set_flags` / `move_message` /
-//! `delete_message` / `append_draft` / `send`) return
+//! The read side (`list_folders` / `fetch_envelopes` /
+//! `fetch_message` / `fetch_attachment`) walks the tree
+//! directly. `send` composes an outbound [`Submit`] transport
+//! (SMTP via `email-smtp` in production) with a Sent-folder
+//! maildir write + a `NewMessage` event on the changes stream.
+//! The remaining writes (`set_flags` / `move_message` /
+//! `delete_message` / `append_draft`) return
 //! [`email_proto::EmailSyncError::Unsupported`] until phase 2/3;
 //! `subscribe` is wired through a per-account broadcast channel
 //! but the FS watcher attachment lands later (mirrors
@@ -26,6 +28,8 @@
 mod backend;
 mod folder;
 mod parse;
+mod submit;
 
-pub use backend::Backend;
+pub use backend::{AccountEntry, Backend};
 pub use folder::FolderName;
+pub use submit::Submit;

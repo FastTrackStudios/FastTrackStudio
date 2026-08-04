@@ -929,6 +929,7 @@ email-config = { path = "features/task/email/email-config" }
 email-autoconfig = { path = "features/task/email/email-autoconfig" }
 email-sync = { path = "features/task/email/email-sync" }
 email-link = { path = "features/task/email/email-link" }
+email-product = { path = "features/task/email/email-product" }
 # features/task — vault-superset slices
 attachments-proto = { path = "features/task/attachments/attachments-proto" }
 media-proto = { path = "features/task/media/media-proto" }
