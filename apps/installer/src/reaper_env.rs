@@ -85,8 +85,8 @@ pub fn rig_dirs(prefix: &Path) -> Vec<PathBuf> {
 }
 
 pub async fn setup(prefix: Option<PathBuf>) -> eyre::Result<()> {
-    if !cfg!(target_os = "linux") {
-        eyre::bail!("`fts-installer reaper` currently supports Linux only");
+    if !cfg!(target_os = "linux") && !cfg!(target_os = "macos") {
+        eyre::bail!("`fts-installer reaper` currently supports Linux and macOS only");
     }
 
     let home = std::env::var_os("HOME")
@@ -153,7 +153,11 @@ async fn install_reaper(
     reaper_root: &Path,
     version: &str,
 ) -> eyre::Result<PathBuf> {
-    let exe = reaper_root.join("REAPER/reaper");
+    let exe = if cfg!(target_os = "macos") {
+        reaper_root.join("REAPER.app/Contents/MacOS/REAPER")
+    } else {
+        reaper_root.join("REAPER/reaper")
+    };
     let version_file = reaper_root.join("VERSION");
     if exe.exists()
         && std::fs::read_to_string(&version_file)
@@ -166,54 +170,100 @@ async fn install_reaper(
 
     let major = version.split('.').next().unwrap_or("7");
     let slug = version.replace('.', "");
-    let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
-    let url = format!("https://www.reaper.fm/files/{major}.x/reaper{slug}_linux_{arch}.tar.xz");
-    let tarball = work.join(format!("reaper{slug}.tar.xz"));
-    fetch::download(client, &url, &tarball, &format!("REAPER {version}")).await?;
-
-    // The tarball unpacks to reaper_linux_<arch>/REAPER/…
-    let stage = work.join("reaper-extracted");
-    extract_tar_xz(&tarball, &stage)?;
-    let reaper_dir = find_dir_named(&stage, "REAPER")
-        .ok_or_else(|| eyre!("REAPER directory not found in {url}"))?;
 
     if reaper_root.exists() {
         std::fs::remove_dir_all(reaper_root)
             .wrap_err_with(|| format!("removing old {}", reaper_root.display()))?;
     }
     std::fs::create_dir_all(reaper_root)?;
-    move_dir(&reaper_dir, &reaper_root.join("REAPER"))?;
-    std::fs::write(&version_file, format!("{version}\n"))?;
 
+    if cfg!(target_os = "macos") {
+        // The macOS build is a single universal (arm64+x86_64) binary
+        // inside REAPER.app, distributed as a .dmg.
+        let url = format!("https://www.reaper.fm/files/{major}.x/reaper{slug}_universal.dmg");
+        let dmg = work.join(format!("reaper{slug}.dmg"));
+        fetch::download(client, &url, &dmg, &format!("REAPER {version}")).await?;
+        let mount = MountedDmg::attach(&dmg)?;
+        let app = find_dir_named(mount.path(), "REAPER.app")
+            .ok_or_else(|| eyre!("REAPER.app not found in {url}"))?;
+        copy_dir_recursive(&app, &reaper_root.join("REAPER.app"))?;
+        drop(mount);
+    } else {
+        let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+        let url = format!("https://www.reaper.fm/files/{major}.x/reaper{slug}_linux_{arch}.tar.xz");
+        let tarball = work.join(format!("reaper{slug}.tar.xz"));
+        fetch::download(client, &url, &tarball, &format!("REAPER {version}")).await?;
+
+        // The tarball unpacks to reaper_linux_<arch>/REAPER/…
+        let stage = work.join("reaper-extracted");
+        extract_tar_xz(&tarball, &stage)?;
+        let reaper_dir = find_dir_named(&stage, "REAPER")
+            .ok_or_else(|| eyre!("REAPER directory not found in {url}"))?;
+        move_dir(&reaper_dir, &reaper_root.join("REAPER"))?;
+    }
+
+    std::fs::write(&version_file, format!("{version}\n"))?;
     println!("REAPER {version} installed at {}", reaper_root.display());
     Ok(exe)
 }
 
-/// Download SWS and return (extension .so, python scripts) staged in `work`.
+/// Download SWS and return (extension .so/.dylib, python scripts) staged
+/// in `work`.
 async fn download_sws(
     client: &reqwest::Client,
     work: &Path,
 ) -> eyre::Result<(PathBuf, Vec<PathBuf>)> {
-    let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
-    let url = format!(
-        "https://www.sws-extension.org/download/pre-release/sws-{SWS_VERSION}-Linux-{arch}-{SWS_COMMIT}.tar.xz"
-    );
-    let tarball = work.join("sws.tar.xz");
-    fetch::download(client, &url, &tarball, "SWS extension").await?;
+    if cfg!(target_os = "macos") {
+        // SWS ships a universal (arm64+x86_64) .dmg on macOS, same
+        // version/commit pin as the Linux pre-release build.
+        let url = format!(
+            "https://www.sws-extension.org/download/pre-release/sws-{SWS_VERSION}-macOS-{SWS_COMMIT}.dmg"
+        );
+        let dmg = work.join("sws.dmg");
+        fetch::download(client, &url, &dmg, "SWS extension").await?;
+        let mount = MountedDmg::attach(&dmg)?;
+        let so = find_file_matching(mount.path(), |n| n.starts_with("reaper_sws") && n.ends_with(".dylib"))
+            .ok_or_else(|| eyre!("reaper_sws .dylib not found in SWS dmg"))?;
+        let scripts_found =
+            find_files_matching(mount.path(), |n| n.starts_with("sws_python") && n.ends_with(".py"));
+        // Copy out of the mount before it's detached — the paths above
+        // become invalid once the disk image is gone.
+        let stage = work.join("sws-staged");
+        std::fs::create_dir_all(&stage)?;
+        let so_dest = stage.join(so.file_name().unwrap());
+        std::fs::copy(&so, &so_dest)?;
+        let mut scripts = Vec::new();
+        for script in &scripts_found {
+            let dest = stage.join(script.file_name().unwrap());
+            std::fs::copy(script, &dest)?;
+            scripts.push(dest);
+        }
+        drop(mount);
+        Ok((so_dest, scripts))
+    } else {
+        let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+        let url = format!(
+            "https://www.sws-extension.org/download/pre-release/sws-{SWS_VERSION}-Linux-{arch}-{SWS_COMMIT}.tar.xz"
+        );
+        let tarball = work.join("sws.tar.xz");
+        fetch::download(client, &url, &tarball, "SWS extension").await?;
 
-    let stage = work.join("sws-extracted");
-    extract_tar_xz(&tarball, &stage)?;
+        let stage = work.join("sws-extracted");
+        extract_tar_xz(&tarball, &stage)?;
 
-    let so = find_file_matching(&stage, |n| n.starts_with("reaper_sws") && n.ends_with(".so"))
-        .ok_or_else(|| eyre!("reaper_sws .so not found in SWS archive"))?;
-    let scripts = find_files_matching(&stage, |n| n.starts_with("sws_python") && n.ends_with(".py"));
-    Ok((so, scripts))
+        let so = find_file_matching(&stage, |n| n.starts_with("reaper_sws") && n.ends_with(".so"))
+            .ok_or_else(|| eyre!("reaper_sws .so not found in SWS archive"))?;
+        let scripts =
+            find_files_matching(&stage, |n| n.starts_with("sws_python") && n.ends_with(".py"));
+        Ok((so, scripts))
+    }
 }
 
-/// Download the ReaPack .so into `work` and return its path.
+/// Download the ReaPack .so/.dylib into `work` and return its path.
 async fn download_reapack(client: &reqwest::Client, work: &Path) -> eyre::Result<PathBuf> {
     let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
-    let filename = format!("reaper_reapack-{arch}.so");
+    let ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+    let filename = format!("reaper_reapack-{arch}.{ext}");
     let url = format!(
         "https://github.com/cfillion/reapack/releases/download/v{REAPACK_VERSION}/{filename}"
     );
@@ -281,8 +331,20 @@ fn write_launch_jsons(prefix: &Path, reaper_exe: &Path) -> eyre::Result<()> {
 }
 
 /// Desktop entries launching REAPER directly with each rig's cfgfile
-/// (no reaper-launcher dependency on stock distros).
+/// (no reaper-launcher dependency on stock distros). Linux (XDG) only —
+/// macOS doesn't have an equivalent of a raw .desktop file; a real Launch
+/// Services entry needs a wrapper .app bundle with its own Info.plist,
+/// which isn't built yet. On macOS the rigs are still fully usable from a
+/// terminal (run the REAPER binary directly with `-cfgfile`).
 fn write_desktop_entries(prefix: &Path, reaper_exe: &Path) -> eyre::Result<()> {
+    if cfg!(target_os = "macos") {
+        println!(
+            "  (macOS — no dock entries yet; launch with: {} -cfgfile <rig>/reaper.ini -newinst)",
+            reaper_exe.display()
+        );
+        return Ok(());
+    }
+
     let apps = prefix.join(".local/share/applications");
     std::fs::create_dir_all(&apps)?;
     for rig in RIGS {
@@ -315,6 +377,54 @@ fn write_desktop_entries(prefix: &Path, reaper_exe: &Path) -> eyre::Result<()> {
 }
 
 // ── archive / fs helpers ─────────────────────────────────────────────
+
+/// A `hdiutil`-mounted .dmg, detached automatically on drop. Used for
+/// REAPER's and SWS's macOS releases (both ship as .dmg, not .tar.xz).
+/// Anything needed from the volume must be copied out before the guard
+/// drops — the mount point stops existing once `hdiutil detach` runs.
+struct MountedDmg {
+    mount_point: PathBuf,
+}
+
+impl MountedDmg {
+    fn attach(dmg: &Path) -> eyre::Result<Self> {
+        let mount_point =
+            std::env::temp_dir().join(format!("fts-installer-dmg-{}-{}", std::process::id(), fastrand_suffix()));
+        std::fs::create_dir_all(&mount_point)
+            .wrap_err_with(|| format!("creating mount point {}", mount_point.display()))?;
+        let status = std::process::Command::new("hdiutil")
+            .args(["attach", "-nobrowse", "-quiet", "-mountpoint"])
+            .arg(&mount_point)
+            .arg(dmg)
+            .status()
+            .wrap_err("running hdiutil attach")?;
+        if !status.success() {
+            eyre::bail!("hdiutil attach failed for {}", dmg.display());
+        }
+        Ok(Self { mount_point })
+    }
+
+    fn path(&self) -> &Path {
+        &self.mount_point
+    }
+}
+
+impl Drop for MountedDmg {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("hdiutil")
+            .args(["detach", "-quiet"])
+            .arg(&self.mount_point)
+            .status();
+    }
+}
+
+/// A cheap unique-enough suffix for temp dir names (no extra crate dep).
+fn fastrand_suffix() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
 
 /// Extract a .tar.xz to `dest` (pure Rust: xz2 stream + tar).
 fn extract_tar_xz(tarball: &Path, dest: &Path) -> eyre::Result<()> {

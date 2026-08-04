@@ -21,6 +21,9 @@ sha2.workspace = true
 reqwest = { version = "0.12", features = ["stream", "rustls-tls"], default-features = false }
 tar = "0.4"
 flate2 = "1"
-# .tar.xz (REAPER + SWS downloads); static liblzma so the shipped binary
-# has no system lzma dependency.
+# .tar.xz (REAPER + SWS downloads on Linux); static liblzma so the shipped
+# binary has no system lzma dependency.
 xz2 = { version = "0.1", features = ["static"] }
+# .zip (the macOS plugin bundle release asset — Apple notarization only
+# accepts zip/pkg/dmg, not tar.gz).
+zip = { version = "2", default-features = false, features = ["deflate"] }

@@ -114,3 +114,29 @@ pub fn extract_tarball(tarball: &Path, dest: &Path) -> eyre::Result<()> {
         .wrap_err_with(|| format!("unpacking into {}", dest.display()))?;
     Ok(())
 }
+
+/// Extract a .zip into `dest` (created fresh) — the macOS plugin bundle
+/// release asset (Apple notarization only accepts zip/pkg/dmg submissions,
+/// not tar.gz, so that's what CI packages and ships for macOS).
+pub fn extract_zip(zip_path: &Path, dest: &Path) -> eyre::Result<()> {
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)?;
+    }
+    std::fs::create_dir_all(dest)?;
+    let file = std::fs::File::open(zip_path).wrap_err_with(|| format!("opening {}", zip_path.display()))?;
+    let mut archive = zip::ZipArchive::new(std::io::BufReader::new(file))
+        .wrap_err_with(|| format!("reading zip {}", zip_path.display()))?;
+    archive.extract(dest).wrap_err_with(|| format!("unpacking into {}", dest.display()))?;
+    Ok(())
+}
+
+/// Extract `path` into `dest`, dispatching on its extension (`.zip` vs
+/// `.tar.gz`) — used where an asset's package format depends on the
+/// downloading platform.
+pub fn extract_archive(path: &Path, dest: &Path) -> eyre::Result<()> {
+    if path.extension().is_some_and(|e| e == "zip") {
+        extract_zip(path, dest)
+    } else {
+        extract_tarball(path, dest)
+    }
+}

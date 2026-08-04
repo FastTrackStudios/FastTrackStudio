@@ -1,15 +1,25 @@
 //! FTS plugin-bundle install/uninstall/list (issue #31).
 //!
-//! The plugin bundle is the `fts-plugins-v*-<platform>.tar.gz` release
-//! asset produced by `just plugins-package`: the `target/bundled/` tree —
-//! `FTS <Name>.clap` files and `FTS <Name>.vst3` bundle directories.
+//! The plugin bundle is the `fts-plugins-v*-<platform>.<ext>` release
+//! asset — a `.tar.gz` of `target/bundled/` on Linux (`just
+//! plugins-package`), a Developer-ID-signed + notarized `.zip` on macOS
+//! (`apps/fasttrackstudio/ios/deploy-macos-plugins.sh` — notarization
+//! only accepts zip/pkg/dmg submissions, not tar.gz): `FTS <Name>.clap`
+//! files and `FTS <Name>.vst3` bundle directories either way.
 //!
-//! Install targets are the per-user plugin dirs (Linux):
+//! Install targets are the per-user plugin dirs:
 //!
 //! ```text
-//! <prefix>/.clap/FTS <Name>.clap
-//! <prefix>/.vst3/FTS <Name>.vst3/
+//! Linux:  <prefix>/.clap/FTS <Name>.clap
+//!         <prefix>/.vst3/FTS <Name>.vst3/
+//! macOS:  <prefix>/Library/Audio/Plug-Ins/CLAP/FTS <Name>.clap
+//!         <prefix>/Library/Audio/Plug-Ins/VST3/FTS <Name>.vst3/
 //! ```
+//!
+//! No AU (Audio Unit) build exists yet — CLAP/VST3 only, both platforms.
+//! The macOS zip is signed but NOT stapled (stapling only works on
+//! .app/.pkg/.dmg); Gatekeeper falls back to an online notarization-ticket
+//! check on first load, which needs network access at that point.
 //!
 //! An install manifest (`<prefix>/.local/share/fts/plugins/MANIFEST` +
 //! `VERSION`) records what we put there, so `uninstall` removes exactly
@@ -37,6 +47,13 @@ impl PluginDirs {
             Some(p) => p,
             None => dirs_home()?,
         };
+        if cfg!(target_os = "macos") {
+            return Ok(Self {
+                clap: home.join("Library/Audio/Plug-Ins/CLAP"),
+                vst3: home.join("Library/Audio/Plug-Ins/VST3"),
+                state: home.join("Library/Application Support/fts/plugins"),
+            });
+        }
         Ok(Self {
             clap: home.join(".clap"),
             vst3: home.join(".vst3"),
@@ -71,7 +88,7 @@ pub async fn install(
         Some(path) if path.is_dir() => (path, "local".to_string()),
         Some(path) => {
             let extract = stage.path().join("bundle");
-            fetch::extract_tarball(&path, &extract)?;
+            fetch::extract_archive(&path, &extract)?;
             (extract, "local".to_string())
         }
         None => {
@@ -86,7 +103,7 @@ pub async fn install(
                 fetch::verify_sha256(&tarball_path, &release.tarball.name, &sums_text)?;
             }
             let extract = stage.path().join("bundle");
-            fetch::extract_tarball(&tarball_path, &extract)?;
+            fetch::extract_archive(&tarball_path, &extract)?;
             (extract, release.tag)
         }
     };
@@ -116,6 +133,21 @@ pub async fn install(
         ));
     }
     installed.sort();
+
+    // The macOS zip is signed + notarized but not stapled (only
+    // .app/.pkg/.dmg support stapling); a lingering quarantine xattr on the
+    // extracted bundles would otherwise force every host's Gatekeeper
+    // check to hit the network on first load. Best-effort, non-fatal.
+    if cfg!(target_os = "macos") {
+        for name in &installed {
+            let path = match name.split_once('/') {
+                Some(("clap", n)) => dirs.clap.join(n),
+                Some(("vst3", n)) => dirs.vst3.join(n),
+                _ => continue,
+            };
+            let _ = std::process::Command::new("xattr").args(["-dr", "com.apple.quarantine"]).arg(&path).status();
+        }
+    }
 
     fs::create_dir_all(&dirs.state)?;
     fs::write(dirs.manifest(), installed.join("\n") + "\n")?;

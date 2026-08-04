@@ -19,6 +19,7 @@
 mod codeberg;
 mod fetch;
 mod layout;
+mod macos_app;
 mod plugins;
 mod reaper_env;
 
@@ -34,8 +35,11 @@ use crate::layout::Layout;
 pub fn platform_suffix() -> eyre::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Ok("x86_64-linux"),
+        // airlock (the only machine that builds/signs macOS artifacts) is
+        // Apple Silicon; there's no Intel-mac build yet.
+        ("macos", "aarch64") => Ok("aarch64-macos"),
         (os, arch) => Err(eyre!(
-            "no FastTrackStudio release builds for {os}/{arch} yet (currently only linux/x86_64)"
+            "no FastTrackStudio release builds for {os}/{arch} yet (currently linux/x86_64 and macos/aarch64)"
         )),
     }
 }
@@ -153,7 +157,7 @@ async fn main() {
         None => install(cli.install).await,
         Some(Cmd::Install(args)) => install(args).await,
         Some(Cmd::Update { prefix }) => update(prefix).await,
-        Some(Cmd::Uninstall { prefix }) => Layout::new(prefix).and_then(|l| l.uninstall()),
+        Some(Cmd::Uninstall { prefix }) => uninstall(prefix),
         Some(Cmd::Reaper { prefix }) => reaper_env::setup(prefix).await,
         Some(Cmd::Bundle { prefix, version }) => bundle(prefix, version).await,
         Some(Cmd::Plugins { cmd }) => match cmd {
@@ -171,6 +175,10 @@ async fn main() {
 }
 
 async fn install(args: InstallArgs) -> eyre::Result<()> {
+    if cfg!(target_os = "macos") {
+        return macos_app::install(args.prefix, args.version, args.url).await;
+    }
+
     let layout = Layout::new(args.prefix)?;
     let client = fetch::http_client()?;
 
@@ -226,7 +234,18 @@ async fn bundle(prefix: Option<PathBuf>, version: Option<String>) -> eyre::Resul
     Ok(())
 }
 
+fn uninstall(prefix: Option<PathBuf>) -> eyre::Result<()> {
+    if cfg!(target_os = "macos") {
+        return macos_app::uninstall(prefix);
+    }
+    Layout::new(prefix)?.uninstall()
+}
+
 async fn update(prefix: Option<PathBuf>) -> eyre::Result<()> {
+    if cfg!(target_os = "macos") {
+        return macos_app::update(prefix).await;
+    }
+
     let layout = Layout::new(prefix)?;
     let client = fetch::http_client()?;
     let release = codeberg::resolve(&client, None).await?;
