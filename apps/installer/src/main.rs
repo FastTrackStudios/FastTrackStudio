@@ -35,11 +35,12 @@ use crate::layout::Layout;
 pub fn platform_suffix() -> eyre::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Ok("x86_64-linux"),
-        // airlock (the only machine that builds/signs macOS artifacts) is
-        // Apple Silicon; there's no Intel-mac build yet.
+        // airlock (Apple Silicon) cross-compiles both — see
+        // deploy-macos.sh's TARGET var and nix/modules/toolchain.nix.
         ("macos", "aarch64") => Ok("aarch64-macos"),
+        ("macos", "x86_64") => Ok("x86_64-macos"),
         (os, arch) => Err(eyre!(
-            "no FastTrackStudio release builds for {os}/{arch} yet (currently linux/x86_64 and macos/aarch64)"
+            "no FastTrackStudio release builds for {os}/{arch} yet (currently linux/x86_64, macos/aarch64, macos/x86_64)"
         )),
     }
 }

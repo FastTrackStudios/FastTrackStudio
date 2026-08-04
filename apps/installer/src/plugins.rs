@@ -93,9 +93,11 @@ pub async fn install(
         }
         None => {
             let client = fetch::http_client()?;
-            let release =
-                codeberg::resolve_with_prefix(&client, version.as_deref(), "fts-plugins-")
-                    .await?;
+            let release = if cfg!(target_os = "macos") {
+                codeberg::resolve_macos_plugins_zip(&client, version.as_deref()).await?
+            } else {
+                codeberg::resolve_with_prefix(&client, version.as_deref(), "fts-plugins-").await?
+            };
             let tarball_path = stage.path().join(&release.tarball.name);
             fetch::download(&client, &release.tarball.url, &tarball_path, &release.tarball.name).await?;
             if let Some(sums) = &release.sums {

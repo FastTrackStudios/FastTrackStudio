@@ -35,16 +35,17 @@ pub async fn resolve(client: &reqwest::Client, tag: Option<&str>) -> eyre::Resul
 }
 
 /// Same resolution, but pick the platform tarball by an arbitrary asset
-/// name prefix (e.g. "fts-plugins-" for the plugin bundle), with the
-/// extension appropriate to the host platform (`.tar.gz` on Linux, `.zip`
-/// for the macOS plugin bundle — Apple notarization requires zip/pkg/dmg).
+/// name prefix (e.g. "fasttrackstudio-" for the Linux app tarball) —
+/// `<prefix>-<platform_suffix>.tar.gz`. Linux-only in practice: the macOS
+/// app and plugin bundle have their own resolvers below (different
+/// container formats and, for the app, a non-conforming build-number
+/// infix in the filename).
 pub async fn resolve_with_prefix(
     client: &reqwest::Client,
     tag: Option<&str>,
     asset_prefix: &str,
 ) -> eyre::Result<Release> {
-    let ext = if cfg!(target_os = "macos") { "zip" } else { "tar.gz" };
-    resolve_with_prefix_ext(client, tag, asset_prefix, ext).await
+    resolve_with_prefix_ext(client, tag, asset_prefix, "tar.gz").await
 }
 
 /// Same as `resolve_with_prefix`, with an explicit asset extension.
@@ -66,16 +67,28 @@ pub async fn resolve_with_prefix_ext(
     .await
 }
 
-/// Resolve the macOS app `.dmg` asset (`FastTrackStudio-<ver>-<build>-macos.dmg`
-/// — the build number is a unix timestamp, not something we can predict, so
-/// this matches on prefix/suffix only). No `SHA256SUMS` covers it; the
+/// Resolve the macOS app `.dmg` asset
+/// (`FastTrackStudio-<ver>-<build>-<arch>-macos.dmg`, e.g.
+/// `-aarch64-macos.dmg` / `-x86_64-macos.dmg` — two separate arch-specific
+/// downloads, no universal build for the app). The build number is a unix
+/// timestamp, not something we can predict, so this matches on
+/// prefix/suffix only, picking the suffix for the resolving machine's own
+/// arch via `platform_suffix()`. No `SHA256SUMS` covers it; the
 /// notarization signature is the integrity/authenticity check instead.
 pub async fn resolve_macos_dmg(client: &reqwest::Client, tag: Option<&str>) -> eyre::Result<Release> {
+    resolve_with_prefix_ext(client, tag, "FastTrackStudio-", "dmg").await
+}
+
+/// Resolve the macOS plugin bundle `.zip` asset
+/// (`fts-plugins-v<ver>-macos.zip`) — a single universal (lipo'd) build
+/// covering both Mac architectures (nice-plug-xtask's `bundle-universal`),
+/// unlike the app dmg. No arch token, so no `platform_suffix()` involved.
+pub async fn resolve_macos_plugins_zip(client: &reqwest::Client, tag: Option<&str>) -> eyre::Result<Release> {
     resolve_matching(
         client,
         tag,
-        |name| name.starts_with("FastTrackStudio-") && name.ends_with("-macos.dmg"),
-        "FastTrackStudio-*-macos.dmg",
+        |name| name.starts_with("fts-plugins-") && name.ends_with("-macos.zip"),
+        "fts-plugins-*-macos.zip",
     )
     .await
 }
