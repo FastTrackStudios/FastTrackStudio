@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use architect::vox;
 use email_config::{BackendKind, FolderAliases, SmtpConfig, TlsMode};
 use email_proto::{
     Account, Draft, EmailEvent, EmailSync, EmailSyncError, Envelope, FlagDelta, Folder, Message,

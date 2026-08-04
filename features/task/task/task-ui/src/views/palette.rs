@@ -4,7 +4,6 @@
 
 use task_proto::{Priority, Status};
 
-use crate::display::{PriorityLabel, StatusLabel};
 
 /// Pill classes for a [`Status`] badge.
 #[must_use]

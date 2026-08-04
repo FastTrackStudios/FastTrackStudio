@@ -330,6 +330,8 @@ pub fn TabStrip() -> Element {
 
 // ── persistence (localStorage on web) ───────────────────────────────
 
+// localStorage persistence exists only in the browser build.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const STORAGE_KEY: &str = "task.tabs";
 
 #[derive(serde::Serialize, serde::Deserialize)]

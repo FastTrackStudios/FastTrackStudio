@@ -40,7 +40,9 @@ fn owner_id(org_id: Uuid) -> Uuid {
 }
 
 /// Extract the `Authorization: Bearer <token>` value, if present.
-fn bearer(headers: &HeaderMap) -> Option<String> {
+/// Shared with the other HTTP token gates (`crate::mcp`) — one
+/// extraction, not per-module forks.
+pub(crate) fn bearer(headers: &HeaderMap) -> Option<String> {
     headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

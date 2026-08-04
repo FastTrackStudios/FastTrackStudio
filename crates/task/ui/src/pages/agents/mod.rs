@@ -36,12 +36,12 @@ use agent_proto::question::QuestionRequest;
 use agent_proto::service::discovery::{CapabilityFlag, ModelInfo, SkillInfo};
 use agent_proto::session::{Session, SessionStatus};
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Archive, Bot, ChevronLeft, Copy, FileText, Info, Pin, Trash2};
+use fts_ui::lucide_dioxus::{Bot, ChevronLeft, Copy, FileText, Info, Trash2};
 use fts_ui::prelude::*;
 
 use logic::{
     PromptHistory, Recall, ScrollMode, autoscroll_js, context_free_percent, context_ring_style,
-    cost_badge, fmt_cost, fmt_duration, fmt_elapsed, fmt_tokens, group_models, hash_hsl, rank_by,
+    cost_badge, fmt_cost, fmt_duration, fmt_elapsed, fmt_tokens, group_models, rank_by,
     referenced_paths, relative_time, scroll_mode, scroll_to_end_js, status_pill,
 };
 use timeline::{ActivityLine, Row, ToolTone, TurnLog, push_line, running_tool, settle_tool};
@@ -727,12 +727,12 @@ pub(crate) fn ChatPane(
     // composer's Enter handling and the 16px input rule below.
     let touch = use_hook(editor::editor_view::coarse_pointer);
     let mut messages = use_signal(Vec::<Message>::new);
-    let mut streaming = use_signal(|| None::<(String, String)>);
-    let mut reasoning = use_signal(String::new);
+    let streaming = use_signal(|| None::<(String, String)>);
+    let reasoning = use_signal(String::new);
     // Live activity for the CURRENT turn; folded into `turns` on
     // completion (keyed by the concluding assistant message id).
-    let mut live_lines = use_signal(Vec::<ActivityLine>::new);
-    let mut turns = use_signal(HashMap::<String, TurnLog>::new);
+    let live_lines = use_signal(Vec::<ActivityLine>::new);
+    let turns = use_signal(HashMap::<String, TurnLog>::new);
     let expanded_folds = use_signal(std::collections::HashSet::<String>::new);
     let mut error = use_signal(String::new);
     let mut busy = use_signal(|| matches!(session.status, SessionStatus::Running));
@@ -745,7 +745,7 @@ pub(crate) fn ChatPane(
     let mut completion_dismissed = use_signal(String::new);
     let mut model = use_signal(String::new);
     let mut responding = use_signal(String::new);
-    let mut stream_state = use_signal(|| StreamState::Connecting);
+    let stream_state = use_signal(|| StreamState::Connecting);
     // Set while a cancel is in flight; cleared by the terminal event.
     let mut stopping = use_signal(|| false);
     // Shell-style `↑`/`↓` recall, restored from localStorage per
@@ -756,9 +756,9 @@ pub(crate) fn ChatPane(
     // How many times the event stream has had to reconnect this
     // session — the health chip shows it once it's non-zero.
     let reconnects = use_signal(|| 0u32);
-    let mut tokens = use_signal(|| (session.usage.input_tokens, session.usage.output_tokens));
-    let mut spend = use_signal(|| session.usage.estimated_cost_usd);
-    let mut turn_started = use_signal(|| None::<chrono::DateTime<chrono::Utc>>);
+    let tokens = use_signal(|| (session.usage.input_tokens, session.usage.output_tokens));
+    let spend = use_signal(|| session.usage.estimated_cost_usd);
+    let turn_started = use_signal(|| None::<chrono::DateTime<chrono::Utc>>);
     let mut elapsed = use_signal(|| 0i64);
 
     // Restore this conversation's prompt history.

@@ -14,6 +14,10 @@
 //! Self-sandboxed: tempdir data root via `TASK_DATA_ROOT`, one test per
 //! binary so the env setup races nothing.
 
+// This test exercises services owned by the `mealplan` plugin;
+// a build without it has nothing to cover.
+#![cfg(feature = "plugin-mealplan")]
+
 use architect::Scope;
 use task_server::AppState;
 

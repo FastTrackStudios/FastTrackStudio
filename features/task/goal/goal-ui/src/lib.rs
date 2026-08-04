@@ -11,7 +11,7 @@ use chrono::Weekday;
 use cycle::{FirstWeekRule, generate_year};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use goal::Goal;
+use goal_proto::Goal;
 use uuid::Uuid;
 
 use task_ui_core::orgs::{OrgMeta, OrgSelection};
@@ -361,6 +361,6 @@ fn first_line(body: &str) -> Option<String> {
 // for the shape.
 
 /// Goals across the selected orgs (concurrent fan-out).
-pub async fn fetch_goals(slugs: &[String]) -> Result<Vec<goal::Goal>, String> {
-    task_ui_core::feeds::fan_out(slugs, "list", |c: goal::GoalServiceClient| async move { c.list().await }).await
+pub async fn fetch_goals(slugs: &[String]) -> Result<Vec<goal_proto::Goal>, String> {
+    task_ui_core::feeds::fan_out(slugs, "list", |c: goal_proto::GoalServiceClient| async move { c.list().await }).await
 }

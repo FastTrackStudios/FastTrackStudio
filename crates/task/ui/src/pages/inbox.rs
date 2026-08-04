@@ -14,19 +14,13 @@
 //! leaving review mode needs no refetch: the store already reflects
 //! every decision.
 
-use architect::Id;
 use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use inbox_proto::{review, InboxItem, ReviewResponse};
 
 use crate::orgs::{OrgMeta, OrgSelection};
-use crate::shell::mobile::MobileActionBar;
 use crate::stores;
-
-const INPUT_CLS: &str = "rounded-lg border border-input bg-input/30 px-3 py-2 text-sm transition-colors \
-     focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] \
-     focus-visible:ring-ring/50 placeholder:text-muted-foreground";
 
 #[component]
 pub fn InboxView() -> Element {

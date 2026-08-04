@@ -21,7 +21,6 @@
 #![cfg(target_arch = "wasm32")]
 
 use media_proto::MediaChunk;
-use wasm_bindgen::JsCast;
 use web_sys::{HtmlAudioElement, MediaSource, MediaSourceReadyState, SourceBuffer, Url};
 
 /// The one MSE mime this path speaks.

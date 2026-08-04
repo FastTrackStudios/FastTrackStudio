@@ -11,6 +11,10 @@
 //! boots a fresh one over the same data root, exactly as a restart
 //! would, and reads the state back.
 
+// This test exercises services owned by the `scheduling` plugin;
+// a build without it has nothing to cover.
+#![cfg(feature = "plugin-scheduling")]
+
 use architect::Scope;
 use scheduling_proto::{BookingStatus, BookingsClient, EventTypeId, NewBooking};
 use task_server::AppState;

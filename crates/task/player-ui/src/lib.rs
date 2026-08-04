@@ -76,6 +76,9 @@ pub use self::widgets::widgets;
 /// An org's `MediaServiceClient` — content-addressed blob bytes
 /// streamed over the vox lane itself (`Tx<MediaChunk>`), no HTTP
 /// side-channel. The forward path for the player's stems.
+// Only the wasm (browser) build streams over these clients; native
+// compiles the module but never calls them.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) async fn media_client(
     slug: &str,
 ) -> Result<media_proto::MediaServiceClient, String> {
@@ -84,6 +87,7 @@ pub(crate) async fn media_client(
 
 /// An org's `AttachmentServiceClient` — short-lived signed download
 /// URLs for content-addressed blobs (song stems).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) async fn attachments_client(
     slug: &str,
 ) -> Result<attachments_proto::AttachmentServiceClient, String> {

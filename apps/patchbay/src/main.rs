@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! FTS Patchbay — the PipeWire studio-routing desktop app.
 //!
 //! The [`patchbay::PatchbayBackend`] engine runs in-process and is ALSO

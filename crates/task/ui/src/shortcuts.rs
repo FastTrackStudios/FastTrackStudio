@@ -299,6 +299,10 @@ pub fn WhichKeyOverlay(state: Signal<Option<WhichKeyView>>) -> Element {
 /// runtime. `Exec` runs an action through the registry (which enqueues
 /// an `Intent`); `Intent` is performed directly; `WhichKey` updates the
 /// overlay.
+// `Exec` / `WhichKey` have no construction site yet (the palette
+// performs Intents directly and which-key renders from its own
+// signal); the variants document the crossing contract and stay.
+#[allow(dead_code)]
 enum Msg {
     Exec(String),
     Intent(actions::Intent),

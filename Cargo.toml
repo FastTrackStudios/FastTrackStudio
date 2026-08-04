@@ -929,6 +929,7 @@ finance = { path = "features/task/finance/finance" }
 mount-proto = { path = "features/task/mount/mount-proto" }
 mount = { path = "features/task/mount/mount" }
 goal = { path = "features/task/goal/goal" }
+goal-proto = { path = "features/task/goal/goal-proto", default-features = false }
 milestone = { path = "features/task/milestone/milestone" }
 milestone-proto = { path = "features/task/milestone/milestone-proto", default-features = false }
 workstream = { path = "features/task/workstream/workstream" }
@@ -946,6 +947,7 @@ email-config = { path = "features/task/email/email-config" }
 email-autoconfig = { path = "features/task/email/email-autoconfig" }
 email-sync = { path = "features/task/email/email-sync" }
 email-link = { path = "features/task/email/email-link" }
+email-product = { path = "features/task/email/email-product" }
 # features/task — vault-superset slices
 attachments-proto = { path = "features/task/attachments/attachments-proto" }
 media-proto = { path = "features/task/media/media-proto" }
@@ -988,6 +990,9 @@ scheduling-proto = { path = "features/task/scheduling/scheduling-proto", default
 scheduling-ui = { path = "features/task/scheduling/scheduling-ui" }
 inbox = { path = "features/task/inbox/inbox" }
 inbox-proto = { path = "features/task/inbox/inbox-proto", default-features = false }
+# features/task/notify — notifications (server-side notifier + the bell)
+notify = { path = "features/task/notify/notify" }
+notify-proto = { path = "features/task/notify/notify-proto", default-features = false }
 # features/task/recall — FSRS spaced-repetition learning deck
 recall = { path = "features/task/recall/recall" }
 recall-proto = { path = "features/task/recall/recall-proto", default-features = false }
@@ -1083,9 +1088,14 @@ mermaid-rs-renderer = { path = "libs/editor/vendor/mermaid-rs-renderer" }
 
 # ── Lints — merged union of the dissolved workspaces' policies ─────────
 [workspace.lints.rust]
-dead_code = "allow"
-unused = "allow"
-unused_unsafe = "allow"
+# Flipped from "allow" 2026-07-28 (task cleanup): the blanket allows are
+# WHY ~30k lines of dead code accumulated silently. The task tree is
+# warning-clean under these; legacy crates in other domains carry a
+# crate-level `#![allow(dead_code, unused)]` marked "Lint debt" until
+# their own burn-down.
+dead_code = "warn"
+unused = "warn"
+unused_unsafe = "warn"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "allow"

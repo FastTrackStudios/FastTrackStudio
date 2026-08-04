@@ -9,7 +9,6 @@ use git_proto::reviews::{
 use git_proto::{
     GitError, GitEvent, Label, PullRequest, PullRequestId, PullRequestState, RepoId, Reviewer, User,
 };
-use vox::Tx;
 
 impl ReviewSurface for Backend {
     fn list_pull_requests(&self, repo: &RepoId) -> Result<Vec<PullRequest>, GitError> {

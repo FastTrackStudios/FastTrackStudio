@@ -55,7 +55,7 @@ pub fn InventoryView() -> Element {
     });
 
     let mut name = use_signal(String::new);
-    let mut category = use_signal(|| "other".to_string());
+    let category = use_signal(|| "other".to_string());
 
     // The shared store: one AtomResult for the list, optimistic create.
     let result = stores::use_item_list();

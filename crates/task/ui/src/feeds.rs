@@ -50,8 +50,8 @@ pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)
 /// Goals across the selected orgs, each paired with the slug of the
 /// org it came from — feeds the shared goal store (the `/goals` page
 /// renders the merged hierarchy; the slug tag keys the live fold).
-pub async fn fetch_goals_tagged(slugs: &[String]) -> Result<Vec<(String, goal::Goal)>, String> {
-    fan_out_tagged(slugs, "list", |c: goal::GoalServiceClient| async move { c.list().await }).await
+pub async fn fetch_goals_tagged(slugs: &[String]) -> Result<Vec<(String, goal_proto::Goal)>, String> {
+    fan_out_tagged(slugs, "list", |c: goal_proto::GoalServiceClient| async move { c.list().await }).await
 }
 
 feeds! {
@@ -150,6 +150,25 @@ feeds! {
         /// Delete one inbox item.
         delete_inbox_item(id: &str) -> ()
             = delete_inbox_item(id.to_string()) as "delete inbox item";
+    }
+}
+
+feeds! {
+    notify_proto::NotifyClient {
+        /// Recent notifications, newest first (one default server
+        /// page) — the bell's backing fetch; the live fold keeps it
+        /// current after that.
+        fetch_notifications() -> Vec<notify_proto::Notification>
+            = list(notify_proto::NotifyListFilter::recent()) as "list notifications";
+
+        /// Flip one notification read (returns the post-write row;
+        /// the stream folds it everywhere).
+        mark_notification_read(id: uuid::Uuid) -> notify_proto::Notification
+            = mark_read(id) as "mark notification read";
+
+        /// Flip every unread notification read.
+        mark_all_notifications_read() -> u64
+            = mark_all_read() as "mark all notifications read";
     }
 }
 

@@ -166,7 +166,7 @@ pub fn VaultView(
     // Separate from `focus_tick`, which NoteView drives off our own
     // save count — sharing one signal would let the two clobber each
     // other. Panels that want "refresh on any commit" read the sum.
-    let mut vault_tick = use_signal(|| 0u64);
+    let vault_tick = use_signal(|| 0u64);
     let refresh_key = use_memo(move || *focus_tick.read() + *vault_tick.read());
 
     // ── Live vault changes ────────────────────────────────────
@@ -186,7 +186,7 @@ pub fn VaultView(
     // stream. Every *re*-subscribe also restarts the tree, which is
     // the recovery path for events published while we were detached
     // (the hub is a sliding mailbox — nothing is replayed).
-    let mut subscribed_once = use_signal(|| false);
+    let subscribed_once = use_signal(|| false);
     architect::use_stream(
         move |tx| {
             // Signals are `Copy`; the hook takes `Fn`, so take
@@ -1286,6 +1286,9 @@ pub use task_ui_core::frontmatter::{
 /// frontmatter block so the Properties panel has something to show
 /// (a `created` date + empty `tags`/`aliases` sequences). No `title`
 /// key — the note's title IS its filename (see `note_header`).
+// Called only from the wasm arm of `create_new_file` (the native
+// client path isn't wired yet).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) fn seed_note_bytes() -> Vec<u8> {
     let today = chrono::Local::now().date_naive();
     format!("---\ncreated: {today}\ntags: []\naliases: []\n---\n\n").into_bytes()

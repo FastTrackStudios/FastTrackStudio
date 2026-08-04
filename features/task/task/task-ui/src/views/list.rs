@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use task_proto::{Priority, Status};
 
-use crate::display::{StatusLabel, TaskDisplay};
+use crate::display::TaskDisplay;
 use crate::{TaskInfo, TaskMutation};
 
 use super::row::TaskRow;

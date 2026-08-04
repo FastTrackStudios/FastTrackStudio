@@ -19,12 +19,12 @@ use timer_proto::service::{
     LogSessionRequest, RateResolution, RateSource, StartTimerRequest, TimerService,
 };
 use timer_proto::{
-    OrgMemberRate, ProjectMemberRate, TimerError, WorkSession, WorkSessionFilter,
+    OrgMemberRate, ProjectMemberRate, Tag, TimerError, WorkSession, WorkSessionFilter,
 };
 use uuid::Uuid;
 
 use crate::entity::{
-    OrgMemberRateActive, OrgMemberRateColumn, OrgMemberRateEntity, OrgMemberRateModel,
+    OrgMemberRateColumn, OrgMemberRateEntity, OrgMemberRateModel,
     ProjectMemberRateActive, ProjectMemberRateColumn, ProjectMemberRateEntity,
     ProjectMemberRateModel, WorkSessionActive, WorkSessionColumn, WorkSessionEntity,
     WorkSessionModel,
@@ -518,7 +518,12 @@ impl TimerService for Store {
 
         // Re-snapshot the rate against the (possibly changed) user /
         // project / billable. Open or non-billable sessions hold $0.
-        let (rate_cents, currency) = if end_time.is_some() && billable {
+        // `preserve_rate` keeps the stored snapshot untouched —
+        // historical corrections (user reassignment) must not shift
+        // already-billed amounts.
+        let (rate_cents, currency) = if req.preserve_rate {
+            (row.rate_cents, row.currency.clone())
+        } else if end_time.is_some() && billable {
             let r = self
                 .cascade_for(user_id, row.org_id, project_id)
                 .await
@@ -644,6 +649,137 @@ impl TimerService for Store {
             .into_iter()
             .map(project_member_rate_from_model)
             .collect())
+    }
+
+    async fn list_tags(&self, org_id: Uuid) -> Result<Vec<Tag>, TimerError> {
+        let rows = crate::entity::TagEntity::find()
+            .filter(crate::entity::TagColumn::OrgId.eq(org_id))
+            .all(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        Ok(rows.into_iter().map(Tag::from).collect())
+    }
+
+    async fn create_tag(
+        &self,
+        org_id: Uuid,
+        name: String,
+        color: String,
+    ) -> Result<Tag, TimerError> {
+        self.ensure_tag(org_id, &name, &color).await.map(Tag::from)
+    }
+
+    async fn delete_tag(&self, org_id: Uuid, name: String) -> Result<Tag, TimerError> {
+        let existing = crate::entity::TagEntity::find()
+            .filter(crate::entity::TagColumn::OrgId.eq(org_id))
+            .filter(crate::entity::TagColumn::Name.eq(name.clone()))
+            .one(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?
+            .ok_or(TimerError::TagNotFound(name))?;
+        crate::entity::TagEntity::delete_by_id(existing.id)
+            .exec(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        Ok(Tag::from(existing))
+    }
+
+    async fn attach_tags(
+        &self,
+        session_id: Uuid,
+        org_id: Uuid,
+        names: Vec<String>,
+    ) -> Result<(), TimerError> {
+        for name in &names {
+            let tag = self.ensure_tag(org_id, name, "").await?;
+            let already = crate::entity::WorkSessionTagEntity::find()
+                .filter(crate::entity::WorkSessionTagColumn::WorkSessionId.eq(session_id))
+                .filter(crate::entity::WorkSessionTagColumn::TagId.eq(tag.id))
+                .one(&self.conn)
+                .await
+                .map_err(|e| TimerError::Backend(e.to_string()))?;
+            if already.is_some() {
+                continue;
+            }
+            crate::entity::WorkSessionTagActive {
+                id: Set(Uuid::new_v4()),
+                work_session_id: Set(session_id),
+                tag_id: Set(tag.id),
+                created_at: Set(Utc::now()),
+            }
+            .insert(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    async fn detach_tags(
+        &self,
+        session_id: Uuid,
+        org_id: Uuid,
+        names: Vec<String>,
+        all: bool,
+    ) -> Result<u64, TimerError> {
+        if all {
+            crate::entity::WorkSessionTagEntity::delete_many()
+                .filter(crate::entity::WorkSessionTagColumn::WorkSessionId.eq(session_id))
+                .exec(&self.conn)
+                .await
+                .map_err(|e| TimerError::Backend(e.to_string()))?;
+            return Ok(0);
+        }
+        let tag_rows = crate::entity::TagEntity::find()
+            .filter(crate::entity::TagColumn::OrgId.eq(org_id))
+            .filter(crate::entity::TagColumn::Name.is_in(names))
+            .all(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?;
+        let matched = tag_rows.len() as u64;
+        let ids: Vec<Uuid> = tag_rows.iter().map(|t| t.id).collect();
+        if !ids.is_empty() {
+            crate::entity::WorkSessionTagEntity::delete_many()
+                .filter(crate::entity::WorkSessionTagColumn::WorkSessionId.eq(session_id))
+                .filter(crate::entity::WorkSessionTagColumn::TagId.is_in(ids))
+                .exec(&self.conn)
+                .await
+                .map_err(|e| TimerError::Backend(e.to_string()))?;
+        }
+        Ok(matched)
+    }
+}
+
+impl Store {
+    /// Idempotent tag upsert by `(org_id, name)` — the shared core of
+    /// `create_tag` / `attach_tags`. An existing row wins untouched
+    /// (its color is not updated).
+    async fn ensure_tag(
+        &self,
+        org_id: Uuid,
+        name: &str,
+        color: &str,
+    ) -> Result<crate::entity::TagModel, TimerError> {
+        if let Some(existing) = crate::entity::TagEntity::find()
+            .filter(crate::entity::TagColumn::OrgId.eq(org_id))
+            .filter(crate::entity::TagColumn::Name.eq(name.to_string()))
+            .one(&self.conn)
+            .await
+            .map_err(|e| TimerError::Backend(e.to_string()))?
+        {
+            return Ok(existing);
+        }
+        let now = Utc::now();
+        crate::entity::TagActive {
+            id: Set(Uuid::new_v4()),
+            org_id: Set(org_id),
+            name: Set(name.to_string()),
+            color: Set(color.to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&self.conn)
+        .await
+        .map_err(|e| TimerError::Backend(e.to_string()))
     }
 }
 

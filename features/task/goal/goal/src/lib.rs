@@ -1,71 +1,50 @@
-// architect's Entity derive emits cfg-gated blocks; allow
-// at crate scope.
-#![allow(unexpected_cfgs)]
-
 //! `goal` — long-term aspirations + their decomposition.
 //!
-//! A [`Goal`] is a typed entity distinct from
-//! [`project::ProjectInfo`]: it carries a `target_date` and a
-//! `kind` (`lifetime` / `yearly` / `quarterly` / `cycle` /
-//! `weekly`) so a multi-year ambition like "Buy a house" can
-//! decompose into a yearly goal ("Save $X by EOY"), which
-//! decomposes into quarterly milestones, which decompose into
-//! cycle-level work — all in the same entity, linked by
-//! `parent_id`.
+//! The wasm-clean wire surface ([`Goal`] / [`Kind`] / [`Status`] +
+//! the [`GoalService`] RPC trait and its `#[subscribe]` events
+//! stream) lives in the sibling [`goal_proto`] crate; this crate
+//! sits on top of it and owns the vault-backed side:
 //!
-//! Markdown frontmatter stays the source of truth. The
-//! SeaORM Model emitted under `--features server` provides
-//! indexed lookups (by status, by target date, by parent) for
-//! UI surfaces that need to filter without re-walking the
-//! vault.
+//! - [`parse_page`] / [`looks_like_goal`] — vault page → `Goal`
+//! - [`serialize_goal`] / [`write_goal`] / [`default_goal_path`] —
+//!   writer + path helper
+//! - [`GoalBackend`] — server impl of [`GoalService`]
 //!
-//! Convention: goal pages live at
-//! `vault/Goals/<slug>.md` for top-level lifetime goals, and
-//! `vault/Goals/<parent-slug>/<slug>.md` for nested
-//! decompositions. The `parent_id` field is what the DB
-//! reads; the folder layout is just for human navigation.
+//! Markdown frontmatter stays the source of truth; goal pages live at
+//! `vault/Goals/<slug>.md` (top-level) and
+//! `vault/Goals/<parent-slug>/<slug>.md` (nested decompositions) —
+//! the `parent_id` field is what the DB reads, the folder layout is
+//! for human navigation. See `plans/cyclic-life-calendar.md` for the
+//! planning system goals plug into.
 //!
-//! See `plans/cyclic-life-calendar.md` for the planning
-//! system goals plug into.
+//! This crate is native-only (it walks the vault via `std::fs`); wasm
+//! UI consumers take `goal-proto` directly — which is why the old
+//! `cfg(not(target_arch = "wasm32"))` gates are gone.
 
-mod model;
-mod service;
+pub mod model;
+pub mod service;
 
-// `entity` / `parse` / `write` / `backend` all reach the shared
-// `vault-entity` support layer, which walks `std::fs` (and pulls a
-// file watcher). Wasm UI consumes wire types + the RPC client only.
-#[cfg(not(target_arch = "wasm32"))]
 mod backend;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod entity;
-#[cfg(not(target_arch = "wasm32"))]
 mod parse;
-#[cfg(not(target_arch = "wasm32"))]
 mod write;
 
 pub use model::{Goal, Kind, Status, Tags};
-#[cfg(not(target_arch = "wasm32"))]
-pub use entity::Goals;
-#[cfg(not(target_arch = "wasm32"))]
-pub use parse::{ParseError, looks_like_goal, parse_goal, parse_page};
 pub use service::{GoalError, GoalEvent, GoalService, GoalServiceRpc};
+
+pub use backend::GoalBackend;
+pub use entity::Goals;
+pub use parse::{ParseError, looks_like_goal, parse_goal, parse_page};
+pub use write::{WriteError, default_goal_path, serialize_goal, write_goal};
+
 #[cfg(feature = "vox")]
-pub use service::{
-    GoalServiceClient, GoalServiceRpcDispatcher as GoalDispatcher, Service as GoalServiceBridge,
-    goal_service_rpc_service_descriptor as goal_service_descriptor, layer as goal_service_layer,
-    serve as serve_goal_service,
+pub use goal_proto::{
+    GoalDispatcher, GoalServiceBridge, GoalServiceClient, goal_service_descriptor,
+    goal_service_layer, serve_goal_service,
 };
 // `#[subscribe] fn events` stream sibling — live goal changes.
-// Mount `goal_service_stream_layer(backend)` next to the base
-// service; subscribers drive a `GoalServiceStreamClient`.
 #[cfg(feature = "vox")]
-pub use service::{
-    GoalServiceStream, GoalServiceStreamClient, GoalServiceStreamSource,
-    goal_service_stream_service_descriptor as goal_stream_descriptor,
-    stream_layer as goal_service_stream_layer, stream_serve as serve_goal_service_stream,
+pub use goal_proto::{
+    GoalServiceStream, GoalServiceStreamClient, GoalServiceStreamSource, goal_stream_descriptor,
+    goal_service_stream_layer, serve_goal_service_stream,
 };
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use backend::GoalBackend;
-#[cfg(not(target_arch = "wasm32"))]
-pub use write::{WriteError, default_goal_path, serialize_goal, write_goal};

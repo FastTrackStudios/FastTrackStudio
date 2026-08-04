@@ -1,6 +1,9 @@
 //! `task cycle …` — the cyclic life-calendar surface.
 //!
-//! Moved verbatim out of `main.rs`; behaviour unchanged.
+//! `current` / `list` are pure computation (no data at all).
+//! `reflect` writes an org WIKI page and goes through the wiki
+//! Pages service over vox — remote server or embedded backend
+//! alike.
 
 use clap::Subcommand;
 
@@ -47,7 +50,7 @@ pub(crate) enum CycleCmd {
     },
 }
 
-pub(crate) fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
+pub(crate) async fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
     use chrono::Datelike;
     let rule = cycle::FirstWeekRule::AtLeastFourDaysInYear;
     match cmd {
@@ -125,17 +128,40 @@ pub(crate) fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
             quarter,
             cycle,
         } => {
-            let ctx = crate::org_ctx::resolve_active(None)?;
             let target = pick_reflection_cycle(year, quarter, cycle, rule)
                 .ok_or_else(|| eyre::eyre!("no matching cycle"))?;
-            let cycles_dir = ctx.root.wiki_knowledge_dir().join("cycles");
-            std::fs::create_dir_all(&cycles_dir)
-                .map_err(|e| eyre::eyre!("create {}: {e}", cycles_dir.display()))?;
+            // Reflections are wiki pages (`wiki/Knowledge/cycles/…`)
+            // — org DATA, written through the wiki Pages service so
+            // the command works against a remote org too (and the
+            // org router's gates apply). Display the on-disk path
+            // when the org lives on this machine, else the
+            // wiki-relative path.
+            let slug = match crate::resolve_active_org(None) {
+                Ok(s) => s,
+                Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
+            };
             let filename = format!("{}-Q{}-C{}.md", target.year, target.quarter, target.ordinal);
-            let path = cycles_dir.join(&filename);
-            if path.exists() {
+            let rel = format!("cycles/{filename}");
+            let display = org_proto::DataRoot::from_env().ok().map_or_else(
+                || rel.clone(),
+                |r| {
+                    r.org(&slug)
+                        .wiki_knowledge_dir()
+                        .join(&rel)
+                        .display()
+                        .to_string()
+                },
+            );
+            let url = crate::resolve_org_vox_url(None, &slug);
+            let pages: wiki_proto::service::pages::PagesClient =
+                crate::establish_for_url(&url).await?;
+            if pages
+                .read_page("default".to_owned(), rel.clone())
+                .await
+                .is_ok()
+            {
                 println!("(reflection already exists)");
-                println!("  {}", path.display());
+                println!("  {display}");
                 return Ok(());
             }
             let now = chrono::Utc::now();
@@ -179,10 +205,12 @@ pub(crate) fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
                 end = target.end_date,
                 created = now.to_rfc3339(),
             );
-            std::fs::write(&path, body)
-                .map_err(|e| eyre::eyre!("write {}: {e}", path.display()))?;
+            pages
+                .write_page("default".to_owned(), rel.clone(), body, String::new())
+                .await
+                .map_err(|e| eyre::eyre!("write {rel}: {e:?}"))?;
             println!("Created cycle reflection at:");
-            println!("  {}", path.display());
+            println!("  {display}");
             println!(
                 "  for {}-Q{}-C{} ({} → {})",
                 target.year, target.quarter, target.ordinal, target.start_date, target.end_date,

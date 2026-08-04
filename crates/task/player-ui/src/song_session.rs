@@ -60,7 +60,7 @@ pub(crate) mod imp {
         TransportControlBar,
     };
     use session_ui::{
-        ACTIVE_INDICES, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
+        PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
         TransportState, apply_active_indices,
     };
 
@@ -126,10 +126,15 @@ pub(crate) mod imp {
     pub(crate) struct StemNode {
         el: HtmlAudioElement,
         gain: GainNode,
+        // Held for its side effect only: dropping the source node would
+        // tear the routing down.
+        #[allow(dead_code)]
         node: web_sys::MediaElementAudioSourceNode,
         /// Post-gain tap for VU metering (reads the level the listener hears).
         /// A side branch off `gain` — it does not connect onward, so it never
-        /// affects the audio path.
+        /// affects the audio path. Read by `peak_levels`, which the session
+        /// view doesn't poll yet — kept for that wiring.
+        #[allow(dead_code)]
         analyser: web_sys::AnalyserNode,
     }
 
@@ -158,6 +163,9 @@ pub(crate) mod imp {
         /// Per-stem peak level (0.0..=1.0), in stem order, from the metering
         /// analysers — the post-gain signal the listener hears (muted stems read
         /// ~0). Cheap; poll at UI rate (~20 fps), not per audio frame.
+        /// Not polled by the session view yet — kept with `analyser` for
+        /// the VU wiring.
+        #[allow(dead_code)]
         pub(crate) fn peak_levels(&self) -> Vec<f32> {
             let mut buf = [0u8; 256];
             self.stems
@@ -193,9 +201,11 @@ pub(crate) mod imp {
             self.playing = false;
         }
 
-        /// Stop playback and release the audio graph. Called when a setlist
-        /// swaps to a different song so the old song's media elements stop
-        /// streaming and the context is freed.
+        /// Stop playback and release the audio graph. Intended for setlist
+        /// song swaps so the old song's media elements stop streaming; the
+        /// session view currently relies on Drop instead — kept for the
+        /// explicit-swap wiring.
+        #[allow(dead_code)]
         pub(crate) fn teardown(&mut self) {
             for s in &self.stems {
                 let _ = s.el.pause();
@@ -329,6 +339,9 @@ pub(crate) mod imp {
     struct AttachmentRefLite {
         #[serde(default)]
         path: Option<String>,
+        // Mirrors the wire shape; not consulted yet (path alone drives
+        // stem resolution).
+        #[allow(dead_code)]
         #[serde(default)]
         kind: Option<String>,
     }

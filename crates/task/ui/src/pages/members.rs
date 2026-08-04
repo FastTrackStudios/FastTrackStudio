@@ -14,7 +14,6 @@
 //! Requires a signed-in session (the member list is derived from the
 //! caller's token); Guest sees a sign-in prompt.
 
-use crate::format::money;
 use std::collections::HashMap;
 
 use dioxus::prelude::*;

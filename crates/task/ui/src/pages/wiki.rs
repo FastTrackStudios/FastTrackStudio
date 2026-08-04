@@ -63,7 +63,7 @@ pub fn WikiView() -> Element {
 
     // Fetch + build once per (org, source) change; the live stream
     // below restarts it when the corpus changes under us.
-    let mut graph = use_resource(move || async move {
+    let graph = use_resource(move || async move {
         let slugs = selected_slugs(&selection.read(), &org_list.read());
         let slug = slugs
             .first()
@@ -89,7 +89,7 @@ pub fn WikiView() -> Element {
     // rpc stays the source of truth. Re-subscribing (org switch,
     // reconnect) also re-fetches: events published while we were
     // detached are gone from the sliding mailbox.
-    let mut subscribed_once = use_signal(|| false);
+    let subscribed_once = use_signal(|| false);
     architect::use_stream(
         move |tx| {
             // Signals are `Copy`; the hook takes `Fn`, so take fresh

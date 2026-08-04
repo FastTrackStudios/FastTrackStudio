@@ -44,7 +44,7 @@ pub fn RecallView() -> Element {
     let mut draft_project = use_signal(String::new);
     let mut draft_front = use_signal(String::new);
     let mut draft_back = use_signal(String::new);
-    let mut draft_type = use_signal(|| CardType::CONCEPT_QA.to_string());
+    let draft_type = use_signal(|| CardType::CONCEPT_QA.to_string());
 
     // Generate-from-note draft.
     let mut gen_path = use_signal(String::new);

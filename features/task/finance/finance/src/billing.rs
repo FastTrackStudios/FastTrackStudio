@@ -14,15 +14,15 @@
 //! error for now).
 
 use chrono::{Datelike, Duration, NaiveDate, TimeZone, Utc};
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
 
 use finance_db::entity::{
-    BookActive, BookEntity, BookModel, InvoiceActive, InvoiceColumn, InvoiceEntity, InvoiceModel,
-    PartyActive, PartyColumn, PartyEntity, PartyModel,
+    BookActive, BookColumn, BookEntity, BookModel, InvoiceActive, InvoiceColumn, InvoiceEntity,
+    InvoiceModel, PartyActive, PartyColumn, PartyEntity, PartyModel,
 };
 use finance_proto::book::{Book, BookKind};
 use finance_proto::error::FinanceError;
@@ -504,6 +504,84 @@ impl FinanceBackend {
         }
         Ok(groups.into_values().collect())
     }
+
+    async fn commit_inner(
+        &self,
+        book: Book,
+        party: Party,
+        invoice: Invoice,
+        session_ids: Vec<Uuid>,
+    ) -> Result<u64, FinanceError> {
+        // Insert-if-missing book + party — the first committed
+        // invoice in a fresh finance.sqlite creates them.
+        BookEntity::insert(book_to_active(&book))
+            .on_conflict(OnConflict::column(BookColumn::Id).do_nothing().to_owned())
+            .do_nothing()
+            .exec(&self.finance)
+            .await
+            .map_err(Self::err)?;
+        PartyEntity::insert(party_to_active(&party))
+            .on_conflict(OnConflict::column(PartyColumn::Id).do_nothing().to_owned())
+            .do_nothing()
+            .exec(&self.finance)
+            .await
+            .map_err(Self::err)?;
+        // Typed duplicate-number guard ahead of the unique index.
+        if !invoice.number.is_empty() {
+            let dup = InvoiceEntity::find()
+                .filter(InvoiceColumn::Number.eq(invoice.number.clone()))
+                .one(&self.finance)
+                .await
+                .map_err(Self::err)?;
+            if dup.is_some() {
+                return Err(Self::backend(format!(
+                    "invoice number `{}` already exists",
+                    invoice.number
+                )));
+            }
+        }
+        InvoiceEntity::insert(invoice_to_active(&invoice))
+            .exec(&self.finance)
+            .await
+            .map_err(Self::err)?;
+        if session_ids.is_empty() {
+            return Ok(0);
+        }
+        let stamped = WorkSessionEntity::update_many()
+            .col_expr(WorkSessionColumn::InvoiceId, Expr::value(invoice.id))
+            .col_expr(WorkSessionColumn::UpdatedAt, Expr::value(Utc::now()))
+            .filter(WorkSessionColumn::Id.is_in(session_ids))
+            .exec(&self.timer)
+            .await
+            .map_err(Self::err)?;
+        Ok(stamped.rows_affected)
+    }
+
+    async fn void_inner(&self, id: Uuid) -> Result<u64, FinanceError> {
+        let mut inv = self.get_inner(id).await?;
+        if inv.amount_paid_minor > 0 {
+            return Err(Self::backend(
+                "invoice has payments against it; issue a credit note instead",
+            ));
+        }
+        inv.status = InvoiceStatus::Cancelled;
+        inv.updated_at = Utc::now();
+        let mut active = invoice_to_active(&inv);
+        active.id = sea_orm::ActiveValue::Unchanged(inv.id);
+        active.update(&self.finance).await.map_err(Self::err)?;
+        // Un-stamp so the hours become re-billable.
+        let cleared = WorkSessionEntity::update_many()
+            .col_expr(
+                WorkSessionColumn::InvoiceId,
+                Expr::value(Option::<Uuid>::None),
+            )
+            .col_expr(WorkSessionColumn::UpdatedAt, Expr::value(Utc::now()))
+            .filter(WorkSessionColumn::InvoiceId.eq(id))
+            .exec(&self.timer)
+            .await
+            .map_err(Self::err)?;
+        Ok(cleared.rows_affected)
+    }
 }
 
 impl Invoicing for FinanceBackend {
@@ -554,6 +632,19 @@ impl Invoicing for FinanceBackend {
     }
     fn run_schedule_once(&self, _id: Uuid) -> Result<Option<Uuid>, FinanceError> {
         Err(Self::backend("run_schedule_once not implemented yet"))
+    }
+    fn commit_invoice(
+        &self,
+        book: Book,
+        party: Party,
+        invoice: Invoice,
+        session_ids: Vec<Uuid>,
+    ) -> Result<u64, FinanceError> {
+        self.runtime
+            .block_on(self.commit_inner(book, party, invoice, session_ids))
+    }
+    fn void_invoice(&self, id: Uuid) -> Result<u64, FinanceError> {
+        self.runtime.block_on(self.void_inner(id))
     }
 }
 

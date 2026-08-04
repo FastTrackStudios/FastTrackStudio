@@ -14,6 +14,10 @@ email-proto = { workspace = true }
 # between the wire/UI folder name the user sees and whatever
 # weird name the server actually uses.
 email-config = { workspace = true }
+# RFC5322 build (`build_message`) + the `SmtpSender` transport
+# behind the account's optional `Submit` submitter — the send
+# path composes SMTP submission into this maildir backend.
+email-smtp = { workspace = true }
 # `dispatch-tokio` gives us `TokioBlockingDispatcher`, which
 # marshals the sync `EmailSync` methods onto the tokio
 # blocking pool — same shape used by `vault::sync::Backend`.

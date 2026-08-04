@@ -20,6 +20,8 @@ use session_ui::{SONG_CHARTS, SONG_VIEWS};
 
 /// Debounce before pushing an edit into the live chart (re-engrave is
 /// heavy; a newer keystroke supersedes a pending push).
+// Referenced only under the wasm timer cfg below.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const RERENDER_DEBOUNCE_MS: u32 = 250;
 
 /// Keyflow chart source editor for one song. `source` is the song's

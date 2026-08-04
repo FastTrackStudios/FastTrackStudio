@@ -5,7 +5,7 @@
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Facet, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
 pub struct Addr {
     pub name: Option<String>,
     pub email: String,

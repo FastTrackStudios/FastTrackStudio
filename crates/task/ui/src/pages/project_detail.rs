@@ -55,7 +55,7 @@ pub fn ProjectDetailView(id: String) -> Element {
     // The shared task store: the selected orgs' tasks (slug-tagged);
     // `belongs()` filters to this project at render time.
     let tasks_res = stores::use_task_list();
-    let task_store = stores::use_task_store();
+    let _task_store = stores::use_task_store();
     let task_muts = stores::use_task_mutations();
 
     // Conversations: threads anchored to this project + the selected

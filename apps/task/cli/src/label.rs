@@ -49,6 +49,13 @@ pub(crate) enum LabelCmd {
 }
 
 /// Path to the per-org label store JSON.
+///
+/// Vox-unification judgment: labels ARE org data, but no label
+/// service exists to route them through (label-proto is types-only
+/// and the org router mounts nothing for it) — a known gap. Until
+/// that surface lands, the store stays this machine-local JSON in
+/// the per-org dir, which co-resides with the local/embedded
+/// server's data root; a remote-only session cannot see it.
 fn label_store_path(org_slug: &str) -> eyre::Result<std::path::PathBuf> {
     let home = std::env::var_os("HOME").ok_or_else(|| eyre::eyre!("HOME not set"))?;
     Ok(std::path::Path::new(&home)

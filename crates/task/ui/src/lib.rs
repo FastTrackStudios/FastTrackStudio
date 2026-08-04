@@ -47,6 +47,7 @@ pub mod task_sort;
 pub mod theming;
 pub mod vault_lookup;
 pub mod vox_clients;
+pub mod watch_sync;
 
 // Re-exported from `task-ui-core` at their historical paths — see the
 // module docs above. `crate::format::money`, `crate::vox_session::vox_url`

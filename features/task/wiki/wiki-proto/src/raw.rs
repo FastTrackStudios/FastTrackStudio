@@ -18,6 +18,24 @@
 use chrono::{DateTime, Utc};
 use facet::Facet;
 
+/// What changed under `Wiki/raw/sources/` since the last
+/// snapshot. Returned by
+/// [`crate::service::raw_layer::RawLayer::rescan_diff`] — the
+/// read-only sibling of `rescan_sources` (which also enqueues
+/// ingest tasks for every created/modified entry). Paths are
+/// wiki-root-relative (`raw/sources/…`).
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[repr(C)]
+pub struct SourceDiff {
+    /// New files since the last snapshot.
+    pub created: Vec<String>,
+    /// Files whose bytes changed.
+    pub modified: Vec<String>,
+    /// Files that have disappeared from disk since the last
+    /// scan.
+    pub deleted: Vec<String>,
+}
+
 /// Arguments for [`crate::service::WikiService::import_raw_source`].
 /// Grouped into a struct because the architect macro's
 /// `Facet` requirement caps tuple args at 4.

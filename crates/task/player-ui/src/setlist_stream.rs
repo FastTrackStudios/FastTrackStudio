@@ -19,10 +19,7 @@ pub(crate) mod imp {
     use std::rc::Rc;
 
     use dioxus::prelude::*;
-    use wasm_bindgen::JsCast;
     use web_sys::HtmlAudioElement;
-
-    use task_ui_core::frontmatter::song_front_from;
 
     /// One playable row.
     #[derive(Clone, PartialEq)]

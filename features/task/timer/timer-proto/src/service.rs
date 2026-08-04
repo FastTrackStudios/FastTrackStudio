@@ -171,6 +171,46 @@ pub trait TimerService {
         project_id: Uuid,
     ) -> Result<Vec<ProjectMemberRate>, TimerError>;
 
+    /// Every [`crate::Tag`] in `org_id`.
+    async fn list_tags(&self, org_id: Uuid) -> Result<Vec<crate::Tag>, TimerError>;
+
+    /// Idempotent tag upsert by `(org_id, name)` — returns the
+    /// existing row (its stored color untouched) or the freshly
+    /// inserted one.
+    async fn create_tag(
+        &self,
+        org_id: Uuid,
+        name: String,
+        color: String,
+    ) -> Result<crate::Tag, TimerError>;
+
+    /// Delete a tag by name; its session joins go with it (FK
+    /// cascade). Returns the deleted row. Fails with
+    /// [`TimerError::TagNotFound`] for an unknown name.
+    async fn delete_tag(&self, org_id: Uuid, name: String) -> Result<crate::Tag, TimerError>;
+
+    /// Ensure each tag in `names` exists in `org_id` (auto-create,
+    /// empty color) and attach it to `session_id`. Already-attached
+    /// pairs are skipped.
+    async fn attach_tags(
+        &self,
+        session_id: Uuid,
+        org_id: Uuid,
+        names: Vec<String>,
+    ) -> Result<(), TimerError>;
+
+    /// Detach tags from `session_id`. `all = true` removes every
+    /// tag (`names` ignored); otherwise removes the named tags and
+    /// returns how many of `names` matched an existing tag in the
+    /// org (0 = none of those tags exist).
+    async fn detach_tags(
+        &self,
+        session_id: Uuid,
+        org_id: Uuid,
+        names: Vec<String>,
+        all: bool,
+    ) -> Result<u64, TimerError>;
+
     /// Every work-session change, as it happens — fires on each
     /// successful start / stop / switch / log / update / delete.
     /// See [`TimerEvent`] for the fetch-once-then-fold subscriber
@@ -198,6 +238,13 @@ pub struct UpdateSessionRequest {
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
     pub billable: Option<bool>,
+    /// Keep the stored `rate_cents` + `currency` instead of
+    /// re-snapshotting from the cascade. For historical
+    /// corrections (`task timer reassign-user` without
+    /// `--rerate`) where already-billed amounts must not
+    /// shift. Default `false` = today's re-snapshot
+    /// behaviour.
+    pub preserve_rate: bool,
 }
 
 /// Args for [`TimerService::start_timer`].
