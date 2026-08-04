@@ -74,6 +74,136 @@ mod native {
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{init, init_tracing, tracing_layer};
 
+// ── OpenTelemetry (feature `otel`, native only) ──────────────────────
+//
+// OTLP export of traces, logs, and metrics to a collector. Doubly
+// opt-in: the cargo feature gates the dependency weight, and at
+// runtime nothing initializes unless `OTEL_EXPORTER_OTLP_ENDPOINT` is
+// set — the local-first "no telemetry" promise holds by default.
+#[cfg(all(not(target_arch = "wasm32"), feature = "otel"))]
+pub mod otel {
+    use opentelemetry::global;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::logs::SdkLoggerProvider;
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use opentelemetry_sdk::Resource;
+    use tracing_subscriber::Layer;
+
+    /// Re-export for callers that record custom metrics (the server's
+    /// HTTP middleware) without adding their own opentelemetry dep.
+    pub use opentelemetry;
+
+    /// Owns the three providers; dropping it flushes and shuts down
+    /// the exporters. Hold for the process lifetime (like the Sentry
+    /// guard).
+    pub struct OtelGuard {
+        tracer: SdkTracerProvider,
+        logger: SdkLoggerProvider,
+        meter: SdkMeterProvider,
+    }
+
+    impl Drop for OtelGuard {
+        fn drop(&mut self) {
+            if let Err(e) = self.tracer.shutdown() {
+                eprintln!("otel: tracer shutdown: {e}");
+            }
+            if let Err(e) = self.logger.shutdown() {
+                eprintln!("otel: logger shutdown: {e}");
+            }
+            if let Err(e) = self.meter.shutdown() {
+                eprintln!("otel: meter shutdown: {e}");
+            }
+        }
+    }
+
+    /// Whether OTLP export is configured for this process.
+    #[must_use]
+    pub fn enabled() -> bool {
+        std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Initialise the OTLP pipelines (http/protobuf; endpoint and
+    /// headers come from the standard `OTEL_EXPORTER_OTLP_*` env vars)
+    /// and return the guard plus the tracing layers to compose into
+    /// the subscriber registry:
+    ///
+    /// - a `tracing-opentelemetry` layer — spans become OTel traces;
+    /// - the appender bridge — `tracing` events become OTel log
+    ///   records (queryable in Loki alongside pod stdout).
+    ///
+    /// The meter provider is installed globally
+    /// (`opentelemetry::global::meter`), so instruments work from
+    /// anywhere. Returns `None` when [`enabled`] is false or an
+    /// exporter fails to build.
+    pub fn init<S>(
+        service: &'static str,
+    ) -> Option<(OtelGuard, Vec<Box<dyn Layer<S> + Send + Sync>>)>
+    where
+        S: tracing::Subscriber
+            + for<'a> tracing_subscriber::registry::LookupSpan<'a>
+            + Send
+            + Sync,
+    {
+        if !enabled() {
+            return None;
+        }
+        let resource = Resource::builder().with_service_name(service).build();
+
+        let span_exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .build()
+            .map_err(|e| eprintln!("otel: span exporter: {e}"))
+            .ok()?;
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_batch_exporter(span_exporter)
+            .with_resource(resource.clone())
+            .build();
+        let tracer = tracer_provider.tracer(service);
+        global::set_tracer_provider(tracer_provider.clone());
+
+        let log_exporter = opentelemetry_otlp::LogExporter::builder()
+            .with_http()
+            .build()
+            .map_err(|e| eprintln!("otel: log exporter: {e}"))
+            .ok()?;
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_batch_exporter(log_exporter)
+            .with_resource(resource.clone())
+            .build();
+
+        let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
+            .with_http()
+            .build()
+            .map_err(|e| eprintln!("otel: metric exporter: {e}"))
+            .ok()?;
+        let meter_provider = SdkMeterProvider::builder()
+            .with_periodic_exporter(metric_exporter)
+            .with_resource(resource)
+            .build();
+        global::set_meter_provider(meter_provider.clone());
+
+        let layers: Vec<Box<dyn Layer<S> + Send + Sync>> = vec![
+            Box::new(tracing_opentelemetry::layer().with_tracer(tracer)),
+            Box::new(
+                opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
+                    &logger_provider,
+                ),
+            ),
+        ];
+        Some((
+            OtelGuard {
+                tracer: tracer_provider,
+                logger: logger_provider,
+                meter: meter_provider,
+            },
+            layers,
+        ))
+    }
+}
+
 // ── wasm: no-op stubs so callers compile cross-target ────────────────
 #[cfg(target_arch = "wasm32")]
 pub fn init(_service: &str) -> Option<()> {
