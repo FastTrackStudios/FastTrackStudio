@@ -41,6 +41,13 @@ server:
   #   env:
   #     TASK_SERVER_ORG: my-org
   #     RUST_LOG: info,task_server=debug
+  #
+  # OpenTelemetry is OFF unless you set an endpoint here — the server
+  # exports nothing by default (local-first promise). To ship traces,
+  # logs, and metrics to a collector:
+  #   env:
+  #     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc:4318
+  #     OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   env: {}
 
   # Name of an existing Secret whose keys are injected via envFrom.

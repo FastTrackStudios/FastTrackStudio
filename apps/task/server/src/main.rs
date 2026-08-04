@@ -15,11 +15,25 @@ async fn main() -> eyre::Result<()> {
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "task_server=info,tower_http=info".into());
-    tracing_subscriber::registry()
+    let registry = tracing_subscriber::registry()
         .with(env_filter)
         .with(tracing_subscriber::fmt::layer())
-        .with(task_telemetry::tracing_layer())
-        .init();
+        .with(task_telemetry::tracing_layer());
+    // OTLP traces/logs/metrics — inert unless OTEL_EXPORTER_OTLP_ENDPOINT
+    // is set (the cluster points it at the collector; local runs stay
+    // telemetry-free). The guard flushes the exporters on drop, so it
+    // lives until the end of `main`.
+    let _otel = match task_telemetry::otel::init("task-server") {
+        Some((guard, layers)) => {
+            registry.with(layers).init();
+            info!("OTLP export enabled");
+            Some(guard)
+        }
+        None => {
+            registry.init();
+            None
+        }
+    };
 
     let bind: SocketAddr = std::env::var("TASK_SERVER_BIND")
         .unwrap_or_else(|_| "0.0.0.0:9090".into())
@@ -123,6 +137,38 @@ async fn main() -> eyre::Result<()> {
         info!(%web_dir, "serving web bundle (SPA) same-origin");
     }
 
+    // HTTP observability, outermost so it covers every route added above
+    // (including `/media` and the SPA fallback): one span per request
+    // (exported as an OTel trace when OTLP is on) plus request-count and
+    // duration metrics. Labels carry method + MATCHED path — never the
+    // raw URI, which holds org slugs and note paths, and never an
+    // unbounded label set.
+    let app = app
+        .layer(axum::middleware::from_fn(http_metrics))
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+                .make_span_with(|req: &axum::http::Request<_>| {
+                    let route = req
+                        .extensions()
+                        .get::<axum::extract::MatchedPath>()
+                        .map(|p| p.as_str().to_owned())
+                        .unwrap_or_else(|| "<unmatched>".to_owned());
+                    tracing::info_span!(
+                        "http.request",
+                        method = %req.method(),
+                        route,
+                        status = tracing::field::Empty,
+                    )
+                })
+                .on_response(
+                    |res: &axum::http::Response<_>,
+                     _latency: std::time::Duration,
+                     span: &tracing::Span| {
+                        span.record("status", res.status().as_u16());
+                    },
+                ),
+        );
+
     info!(%bind, "listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;
     axum::serve(listener, app)
@@ -132,6 +178,55 @@ async fn main() -> eyre::Result<()> {
     info!("shutdown — closing backend resources");
     scope.close().await;
     Ok(())
+}
+
+/// Per-request RED metrics: `http.server.request.duration` (histogram,
+/// seconds) and `http.server.requests` (counter), labelled by method,
+/// matched route, and status code. Instruments are created once and
+/// reused; when OTLP is off the global meter is a no-op, so this costs
+/// a couple of atomic bumps.
+async fn http_metrics(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use std::sync::OnceLock;
+    use task_telemetry::otel::opentelemetry::{KeyValue, global, metrics::{Counter, Histogram}};
+
+    static INSTRUMENTS: OnceLock<(Histogram<f64>, Counter<u64>)> = OnceLock::new();
+    let (duration, count) = INSTRUMENTS.get_or_init(|| {
+        let meter = global::meter("task-server");
+        (
+            meter
+                .f64_histogram("http.server.request.duration")
+                .with_unit("s")
+                .with_description("HTTP server request duration")
+                .build(),
+            meter
+                .u64_counter("http.server.requests")
+                .with_description("HTTP server requests handled")
+                .build(),
+        )
+    });
+
+    let method = req.method().to_string();
+    let route = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|p| p.as_str().to_owned())
+        .unwrap_or_else(|| "<unmatched>".to_owned());
+
+    let started = std::time::Instant::now();
+    let res = next.run(req).await;
+    let elapsed = started.elapsed().as_secs_f64();
+
+    let labels = [
+        KeyValue::new("http.request.method", method),
+        KeyValue::new("http.route", route),
+        KeyValue::new("http.response.status_code", i64::from(res.status().as_u16())),
+    ];
+    duration.record(elapsed, &labels);
+    count.add(1, &labels);
+    res
 }
 
 /// Resolve when the process receives Ctrl-C (or SIGTERM on unix), so
