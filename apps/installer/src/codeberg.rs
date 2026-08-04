@@ -67,16 +67,21 @@ pub async fn resolve_with_prefix_ext(
     .await
 }
 
-/// Resolve the macOS app `.dmg` asset
-/// (`FastTrackStudio-<ver>-<build>-<arch>-macos.dmg`, e.g.
-/// `-aarch64-macos.dmg` / `-x86_64-macos.dmg` — two separate arch-specific
-/// downloads, no universal build for the app). The build number is a unix
-/// timestamp, not something we can predict, so this matches on
-/// prefix/suffix only, picking the suffix for the resolving machine's own
-/// arch via `platform_suffix()`. No `SHA256SUMS` covers it; the
-/// notarization signature is the integrity/authenticity check instead.
+/// Resolve the macOS app `.dmg` asset (`FastTrackStudio-<ver>-<build>-macos.dmg`
+/// — a single universal (lipo'd) build covering both Mac architectures,
+/// same as the plugin zip below, so no arch token or `platform_suffix()`
+/// involved. The build number is a unix timestamp, not something we can
+/// predict, so this matches on prefix/suffix only. No `SHA256SUMS` covers
+/// it; the notarization signature is the integrity/authenticity check
+/// instead.
 pub async fn resolve_macos_dmg(client: &reqwest::Client, tag: Option<&str>) -> eyre::Result<Release> {
-    resolve_with_prefix_ext(client, tag, "FastTrackStudio-", "dmg").await
+    resolve_matching(
+        client,
+        tag,
+        |name| name.starts_with("FastTrackStudio-") && name.ends_with("-macos.dmg"),
+        "FastTrackStudio-*-macos.dmg",
+    )
+    .await
 }
 
 /// Resolve the macOS plugin bundle `.zip` asset

@@ -30,17 +30,16 @@ use eyre::{Context, eyre};
 
 use crate::layout::Layout;
 
-/// Platform suffix used in release asset names, e.g.
-/// `fasttrackstudio-v0.1.0-x86_64-linux.tar.gz`.
+/// Platform suffix used in Linux release asset names, e.g.
+/// `fasttrackstudio-v0.1.0-x86_64-linux.tar.gz`. The macOS app/plugin
+/// assets are universal (both arches, `lipo`'d together) so they don't
+/// need one — see `codeberg::resolve_macos_dmg` /
+/// `resolve_macos_plugins_zip`.
 pub fn platform_suffix() -> eyre::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Ok("x86_64-linux"),
-        // airlock (Apple Silicon) cross-compiles both — see
-        // deploy-macos.sh's TARGET var and nix/modules/toolchain.nix.
-        ("macos", "aarch64") => Ok("aarch64-macos"),
-        ("macos", "x86_64") => Ok("x86_64-macos"),
         (os, arch) => Err(eyre!(
-            "no FastTrackStudio release builds for {os}/{arch} yet (currently linux/x86_64, macos/aarch64, macos/x86_64)"
+            "no FastTrackStudio release builds for {os}/{arch} yet (currently linux/x86_64 only — macOS goes through resolve_macos_dmg/resolve_macos_plugins_zip instead)"
         )),
     }
 }

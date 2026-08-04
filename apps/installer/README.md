@@ -117,16 +117,15 @@ differ from Linux:
 ```
 
 - **App**: `install`/`update` download the notarized+stapled
-  `FastTrackStudio-*-<arch>-macos.dmg` release asset for the resolving
-  machine's own arch (built by `apps/fasttrackstudio/ios/deploy-macos.sh`
-  on airlock — natively for arm64, cross-compiled for `x86_64-apple-darwin`
-  otherwise, no real Intel Mac involved), mount it with `hdiutil`, copy
-  the `.app` into `~/Applications`, and symlink whatever binary `dx` put
-  at `Contents/MacOS/` into `~/.local/bin`. **Two separate arch-specific
-  dmgs, not one universal binary** — `dx build`/`fts-installer` don't do
-  the lipo bookkeeping the plugin bundle gets (below). No SHA256SUMS
-  check — the Developer-ID signature + notarization ticket is the
-  integrity/authenticity check.
+  `FastTrackStudio-*-macos.dmg` release asset — a single universal build
+  covering both Mac architectures (`apps/fasttrackstudio/ios/deploy-macos.sh`
+  on airlock builds `aarch64-apple-darwin` natively and cross-compiles
+  `x86_64-apple-darwin`, no real Intel Mac involved, then `lipo`s every
+  Mach-O in the `.app` bundle together before signing once) — mounts it
+  with `hdiutil`, copies the `.app` into `~/Applications`, and symlinks
+  whatever binary `dx` put at `Contents/MacOS/` into `~/.local/bin`. No
+  SHA256SUMS check — the Developer-ID signature + notarization ticket is
+  the integrity/authenticity check.
 - **REAPER env**: `reaper` downloads REAPER's/SWS's official universal
   `.dmg`s (mounted, contents copied out, detached — these already cover
   both arches, no work needed on our side) and ReaPack's `.dylib` release
@@ -136,9 +135,9 @@ differ from Linux:
   built) — launch a rig from a terminal:
   `~/.local/lib/fts/reaper/REAPER.app/Contents/MacOS/REAPER -cfgfile
   ~/fasttrackstudio/reaper.ini -newinst`.
-- **Plugins**: CLAP + VST3 only — **no AU build** yet. Unlike the app,
-  this **is** a single universal build (`fts-plugins-v<ver>-macos.zip`,
-  no arch token) — nice-plug-xtask's `bundle-universal` builds both
+- **Plugins**: CLAP + VST3 only — **no AU build** yet. Same universal
+  approach as the app: `fts-plugins-v<ver>-macos.zip` (no arch token) —
+  nice-plug-xtask's `bundle-universal` builds both
   `aarch64-apple-darwin` and `x86_64-apple-darwin` and `lipo`s them
   together per plugin, so one download covers both Mac architectures.
   Apple notarization only accepts zip/pkg/dmg (not tar.gz), so
@@ -152,6 +151,10 @@ differ from Linux:
   `fasttrackstudio` GUI/`--engine` binary — the app tarball's `fts`
   binary is Linux-only for now); no `reaper_fts_extensions.dylib` build
   exists yet, so unlike Linux the macOS app install never touches the
-  REAPER rig `UserPlugins/` dirs; the x86_64 app/cross-compile path is
-  new and unverified against this codebase's vendored native deps
-  (phon-jit, NAM's C++ bridge) until it's actually run on airlock.
+  REAPER rig `UserPlugins/` dirs; the universal-binary build (both the
+  app and the plugin bundle) is new and unverified against this
+  codebase's vendored native deps (phon-jit, NAM's C++ bridge) —
+  specifically whether they cross-compile cleanly to
+  `x86_64-apple-darwin` and whether every Mach-O in the app bundle
+  actually has a same-path counterpart to `lipo` against — until it's
+  actually run on airlock.
