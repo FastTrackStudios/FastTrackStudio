@@ -75,6 +75,15 @@ const RIGS: &[Rig] = &[
     },
 ];
 
+/// The rig resource dirs under `prefix` (`~/fasttrackstudio`,
+/// `~/fts-tracks`, `~/fts-dev`) — where `reaper_fts_extensions.so` from
+/// the app tarball belongs, in each rig's `UserPlugins/`. Used by
+/// `layout::install` to lay the extension down after `reaper` has run;
+/// a rig dir that doesn't exist yet (REAPER env not set up) is skipped.
+pub fn rig_dirs(prefix: &Path) -> Vec<PathBuf> {
+    RIGS.iter().map(|r| prefix.join(r.dir)).collect()
+}
+
 pub async fn setup(prefix: Option<PathBuf>) -> eyre::Result<()> {
     if !cfg!(target_os = "linux") {
         eyre::bail!("`fts-installer reaper` currently supports Linux only");

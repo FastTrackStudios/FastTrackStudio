@@ -9,7 +9,23 @@ fts-installer install [--version vX.Y.Z] [--prefix DIR] [--url TARBALL_URL]
 fts-installer update  [--prefix DIR]
 fts-installer uninstall [--prefix DIR]
 fts-installer reaper    [--prefix DIR]   # REAPER + SWS + ReaPack + the 3 rigs
+fts-installer bundle    [--prefix DIR] [--version vX.Y.Z]   # everything, one command
 ```
+
+## `fts-installer bundle` — the full installer package
+
+Everything a fresh machine needs, in one command: `reaper`, then
+`install` (the app), then `plugins install`. Order matters — running
+`reaper` first means the FastTrackStudio app install has rig dirs to
+drop `reaper_fts_extensions.so` into (`~/fasttrackstudio/UserPlugins/`,
+`~/fts-tracks/UserPlugins/`, `~/fts-dev/UserPlugins/`); the extension is
+silently skipped for any rig dir that doesn't exist yet, so running
+`install` standalone on a machine with no REAPER env is still fine, and
+re-running `bundle` after `reaper` sets it up going forward is a no-op
+for what's already current. `--version` (if given) pins both the app and
+plugin bundle downloads; REAPER/SWS/ReaPack are always their pinned/
+latest official versions (see below), independent of the FTS release
+tag.
 
 - Releases are resolved via the codeberg (Gitea/Forgejo) API
   (`/api/v1/repos/FastTrackStudios/FastTrackStudio/releases/latest` or
@@ -74,5 +90,4 @@ fts-installer reaper [--prefix DIR]
 - Idempotent: an already-current REAPER version is not re-downloaded.
 
 Still TODO here: themes/library content (ColorThemes, FXChains,
-TrackTemplates from an fts-library release) and installing
-`reaper_fts_extensions.so` from the app tarball into the rigs.
+TrackTemplates from an fts-library release).

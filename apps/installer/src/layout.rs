@@ -46,13 +46,15 @@ impl Layout {
         self.prefix
             .join(".local/share/icons/hicolor/scalable/apps/fasttrackstudio.svg")
     }
-    /// REAPER's resource dir — its presence is the "REAPER is installed
-    /// here" signal; the extension is only laid down when it exists.
-    fn reaper_resource_dir(&self) -> PathBuf {
-        self.prefix.join(".config/REAPER")
-    }
-    fn reaper_extension_path(&self) -> PathBuf {
-        self.reaper_resource_dir().join("UserPlugins/reaper_fts_extensions.so")
+    /// UserPlugins dirs of the rigs `fts-installer reaper` sets up
+    /// (`~/fasttrackstudio`, `~/fts-tracks`, `~/fts-dev`). A rig dir that
+    /// doesn't exist yet (REAPER env not set up) is skipped when the
+    /// extension is installed.
+    fn reaper_rig_user_plugins_dirs(&self) -> Vec<PathBuf> {
+        crate::reaper_env::rig_dirs(&self.prefix)
+            .into_iter()
+            .map(|d| d.join("UserPlugins"))
+            .collect()
     }
 
     /// Version recorded by a previous install (contents of lib/fts/VERSION).
@@ -89,18 +91,23 @@ impl Layout {
             std::fs::copy(&version_src, lib.join("VERSION"))?;
         }
 
-        // REAPER extension: only when a REAPER install is present (its
-        // resource dir exists); silently skipped otherwise. Same
+        // REAPER extension: dropped into every rig set up by
+        // `fts-installer reaper` (its dir existing is the "REAPER env is
+        // here" signal); rigs not yet set up are silently skipped. Same
         // copy-to-.new-then-rename trick — REAPER may be running.
         let ext_src = stage.join("reaper_fts_extensions.so");
-        if self.reaper_resource_dir().is_dir() && ext_src.exists() {
-            let ext = self.reaper_extension_path();
-            std::fs::create_dir_all(ext.parent().unwrap())?;
-            let tmp = ext.with_extension("so.new");
-            std::fs::copy(&ext_src, &tmp).wrap_err("copying reaper_fts_extensions.so")?;
-            set_executable(&tmp)?;
-            std::fs::rename(&tmp, &ext)?;
-            println!("  REAPER extension installed -> {}", ext.display());
+        if ext_src.exists() {
+            for user_plugins in self.reaper_rig_user_plugins_dirs() {
+                if !user_plugins.is_dir() {
+                    continue;
+                }
+                let ext = user_plugins.join("reaper_fts_extensions.so");
+                let tmp = ext.with_extension("so.new");
+                std::fs::copy(&ext_src, &tmp).wrap_err("copying reaper_fts_extensions.so")?;
+                set_executable(&tmp)?;
+                std::fs::rename(&tmp, &ext)?;
+                println!("  REAPER extension installed -> {}", ext.display());
+            }
         }
 
         // systemd user unit — installed but NOT enabled; the app (or an
@@ -162,7 +169,9 @@ impl Layout {
             best_effort("systemctl", &["--user", "daemon-reload"]);
         }
 
-        remove_file_if_exists(&self.reaper_extension_path())?;
+        for user_plugins in self.reaper_rig_user_plugins_dirs() {
+            remove_file_if_exists(&user_plugins.join("reaper_fts_extensions.so"))?;
+        }
         for name in ["fasttrackstudio", "fts"] {
             remove_file_if_exists(&self.bin_dir().join(name))?;
         }

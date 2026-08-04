@@ -89,6 +89,19 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PluginsCmd,
     },
+    /// The full installer package: REAPER + SWS + ReaPack + the three FTS
+    /// rigs, the FastTrackStudio app (with its REAPER extension dropped
+    /// into each rig), and every FTS plugin. One command, nothing else to
+    /// download by hand.
+    Bundle {
+        /// Install under this directory instead of $HOME.
+        #[arg(long, value_name = "DIR")]
+        prefix: Option<PathBuf>,
+        /// Install a specific FastTrackStudio release tag instead of the
+        /// latest (applies to the app and plugin bundle both).
+        #[arg(long, value_name = "TAG")]
+        version: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -142,6 +155,7 @@ async fn main() {
         Some(Cmd::Update { prefix }) => update(prefix).await,
         Some(Cmd::Uninstall { prefix }) => Layout::new(prefix).and_then(|l| l.uninstall()),
         Some(Cmd::Reaper { prefix }) => reaper_env::setup(prefix).await,
+        Some(Cmd::Bundle { prefix, version }) => bundle(prefix, version).await,
         Some(Cmd::Plugins { cmd }) => match cmd {
             PluginsCmd::Install { version, from, prefix } => {
                 plugins::install(version, from, prefix).await
@@ -192,6 +206,23 @@ async fn install(args: InstallArgs) -> eyre::Result<()> {
     } else {
         println!("installed FastTrackStudio from {tarball_url}");
     }
+    Ok(())
+}
+
+/// The full installer package: REAPER env first (so the app install below
+/// has rig dirs to drop `reaper_fts_extensions.so` into), then the
+/// FastTrackStudio app, then every FTS plugin.
+async fn bundle(prefix: Option<PathBuf>, version: Option<String>) -> eyre::Result<()> {
+    println!("== 1/3: REAPER + SWS + ReaPack + the three FTS rigs ==");
+    reaper_env::setup(prefix.clone()).await?;
+
+    println!("\n== 2/3: FastTrackStudio app ==");
+    install(InstallArgs { version: version.clone(), prefix: prefix.clone(), url: None }).await?;
+
+    println!("\n== 3/3: FTS plugins ==");
+    plugins::install(version, None, prefix).await?;
+
+    println!("\nbundle install complete.");
     Ok(())
 }
 
