@@ -797,7 +797,10 @@ opentelemetry = "0.30"
 opentelemetry_sdk = { version = "0.30", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.30", default-features = false, features = [
   "http-proto",
-  "reqwest-client",
+  # BLOCKING is deliberate: the SDK's batch processors run on their own
+  # dedicated OS threads, which have no Tokio reactor — the async client
+  # panics them with "there is no reactor running" on first flush.
+  "reqwest-blocking-client",
   "reqwest-rustls",
   "trace",
   "logs",
