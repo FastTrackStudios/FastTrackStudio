@@ -13,6 +13,7 @@ members = [
     #    history preserved; framework changes are ordinary in-tree work)
     "libs/architect/architect",
     "libs/vendor/dioxus-test",
+    "libs/vendor/world",
     "libs/architect/macros/architect-derive",
     "libs/architect/macros/architect-rpc-derive",
     "libs/architect/macros/architect-action-derive",
@@ -288,6 +289,9 @@ members = [
     "apps/plugins/signal",
     "apps/plugins/gate",
     "apps/plugins/limiter",
+    "apps/plugins/meter",
+    "apps/plugins/pitch",
+    "apps/plugins/unison",
     "apps/plugins/trigger",
     "apps/plugins/xtask",
     "apps/plugins/host",
@@ -587,6 +591,7 @@ delay = { path = "features/fx/delay/delay" }
 pitch = { path = "features/fx/pitch/pitch" }
 pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
 tune = { path = "features/fx/tune/tune" }
+world-sys = { path = "libs/vendor/world" }
 tune-dsp = { path = "features/fx/tune/tune-dsp" }
 level = { path = "features/fx/level/level" }
 level-dsp = { path = "features/fx/level/level-dsp" }
@@ -712,6 +717,9 @@ lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", branch = "
 clsx = "0.1.1"
 tw_merge = "0.1.21"
 nucleo-matcher = "0.3"
+# fff's fuzzy scorer (SIMD Smith-Waterman, scalar fallback on wasm) —
+# the everything-search window's matcher.
+neo_frizbee = { version = "0.11", features = ["match_end_col"] }
 palette = "0.7.6"
 linkme = "0.3"
 

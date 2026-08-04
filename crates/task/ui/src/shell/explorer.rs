@@ -167,7 +167,7 @@ pub fn VaultExplorer() -> Element {
     let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
     let active = use_memo(move || crate::orgs::active_slug(&selection.read(), &org_list.read()));
-    let files = use_resource(move || {
+    let mut files = use_resource(move || {
         let slug = active();
         async move { fetch_folder_index(slug).await }
     });
@@ -277,7 +277,13 @@ pub fn VaultExplorer() -> Element {
                         }
                     }
                     Some(Err(e)) => rsx! {
-                        div { class: "px-3 py-2 text-xs text-destructive", "Vault unreachable: {e}" }
+                        div { class: "px-1.5 py-1",
+                            crate::states::InlineError {
+                                message: e.clone(),
+                                label: "Vault".to_string(),
+                                on_retry: move |()| files.restart(),
+                            }
+                        }
                     },
                     None => rsx! {
                         div { class: "flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground",
@@ -367,11 +373,18 @@ fn explorer_node(
                 class: "{row_cls}",
                 style: "padding-left: {indent + 6}px",
                 onclick: move |_| {
-                    // Clicking the row OPENS the note. For a folder it also
-                    // ensures the folder is expanded (never collapses — the
-                    // chevron owns collapse), so a click both opens the
-                    // folder-note and reveals its children.
+                    // Clicking the row OPENS the note and reveals a folder's
+                    // children. Clicking the row of the note that's ALREADY
+                    // open toggles the dropdown instead — so collapsing
+                    // doesn't require hunting the tiny chevron.
                     if is_folder {
+                        if is_selected {
+                            let mut set = expanded.write();
+                            if !set.remove(&row_key) {
+                                set.insert(row_key.clone());
+                            }
+                            return;
+                        }
                         expanded.write().insert(row_key.clone());
                     }
                     nav.push(Route::VaultRoute { path: path.clone(), org: String::new() });

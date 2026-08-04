@@ -568,7 +568,12 @@ pub fn VaultView(
             }
         }
         Some(Err(e)) => rsx! {
-            div { class: "px-3 py-2 text-sm text-destructive", "Couldn't reach the vault service: {e}" }
+            div { class: "px-2 py-2",
+                crate::states::InlineError {
+                    message: e.clone(),
+                    label: "Vault".to_string(),
+                }
+            }
         },
         None => rsx! {
             div { class: "flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground",
@@ -721,8 +726,11 @@ pub fn VaultView(
                 }
             },
             Some(Err(e)) => rsx! {
-                div { class: "px-3 py-2 text-sm text-destructive",
-                    "Couldn't load backlinks: {e}"
+                div { class: "px-2 py-2",
+                    crate::states::InlineError {
+                        message: e.clone(),
+                        label: "Backlinks".to_string(),
+                    }
                 }
             },
             None => rsx! {
@@ -777,7 +785,12 @@ pub fn VaultView(
                 }
             },
             Some(Err(e)) => rsx! {
-                div { class: "px-3 py-2 text-sm text-destructive", "Couldn't load links: {e}" }
+                div { class: "px-2 py-2",
+                    crate::states::InlineError {
+                        message: e.clone(),
+                        label: "Links".to_string(),
+                    }
+                }
             },
             None => rsx! {
                 div { class: "flex flex-col gap-2 px-3 py-2",
@@ -813,8 +826,11 @@ pub fn VaultView(
                     }
                 }
                 (Some(Err(e)), _) | (_, Some(Err(e))) => rsx! {
-                    div { class: "px-3 py-2 text-sm text-muted-foreground",
-                        "Couldn't build the local graph: {e}"
+                    div { class: "px-2 py-2",
+                        crate::states::InlineError {
+                            message: e.clone(),
+                            label: "Graph".to_string(),
+                        }
                     }
                 },
                 _ => rsx! {

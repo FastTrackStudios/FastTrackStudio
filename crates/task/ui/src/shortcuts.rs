@@ -105,6 +105,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding { seq: "g i", web: None, action: actions::NAV_INBOX, label: "Inbox", overrides_browser: false },
     Binding { seq: "g t", web: None, action: actions::NAV_TASKS, label: "Tasks", overrides_browser: false },
     // ── `<space>` leader ──
+    Binding { seq: "space space", web: None, action: actions::SEARCH_ALL, label: "Search everything", overrides_browser: false },
     Binding { seq: "space n", web: None, action: actions::NEW_NOTE, label: "New note", overrides_browser: false },
     Binding { seq: "space t", web: None, action: actions::NAV_TASKS, label: "Tasks", overrides_browser: false },
     Binding { seq: "space c", web: None, action: actions::CAPTURE_FLEETING, label: "Capture", overrides_browser: false },
@@ -245,8 +246,9 @@ pub fn derive_whichkey(prefix: &[String]) -> Option<WhichKeyView> {
 
 // ── which-key overlay ───────────────────────────────────────────────
 
-/// Bottom-center which-key hint, shown while a leader sequence is
-/// pending. Renders nothing when `state` is `None`.
+/// Bottom-right which-key panel, shown while a leader sequence is
+/// pending — a compact column of key → action rows, lazygit-style.
+/// Renders nothing when `state` is `None`.
 #[component]
 pub fn WhichKeyOverlay(state: Signal<Option<WhichKeyView>>) -> Element {
     let view = state.read().clone();
@@ -254,31 +256,34 @@ pub fn WhichKeyOverlay(state: Signal<Option<WhichKeyView>>) -> Element {
         return rsx! {};
     };
     rsx! {
-        div { class: "pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center p-3",
-            div { class: "pointer-events-auto flex max-w-3xl flex-col gap-2 rounded-xl border border-border bg-background/95 p-3 shadow-xl backdrop-blur",
-                div { class: "flex items-center gap-2 text-xs text-muted-foreground",
-                    span { class: "rounded bg-accent px-1.5 py-0.5 font-mono font-semibold text-foreground",
+        div { class: "pointer-events-none fixed bottom-4 right-4 z-50 flex justify-end",
+            div { class: "pointer-events-auto w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover/95 shadow-2xl backdrop-blur",
+                div { class: "flex items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2",
+                    kbd { class: "rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px] font-semibold text-foreground shadow-sm",
                         "{view.prefix}"
                     }
-                    span { "waiting for next key…" }
+                    span { class: "text-[11px] text-muted-foreground", "which key…" }
                 }
-                div { class: "grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3",
+                div { class: "flex max-h-72 flex-col overflow-y-auto py-1",
                     for entry in view.entries.iter() {
-                        div { key: "{entry.key}", class: "flex items-center gap-2 text-sm",
-                            span { class: "min-w-[1.5rem] rounded bg-muted px-1.5 py-0.5 text-center font-mono text-xs text-foreground",
+                        div { key: "{entry.key}", class: "flex items-center gap-2.5 px-3 py-1",
+                            kbd { class: "min-w-[1.75rem] rounded border border-border/70 bg-muted/50 px-1.5 py-0.5 text-center font-mono text-[11px] text-foreground",
                                 "{entry.key}"
                             }
                             span {
                                 class: if entry.is_branch {
-                                    "text-primary"
+                                    "truncate text-[13px] font-medium text-primary"
                                 } else {
-                                    "text-muted-foreground"
+                                    "truncate text-[13px] text-foreground/90"
                                 },
                                 if entry.is_branch {
-                                    "+{entry.label}"
+                                    "+ {entry.label}"
                                 } else {
                                     "{entry.label}"
                                 }
+                            }
+                            if entry.is_branch {
+                                span { class: "ml-auto text-[11px] text-muted-foreground", "›" }
                             }
                         }
                     }
@@ -311,6 +316,8 @@ pub fn use_app_shortcuts() -> Signal<Option<WhichKeyView>> {
     let palette = use_context::<crate::palette::PaletteOpen>().0;
     let omni = use_context::<crate::palette::OmniOpen>().0;
     let fleeting = use_context::<crate::chrome::FleetingOpen>().0;
+    let search = use_context::<crate::chrome::SearchOpen>().0;
+    let pending_title = use_context::<crate::chrome::PendingTitleEdit>().0;
     let explorer = use_context::<Signal<crate::chrome::ExplorerOpen>>();
     let right_panel = use_context::<Signal<crate::chrome::RightPanelOpen>>();
     let zen = use_context::<crate::chrome::ZenMode>().0;
@@ -389,6 +396,7 @@ pub fn use_app_shortcuts() -> Signal<Option<WhichKeyView>> {
             let mut palette = palette;
             let mut omni = omni;
             let mut fleeting = fleeting;
+            let mut search = search;
             let mut explorer = explorer;
             let mut right_panel = right_panel;
             let mut zen = zen;
@@ -406,6 +414,8 @@ pub fn use_app_shortcuts() -> Signal<Option<WhichKeyView>> {
                             &mut palette,
                             &mut omni,
                             &mut fleeting,
+                            &mut search,
+                            pending_title,
                             &mut explorer,
                             &mut right_panel,
                             &mut zen,
@@ -437,6 +447,8 @@ fn perform_intent(
     palette: &mut Signal<bool>,
     omni: &mut Signal<bool>,
     fleeting: &mut Signal<bool>,
+    search: &mut Signal<bool>,
+    mut pending_title: Signal<Option<String>>,
     explorer: &mut Signal<crate::chrome::ExplorerOpen>,
     right_panel: &mut Signal<crate::chrome::RightPanelOpen>,
     zen: &mut Signal<bool>,
@@ -455,6 +467,7 @@ fn perform_intent(
             palette.set(!cur);
         }
         Intent::OpenOmni => omni.set(true),
+        Intent::OpenSearch => search.set(true),
         Intent::OpenFleeting => fleeting.set(true),
         Intent::ToggleSidebar => {
             let cur = explorer.peek().0;
@@ -473,18 +486,7 @@ fn perform_intent(
             if slug.is_empty() {
                 return;
             }
-            let name = format!(
-                "Untitled {}.md",
-                &uuid::Uuid::new_v4().simple().to_string()[..8]
-            );
-            spawn(async move {
-                match crate::pages::vault::create_new_file(slug, name.clone()).await {
-                    Ok(_) => {
-                        nav.push(crate::routes::Route::VaultRoute { path: name, org: String::new() });
-                    }
-                    Err(e) => tracing::warn!(%e, "new note failed"),
-                }
-            });
+            spawn_new_note(slug, nav, pending_title);
         }
         Intent::StartTimer => {
             let Some((slug, org_id)) =
@@ -505,6 +507,44 @@ fn perform_intent(
             );
         }
     }
+}
+
+/// Create a fresh vault note and open it, primed for immediate naming.
+///
+/// Obsidian-style names: `Untitled`, then `Untitled 2`… — the folder
+/// index tells us which are taken. The created path is parked in
+/// [`crate::chrome::PendingTitleEdit`] so the note opens straight into
+/// title-edit mode (text selected) and typing immediately names it.
+/// Shared by the `<space> n` intent and the dashboard's New-note tile.
+pub fn spawn_new_note(
+    slug: String,
+    nav: dioxus_router::Navigator,
+    mut pending_title: Signal<Option<String>>,
+) {
+    spawn(async move {
+        let taken: std::collections::HashSet<String> =
+            crate::pages::vault::fetch_folder_index(slug.clone())
+                .await
+                .map(|pages| pages.into_iter().map(|p| p.path.to_lowercase()).collect())
+                .unwrap_or_default();
+        let name = (1..)
+            .map(|i| {
+                if i == 1 {
+                    "Untitled.md".to_string()
+                } else {
+                    format!("Untitled {i}.md")
+                }
+            })
+            .find(|n| !taken.contains(&n.to_lowercase()))
+            .expect("unbounded name search");
+        match crate::pages::vault::create_new_file(slug, name.clone()).await {
+            Ok(_) => {
+                pending_title.set(Some(name.clone()));
+                nav.push(crate::routes::Route::VaultRoute { path: name, org: String::new() });
+            }
+            Err(e) => tracing::warn!(%e, "new note failed"),
+        }
+    });
 }
 
 // ── wasm wiring ─────────────────────────────────────────────────────
@@ -538,8 +578,17 @@ fn install_dom_listeners(
             Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
                 // Typing guard: plain keys belong to the focused text
                 // control; only Ctrl/Cmd chords are shortcuts there.
+                // Exception: the note editor in vim NORMAL mode may
+                // start a leader sequence with `<space>` (and continue
+                // a pending one) — plain letters stay vim motions, so
+                // `g`/`gg` never leave the editor.
                 if text_entry_focused() && !(e.ctrl_key() || e.meta_key()) {
-                    return;
+                    let leader_ok = editor_vim_normal()
+                        && editor_root_focused()
+                        && (e.key() == " " || !pending.borrow().is_empty());
+                    if !leader_ok {
+                        return;
+                    }
                 }
                 // OS auto-repeat never fires app actions.
                 if e.repeat() {
@@ -682,6 +731,37 @@ fn seq_token(ev: &input::KeyEvent) -> Option<String> {
     } else {
         Some(base)
     }
+}
+
+// ── editor vim-mode bridge ──────────────────────────────────────────
+//
+// The note editor is a contenteditable region, so the typing guard
+// would normally swallow every plain key. The focused note view
+// publishes its vim mode here (see `note_view.rs`) so the guard can
+// let the `<space>` leader through while the editor sits in NORMAL
+// mode — where plain keys are motions, not text.
+thread_local! {
+    static EDITOR_VIM_NORMAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Publish whether the focused note editor is in vim NORMAL mode.
+/// Called by the note view's status effect; cleared on unmount.
+pub fn set_editor_vim_normal(on: bool) {
+    EDITOR_VIM_NORMAL.with(|c| c.set(on));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn editor_vim_normal() -> bool {
+    EDITOR_VIM_NORMAL.with(|c| c.get())
+}
+
+/// Is the DOM focus inside the note editor's root element?
+#[cfg(target_arch = "wasm32")]
+fn editor_root_focused() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.active_element())
+        .is_some_and(|el| el.closest(".editor-root").ok().flatten().is_some())
 }
 
 /// Is the focused element a text-entry surface?

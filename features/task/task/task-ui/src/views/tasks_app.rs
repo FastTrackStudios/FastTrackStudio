@@ -33,6 +33,11 @@ impl ViewMode {
 #[derive(Props, Clone, PartialEq)]
 pub struct TasksAppProps {
     pub tasks: Vec<TaskInfo>,
+    /// Per-project condensation leftovers (see
+    /// [`super::list::TaskListProps::more`]): the list view renders
+    /// them behind an inline "N more in {project}" expander.
+    #[props(default)]
+    pub more: Vec<(Uuid, Vec<TaskInfo>)>,
     pub on_event: EventHandler<TaskMutation>,
     #[props(default)]
     pub initial_view: Option<ViewMode>,
@@ -55,9 +60,20 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
     let mut view = use_signal(|| props.initial_view.unwrap_or_default());
     let mut open_id: Signal<Option<Uuid>> = use_signal(|| None);
 
-    let selected: Option<TaskInfo> = open_id
-        .read()
-        .and_then(|id| props.tasks.iter().find(|t| t.id == id).cloned());
+    // Condensed-away rows are still openable (from the expander), so
+    // every lookup scans the visible list AND the leftovers.
+    let find_task = {
+        let tasks = props.tasks.clone();
+        let more = props.more.clone();
+        move |id: Uuid| -> Option<TaskInfo> {
+            tasks
+                .iter()
+                .chain(more.iter().flat_map(|(_, rest)| rest.iter()))
+                .find(|t| t.id == id)
+                .cloned()
+        }
+    };
+    let selected: Option<TaskInfo> = open_id.read().and_then(&find_task);
 
     let total = props.tasks.len();
     // Progress counts route through state groups (is_done), not
@@ -129,20 +145,25 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                     ViewMode::List => rsx! {
                         TaskList {
                             tasks: props.tasks.clone(),
+                            more: props.more.clone(),
                             on_event: props.on_event,
-                            on_toggle: move |id: Uuid| {
-                                // Domain click cycle: open → in-progress
-                                // (timer starts) → done; a subtask under a
-                                // running parent completes directly.
-                                let next = props.tasks.iter().find(|t| t.id == id).map(|t| {
-                                    let parent_status = t
-                                        .parent()
-                                        .and_then(|p| props.tasks.iter().find(|x| x.id == p))
-                                        .map(|p| p.status.as_str());
-                                    task_proto::click_transition(&t.status, parent_status)
-                                });
-                                if let Some(s) = next {
-                                    props.on_event.call(TaskMutation::SetStatus { id, status: s.to_string() });
+                            on_toggle: {
+                                let find_task = find_task.clone();
+                                move |id: Uuid| {
+                                    // Domain click cycle: open → in-progress
+                                    // (timer starts) → done; a subtask under a
+                                    // running parent completes directly.
+                                    let next = find_task(id).map(|t| {
+                                        let parent_status = t.parent().and_then(|p| find_task(p));
+                                        task_proto::click_transition(
+                                            &t.status,
+                                            parent_status.as_ref().map(|p| p.status.as_str()),
+                                        )
+                                        .to_string()
+                                    });
+                                    if let Some(s) = next {
+                                        props.on_event.call(TaskMutation::SetStatus { id, status: s });
+                                    }
                                 }
                             },
                             on_open: move |id: Uuid| open_id.set(Some(id)),

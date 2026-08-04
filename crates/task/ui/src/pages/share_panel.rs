@@ -119,7 +119,10 @@ pub fn SharePanel(slug: String, path: Option<String>) -> Element {
                     span { class: "text-sm text-muted-foreground", "Loading…" }
                 },
                 Some(Err(e)) => rsx! {
-                    span { class: "text-sm text-destructive", "Share service unavailable: {e}" }
+                    crate::states::InlineError {
+                        message: e.clone(),
+                        label: "Sharing".to_string(),
+                    }
                 },
                 Some(Ok(list)) if list.is_empty() => rsx! {
                     div { class: "rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground",

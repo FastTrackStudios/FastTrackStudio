@@ -64,7 +64,12 @@ pub fn TaskDetailPage(id: Uuid) -> Element {
             div { class: "p-6 text-sm text-muted-foreground", "Loading task…" }
         },
         Some(Err(e)) => rsx! {
-            div { class: "p-6 text-sm text-destructive", "Failed to load: {e}" }
+            div { class: "p-6",
+                crate::states::ErrorState {
+                    title: "Couldn't load this task",
+                    message: e.clone(),
+                }
+            }
         },
         Some(Ok(tagged)) => {
             let Some((slug, task)) = tagged

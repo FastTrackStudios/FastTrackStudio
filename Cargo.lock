@@ -16339,6 +16339,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "meter-plugin"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "meter-dsp",
+ "meter-ui",
+ "nice-plug",
+ "nice-plug-dioxus",
+ "parking_lot",
+]
+
+[[package]]
 name = "meter-ui"
 version = "0.1.0"
 dependencies = [
@@ -16898,6 +16910,12 @@ checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys 0.3.1",
 ]
+
+[[package]]
+name = "neo_frizbee"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a2f6120a8da26bea3587731072111062c5d8c51ca3a3a75a716bd8b735d5882"
 
 [[package]]
 name = "netdev"
@@ -19486,6 +19504,15 @@ dependencies = [
  "hound",
  "rustfft",
  "serde",
+]
+
+[[package]]
+name = "pitch-plugin"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "nice-plug",
+ "pitch-dsp",
 ]
 
 [[package]]
@@ -23335,14 +23362,18 @@ dependencies = [
  "audiocore-dsp",
  "comp",
  "daw",
+ "daw-proto",
  "delay",
  "eq",
  "hound",
  "level-dsp",
+ "midicore-proto",
  "modulation",
+ "pitch-dsp",
  "reverb",
  "saturate-dsp",
  "signal-plugin-host",
+ "tune",
 ]
 
 [[package]]
@@ -27420,6 +27451,7 @@ dependencies = [
  "pitch-dsp",
  "realfft",
  "tract-onnx",
+ "world-sys",
 ]
 
 [[package]]
@@ -27905,6 +27937,7 @@ dependencies = [
  "locations-proto",
  "mealplan-proto",
  "milestone-proto",
+ "neo_frizbee",
  "nucleo-matcher",
  "pantry-proto",
  "prefs-proto",
@@ -28178,6 +28211,15 @@ name = "unicode_categories"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
+
+[[package]]
+name = "unison-plugin"
+version = "0.1.0"
+dependencies = [
+ "audiocore-dsp",
+ "nice-plug",
+ "pitch-dsp",
+]
 
 [[package]]
 name = "universal-hash"
@@ -31149,6 +31191,13 @@ dependencies = [
  "vox",
  "vox-types",
  "workflows-proto",
+]
+
+[[package]]
+name = "world-sys"
+version = "0.1.0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

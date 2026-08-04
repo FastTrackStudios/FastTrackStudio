@@ -26,6 +26,10 @@ pub fn NoteHeader(
     /// `props-collapsed` and hides the frontmatter properties widget.
     /// The chevron below the title toggles it.
     props_open: Signal<bool>,
+    /// Bumped by the note view when keyboard focus should move up into
+    /// the title (caret at the document top + `k`/ArrowUp). Entering
+    /// edit mode selects the whole title so typing replaces it.
+    focus_req: Signal<u32>,
     /// Refresh the folder index after a rename commits (the tree row
     /// path changed).
     on_renamed: EventHandler<()>,
@@ -38,6 +42,23 @@ pub fn NoteHeader(
         return rsx! {};
     };
     let title = basename_of(&path).to_owned();
+
+    // A freshly-created "Untitled" note (the `<space> n` flow) asks to
+    // be named immediately: the new-note intent parks the path in
+    // `PendingTitleEdit`, and the matching header consumes it by
+    // requesting title focus.
+    {
+        let mut pending = use_context::<crate::chrome::PendingTitleEdit>().0;
+        let mut focus_req = focus_req;
+        let my_path = path.clone();
+        use_effect(move || {
+            let hit = pending.read().as_deref() == Some(my_path.as_str());
+            if hit {
+                pending.set(None);
+                focus_req += 1;
+            }
+        });
+    }
 
     // ── Rename: title commit → put_file(new, CreateOnly) → nav → delete.
     let cur_title = title.clone();
@@ -93,26 +114,57 @@ pub fn NoteHeader(
     let _ = props_open;
     rsx! {
         div { class: "flex flex-col gap-1 px-6 pt-5 pb-0",
-            TitleField { title, on_commit: do_rename }
+            TitleField { title, focus_req, on_commit: do_rename }
         }
     }
 }
 
+/// Refocus the editor body (the contenteditable root) — the title's
+/// keyboard exit (ArrowDown / Escape) drops back into the document.
+fn focus_editor_body() {
+    let _ = dioxus::document::eval(
+        "const el = document.querySelector('.editor-root'); if (el) el.focus();",
+    );
+}
+
 /// Big, click-to-edit title styled like an H1. Click swaps the heading
-/// for an input; Enter or blur commits, Escape cancels.
+/// for an input; Enter or blur commits, Escape cancels, ArrowDown
+/// commits and returns focus to the document. A `focus_req` bump
+/// enters edit mode with the whole title selected (type to replace).
 #[component]
-fn TitleField(title: String, on_commit: EventHandler<String>) -> Element {
+fn TitleField(title: String, focus_req: Signal<u32>, on_commit: EventHandler<String>) -> Element {
     let mut editing = use_signal(|| false);
     let mut draft = use_signal(String::new);
+    // Whether the next mount of the input should select-all (keyboard
+    // entry) rather than leave the caret where the click put it.
+    let mut select_all = use_signal(|| false);
+
+    {
+        let title = title.clone();
+        use_effect(move || {
+            if focus_req() > 0 && !*editing.peek() {
+                draft.set(title.clone());
+                select_all.set(true);
+                editing.set(true);
+            }
+        });
+    }
 
     if editing() {
         rsx! {
             input {
+                id: "note-title-input",
                 class: "w-full bg-transparent text-3xl font-bold tracking-tight text-foreground outline-none",
                 value: "{draft}",
                 autofocus: true,
                 onmounted: move |el| async move {
                     let _ = el.set_focus(true).await;
+                    if *select_all.peek() {
+                        select_all.set(false);
+                        let _ = dioxus::document::eval(
+                            "const i = document.getElementById('note-title-input'); if (i) i.select();",
+                        );
+                    }
                 },
                 oninput: move |e| draft.set(e.value()),
                 onkeydown: move |e: KeyboardEvent| {
@@ -120,13 +172,23 @@ fn TitleField(title: String, on_commit: EventHandler<String>) -> Element {
                     if e.key() == Key::Enter {
                         editing.set(false);
                         on_commit.call(draft.peek().clone());
+                        focus_editor_body();
                     } else if e.key() == Key::Escape {
                         editing.set(false);
+                        focus_editor_body();
+                    } else if e.key() == Key::ArrowDown {
+                        // The document continues below the title —
+                        // commit and drop focus back into it.
+                        editing.set(false);
+                        on_commit.call(draft.peek().clone());
+                        focus_editor_body();
                     }
                 },
                 onfocusout: move |_| {
-                    editing.set(false);
-                    on_commit.call(draft.peek().clone());
+                    if *editing.peek() {
+                        editing.set(false);
+                        on_commit.call(draft.peek().clone());
+                    }
                 },
             }
         }

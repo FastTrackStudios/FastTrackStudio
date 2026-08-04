@@ -36,6 +36,7 @@ pub mod plugin_gate;
 pub mod prefs;
 pub mod presence;
 pub mod routes;
+pub mod search;
 pub mod server_registry;
 pub mod shell;
 pub mod shortcuts;
