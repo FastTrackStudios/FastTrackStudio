@@ -157,4 +157,12 @@ differ from Linux:
   specifically whether they cross-compile cleanly to
   `x86_64-apple-darwin` and whether every Mach-O in the app bundle
   actually has a same-path counterpart to `lipo` against — until it's
-  actually run on airlock.
+  actually run on airlock. `apps/fasttrackstudio/ios/verify-macos-universal.sh`
+  (wired into the `macos-desktop`/`macos-plugins` CI jobs, right after
+  build and before upload) is the automated check for this: codesign +
+  Gatekeeper/notarization acceptance, `lipo -archs` on every Mach-O in
+  the bundle (warns on any that aren't universal), and — for the app —
+  actually executing the binary in both arch personalities (native
+  arm64, x86_64 via Rosetta) to catch loader-level failures. Run it by
+  hand with `bash apps/fasttrackstudio/ios/verify-macos-universal.sh app`
+  or `... plugins` (defaults to the newest artifact under `target/`).
