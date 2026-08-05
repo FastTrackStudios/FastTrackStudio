@@ -12,7 +12,7 @@
 //! test harness and in any non-plugin mount, so the panel falls back to its
 //! design size and draws unscaled.
 
-use audiocore_core::prelude::*;
+use dioxus::prelude::*;
 
 use crate::hardware::panel_svg::fit_scale;
 

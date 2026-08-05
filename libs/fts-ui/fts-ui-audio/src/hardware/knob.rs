@@ -11,9 +11,9 @@
 //! same [`DragProvider`](fts_ui_audio::drag::DragProvider) as every other FTS
 //! control, so a hardware face behaves like the rest of the editor.
 
-use audiocore_core::prelude::*;
-use fts_ui_audio::drag::{begin_drag, DragState};
-use fts_ui_audio::prelude::*;
+use dioxus::prelude::*;
+use crate::drag::{begin_drag, DragState};
+use crate::prelude::*;
 
 use crate::hardware::knob_svg::{knob_angle, pointer_polygon, ring_arc_path, ring_point, ScaleMark};
 

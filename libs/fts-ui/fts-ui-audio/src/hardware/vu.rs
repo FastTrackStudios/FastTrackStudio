@@ -5,7 +5,7 @@
 //! colour, the bezel, the printed scale and the legend. The LA-2A's is warm
 //! and amber-lit; the 1176's is the blue-lit UREI face.
 
-use audiocore_core::prelude::*;
+use dioxus::prelude::*;
 
 use crate::hardware::vu_svg::{
     db_to_vu, gr_to_vu, needle_tip, scale_arc_path, tick_point, PIVOT_X, PIVOT_Y, VU_H, VU_TICKS,

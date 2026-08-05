@@ -1,12 +1,12 @@
 //! Panel switches — the physical toggle and the 1176's ratio buttons.
 //!
 //! Both drive a stepped [`ParamHandle`] (built by
-//! [`crate::profile_handle`]), so a click sets a detent position rather than
+//! the plugin's profile handles), so a click sets a detent position rather than
 //! writing a value: the handle owns the mapping from "the 8 button" to
 //! ratio 8:1.
 
-use audiocore_core::prelude::*;
-use fts_ui_audio::prelude::*;
+use dioxus::prelude::*;
+use crate::prelude::*;
 
 /// How many buttons a bank stacks before it starts a second column.
 const MAX_BUTTON_ROWS: usize = 5;
