@@ -2325,7 +2325,7 @@ dependencies = [
  "bitflags 2.13.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -5192,7 +5192,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -7434,7 +7434,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -10757,7 +10757,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.1.3",
+ "windows-link 0.2.1",
  "windows-result 0.4.1",
 ]
 
@@ -19130,7 +19130,7 @@ dependencies = [
  "image",
  "itertools 0.14.0",
  "js-sys",
- "libloading 0.7.4",
+ "libloading 0.8.9",
  "log",
  "maybe-owned",
  "once_cell",
@@ -22132,6 +22132,8 @@ dependencies = [
 [[package]]
 name = "rusty_link"
 version = "0.4.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4169045a50ee3c874ee11128b8f06a46947776b23e3ee5f4bca293b6f3bb6f07"
 dependencies = [
  "bindgen 0.72.1",
  "cmake",
@@ -26366,7 +26368,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",

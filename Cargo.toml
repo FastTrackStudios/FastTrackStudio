@@ -1088,15 +1088,6 @@ blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd23
 # them, so serialized keybind configs (`keys "<C-s>"`) could not be
 # re-parsed. Drop the vendor once upstream fixes can_be_bare.
 styx-format = { path = "libs/vendor/styx-format" }
-# Vendored one-line Cargo.toml fix: pin its bindgen build-dep to
-# default-features=false + experimental+runtime, matching libspa-sys's own
-# request. Plain unified with libspa-sys's non-default feature set breaks
-# bindgen's macro constant-folding for cast-expression C macros (silently
-# drops SPA_ID_INVALID) whenever both crates are in the same build graph
-# (fasttrackstudio, signal-plugin — daw-link's Ableton Link sync +
-# cpal's pipewire backend). Drop the vendor if upstream ever exposes a
-# feature knob for this instead of a bare `bindgen = "^0.72.1"`.
-rusty_link = { path = "libs/vendor/rusty_link" }
 # Vendored phon rc.5 + derive support for parse/display opaque scalars
 # (Uuid, chrono DateTime/NaiveDate, url, …). Upstream rc.5 PANICS (and the
 # reply path aborts the process) the first time a vox RPC reply contains
