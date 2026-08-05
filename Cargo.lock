@@ -14982,7 +14982,9 @@ name = "limiter-plugin"
 version = "0.1.0"
 dependencies = [
  "comp",
+ "limiter-ui",
  "nice-plug",
+ "nice-plug-dioxus",
 ]
 
 [[package]]
