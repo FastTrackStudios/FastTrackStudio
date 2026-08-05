@@ -116,6 +116,52 @@ differ from Linux:
 ~/fasttrackstudio, ~/fts-tracks, ~/fts-dev          the 3 rigs (same as Linux)
 ```
 
+### The `.pkg` installer (recommended for humans)
+
+Most macOS users should not touch `fts-installer` at all — the release
+carries a themed, notarized **`FastTrackStudio-<ver>-macos.pkg`** that
+installs everything in one double-click, and upgrades in place when a
+newer one is run (component identifiers are stable):
+
+```text
+[x] FastTrackStudio        -> /Applications/FastTrackStudio.app
+[x] FTS Plugins            group — one click toggles all of them
+    [x] FTS EQ             -> /Library/Audio/Plug-Ins/{CLAP,VST3}/FTS EQ.*
+    [x] FTS Comp
+    ...                    one line per plugin, each installing both formats
+```
+
+Click **Customize** in Installer.app to reach the tree; everything is
+selected by default.
+
+**Silent / unattended** (MDM, fleet deploys, CI) — no UI, no prompts:
+
+```bash
+# everything
+sudo installer -pkg FastTrackStudio-<ver>-macos.pkg -target /
+
+# pick components: edit the choices template shipped beside the .pkg
+# (FastTrackStudio-<ver>-macos-choices.xml — flip attributeSetting to 0
+# to skip that piece), then
+sudo installer -applyChoiceChangesXML FastTrackStudio-<ver>-macos-choices.xml \
+     -pkg FastTrackStudio-<ver>-macos.pkg -target /
+```
+
+Choice ids (`choice.app`, `choice.plugins`, `choice.plugin.<name>`) are
+stable across releases, so a deployment script written once keeps working.
+Unlike the GUI, toggling the `choice.plugins` group in that file does NOT
+cascade — set each plugin child explicitly (the template lists them all).
+
+Built by `apps/fasttrackstudio/ios/deploy-macos-pkg.sh` on airlock (the
+`macos-installer` job in `release-binaries.yml`). It needs BOTH Developer
+ID cert flavours: *Application* for the payloads and *Installer* for the
+`.pkg` wrapper — `mint-developer-id.rb` mints either, selected by
+`$DEVID_CERT_TYPE`.
+
+The pieces below describe what `fts-installer` does instead, which is
+still the path for scripted installs that want the CLI, and the only path
+on Linux.
+
 - **App**: `install`/`update` download the notarized+stapled
   `FastTrackStudio-*-macos.dmg` release asset — a single universal build
   covering both Mac architectures (`apps/fasttrackstudio/ios/deploy-macos.sh`

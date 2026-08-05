@@ -90,6 +90,7 @@ members = [
     # ── crates/daw — daw domain core (wave 2) ─────────────────────────
     "crates/daw/daw",
     "crates/daw/proto",
+    "crates/daw/actions",
     "crates/daw/control",
     "crates/daw/module",
     # ── libs/devtools ─────────────────────────────────────────────────
@@ -130,6 +131,7 @@ members = [
     "features/reaper/reaper-input",
     "features/reaper/daw-perf-test",
     "features/reaper/actions-reaper",
+    "features/reaper/fts-icons",
     # ── features/launcher — launcher search/workflow engine + panel ────
     "features/launcher/fts-launcher",
     # ── features/standalone / surfaces / daw-ui ───────────────────────
@@ -423,6 +425,7 @@ input-keybinds = { path = "crates/input/input-keybinds" }
 # domain; consumers outside it go through the `daw` facade.
 daw = { path = "crates/daw/daw" }
 daw-proto = { path = "crates/daw/proto" }
+daw-actions = { path = "crates/daw/actions" }
 daw-control = { path = "crates/daw/control" }
 daw-module = { path = "crates/daw/module" }
 fts-devtools = { path = "libs/devtools/fts-devtools" }
@@ -454,6 +457,7 @@ daw-reaper-dioxus = { path = "features/reaper/daw-reaper-dioxus" }
 daw-reaper-dioxus-ext = { path = "features/reaper/daw-reaper-dioxus-ext" }
 daw-reaper-embed = { path = "features/reaper/daw-reaper-embed" }
 reaper-launcher = { path = "features/reaper/reaper-launcher" }
+fts-icons = { path = "features/reaper/fts-icons" }
 reaper-config = { path = "features/reaper/reaper-config" }
 reaper-kbd = { path = "features/reaper/reaper-kbd" }
 reaper-hwnd = { path = "features/reaper/reaper-hwnd" }
@@ -1092,15 +1096,6 @@ blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd23
 # them, so serialized keybind configs (`keys "<C-s>"`) could not be
 # re-parsed. Drop the vendor once upstream fixes can_be_bare.
 styx-format = { path = "libs/vendor/styx-format" }
-# Vendored one-line Cargo.toml fix: pin its bindgen build-dep to
-# default-features=false + experimental+runtime, matching libspa-sys's own
-# request. Plain unified with libspa-sys's non-default feature set breaks
-# bindgen's macro constant-folding for cast-expression C macros (silently
-# drops SPA_ID_INVALID) whenever both crates are in the same build graph
-# (fasttrackstudio, signal-plugin — daw-link's Ableton Link sync +
-# cpal's pipewire backend). Drop the vendor if upstream ever exposes a
-# feature knob for this instead of a bare `bindgen = "^0.72.1"`.
-rusty_link = { path = "libs/vendor/rusty_link" }
 # Vendored phon rc.5 + derive support for parse/display opaque scalars
 # (Uuid, chrono DateTime/NaiveDate, url, …). Upstream rc.5 PANICS (and the
 # reply path aborts the process) the first time a vox RPC reply contains
