@@ -1,8 +1,38 @@
+//! Auto-colour — classify tracks and paint them, reactively.
+//!
+//! Session owns colour because colour is about to stop being a pure
+//! function of a track's name: section-aware and setlist-aware colouring
+//! need song structure, and only this crate has it.
+//!
+//! Two halves, deliberately separable:
+//!
+//! - [`classify`] decides what colour a track *should* be. It runs names
+//!   through `monarchy_sort` and looks the resulting group path up in
+//!   `music_catalog`'s palette — the same taxonomy the track organiser
+//!   uses, so colours and grouping agree by construction rather than by
+//!   two rule sets being kept in sync by hand.
+//! - this module is the runtime around it: reactive re-application on
+//!   track events, persistence of what auto-colour applied (so a colour
+//!   the *user* set is never clobbered), the enable/disable toggle, and
+//!   parent-colour inheritance for tracks the classifier has no opinion
+//!   about.
+//!
+//! Previously this was two separate implementations — `daw_actions::auto_color`
+//! (this runtime, with its own hand-rolled substring rules) and
+//! `dynamic_template::auto_color` (the monarchy classifier, with no
+//! runtime). Both registered actions; both appeared in REAPER's action
+//! list. This is the merge: that runtime, that classifier.
+//!
+//! Contract in [`session_proto::color`].
+
+pub mod classify;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use daw::service::{ExtState, ProjectContext, Projects, TrackEvent, TrackRef, Tracks};
+use session_proto::color::{AutoColorActions, register_auto_color_actions};
 use tokio::sync::broadcast::error::RecvError;
 
 static STATE: OnceLock<Arc<AutoColorState>> = OnceLock::new();
@@ -46,12 +76,8 @@ impl AutoColorState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct AutoColorRule {
-    color: u32,
-    matcher: fn(&str) -> bool,
-}
-
+/// What auto-colour decided for one track. `None` means "no opinion" —
+/// the classifier didn't place it and no coloured parent was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AutoColorDecision {
     pub color: Option<u32>,
@@ -542,10 +568,13 @@ pub(crate) fn decide_colors(tracks: &[daw::service::Track]) -> HashMap<String, A
         .iter()
         .map(|track| (track.guid.as_str(), track))
         .collect();
+    let by_name = classify::colors_by_track_name(tracks);
     let explicit: HashMap<&str, u32> = tracks
         .iter()
         .filter_map(|track| {
-            rule_color_for_name(&track.name).map(|color| (track.guid.as_str(), color))
+            by_name
+                .get(track.name.as_str())
+                .map(|color| (track.guid.as_str(), *color))
         })
         .collect();
 
@@ -578,147 +607,6 @@ fn inherited_parent_color(
     None
 }
 
-fn rule_color_for_name(name: &str) -> Option<u32> {
-    let normalized = normalize_name(name);
-    AUTO_COLOR_RULES
-        .iter()
-        .find(|rule| (rule.matcher)(&normalized))
-        .map(|rule| rule.color)
-}
-
-fn normalize_name(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                ' '
-            }
-        })
-        .collect::<String>()
-}
-
-// Ordering matters: the first matching rule wins. Keep specific names
-// (vocal, guitar) ahead of generic synth keywords like "lead"/"pad" so
-// "Lead Vocal" classifies as vocal, not synth.
-const AUTO_COLOR_RULES: &[AutoColorRule] = &[
-    AutoColorRule {
-        color: 0x7C3AED,
-        matcher: has_tracks_folder,
-    },
-    AutoColorRule {
-        color: 0x14B8A6,
-        matcher: has_reference,
-    },
-    AutoColorRule {
-        color: 0xF59E0B,
-        matcher: has_guide,
-    },
-    AutoColorRule {
-        color: 0xEF4444,
-        matcher: has_drums,
-    },
-    AutoColorRule {
-        color: 0xF97316,
-        matcher: has_percussion,
-    },
-    AutoColorRule {
-        color: 0x0EA5E9,
-        matcher: has_bass,
-    },
-    AutoColorRule {
-        color: 0x22C55E,
-        matcher: has_guitar,
-    },
-    AutoColorRule {
-        color: 0xA855F7,
-        matcher: has_keys,
-    },
-    AutoColorRule {
-        color: 0xEC4899,
-        matcher: has_vocal,
-    },
-    AutoColorRule {
-        color: 0x06B6D4,
-        matcher: has_synth,
-    },
-    AutoColorRule {
-        color: 0x84CC16,
-        matcher: has_strings,
-    },
-    AutoColorRule {
-        color: 0xEAB308,
-        matcher: has_horns,
-    },
-    AutoColorRule {
-        color: 0x64748B,
-        matcher: has_fx,
-    },
-];
-
-fn has_word(name: &str, word: &str) -> bool {
-    name.split_whitespace().any(|part| part == word)
-}
-
-fn has_any_word(name: &str, words: &[&str]) -> bool {
-    words.iter().any(|word| has_word(name, word))
-}
-
-fn has_tracks_folder(name: &str) -> bool {
-    name.trim() == "tracks"
-}
-
-fn has_reference(name: &str) -> bool {
-    has_any_word(name, &["reference", "refs", "ref", "mix"])
-}
-
-fn has_guide(name: &str) -> bool {
-    has_any_word(name, &["guide", "click", "count", "loop"])
-}
-
-fn has_drums(name: &str) -> bool {
-    has_any_word(
-        name,
-        &["drums", "drum", "kit", "kick", "snare", "tom", "oh"],
-    )
-}
-
-fn has_percussion(name: &str) -> bool {
-    has_any_word(name, &["perc", "percussion", "shaker", "tamb", "conga"])
-}
-
-fn has_bass(name: &str) -> bool {
-    has_word(name, "bass")
-}
-
-fn has_guitar(name: &str) -> bool {
-    has_any_word(name, &["guitar", "guitars", "gtr", "gtrs", "egtr", "agtr"])
-}
-
-fn has_keys(name: &str) -> bool {
-    has_any_word(name, &["keys", "key", "piano", "organ", "rhodes", "wurli"])
-}
-
-fn has_synth(name: &str) -> bool {
-    has_any_word(name, &["synth", "pad", "lead", "arp"])
-}
-
-fn has_vocal(name: &str) -> bool {
-    has_any_word(name, &["vocal", "vocals", "vox", "bgv", "bgvs", "choir"])
-}
-
-fn has_strings(name: &str) -> bool {
-    has_any_word(name, &["string", "strings", "violin", "cello", "viola"])
-}
-
-fn has_horns(name: &str) -> bool {
-    has_any_word(name, &["horn", "horns", "trumpet", "sax", "trombone"])
-}
-
-fn has_fx(name: &str) -> bool {
-    has_any_word(name, &["fx", "sfx", "effect", "effects"])
-}
-
 #[cfg(test)]
 mod tests {
     use daw::service::Track;
@@ -731,11 +619,26 @@ mod tests {
         track
     }
 
-    #[test]
-    fn first_matching_rule_wins() {
-        assert_eq!(rule_color_for_name("Guide Bass"), Some(0xF59E0B));
+    /// Colours are asserted against `music_catalog` rather than literal
+    /// hex. The whole reason this module merged two implementations is
+    /// that the old runtime carried its *own* colour table which had
+    /// drifted from the shared palette — "Guitars" was green here and
+    /// blue everywhere else in the app. Hardcoding hex would let that
+    /// happen again silently.
+    fn guitars() -> u32 {
+        music_catalog::lookup::color_for_name("Guitars")
+            .expect("Guitars is a known group")
+            .to_hex()
     }
 
+    #[test]
+    fn folder_track_named_after_a_group_takes_that_group_color() {
+        let tracks = vec![track("folder", 0, "Guitars", None)];
+        assert_eq!(decide_colors(&tracks)["folder"].color, Some(guitars()));
+    }
+
+    /// A track the classifier has no opinion about ("57" — an SM57 mic
+    /// name) inherits from the nearest coloured ancestor.
     #[test]
     fn child_inherits_nearest_colored_parent() {
         let tracks = vec![
@@ -745,8 +648,8 @@ mod tests {
 
         let decisions = decide_colors(&tracks);
 
-        assert_eq!(decisions["folder"].color, Some(0x22C55E));
-        assert_eq!(decisions["child"].color, Some(0x22C55E));
+        assert_eq!(decisions["folder"].color, Some(guitars()));
+        assert_eq!(decisions["child"].color, Some(guitars()));
     }
 
     #[test]
@@ -756,58 +659,19 @@ mod tests {
             track("child", 1, "Lead Vocal", Some("folder")),
         ];
 
-        let decisions = decide_colors(&tracks);
+        let child = decide_colors(&tracks)["child"].color;
 
-        assert_eq!(decisions["child"].color, Some(0xEC4899));
+        assert!(child.is_some());
+        assert_ne!(child, Some(guitars()), "vocal should not inherit Guitars");
     }
 }
 
 // ── architect::actions implementation ───────────────────────────────────
 //
-// The action enum + `dispatch` below stay: they are the shared body every
-// action method (and, where one exists, the RPC service impl) calls into.
-// What's gone is the string-keyed `action_for_id` lookup and the
-// `session_actions` `define_actions!` entries that declared the same
-// `FTS_SESSION_*` command ids a second time.
+// Contract in `session_proto::color`.
 
-/// Bridges the five auto-color actions onto `#[architect::actions]`. Every
-/// method forwards to the existing synchronous `dispatch` — no behavior
-/// change, just a declarative front door with real metadata.
+/// Serves the five auto-colour actions.
 pub struct AutoColorActionsImpl;
-
-#[architect::actions(namespace = "FTS_SESSION")]
-pub trait AutoColorActions {
-    #[action(
-        description = "Apply session auto-color rules to all tracks and keep auto-color enabled",
-        category = "Session",
-        group = "Auto Color"
-    )]
-    fn auto_color_color_all(&self);
-    #[action(
-        description = "Apply session auto-color rules to selected tracks",
-        category = "Session",
-        group = "Auto Color"
-    )]
-    fn auto_color_color_selected(&self);
-    #[action(
-        description = "Toggle session auto-color for all tracks",
-        category = "Session",
-        group = "Auto Color"
-    )]
-    fn auto_color_toggle(&self);
-    #[action(
-        description = "Clear colors from all tracks and disable session auto-color",
-        category = "Session",
-        group = "Auto Color"
-    )]
-    fn auto_color_clear_all(&self);
-    #[action(
-        description = "Clear colors from selected tracks",
-        category = "Session",
-        group = "Auto Color"
-    )]
-    fn auto_color_clear_selected(&self);
-}
 
 impl AutoColorActions for AutoColorActionsImpl {
     fn auto_color_color_all(&self) {
