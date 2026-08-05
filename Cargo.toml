@@ -89,6 +89,7 @@ members = [
     # ── crates/daw — daw domain core (wave 2) ─────────────────────────
     "crates/daw/daw",
     "crates/daw/proto",
+    "crates/daw/actions",
     "crates/daw/control",
     "crates/daw/module",
     # ── libs/devtools ─────────────────────────────────────────────────
@@ -421,6 +422,7 @@ input-keybinds = { path = "crates/input/input-keybinds" }
 # domain; consumers outside it go through the `daw` facade.
 daw = { path = "crates/daw/daw" }
 daw-proto = { path = "crates/daw/proto" }
+daw-actions = { path = "crates/daw/actions" }
 daw-control = { path = "crates/daw/control" }
 daw-module = { path = "crates/daw/module" }
 fts-devtools = { path = "libs/devtools/fts-devtools" }
