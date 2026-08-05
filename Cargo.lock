@@ -9989,6 +9989,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-icons"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "daw-proto",
+ "dirs",
+ "resvg 0.45.1",
+ "serde",
+ "serde_json",
+ "toml 0.8.2",
+ "ureq 2.12.1",
+]
+
+[[package]]
 name = "fts-installer"
 version = "0.1.0"
 dependencies = [
