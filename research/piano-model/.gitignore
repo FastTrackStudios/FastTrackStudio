@@ -1,6 +1,0 @@
-# Detached research crate — keep source + docs, drop generated artifacts.
-/target/
-/out/
-*.wav
-manifest.json
-.venv/
