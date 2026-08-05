@@ -5850,6 +5850,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-actions"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "daw",
+ "daw-reaper",
+ "eyre",
+ "music-catalog",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "daw-allocator"
 version = "0.1.0"
 
@@ -9951,6 +9964,7 @@ dependencies = [
  "architect",
  "crossbeam-channel",
  "daw",
+ "daw-actions",
  "daw-extension-runtime",
  "daw-reaper",
  "daw-synchronization",
@@ -23198,7 +23212,9 @@ dependencies = [
  "actions-proto",
  "architect",
  "chrono",
+ "color-palette",
  "daw",
+ "daw-actions",
  "daw-proto",
  "daw-reaper",
  "daw-standalone",
@@ -23208,6 +23224,7 @@ dependencies = [
  "futures",
  "keyflow",
  "keyflow-daw-analysis",
+ "monarchy",
  "music-catalog",
  "reaper-high",
  "reaper-low",
