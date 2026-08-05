@@ -38,6 +38,31 @@ use editor::EditorState;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) const VAULT_ID: &str = "default";
 
+/// The scope that should own a pane's editor buffer.
+///
+/// A pane's [`EditorState`] does not stay inside the pane: `NoteView`
+/// publishes it to the right sidebar as
+/// [`FocusedDoc`](crate::pages::note_properties::FocusedDoc), stored in
+/// a context signal provided by the *vault page* — an ancestor of both
+/// the pane and the sidebar. The sidebar is a **sibling** subtree, not
+/// a descendant of the pane.
+///
+/// Created with a plain `use_signal`, the buffer is owned by the pane's
+/// own scope, so every sidebar read is a cross-scope read of a value
+/// that dies when the pane unmounts (tab switch, file switch,
+/// split-view swap). Dioxus flags exactly this ("A Copy Value created
+/// in ScopeId(_, NoteView) … was used in ScopeId(_, NoteProperties)"),
+/// and the multiplayer conformance suite fails the run on it — see
+/// Finding 4 in `apps/task/tests/multiplayer/README.md`.
+///
+/// The page therefore hands panes *its* `ScopeId`, and the buffer is
+/// created there instead. It outlives any single pane, so the sidebar's
+/// reads are always valid. Because the pane's teardown then no longer
+/// frees it, the pane must drop it explicitly — see
+/// [`DocumentSession::dispose_buffer`].
+#[derive(Clone, Copy)]
+pub struct DocOwnerScope(pub ScopeId);
+
 /// Debounce window between the last edit and the autosave write.
 const AUTOSAVE_DEBOUNCE_MS: u64 = 2_000;
 
@@ -113,11 +138,28 @@ pub struct DocumentSession {
     /// reactively.
     save_count: Signal<u64>,
     notify: Option<architect::Notifications>,
+    /// True when [`state`](Self::state) was created in an ancestor
+    /// scope via [`DocOwnerScope`], and so is NOT freed when this pane
+    /// unmounts. The pane owns the responsibility instead — see
+    /// [`DocumentSession::dispose_buffer`].
+    buffer_is_foreign: bool,
 }
 
 /// Create the session and install the debounced-autosave effect.
 pub fn use_document_session(home: Memo<String>) -> DocumentSession {
-    let state = use_signal(|| EditorState::new(String::new()));
+    // The buffer is the one piece of session state that leaves this
+    // scope (see [`DocOwnerScope`]), so it is created in the page's
+    // scope when the page offers one. Everything below stays local:
+    // nothing else here is read outside the pane.
+    let owner = try_use_context::<DocOwnerScope>();
+    let state = use_hook(|| match owner {
+        Some(DocOwnerScope(scope)) => {
+            Signal::new_in_scope(EditorState::new(String::new()), scope)
+        }
+        // Standalone mount (no vault page above): local ownership is
+        // correct and `dispose_buffer` becomes a no-op.
+        None => Signal::new(EditorState::new(String::new())),
+    });
     let open = use_signal(|| None::<OpenFile>);
     let saved_text = use_signal(String::new);
     let status = use_signal(SaveStatus::default);
@@ -142,6 +184,7 @@ pub fn use_document_session(home: Memo<String>) -> DocumentSession {
         saving,
         save_count,
         notify,
+        buffer_is_foreign: owner.is_some(),
     };
 
     // Debounced autosave. Subscribes to the editor state; every
@@ -175,6 +218,23 @@ pub fn use_document_session(home: Memo<String>) -> DocumentSession {
 }
 
 impl DocumentSession {
+    /// Free the editor buffer when it was created in the page's scope
+    /// rather than the pane's (see [`DocOwnerScope`]).
+    ///
+    /// The pane MUST call this as it unmounts, *after* withdrawing
+    /// itself from the focused-doc context — otherwise the sidebar
+    /// could read a buffer that has already been freed. Without it the
+    /// buffer would live until the whole vault page unmounts, leaking
+    /// one document per tab/file switch.
+    ///
+    /// A no-op when the buffer is locally owned, which is the case for
+    /// a `NoteView` mounted outside the vault page.
+    pub fn dispose_buffer(&self) {
+        if self.buffer_is_foreign {
+            self.state.manually_drop();
+        }
+    }
+
     // ── Reactive reads ────────────────────────────────────────
 
     /// Path of the open file, or `None`. Reactive.

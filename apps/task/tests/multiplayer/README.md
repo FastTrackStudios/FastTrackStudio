@@ -66,11 +66,17 @@ When a fix lands, the `test.fail()` tests will report
 > the 2026-07-10 subtree import (stale `REPO_ROOT`, a playwright pin
 > that did not match the flake's browsers, and selectors coupled to
 > pre-redesign markup — see the revival commit). It boots and drives
-> real browser contexts again. `presence baseline` passes. The three
-> convergence tests now reach their assertions and fail on Finding 4.
-> The 20-peer churn test fails at its first checkpoint and has not been
-> re-diagnosed since the revival — its `test.fail()` marker predates
-> this and should not be trusted as the current cause.
+> real browser contexts again, and Finding 4 (below) was caught and
+> fixed off the back of it. Both `presence baseline` and all three
+> convergence suites pass.
+>
+> Still open: the 20-peer churn test fails at its first checkpoint and
+> has not been re-diagnosed since the revival — its `test.fail()`
+> marker predates this and should not be trusted as the current cause.
+> The `input lifecycle` convergence test passes when run alone but has
+> been seen failing in a full-suite run, so it is order-dependent;
+> retries are off on purpose here, so that is a finding to chase, not
+> to paper over.
 
 ## Findings (verification results, 2026-06-12)
 
@@ -117,9 +123,9 @@ any other context still fails the run. Fix belongs near
 
 ### 4. Signal-ownership violation: the focused doc's buffer is read across scopes
 
-*Found 2026-08-05, by the revived suite. Blocks all three convergence
-tests, which assert zero console errors and never excuse a
-signal-ownership warning.*
+*Found 2026-08-05 by the revived suite; **fixed** the same day. It had
+been blocking all three convergence tests, which assert zero console
+errors and never excuse a signal-ownership warning. All three pass now.*
 
 Every peer logs ~20 of these within a short editing session:
 
@@ -142,12 +148,22 @@ the creating scope is not an ancestor of the using scope. The value is
 genuinely dropped when the note pane unmounts (tab switch, file switch,
 split-view swap) while the context can still hand it out.
 
-Fix direction — own the buffer in a scope that outlives both panes:
-move the `EditorState` signal up to where the `FocusedDoc` context is
-provided (`pages/vault.rs`) and pass it into `NoteView`. Creating it
-with `Signal::new_in_scope(.., ScopeId::ROOT)` also silences the
-warning but leaks one document buffer per pane mount, so it is not the
-answer.
+**The fix.** `pages/vault.rs` now provides
+`document_session::DocOwnerScope(current_scope_id())` alongside the
+`FocusedDoc` context, and `use_document_session` creates the buffer
+with `Signal::new_in_scope(.., that_scope)`. The buffer is then owned
+by the page — an ancestor of both the pane and the sidebar — so every
+sidebar read is in-scope and valid.
+
+Because the pane's teardown no longer frees it, `NoteView`'s `use_drop`
+calls `session.dispose_buffer()` *after* withdrawing from the
+focused-doc context (order matters: the sidebar must never be able to
+reach a freed buffer). Without that, the page would retain one document
+buffer per tab/file switch.
+
+`Signal::new_in_scope(.., ScopeId::ROOT)` would also silence the
+warning, but leaks one buffer per pane mount for the app's lifetime —
+which is why ownership is pinned to the page instead.
 
 ### 3. Known noise (allowlisted, see `helpers.js`)
 

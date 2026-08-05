@@ -251,6 +251,13 @@ pub fn VaultView(
     // The focused note's live editor doc, published by its `NoteView`
     // and consumed by the right-sidebar Properties tab.
     use_context_provider(|| Signal::new(None::<crate::pages::note_properties::FocusedDoc>));
+    // …and the scope that owns those buffers. It must be THIS scope:
+    // the context signal above lives here, so anything reachable
+    // through it has to outlive the panes that publish into it. See
+    // `DocOwnerScope` for the cross-scope read this prevents.
+    use_context_provider(|| {
+        crate::document_session::DocOwnerScope(dioxus::core::current_scope_id())
+    });
     // Which right-sidebar tab is showing. Properties first — it's the
     // one used most while writing.
     let mut right_tab = use_signal(|| RightTab::Properties);
