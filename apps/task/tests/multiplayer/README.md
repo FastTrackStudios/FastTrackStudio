@@ -11,14 +11,14 @@ one browser context = one presence peer. Tracked issue `dd824506`.
 ```sh
 just mp-test
 # or, equivalently:
-nix develop .#playwright --command tests/multiplayer/run.sh
+nix develop --command tests/multiplayer/run.sh
 # reuse already-built artifacts (server, CLI, wasm bundle):
-nix develop .#playwright --command bash -c 'cd tests/multiplayer && MP_SKIP_BUILD=1 npx playwright test'
+nix develop --command bash -c 'cd tests/multiplayer && MP_SKIP_BUILD=1 npx playwright test'
 ```
 
 `run.sh` builds `task-server` + `task-cli` (debug) and the web
 bundle with `TASK_VOX_URL_WEB=ws://127.0.0.1:$MP_SERVER_PORT/vox`
-**baked at compile time** (`crates/ui/src/vox_session.rs`), then
+**baked at compile time** (`crates/task/ui/src/vox_session.rs`), then
 runs Playwright. Building the bundle up front — instead of inside a
 `webServer` block — is the warmup that absorbs the dx cold-build
 flake; the tests are served static bytes by `serve.js`.
@@ -45,7 +45,7 @@ the same key — no duplicate after refresh-rejoin).
 
 Doc text is read from `window.__taskVault` (a wasm-side mirror of
 the exact editor buffer + collab status + local replica text, see
-`crates/ui/src/pages/vault.rs`) — the decorated DOM cannot be
+`crates/task/ui/src/pages/note_view.rs`) — the decorated DOM cannot be
 scraped back into doc text because hidden live-preview ranges render
 nothing.
 
@@ -61,6 +61,16 @@ nothing.
 
 When a fix lands, the `test.fail()` tests will report
 "passed unexpectedly" — that's the signal to delete the marker.
+
+> **Status after the 2026-08-05 revival.** The suite had not run since
+> the 2026-07-10 subtree import (stale `REPO_ROOT`, a playwright pin
+> that did not match the flake's browsers, and selectors coupled to
+> pre-redesign markup — see the revival commit). It boots and drives
+> real browser contexts again. `presence baseline` passes. The three
+> convergence tests now reach their assertions and fail on Finding 4.
+> The 20-peer churn test fails at its first checkpoint and has not been
+> re-diagnosed since the revival — its `test.fail()` marker predates
+> this and should not be trusted as the current cause.
 
 ## Findings (verification results, 2026-06-12)
 
@@ -103,14 +113,48 @@ error class `tests/playwright/smoke.spec.js` guards against. The
 harness counts these as `knownBootRaces` (only when they follow an
 empty-slug failure within 5s) instead of failing; the same error in
 any other context still fails the run. Fix belongs near
-`crates/ui/src/vox_clients.rs` / org discovery sequencing.
+`crates/task/ui/src/vox_clients.rs` / org discovery sequencing.
+
+### 4. Signal-ownership violation: the focused doc's buffer is read across scopes
+
+*Found 2026-08-05, by the revived suite. Blocks all three convergence
+tests, which assert zero console errors and never excuse a
+signal-ownership warning.*
+
+Every peer logs ~20 of these within a short editing session:
+
+```
+A Copy Value created in ScopeId(_, "ui::pages::note_view::NoteView")
+  (at crates/task/ui/src/document_session.rs:120)
+  ... was used in ScopeId(_, "ui::pages::note_properties::NoteProperties")
+```
+
+`use_document_session` creates `state: Signal<EditorState>` in
+`NoteView`'s scope. `NoteView` then publishes it to the sidebar
+Properties panel as `FocusedDoc { state, .. }`, stored in a
+`Signal<Option<FocusedDoc>>` context provided by `pages/vault.rs` —
+i.e. an ancestor of BOTH panes. `NoteProperties` renders in the right
+sidebar, a *sibling* subtree, and reads `doc.state` from there.
+
+The claim-id `use_drop` in `note_view.rs` is already correct, so this
+is not a stale read after unmount: Dioxus warns on every read because
+the creating scope is not an ancestor of the using scope. The value is
+genuinely dropped when the note pane unmounts (tab switch, file switch,
+split-view swap) while the context can still hand it out.
+
+Fix direction — own the buffer in a scope that outlives both panes:
+move the `EditorState` signal up to where the `FocusedDoc` context is
+provided (`pages/vault.rs`) and pass it into `NoteView`. Creating it
+with `Signal::new_in_scope(.., ScopeId::ROOT)` also silences the
+warning but leaks one document buffer per pane mount, so it is not the
+answer.
 
 ### 3. Known noise (allowlisted, see `helpers.js`)
 
 - `ws://…/_dioxus?build_id=0` failure — dx DEBUG bundles ship the
   devtools client; harmless against a static server.
 - Dioxus signal-ownership WARNs: `CollabSession`-owned Copy values
-  read from the `Editor` scope (`crates/ui/src/collab.rs:90` /
+  read from the `Editor` scope (`crates/task/ui/src/collab.rs:90` /
   `:312`, `crdt/src/hooks.rs:300`) — flagged by dioxus as a
   potential use-after-drop; worth a look independent of this suite.
 - `Changing the props of Style {} is not supported` (vault page's

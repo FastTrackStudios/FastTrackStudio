@@ -5,7 +5,7 @@
 #   1. task-server + task-cli (debug — runtime perf is irrelevant)
 #   2. the dx web bundle with TASK_VOX_URL_WEB baked to the ISOLATED
 #      test server port (the vox URL is a compile-time constant on
-#      wasm — see crates/ui/src/vox_session.rs)
+#      wasm — see crates/task/ui/src/vox_session.rs)
 #   3. pnpm install (first run only)
 #   4. playwright test
 #
@@ -14,8 +14,10 @@
 # Editor repo documents — by the time Playwright starts, the bundle
 # is static bytes served by serve.js.
 #
-# Run inside the playwright dev shell so the pinned browsers resolve:
-#   nix develop .#playwright --command tests/multiplayer/run.sh
+# Run inside the repo dev shell so the pinned Playwright browsers and
+# the wasm C toolchain resolve (there is no separate .#playwright
+# shell — the default one carries PLAYWRIGHT_BROWSERS_PATH):
+#   nix develop --command apps/task/tests/multiplayer/run.sh
 #
 # Env knobs:
 #   MP_SERVER_PORT (default 18091)  isolated task-server port
@@ -25,7 +27,10 @@
 
 set -euo pipefail
 cd "$(dirname "$0")"
-REPO_ROOT="$(cd ../.. && pwd)"
+# The monorepo root. This script lives at apps/task/tests/multiplayer,
+# so the root is four levels up — it was two when Task was a standalone
+# repo, and the subtree import left this pointing at apps/task/.
+REPO_ROOT="$(cd ../../../.. && pwd)"
 MP_SERVER_PORT="${MP_SERVER_PORT:-18091}"
 
 if [[ "${MP_SKIP_BUILD:-}" != "1" ]]; then
@@ -35,7 +40,7 @@ if [[ "${MP_SKIP_BUILD:-}" != "1" ]]; then
   # resolve module specifier \"env\""). Fail fast instead.
   if [[ -z "${CC_wasm32_unknown_unknown:-}" ]]; then
     echo "error: CC_wasm32_unknown_unknown is unset — run inside the dev shell:" >&2
-    echo "  nix develop .#playwright --command tests/multiplayer/run.sh" >&2
+    echo "  nix develop --command apps/task/tests/multiplayer/run.sh" >&2
     exit 1
   fi
 
@@ -43,7 +48,7 @@ if [[ "${MP_SKIP_BUILD:-}" != "1" ]]; then
   (cd "$REPO_ROOT" && cargo build -p task-server -p task-cli)
 
   echo "[mp] building the web bundle (TASK_VOX_URL_WEB=ws://127.0.0.1:${MP_SERVER_PORT}/vox)…"
-  (cd "$REPO_ROOT/apps/web" && TASK_VOX_URL_WEB="ws://127.0.0.1:${MP_SERVER_PORT}/vox" dx build --platform web)
+  (cd "$REPO_ROOT/apps/task/web" && TASK_VOX_URL_WEB="ws://127.0.0.1:${MP_SERVER_PORT}/vox" dx build --platform web)
 fi
 
 if [[ ! -d node_modules ]]; then

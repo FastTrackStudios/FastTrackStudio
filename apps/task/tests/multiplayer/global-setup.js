@@ -3,7 +3,7 @@
 //
 //   1. throwaway TASK_DATA_ROOT (mktemp) — never the dev data root
 //   2. `task org init` + 4 dev-account signups via the CLI binary
-//      (the same 4 accounts `crates/ui/src/auth.rs::DEV_ACCOUNTS`
+//      (the same 4 accounts `crates/task/ui/src/auth.rs::DEV_ACCOUNTS`
 //      pre-fills in the web switcher)
 //   3. seed vault notes (the collab note + a wikilink target)
 //   4. spawn `task-server` on MP_SERVER_PORT (default 18091)
@@ -21,7 +21,12 @@ const os = require("os");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+// The monorepo root — this suite lives at apps/task/tests/multiplayer,
+// so it is four levels up. It was two when Task was its own repo; the
+// 2026-07-10 subtree import moved the root without moving this, which
+// is why every artifact path resolved under apps/task/ and the suite
+// could not find a single binary.
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const SERVER_PORT = parseInt(process.env.MP_SERVER_PORT || "18091", 10);
 const WEB_PORT = parseInt(process.env.MP_WEB_PORT || "18092", 10);
 // Per-run unique slug: a leaked page from a PREVIOUS run (a forgotten
@@ -34,7 +39,7 @@ const WEB_PORT = parseInt(process.env.MP_WEB_PORT || "18092", 10);
 const ORG_SLUG = `mptest-${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36).padStart(2, "0")}`;
 const STATE_FILE = path.join(__dirname, ".mp-state.json");
 
-// Mirror of crates/ui/src/auth.rs::DEV_ACCOUNTS — keep in sync.
+// Mirror of crates/task/ui/src/auth.rs::DEV_ACCOUNTS — keep in sync.
 const DEV_ACCOUNTS = [
   { email: "cody@fasttrackstudios.com", password: "dev-cody-2026", name: "Cody Wright", username: "cody" },
   { email: "carter@fasttrackstudios.com", password: "dev-carter-2026", name: "Carter Whitlock", username: "carter" },
@@ -106,7 +111,7 @@ module.exports = async () => {
   }
   if (!wasmBytes.includes(Buffer.from("__taskVault"))) {
     throw new Error(
-      "wasm bundle predates the __taskVault test hook (crates/ui/src/pages/vault.rs) — rebuild via ./run.sh",
+      "wasm bundle predates the __taskVault test hook (crates/task/ui/src/pages/note_view.rs) — rebuild via ./run.sh",
     );
   }
   // A bundle built OUTSIDE the nix dev shell links the tree-sitter
@@ -115,7 +120,7 @@ module.exports = async () => {
   if (glue.includes('from "env"')) {
     throw new Error(
       "wasm glue imports from \"env\" (tree-sitter C grammars didn't compile for wasm) — " +
-        "rebuild inside the dev shell: nix develop .#playwright --command tests/multiplayer/run.sh",
+        "rebuild inside the dev shell: nix develop --command tests/multiplayer/run.sh",
     );
   }
 
