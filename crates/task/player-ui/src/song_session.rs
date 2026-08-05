@@ -361,8 +361,8 @@ pub(crate) mod imp {
     /// Human-facing section name for a laid-out chart section: a quoted label
     /// wins (`Interlude "Breakdown"` → "Breakdown"), else the kind plus its
     /// occurrence number ("Verse 1", "Intro").
-    fn laid_section_name(s: &session::chart_import::LaidSection) -> String {
-        use session::keyflow_actions::SectionKind::*;
+    fn laid_section_name(s: &session::setlist::chart_import::LaidSection) -> String {
+        use session::keyflow::actions::SectionKind::*;
         if let Some(label) = &s.label {
             if !label.trim().is_empty() {
                 return label.clone();
@@ -465,7 +465,7 @@ pub(crate) mod imp {
     /// Build a [`Manifest`] with NO `manifest.json`, from the colocated
     /// `song` folder schema (issues #57/#59): read `song.md` → the default
     /// arrangement's `arrangement.md` → its `chartRef` (chart → sections via
-    /// [`session::chart_import::chart_to_layout`]) and `attachmentRefs` (the
+    /// [`session::setlist::chart_import::chart_to_layout`]) and `attachmentRefs` (the
     /// audio stems). The "drop a song folder and it plays" path.
     pub(crate) async fn fetch_kf_manifest(org: &str, slug: &str) -> Result<Manifest, String> {
         let base = format!("/org/{org}/media/songs/{slug}");
@@ -509,11 +509,11 @@ pub(crate) mod imp {
         let mut chart_end = 0.0f64;
         if let Some(cp) = chart_path {
             if let Ok(chart_text) = fetch_text(&format!("{base}/{cp}")).await {
-                if let Ok(layout) = session::chart_import::chart_to_layout(&chart_text) {
+                if let Ok(layout) = session::setlist::chart_import::chart_to_layout(&chart_text) {
                     sections = layout
                         .sections
                         .iter()
-                        .filter(|s| s.kind != session::keyflow_actions::SectionKind::CountIn)
+                        .filter(|s| s.kind != session::keyflow::actions::SectionKind::CountIn)
                         .map(|s| Section {
                             name: laid_section_name(s),
                             start_sec: s.start_seconds,
