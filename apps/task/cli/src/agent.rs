@@ -1807,3 +1807,131 @@ pub(crate) async fn run_agent_queue(cmd: AgentQueueCmd) -> eyre::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_eval_verdict_reads_the_judges_json() {
+        let v = parse_eval_verdict(r#"{"done": true, "reason": "tests pass"}"#, 0);
+        assert!(v.met);
+        assert_eq!(v.reason, "tests pass");
+
+        // A judge that says "not done" overrides a zero exit code —
+        // the whole point of running an evaluator.
+        let v = parse_eval_verdict(r#"{"done": false, "reason": "3 failures"}"#, 0);
+        assert!(!v.met);
+        assert_eq!(v.reason, "3 failures");
+    }
+
+    #[test]
+    fn parse_eval_verdict_digs_the_json_out_of_surrounding_prose() {
+        // LLM judges routinely wrap the object in commentary; scanning
+        // from the first `{` to the last `}` is what keeps that from
+        // silently falling through to the exit-code path.
+        let v = parse_eval_verdict(
+            "Here is my assessment:\n{\"done\": true, \"reason\": \"looks good\"}\nHope that helps!",
+            1,
+        );
+        assert!(v.met, "prose around the object must not defeat parsing");
+        assert_eq!(v.reason, "looks good");
+    }
+
+    #[test]
+    fn parse_eval_verdict_falls_back_to_the_exit_code() {
+        let v = parse_eval_verdict("no json here", 0);
+        assert!(v.met);
+        assert_eq!(v.reason, "no json here");
+
+        let v = parse_eval_verdict("  boom  ", 1);
+        assert!(!v.met);
+        assert_eq!(v.reason, "boom");
+
+        // Malformed JSON is not a verdict — fall through, don't panic.
+        let v = parse_eval_verdict("{not valid json}", 1);
+        assert!(!v.met);
+
+        // `reason` is optional in the judge shape.
+        let v = parse_eval_verdict(r#"{"done": true}"#, 1);
+        assert!(v.met);
+        assert_eq!(v.reason, "");
+    }
+
+    #[test]
+    fn parse_stream_event_prefers_the_tool_call() {
+        let line = r#"{"type":"assistant","message":{"content":[
+            {"type":"text","text":"Let me edit that file."},
+            {"type":"tool_use","name":"Edit","input":{"file_path":"src/foo.rs"}}
+        ]}}"#;
+        assert_eq!(
+            parse_stream_event(line).as_deref(),
+            Some("Edit: src/foo.rs"),
+            "the concrete action beats the narration"
+        );
+    }
+
+    #[test]
+    fn parse_stream_event_falls_back_to_message_text() {
+        let line = r#"{"type":"assistant","message":{"content":[
+            {"type":"text","text":"\n\nRunning the suite now.\nSecond line."}
+        ]}}"#;
+        let got = parse_stream_event(line).expect("text event");
+        assert!(got.contains("Running the suite now."), "{got}");
+        assert!(
+            !got.contains("Second line."),
+            "only the first non-empty line is the step: {got}"
+        );
+    }
+
+    #[test]
+    fn parse_stream_event_ignores_lines_it_does_not_understand() {
+        // Unrecognized lines return None so the caller streams them
+        // raw — this is what keeps plain (non-stream-json) workers
+        // working unchanged.
+        assert_eq!(parse_stream_event("not json at all"), None);
+        assert_eq!(parse_stream_event(r#"{"type":"system"}"#), None);
+        assert_eq!(parse_stream_event(""), None);
+        assert_eq!(
+            parse_stream_event(r#"{"type":"result"}"#).as_deref(),
+            Some("✓ turn result")
+        );
+    }
+
+    #[test]
+    fn parse_stream_event_clips_long_arguments() {
+        let long = "x".repeat(200);
+        let line = format!(
+            r#"{{"type":"assistant","message":{{"content":[
+                {{"type":"tool_use","name":"Bash","input":{{"command":"{long}"}}}}
+            ]}}}}"#
+        );
+        let got = parse_stream_event(&line).expect("tool event");
+        assert!(got.ends_with('…'), "{got}");
+        assert!(got.chars().count() < 100, "clipped to a status line: {got}");
+    }
+
+    #[test]
+    fn parse_subtask_titles_strips_list_markers_and_drops_noise() {
+        let out = "\
+- Wire the store
+* Add the route
+3. Write tests
+
+ONE-SHOT
+Headings are not subtasks:
+";
+        assert_eq!(
+            parse_subtask_titles(out),
+            vec!["Wire the store", "Add the route", "Write tests"]
+        );
+    }
+
+    #[test]
+    fn parse_subtask_titles_rejects_prose_paragraphs() {
+        // A model that answers in prose instead of a list would
+        // otherwise turn a whole paragraph into a "subtask".
+        let long = format!("- {}", "a".repeat(200));
+        assert!(parse_subtask_titles(&long).is_empty());
+    }
+}

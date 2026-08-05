@@ -260,6 +260,13 @@ plugin-contacts = ["task-server/plugin-contacts"]
 plugin-recall = ["task-server/plugin-recall"]
 plugin-home = ["task-server/plugin-home", "dep:locations"]
 
+[dev-dependencies]
+# `collection`'s local `slug()` is a 12th copy of the slugify rule and
+# diverges from the canonical one outside ASCII. The test module pins
+# that divergence against both implementations so it can't widen
+# unnoticed — see issue #68.
+vault-entity = { workspace = true }
+tempfile = "3"
 
 [lints]
 workspace = true

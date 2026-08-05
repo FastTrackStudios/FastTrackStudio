@@ -32,12 +32,10 @@ use crate::AppState;
 use inbox_proto::{Inbox, InboxItem};
 use timer_proto::{StartTimerRequest, TimerService};
 
-/// Namespace tag for the deterministic single-user owner id. MUST match
-/// `task_ui::chrome::owner_id` / the CLI `timer_owner_id` so the watch,
-/// web UI, and CLI all key timer rows on the same user.
-fn owner_id(org_id: Uuid) -> Uuid {
-    Uuid::new_v5(&org_id, b"task-local-owner")
-}
+/// Deterministic single-user owner id, so the watch, web UI, and CLI
+/// all key timer rows on the same user. One definition, in
+/// `timer_proto::owner`.
+use timer_proto::local_owner_id as owner_id;
 
 /// Extract the `Authorization: Bearer <token>` value, if present.
 /// Shared with the other HTTP token gates (`crate::mcp`) — one

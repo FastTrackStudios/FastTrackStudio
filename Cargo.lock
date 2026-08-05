@@ -26118,6 +26118,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.4",
  "vault",
+ "vault-entity",
  "vault-live",
  "vault-obsidian",
  "vault-proto",
