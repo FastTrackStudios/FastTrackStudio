@@ -3371,6 +3371,17 @@ dependencies = [
  "dioxus",
  "fts-ui",
  "keyflow",
+ "tracing",
+]
+
+[[package]]
+name = "chord-tool-daw"
+version = "0.1.0"
+dependencies = [
+ "chord-tool",
+ "daw",
+ "daw-proto",
+ "tracing",
 ]
 
 [[package]]
