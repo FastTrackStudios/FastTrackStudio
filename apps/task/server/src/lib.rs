@@ -1312,7 +1312,7 @@ pub(crate) async fn build_org_state(
             sqlite_conns.push(store.conn().clone());
         }
 
-        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins));
+        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins, org_root.slug()));
         // Coverage + dry-run, once per org at boot: how many mounted
         // services carry a permit table, which do not, and what a
         // signed-in member would be denied if enforcement were on. The
@@ -2220,9 +2220,16 @@ pub fn org_permission_engine() -> Arc<dyn architect_permissions::PermissionEngin
 fn build_org_permissions_gate(
     auth: &AuthState,
     plugins: &task_plugin::PluginSet,
+    slug: &str,
 ) -> architect::permissions_gate::PermissionsGate {
     use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
-    let identity = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
+    // Wrapped so every RPC's wide event carries WHY the principal came out
+    // the way it did — "no token presented" vs "token rejected" are the
+    // same `Principal::Anonymous` without it (see `AuditedIdentityResolver`).
+    let identity = permits::AuditedIdentityResolver::new(
+        architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone()),
+        slug,
+    );
     let enforce = enforce_permissions();
     let audit = permits::GateAudit::new(enforce, permission_deny_ledger(), DEFAULT_ORG_ROLE);
     let gate = PermissionsGate::new(org_permission_engine(), Arc::new(identity))

@@ -80,8 +80,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use architect_permissions::{
-    Action, AuditEvent, AuditSink, MethodPermit, PermissionEngine, Principal,
-    ServicePermits,
+    Action, AuditEvent, AuditSink, BoxIdentityFuture, IdentityResolver, MethodPermit,
+    PermissionEngine, Principal, ServicePermits,
 };
 use vox::ServiceDescriptor;
 
@@ -552,7 +552,11 @@ const fn m(
 pub fn mounts() -> Vec<Mount> {
     let mut v: Vec<Mount> = vec![
         // Platform
-        m("core", architect_auth::auth_service_service_descriptor(), AUTH),
+        m(
+            "core",
+            architect_auth::auth_service_service_descriptor(),
+            AUTH,
+        ),
         m(
             "core",
             architect_permissions_proto::permissions_service_service_descriptor(),
@@ -563,13 +567,29 @@ pub fn mounts() -> Vec<Mount> {
             attachments_proto::attachment_service_service_descriptor(),
             ATTACHMENTS,
         ),
-        m("core", media_proto::media_service_service_descriptor(), MEDIA),
+        m(
+            "core",
+            media_proto::media_service_service_descriptor(),
+            MEDIA,
+        ),
         m("core", vault_proto::descriptor(), VAULT),
         m("core", vault_proto::stream_descriptor(), VAULT_STREAM),
-        m("core", vault_proto::vault_graph_rpc_service_descriptor(), VAULT_GRAPH),
-        m("core", share_proto::share_service_service_descriptor(), SHARE),
+        m(
+            "core",
+            vault_proto::vault_graph_rpc_service_descriptor(),
+            VAULT_GRAPH,
+        ),
+        m(
+            "core",
+            share_proto::share_service_service_descriptor(),
+            SHARE,
+        ),
         m("core", crdt::sync::doc_sync_service_descriptor(), DOC_SYNC),
-        m("core", crdt::sync::doc_presence_service_descriptor(), DOC_PRESENCE),
+        m(
+            "core",
+            crdt::sync::doc_presence_service_descriptor(),
+            DOC_PRESENCE,
+        ),
     ];
     #[cfg(feature = "plugin-agent")]
     v.extend([
@@ -617,9 +637,21 @@ pub fn mounts() -> Vec<Mount> {
         m("core", goal::goal_service_descriptor(), GOAL),
         m("core", goal::goal_stream_descriptor(), GOAL_STREAM),
         m("core", milestone::milestone_service_descriptor(), MILESTONE),
-        m("core", milestone::milestone_stream_descriptor(), MILESTONE_STREAM),
-        m("core", workstream::workstream_service_descriptor(), WORKSTREAM),
-        m("core", workstream::workstream_stream_descriptor(), WORKSTREAM_STREAM),
+        m(
+            "core",
+            milestone::milestone_stream_descriptor(),
+            MILESTONE_STREAM,
+        ),
+        m(
+            "core",
+            workstream::workstream_service_descriptor(),
+            WORKSTREAM,
+        ),
+        m(
+            "core",
+            workstream::workstream_stream_descriptor(),
+            WORKSTREAM_STREAM,
+        ),
         m("core", task::task_service_descriptor(), TASK),
         m("core", task::task_stream_descriptor(), TASK_STREAM),
         m(
@@ -633,7 +665,11 @@ pub fn mounts() -> Vec<Mount> {
             threads::service::threads_service_rpc_service_descriptor(),
             THREADS,
         ),
-        m("core", prefs_proto::service::prefs_service_rpc_service_descriptor(), PREFS),
+        m(
+            "core",
+            prefs_proto::service::prefs_service_rpc_service_descriptor(),
+            PREFS,
+        ),
     ]);
     #[cfg(feature = "plugin-scheduling")]
     v.extend([
@@ -681,10 +717,22 @@ pub fn mounts() -> Vec<Mount> {
     ]);
     v.extend([
         // Knowledge
-        m("core", inbox_proto::service::inbox::inbox_rpc_service_descriptor(), INBOX),
+        m(
+            "core",
+            inbox_proto::service::inbox::inbox_rpc_service_descriptor(),
+            INBOX,
+        ),
         m("core", inbox_proto::inbox_stream_descriptor(), INBOX_STREAM),
-        m("core", notify_proto::notify_rpc_service_descriptor(), NOTIFY),
-        m("core", notify_proto::notify_stream_descriptor(), NOTIFY_STREAM),
+        m(
+            "core",
+            notify_proto::notify_rpc_service_descriptor(),
+            NOTIFY,
+        ),
+        m(
+            "core",
+            notify_proto::notify_stream_descriptor(),
+            NOTIFY_STREAM,
+        ),
     ]);
     #[cfg(feature = "plugin-recall")]
     v.extend([
@@ -693,7 +741,11 @@ pub fn mounts() -> Vec<Mount> {
             recall_proto::service::recall::recall_rpc_service_descriptor(),
             RECALL,
         ),
-        m("recall", recall_proto::recall_stream_descriptor(), RECALL_STREAM),
+        m(
+            "recall",
+            recall_proto::recall_stream_descriptor(),
+            RECALL_STREAM,
+        ),
     ]);
     #[cfg(feature = "plugin-contacts")]
     v.extend([
@@ -702,29 +754,35 @@ pub fn mounts() -> Vec<Mount> {
             contacts_proto::service::contacts::contacts_rpc_service_descriptor(),
             CONTACTS,
         ),
-        m("contacts", contacts_proto::contacts_stream_descriptor(), CONTACTS_STREAM),
-    ]);
-    v.extend([
-        m("core", tag_proto::service::tags::tag_service_rpc_service_descriptor(), TAGS),
-    ]);
-    #[cfg(feature = "plugin-scripture")]
-    v.extend([
-        m("scripture", scripture::scripture_service_descriptor(), SCRIPTURE),
-    ]);
-    v.extend([
-        m("core", links::links_service_descriptor(), LINKS),
-    ]);
-    #[cfg(feature = "plugin-fasttrackstudio")]
-    v.extend([
-        m("fasttrackstudio", collection::collection_service_descriptor(), COLLECTION),
-    ]);
-    v.extend([
         m(
-            "core",
-            resources_proto::resources_service_rpc_service_descriptor(),
-            RESOURCES,
+            "contacts",
+            contacts_proto::contacts_stream_descriptor(),
+            CONTACTS_STREAM,
         ),
     ]);
+    v.extend([m(
+        "core",
+        tag_proto::service::tags::tag_service_rpc_service_descriptor(),
+        TAGS,
+    )]);
+    #[cfg(feature = "plugin-scripture")]
+    v.extend([m(
+        "scripture",
+        scripture::scripture_service_descriptor(),
+        SCRIPTURE,
+    )]);
+    v.extend([m("core", links::links_service_descriptor(), LINKS)]);
+    #[cfg(feature = "plugin-fasttrackstudio")]
+    v.extend([m(
+        "fasttrackstudio",
+        collection::collection_service_descriptor(),
+        COLLECTION,
+    )]);
+    v.extend([m(
+        "core",
+        resources_proto::resources_service_rpc_service_descriptor(),
+        RESOURCES,
+    )]);
     #[cfg(feature = "plugin-finance")]
     v.extend([
         // Finance
@@ -742,7 +800,11 @@ pub fn mounts() -> Vec<Mount> {
     #[cfg(feature = "plugin-wiki")]
     v.extend([
         // Wiki
-        m("wiki", wiki_proto::service::schema::schema_rpc_service_descriptor(), WIKI_SCHEMA),
+        m(
+            "wiki",
+            wiki_proto::service::schema::schema_rpc_service_descriptor(),
+            WIKI_SCHEMA,
+        ),
         m(
             "wiki",
             wiki_proto::service::catalog::catalog_rpc_service_descriptor(),
@@ -753,14 +815,26 @@ pub fn mounts() -> Vec<Mount> {
             wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor(),
             WIKI_RAW,
         ),
-        m("wiki", wiki_proto::service::graph::graph_rpc_service_descriptor(), WIKI_GRAPH),
-        m("wiki", wiki_proto::service::pages::pages_rpc_service_descriptor(), WIKI_PAGES),
+        m(
+            "wiki",
+            wiki_proto::service::graph::graph_rpc_service_descriptor(),
+            WIKI_GRAPH,
+        ),
+        m(
+            "wiki",
+            wiki_proto::service::pages::pages_rpc_service_descriptor(),
+            WIKI_PAGES,
+        ),
         m(
             "wiki",
             wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
             WIKI_INGEST,
         ),
-        m("wiki", wiki_proto::service::lint::lint_rpc_service_descriptor(), WIKI_LINT),
+        m(
+            "wiki",
+            wiki_proto::service::lint::lint_rpc_service_descriptor(),
+            WIKI_LINT,
+        ),
         m(
             "wiki",
             wiki_proto::service::search::search_rpc_service_descriptor(),
@@ -795,8 +869,16 @@ pub fn mounts() -> Vec<Mount> {
     ]);
     #[cfg(feature = "plugin-mealplan")]
     v.extend([
-        m("mealplan", cookbook::cookbook_service_descriptor(), COOKBOOK),
-        m("mealplan", mealplan::mealplan_service_descriptor(), MEALPLAN),
+        m(
+            "mealplan",
+            cookbook::cookbook_service_descriptor(),
+            COOKBOOK,
+        ),
+        m(
+            "mealplan",
+            mealplan::mealplan_service_descriptor(),
+            MEALPLAN,
+        ),
         m("mealplan", pantry::pantry_service_descriptor(), PANTRY),
         m(
             "mealplan",
@@ -812,7 +894,11 @@ pub fn mounts() -> Vec<Mount> {
     #[cfg(feature = "plugin-fitness")]
     v.extend([
         m("fitness", body::body_service_descriptor(), BODY),
-        m("fitness", exercises::exercises_service_descriptor(), EXERCISES),
+        m(
+            "fitness",
+            exercises::exercises_service_descriptor(),
+            EXERCISES,
+        ),
         m("fitness", workouts::workouts_service_descriptor(), WORKOUTS),
         m("fitness", intake::intake_service_descriptor(), INTAKE),
     ]);
@@ -826,7 +912,11 @@ pub fn mounts() -> Vec<Mount> {
     ]);
     #[cfg(feature = "plugin-forge")]
     v.extend([
-        m("forge", git_proto::repo::repo_catalog_rpc_service_descriptor(), FORGE_REPOS),
+        m(
+            "forge",
+            git_proto::repo::repo_catalog_rpc_service_descriptor(),
+            FORGE_REPOS,
+        ),
         m(
             "forge",
             git_proto::issues::issue_tracker_rpc_service_descriptor(),
@@ -1033,7 +1123,11 @@ pub fn dry_run(engine: &dyn PermissionEngine) -> DryRun {
 
 /// Boot-time report — one summary line per org plus a warn line for every
 /// gap. Called from [`crate::OrgAppState::new`] after the gate is built.
-pub fn log_coverage(slug: &str, gate: &architect::permissions_gate::PermissionsGate, enforce: bool) {
+pub fn log_coverage(
+    slug: &str,
+    gate: &architect::permissions_gate::PermissionsGate,
+    enforce: bool,
+) {
     let c = coverage();
     let d = dry_run(gate.engine().as_ref());
     let mode = if enforce { "ENFORCING" } else { "observe-only" };
@@ -1203,12 +1297,110 @@ impl GateAudit {
     }
 }
 
+/// Wraps an [`IdentityResolver`] to put the auth outcome on the wide event.
+///
+/// `SessionIdentityResolver` returns `Principal::Anonymous` for two very
+/// different situations — **the client sent no token at all**, and **the
+/// client sent a token the session store rejected** — and nothing
+/// downstream can tell them apart. That distinction is the difference
+/// between "the UI never signed in" and "sessions are expiring", and its
+/// absence is exactly what made a real not-signed-in incident slow to
+/// diagnose: every RPC logged `principal=anonymous` and the logs could
+/// not say why.
+///
+/// A decorator, not a change to `architect_auth`, so the framework keeps
+/// no opinion about telemetry. Records the *shape* of the credential,
+/// never the credential:
+///   `auth.principal_kind`   user | anonymous
+///   `auth.user_id`          (when resolved)
+///   `auth.token_presented`  true | false
+///   `auth.outcome`          resolved | rejected | absent
+/// It also carries `org.slug`. The org is only known at the WebSocket
+/// upgrade, which is a different span from the RPCs that ride the socket
+/// afterwards — but identity resolution runs per RPC and is built per
+/// org, so it is the natural place to stamp it. Without this a wide
+/// event cannot answer "which org", which is the first question in a
+/// multi-tenant system.
+pub struct AuditedIdentityResolver<R> {
+    inner: R,
+    slug: String,
+}
+
+impl<R> AuditedIdentityResolver<R> {
+    pub fn new(inner: R, slug: impl Into<String>) -> Self {
+        Self {
+            inner,
+            slug: slug.into(),
+        }
+    }
+}
+
+impl<R: IdentityResolver> IdentityResolver for AuditedIdentityResolver<R> {
+    fn resolve<'a>(&'a self, bearer_token: Option<&'a str>) -> BoxIdentityFuture<'a> {
+        Box::pin(async move {
+            use task_telemetry::wide;
+
+            wide::set("org.slug", self.slug.clone());
+            let presented = bearer_token.is_some_and(|t| !t.is_empty());
+            wide::set("auth.token_presented", presented);
+
+            let principal = self.inner.resolve(bearer_token).await;
+            match &principal {
+                Principal::User { user_id } => {
+                    wide::set("auth.principal_kind", "user");
+                    wide::set("auth.user_id", user_id.clone());
+                    wide::set("auth.outcome", "resolved");
+                }
+                _ => {
+                    wide::set("auth.principal_kind", "anonymous");
+                    // THE field. Same principal, opposite root causes.
+                    wide::set(
+                        "auth.outcome",
+                        if presented { "rejected" } else { "absent" },
+                    );
+                }
+            }
+            principal
+        })
+    }
+}
+
 impl AuditSink for GateAudit {
+    /// Record a gate decision onto the request's wide event.
+    ///
+    /// This used to emit a log line per decision. One page load produced
+    /// ~24 of them — the exact scatter the wide-event pattern exists to
+    /// kill: unaggregatable, uncorrelated, and each one missing the
+    /// context (which RPC? which org? whose session?) that would have
+    /// made it actionable. The RPC span already holds that context, so
+    /// the decision belongs ON it.
+    ///
+    /// Fields, not prose, so a single query answers "who is being denied
+    /// what, and would enforcing break them":
+    ///   `perm.decision`  allow | deny | would_deny
+    ///   `perm.mode`      enforcing | observe-only
+    ///   `perm.principal` / `perm.resource` / `perm.action` / `perm.reason`
+    ///
+    /// A denial still emits ONE log line, because a denial is the kind of
+    /// thing you want to alert on without querying traces — but it is now
+    /// the only line, and it carries the full tuple.
     fn record(&self, e: AuditEvent) {
+        use task_telemetry::wide;
+
         let reason = e.reason.unwrap_or_default();
+        let mode = if self.enforcing {
+            "enforcing"
+        } else {
+            "observe-only"
+        };
+        wide::set("perm.mode", mode);
+        wide::set("perm.default_role", self.default_role);
+
         if e.resource == GATE_MARKER_RESOURCE && e.action == GATE_MARKER_ACTION {
             // Observe-only marker: the ONLY event carrying service/method.
             self.ledger.record(&reason);
+            wide::set("perm.decision", "would_deny");
+            wide::set("perm.reason", reason.clone());
             tracing::warn!(
                 target: "task_server::permissions",
                 mode = "observe-only",
@@ -1218,13 +1410,15 @@ impl AuditSink for GateAudit {
             );
             return;
         }
+
+        wide::set_display("perm.principal", &e.principal);
+        wide::set_display("perm.resource", &e.resource);
+        wide::set_display("perm.action", &e.action);
+
         if !e.allowed {
             self.ledger.record(&reason);
-            let mode = if self.enforcing {
-                "enforcing"
-            } else {
-                "observe-only"
-            };
+            wide::set("perm.decision", "deny");
+            wide::set("perm.reason", reason.clone());
             // In observe-only this pairs with the marker line above; when
             // enforcing it is the whole record (the gate emits no marker),
             // so it carries the principal/resource/action explicitly.
@@ -1240,13 +1434,11 @@ impl AuditSink for GateAudit {
             );
             return;
         }
-        tracing::info!(
-            target: "task_server::permissions",
-            principal = %e.principal,
-            resource = %e.resource,
-            action = %e.action,
-            "permissions gate: audited allow",
-        );
+
+        // Allows are the overwhelming majority. They ride the wide event
+        // only — a log line per allowed call is pure noise, and the span
+        // already records that the call happened at all.
+        wide::set("perm.decision", "allow");
     }
 }
 
@@ -1417,10 +1609,7 @@ mod tests {
             PluginSet::resolve(Some(&PluginChoice::Disabled(vec!["mealplan".into()])));
         let filtered = mounts_for(&no_mealplan);
         assert!(filtered.iter().all(|m| m.plugin != "mealplan"));
-        let dropped = mounts()
-            .iter()
-            .filter(|m| m.plugin == "mealplan")
-            .count();
+        let dropped = mounts().iter().filter(|m| m.plugin == "mealplan").count();
         assert!(dropped > 0, "the mealplan plugin owns mounts");
         assert_eq!(filtered.len(), mounts().len() - dropped);
     }

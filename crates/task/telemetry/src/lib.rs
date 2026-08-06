@@ -111,6 +111,62 @@ pub type OtelHandle = Option<otel::OtelGuard>;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "otel")))]
 pub type OtelHandle = Option<()>;
 
+// ── Wide events ──────────────────────────────────────────────────────
+/// Wide events (canonical log lines): ONE context-rich event per unit of
+/// work, instead of a scatter of log lines nobody can correlate.
+///
+/// **The span IS the event.** `architect` already opens exactly one span
+/// per vox RPC (`LayerRouter::call_span`) and `tower_http` opens one per
+/// HTTP request, so the request-scoped container already exists and
+/// already propagates across await points. Enriching that span is
+/// strictly better than assembling a parallel struct: the fields land on
+/// the exported trace, they inherit the trace id for free, and one query
+/// answers "what happened to this request".
+///
+/// This exists because `tracing`'s macros take a *static* field list —
+/// you cannot add a field to a span that the macro did not declare.
+/// [`set`] goes around that via the OTel span extension, which takes
+/// dynamic keys. That is the whole reason for this module.
+///
+/// ```ignore
+/// wide::set("auth.principal_kind", "anonymous");
+/// wide::set("perm.decision", "would_deny");
+/// wide::set("perm.resource", resource.to_string());
+/// ```
+///
+/// Conventions, so the fields stay queryable:
+/// - Dotted, namespaced keys: `auth.*`, `perm.*`, `org.*`, `rpc.*`.
+/// - One name per concept, everywhere. The article's core complaint is
+///   the same id logged five different ways; a wide event with
+///   inconsistent keys is just as unaggregatable.
+/// - High cardinality is the POINT (user ids, org slugs). Do not
+///   pre-aggregate into buckets to "save space".
+/// - Never put a secret, token, or password in a field. These are
+///   exported off-box.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wide {
+    /// Attach a field to the current unit of work.
+    ///
+    /// A no-op when nothing is listening (no OTel layer installed, or the
+    /// `otel` feature is off) — call it freely from library code without
+    /// gating the call site.
+    #[cfg(feature = "otel")]
+    pub fn set(key: &'static str, value: impl Into<opentelemetry::Value>) {
+        use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+        tracing::Span::current().set_attribute(key, value);
+    }
+
+    /// No-op stand-in so callers compile without the `otel` feature.
+    #[cfg(not(feature = "otel"))]
+    pub fn set<V>(_key: &'static str, _value: V) {}
+
+    /// Convenience for the very common `impl Display` case — saves every
+    /// call site an explicit `.to_string()`.
+    pub fn set_display(key: &'static str, value: impl core::fmt::Display) {
+        set(key, value.to_string());
+    }
+}
+
 // ── OpenTelemetry (feature `otel`, native only) ──────────────────────
 //
 // OTLP export of traces, logs, and metrics to a collector. Doubly
