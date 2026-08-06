@@ -453,18 +453,23 @@ pub fn ConnectionBadge() -> Element {
     }
 }
 
-/// Live peers + derived agent/timer entries, deduped by name and
-/// sorted humans-first — the one roster derivation, shared by the
-/// sidebar roster, the mobile sheet, and the top-bar avatar group.
-/// A hook (owns a poll future + resource): call from component tops
-/// only.
-pub fn use_presence_entries() -> Vec<(String, PresenceEntry)> {
-    let presence = crdt::use_presence();
+/// The shared derived-presence poll, provided once near the app root.
+///
+/// Wraps the `Resource` so it can go in a context; consumers read it
+/// through [`use_presence_entries`] and never poll themselves.
+#[derive(Clone, Copy)]
+pub struct DerivedPresence(pub Resource<Vec<PresenceEntry>>);
+
+/// Start the ONE derived-presence poll: agent sessions + open timers for
+/// the selected orgs, every 60s and on org-selection change.
+///
+/// Call exactly once, at the app root. Every roster surface then shares
+/// this single fetch — see the note in [`use_presence_entries`] for what
+/// the per-consumer version cost.
+pub fn use_provide_derived_presence() {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
 
-    // Derived layer: poll agent sessions + open timers every 60s
-    // (and on org-selection change — the resource reads both signals).
     let mut tick = use_signal(|| 0u64);
     use_future(move || async move {
         loop {
@@ -477,6 +482,30 @@ pub fn use_presence_entries() -> Vec<(String, PresenceEntry)> {
         let slugs = selected_slugs(&selection.read(), &org_list.read());
         async move { fetch_derived_entries(&slugs).await }
     });
+    use_context_provider(|| DerivedPresence(derived));
+}
+
+/// Live peers + derived agent/timer entries, deduped by name and
+/// sorted humans-first — the one roster derivation, shared by the
+/// sidebar roster, the mobile sheet, and the top-bar avatar group.
+/// A hook: call from component tops only. Requires
+/// [`use_provide_derived_presence`] above it in the tree.
+pub fn use_presence_entries() -> Vec<(String, PresenceEntry)> {
+    let presence = crdt::use_presence();
+
+    // Derived rows come from ONE shared poll (see
+    // [`use_provide_derived_presence`]). This hook used to own the poll
+    // future and the resource itself, which meant every component that
+    // called it started its own: `PresenceRoster` and `PresenceAvatarBar`
+    // are both mounted on the desktop shell, so the app ran two identical
+    // 60-second polls, each fanning out across every selected org.
+    //
+    // Traces caught it — `TimerService/list_sessions` at 217 calls/hour
+    // and `SessionsRpc/list_sessions` at 170, against ~1/hour for every
+    // other read, arriving in simultaneous bursts a minute apart. The
+    // duplication also scaled with consumers, so a third caller would
+    // have made it worse silently.
+    let derived = use_context::<DerivedPresence>().0;
 
     // Live peers (reactive — `states()` re-renders on every presence
     // change), then merge derived rows de-duped by name. Render keys:
