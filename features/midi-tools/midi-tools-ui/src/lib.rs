@@ -27,9 +27,11 @@
 //! them when it's loaded, and the fallback keeps the panel legible when
 //! it isn't.
 
+mod arp_panel;
 mod curve_editor;
 mod drag;
 mod panel;
 
 pub use curve_editor::CurveEditor;
+pub use arp_panel::{ArpPanel, ArpSinkHandle};
 pub use panel::{SinkHandle, VelocityPanel};

@@ -89,3 +89,64 @@ impl VelocitySink for DemoSink {
         Ok(())
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Arpeggiator
+// ─────────────────────────────────────────────────────────────────────
+
+/// A take an arpeggiator can read chords from and write an arp back to.
+///
+/// Separate from [`VelocitySink`] rather than one big `MidiToolsSink`:
+/// the two tools need different things from a backend (velocity needs
+/// only note *reads* and velocity *writes*; the arp needs deletes and
+/// raw-PPQ inserts), and a panel that only shapes velocity shouldn't
+/// have to be handed something that can delete notes.
+pub trait ArpSink: Send + Sync + 'static {
+    /// Read the target's notes and group them into chords.
+    fn open(&self) -> Result<crate::arp::ArpSession, String>;
+
+    /// Replace the source chords with the arpeggio. Returns how many
+    /// notes were written.
+    fn commit(&self, session: &crate::arp::ArpSession) -> Result<usize, String>;
+}
+
+/// The no-DAW default: a two-chord progression to arpeggiate.
+pub struct DemoArpSink {
+    chords: Vec<crate::arp::Chord>,
+}
+
+impl Default for DemoArpSink {
+    /// Am → F, a bar each. Two chords rather than one so the panel shows
+    /// that each is arpeggiated over its own span rather than the whole
+    /// selection being treated as one cluster.
+    fn default() -> Self {
+        use crate::arp::{Chord, ChordNote, PPQ};
+        let chord = |start: f64, pitches: [u8; 3]| Chord {
+            start_ppq: start,
+            end_ppq: start + PPQ * 4.0,
+            notes: pitches
+                .into_iter()
+                .map(|pitch| ChordNote {
+                    pitch,
+                    velocity: 96,
+                })
+                .collect(),
+        };
+        Self {
+            chords: vec![chord(0.0, [57, 60, 64]), chord(PPQ * 4.0, [53, 57, 60])],
+        }
+    }
+}
+
+impl ArpSink for DemoArpSink {
+    fn open(&self) -> Result<crate::arp::ArpSession, String> {
+        Ok(crate::arp::ArpSession::new(self.chords.clone(), Vec::new()))
+    }
+
+    fn commit(&self, session: &crate::arp::ArpSession) -> Result<usize, String> {
+        Err(format!(
+            "no DAW attached — would write {} notes",
+            session.resolve().len()
+        ))
+    }
+}

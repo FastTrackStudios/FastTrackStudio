@@ -1,4 +1,4 @@
-//! Reads notes out of a DAW project and writes velocities back in.
+//! Reads notes out of a DAW project and writes midi-tools' results back.
 //!
 //! The half of midi-tools that knows what a project is. `midi-tools`
 //! itself is arithmetic over `&[Note]` and depends on nothing, so the
@@ -11,7 +11,7 @@
 
 use std::sync::Mutex;
 
-use daw::service::{Items, Midi, MidiTakeLocation, ProjectContext};
+use daw::service::{Items, Midi, MidiNoteCreate, MidiTakeLocation, ProjectContext};
 use daw::service::item::ItemRef;
 use midi_tools::velocity::{Note, Session, VelocityEdit};
 
@@ -198,5 +198,137 @@ impl<D: VelocityDaw> midi_tools::VelocitySink for DawVelocitySink<D> {
 
     fn resync(&self, session: &mut Session) -> Result<(), String> {
         DawVelocitySink::resync(self, session)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Arpeggiator
+// ─────────────────────────────────────────────────────────────────────
+
+use midi_tools::arp::{ArpSession, DEFAULT_GAP_PPQ, TimedNote, group_chords};
+
+/// What arpeggiating needs from a backend.
+///
+/// A wider surface than [`VelocityDaw`] — the arp replaces notes rather
+/// than editing them, so it needs deletes and inserts on top of reads.
+pub trait ArpDaw: Items + Midi + Send + Sync + 'static {}
+impl<T> ArpDaw for T where T: Items + Midi + Send + Sync + 'static {}
+
+/// Reads chords out of a take and writes an arpeggio back.
+pub struct DawArpSink<D> {
+    daw: D,
+    location: Mutex<Option<MidiTakeLocation>>,
+}
+
+impl<D> DawArpSink<D> {
+    pub fn new(daw: D) -> Self {
+        Self {
+            daw,
+            location: Mutex::new(None),
+        }
+    }
+
+    pub fn location(&self) -> Option<MidiTakeLocation> {
+        self.location.lock().ok().and_then(|l| l.clone())
+    }
+}
+
+impl<D: ArpDaw> DawArpSink<D> {
+    /// Bind to the first selected item's active take and group its notes
+    /// into chords.
+    ///
+    /// Honours selection the same way the velocity tool does: selected
+    /// notes if any are selected, otherwise the whole take. That's what
+    /// lets you arpeggiate one chord of a progression without splitting
+    /// the item.
+    pub fn open(&self) -> Result<ArpSession, String> {
+        let project = ProjectContext::Current;
+
+        let item = self
+            .daw
+            .get_selected_items(project.clone())
+            .into_iter()
+            .next()
+            .ok_or_else(|| "select a MIDI item first".to_string())?;
+
+        let location = MidiTakeLocation::active(project, ItemRef::Guid(item.guid));
+        let all = self.daw.notes(location.clone());
+        if all.is_empty() {
+            return Err("that item has no MIDI notes".to_string());
+        }
+
+        let any_selected = all.iter().any(|n| n.selected);
+        let source: Vec<_> = all
+            .into_iter()
+            .filter(|n| n.selected || !any_selected)
+            .collect();
+
+        let indices: Vec<u32> = source.iter().map(|n| n.index).collect();
+        let timed: Vec<TimedNote> = source
+            .iter()
+            .map(|n| TimedNote {
+                start_ppq: n.start_ppq,
+                length_ppq: n.length_ppq,
+                pitch: n.pitch,
+                velocity: n.velocity,
+            })
+            .collect();
+
+        let chords = group_chords(&timed, DEFAULT_GAP_PPQ);
+
+        *self
+            .location
+            .lock()
+            .map_err(|_| "sink is poisoned".to_string())? = Some(location);
+
+        Ok(ArpSession::new(chords, indices))
+    }
+
+    /// Replace the source notes with the arpeggio.
+    ///
+    /// Delete first, then insert. The other order would leave the source
+    /// chord's indices shifted by however many notes the arp added, and
+    /// the delete would take out the arp instead of the chord.
+    pub fn commit(&self, session: &ArpSession) -> Result<usize, String> {
+        let location = self
+            .location()
+            .ok_or_else(|| "no take bound — open the tool on an item".to_string())?;
+
+        let notes = session.resolve();
+        if notes.is_empty() {
+            return Err("nothing to write — check the rate".to_string());
+        }
+
+        self.daw
+            .delete_notes(location.clone(), session.source_indices().to_vec());
+
+        let creates: Vec<MidiNoteCreate> = notes
+            .iter()
+            .map(|n| MidiNoteCreate {
+                channel: 0,
+                pitch: n.pitch,
+                velocity: n.velocity,
+                start_ppq: n.start_ppq,
+                length_ppq: n.length_ppq,
+            })
+            .collect();
+
+        // `add_notes_ppq`, not `add_notes`: these positions came out of
+        // `notes()` and are raw take PPQ. `add_notes` would reinterpret
+        // them as project quarter-notes and scatter the arp across the
+        // timeline. See the doc comment on the trait method.
+        self.daw.add_notes_ppq(location, creates);
+
+        Ok(notes.len())
+    }
+}
+
+impl<D: ArpDaw> midi_tools::ArpSink for DawArpSink<D> {
+    fn open(&self) -> Result<ArpSession, String> {
+        DawArpSink::open(self)
+    }
+
+    fn commit(&self, session: &ArpSession) -> Result<usize, String> {
+        DawArpSink::commit(self, session)
     }
 }

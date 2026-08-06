@@ -1,36 +1,45 @@
-//! Sliders, built from pointer events and inline styles.
+//! Sliders and the bar editor.
 //!
-//! Not `<input type=range>` and not a component-library slider: this
-//! panel has to render identically standalone, as a plugin, and embedded
-//! in REAPER, and the REAPER path goes through Blitz, which does not
-//! give you native form-control chrome or reliable external CSS. So the
-//! track and the thumb are `div`s with explicit pixel styles, and the
-//! interaction is arithmetic on pointer coordinates.
+//! The sliders wrap `dioxus_primitives::slider` rather than hand-rolling
+//! pointer arithmetic. The first cut of this file did hand-roll it, and
+//! it flickered: a hand-rolled slider that feeds its *clamped* value back
+//! in as its displayed value oscillates whenever the pointer sits between
+//! two steps, and one that measures its track only at mount drifts as
+//! soon as the panel scrolls. The primitive already solves both — it
+//! keeps unclamped "granular" thumb state through a drag, re-measures the
+//! track on `pointerdown` and on resize, and picks the active thumb once
+//! at drag start instead of per move (which is what made the two-thumb
+//! range slider swap its thumbs mid-drag).
 //!
-//! Everything here takes its geometry as explicit style values rather
-//! than Tailwind classes, per the signal UI rules — classes are additive
-//! polish, and a slider that collapses to zero height without a
-//! stylesheet is not a slider.
+//! What stays local is the *styling*. The panel has to render identically
+//! standalone, as a plugin, and inside REAPER through Blitz, so nothing
+//! here depends on a stylesheet: every layout-critical value is an inline
+//! `style="..."`, per the signal UI rules. That's also why this doesn't
+//! use `fts_ui::components::Slider`, which is the same primitive dressed
+//! in Tailwind classes and collapses to nothing without them.
 
 use dioxus::prelude::*;
+use dioxus_primitives::slider::{
+    RangeSlider as PrimitiveRangeSlider, Slider as PrimitiveSlider, SliderRange, SliderThumb,
+    SliderTrack,
+};
 
-/// Pixel geometry shared by the horizontal sliders, so the four sections
-/// line up without each one hard-coding its own numbers.
-pub const TRACK_H: f64 = 6.0;
-pub const THUMB: f64 = 14.0;
+/// Thumb diameter. The slider's row is sized to it so a thumb that
+/// overhangs the 6px track doesn't get clipped by the row above.
+const THUMB: f64 = 14.0;
 
-/// Fraction of the way along `element` the pointer sits, 0.0..=1.0.
-///
-/// Uses the element's own bounding rect rather than the event's offset
-/// coordinates: offsets are reported relative to whatever child is under
-/// the cursor, so once the pointer crosses onto the thumb the value
-/// jumps. Measuring against the track is what makes a drag continuous.
-fn fraction_along(rect_x: f64, rect_w: f64, client_x: f64) -> f64 {
-    if rect_w <= 0.0 {
-        return 0.0;
-    }
-    ((client_x - rect_x) / rect_w).clamp(0.0, 1.0)
-}
+/// Written out rather than interpolated from [`TRACK_H`] / [`THUMB`]:
+/// these are `const`s so they can be handed straight to the primitive's
+/// `style` attribute, and formatting a const string needs a macro crate
+/// this panel has no other reason to depend on. Keep them in step by
+/// hand — they only change when the slider is redesigned.
+const TRACK_STYLE: &str = "position:relative; height:6px; width:100%; border-radius:3px; background:var(--muted, #2a2a2a); overflow:visible;";
+
+/// The thumb is a `<button>`, so its chrome is reset explicitly — a
+/// default button background and border would show through.
+const THUMB_STYLE: &str = "position:absolute; top:50%; width:14px; height:14px; margin-left:-7px; margin-top:-7px; padding:0; border-radius:50%; background:var(--foreground, #e8e8e8); border:1px solid var(--border, #444); cursor:pointer; touch-action:none;";
+
+const RANGE_STYLE: &str = "position:absolute; top:0; height:6px; border-radius:3px; background:var(--primary, #d2691e);";
 
 /// A horizontal slider over an arbitrary numeric range.
 ///
@@ -42,120 +51,56 @@ pub fn Slider(
     value: f64,
     min: f64,
     max: f64,
-    /// Colour of the filled portion of the track.
-    #[props(default = "var(--primary, #d2691e)".to_string())]
-    fill: String,
+    #[props(default = 0.01)] step: f64,
     #[props(default = 120.0)] width: f64,
     on_change: EventHandler<f64>,
 ) -> Element {
-    let span = (max - min).max(f64::EPSILON);
-    let position = ((value - min) / span).clamp(0.0, 1.0);
-    let mut dragging = use_signal(|| false);
-    // The track's page geometry, captured on press. Re-measuring per
-    // move would be a layout read on every pointer event.
-    let mut rect = use_signal(|| (0.0_f64, 0.0_f64));
-
-    let emit = move |frac: f64| on_change.call(min + frac * span);
-
     rsx! {
         div {
-            style: "position:relative; width:{width}px; height:{THUMB}px; display:flex; align-items:center; cursor:pointer; touch-action:none; flex:none;",
-            onmounted: move |e| async move {
-                if let Ok(r) = e.get_client_rect().await {
-                    rect.set((r.origin.x, r.size.width));
+            style: "width:{width}px; flex:none; display:flex; align-items:center; height:{THUMB}px;",
+            PrimitiveSlider {
+                value: Some(value),
+                min,
+                max,
+                step,
+                label: None::<String>,
+                on_value_change: move |v: f64| on_change.call(v),
+                style: "position:relative; display:flex; align-items:center; width:100%; touch-action:none; user-select:none;",
+                SliderTrack { style: TRACK_STYLE,
+                    SliderRange { style: RANGE_STYLE }
+                    SliderThumb { style: THUMB_STYLE }
                 }
-            },
-            onpointerdown: move |e| {
-                dragging.set(true);
-                let (x, w) = rect();
-                emit(fraction_along(x, w, e.data().client_coordinates().x));
-            },
-            onpointermove: move |e| {
-                if dragging() {
-                    let (x, w) = rect();
-                    emit(fraction_along(x, w, e.data().client_coordinates().x));
-                }
-            },
-            onpointerup: move |_| dragging.set(false),
-            // Releasing outside the track must end the drag too, or the
-            // thumb follows the cursor around the panel afterwards.
-            onpointerleave: move |_| dragging.set(false),
-
-            // Track.
-            div { style: "position:absolute; left:0; right:0; height:{TRACK_H}px; border-radius:3px; background:var(--muted, #2a2a2a);" }
-            // Fill.
-            div { style: "position:absolute; left:0; width:{position * 100.0}%; height:{TRACK_H}px; border-radius:3px; background:{fill};" }
-            // Thumb.
-            div {
-                style: "position:absolute; left:calc({position * 100.0}% - {THUMB / 2.0}px); width:{THUMB}px; height:{THUMB}px; border-radius:50%; background:var(--foreground, #e8e8e8); border:1px solid var(--border, #444); pointer-events:none;",
             }
         }
     }
 }
 
 /// A two-thumb range slider — MVelocity's RANGE control.
-///
-/// Grabs whichever thumb is nearer the press, then lets that thumb push
-/// past the other rather than pinning it. Crossing the thumbs is a
-/// natural way to say "I want the window over there", and
-/// `velocity::Range::new` reorders the bounds for exactly this reason.
 #[component]
 pub fn RangeSlider(
     low: f64,
     high: f64,
     min: f64,
     max: f64,
+    #[props(default = 1.0)] step: f64,
     #[props(default = 150.0)] width: f64,
     on_change: EventHandler<(f64, f64)>,
 ) -> Element {
-    let span = (max - min).max(f64::EPSILON);
-    let lo_pos = ((low - min) / span).clamp(0.0, 1.0);
-    let hi_pos = ((high - min) / span).clamp(0.0, 1.0);
-
-    // Which thumb the current drag owns. `None` between drags.
-    let mut held = use_signal(|| Option::<bool>::None);
-    let mut rect = use_signal(|| (0.0_f64, 0.0_f64));
-
-    let apply = move |frac: f64, low_thumb: bool| {
-        let v = min + frac * span;
-        if low_thumb {
-            on_change.call((v, high));
-        } else {
-            on_change.call((low, v));
-        }
-    };
-
     rsx! {
         div {
-            style: "position:relative; width:{width}px; height:{THUMB}px; display:flex; align-items:center; cursor:pointer; touch-action:none; flex:none;",
-            onmounted: move |e| async move {
-                if let Ok(r) = e.get_client_rect().await {
-                    rect.set((r.origin.x, r.size.width));
-                }
-            },
-            onpointerdown: move |e| {
-                let (x, w) = rect();
-                let frac = fraction_along(x, w, e.data().client_coordinates().x);
-                let low_thumb = (frac - lo_pos).abs() <= (frac - hi_pos).abs();
-                held.set(Some(low_thumb));
-                apply(frac, low_thumb);
-            },
-            onpointermove: move |e| {
-                if let Some(low_thumb) = held() {
-                    let (x, w) = rect();
-                    apply(fraction_along(x, w, e.data().client_coordinates().x), low_thumb);
-                }
-            },
-            onpointerup: move |_| held.set(None),
-            onpointerleave: move |_| held.set(None),
-
-            div { style: "position:absolute; left:0; right:0; height:{TRACK_H}px; border-radius:3px; background:var(--muted, #2a2a2a);" }
-            div {
-                style: "position:absolute; left:{lo_pos.min(hi_pos) * 100.0}%; width:{(hi_pos - lo_pos).abs() * 100.0}%; height:{TRACK_H}px; border-radius:3px; background:var(--primary, #d2691e);",
-            }
-            for pos in [lo_pos, hi_pos] {
-                div {
-                    style: "position:absolute; left:calc({pos * 100.0}% - {THUMB / 2.0}px); width:{THUMB}px; height:{THUMB}px; border-radius:50%; background:var(--foreground, #e8e8e8); border:1px solid var(--border, #444); pointer-events:none;",
+            style: "width:{width}px; flex:none; display:flex; align-items:center; height:{THUMB}px;",
+            PrimitiveRangeSlider {
+                value: Some(low..high),
+                min,
+                max,
+                step,
+                label: None::<String>,
+                on_value_change: move |r: std::ops::Range<f64>| on_change.call((r.start, r.end)),
+                style: "position:relative; display:flex; align-items:center; width:100%; touch-action:none; user-select:none;",
+                SliderTrack { style: TRACK_STYLE,
+                    SliderRange { style: RANGE_STYLE }
+                    SliderThumb { index: 0, style: THUMB_STYLE }
+                    SliderThumb { index: 1, style: THUMB_STYLE }
                 }
             }
         }
@@ -164,13 +109,18 @@ pub fn RangeSlider(
 
 /// A column of vertical bars you can draw on by dragging across them.
 ///
-/// This is MVelocity's step-velocity slider bank, and it's how a pattern
-/// should be edited: the bars *are* the pattern, drawn at the same scale
-/// as the velocities they set, and dragging across several sets them all
-/// in one gesture the way a drum machine's velocity lane does.
+/// MVelocity's step-velocity slider bank, and how a pattern should be
+/// edited: the bars *are* the pattern, drawn at the same scale as the
+/// velocities they set, and dragging across several sets them all in one
+/// gesture the way a drum machine's velocity lane does.
+///
+/// Hand-rolled because no primitive covers "N independent values, drawn
+/// across" — but it takes the primitive's two lessons: the box is
+/// re-measured at the start of every gesture rather than only at mount,
+/// and leaving the box does not cancel the drag.
 #[component]
 pub fn BarEditor(
-    /// Bar heights, in `0..=max`.
+    /// Bar heights, in `1..=max`.
     values: Vec<u8>,
     #[props(default = 127)] max: u8,
     #[props(default = 88.0)] height: f64,
@@ -178,6 +128,10 @@ pub fn BarEditor(
 ) -> Element {
     let mut dragging = use_signal(|| false);
     let mut rect = use_signal(|| (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64));
+    // Held so the box can be re-measured mid-gesture. Measuring only at
+    // mount is what makes a hand-rolled widget drift once anything above
+    // it grows or the panel scrolls.
+    let mut mounted: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
     let count = values.len().max(1);
 
     // Which bar the pointer is over, and how high up it sits.
@@ -192,27 +146,47 @@ pub fn BarEditor(
         Some((i, (frac * f64::from(max)).round().max(1.0) as u8))
     };
 
+    let measure = move || async move {
+        let el = mounted();
+        if let Some(el) = el
+            && let Ok(r) = el.get_client_rect().await
+        {
+            rect.set((r.origin.x, r.origin.y, r.size.width, r.size.height));
+        }
+    };
+
     rsx! {
         div {
-            style: "position:relative; display:flex; align-items:flex-end; gap:2px; height:{height}px; padding:3px; border-radius:4px; background:var(--muted, #1e1e1e); border:1px solid var(--border, #333); cursor:crosshair; touch-action:none;",
+            style: "position:relative; display:flex; align-items:flex-end; gap:2px; height:{height}px; padding:3px; border-radius:4px; background:var(--muted, #1e1e1e); border:1px solid var(--border, #333); cursor:crosshair; touch-action:none; user-select:none;",
             onmounted: move |e| async move {
-                if let Ok(r) = e.get_client_rect().await {
-                    rect.set((r.origin.x, r.origin.y, r.size.width, r.size.height));
-                }
+                mounted.set(Some(e.data()));
+                measure().await;
             },
-            onpointerdown: move |e| {
+            onresize: move |_| async move { measure().await },
+            onpointerdown: move |e| async move {
                 dragging.set(true);
+                // Re-measure before acting on the very first coordinate,
+                // so a gesture can never be applied against a stale box.
+                measure().await;
                 let c = e.data().client_coordinates();
-                if let Some((i, v)) = hit(c.x, c.y) { on_change.call((i, v)); }
+                if let Some((i, v)) = hit(c.x, c.y) {
+                    on_change.call((i, v));
+                }
             },
             onpointermove: move |e| {
                 if dragging() {
                     let c = e.data().client_coordinates();
-                    if let Some((i, v)) = hit(c.x, c.y) { on_change.call((i, v)); }
+                    if let Some((i, v)) = hit(c.x, c.y) {
+                        on_change.call((i, v));
+                    }
                 }
             },
             onpointerup: move |_| dragging.set(false),
-            onpointerleave: move |_| dragging.set(false),
+            // Deliberately no `onpointerleave` handler: cancelling the
+            // drag on leave means a fast stroke that strays a pixel above
+            // the box drops the rest of the gesture, which is most of what
+            // made this widget feel unreliable. The gesture ends when the
+            // pointer is released, wherever that happens.
 
             for (i, v) in values.iter().copied().enumerate() {
                 div {

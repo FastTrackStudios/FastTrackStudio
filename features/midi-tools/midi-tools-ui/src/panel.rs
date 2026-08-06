@@ -91,9 +91,17 @@ pub fn VelocityPanel() -> Element {
         Err(e) => e,
     });
 
-    let resolved = session.read().resolve();
+    // Memoized: `resolve` runs all four engines over every note, and the
+    // panel re-renders on every frame of a slider drag. Recomputing it
+    // per render is fine for the 32-note demo take and visibly janky on a
+    // real one — a few hundred notes times four engines, sixty times a
+    // second, for a value that only changes when the session does.
+    let resolved = use_memo(move || session.read().resolve());
+    let pending = use_memo(move || session.read().edits().len());
+
+    let resolved = resolved();
+    let pending = pending();
     let selected = resolved.iter().filter(|n| n.selected).count();
-    let pending = session.read().edits().len();
 
     // Re-opening rebinds to whatever is selected now, discarding the
     // parameters — a deliberate reset, distinct from the silent resync
@@ -353,7 +361,7 @@ pub fn VelocityPanel() -> Element {
 /// the panel re-renders on every frame of a slider drag. A component with
 /// no props is memoized, so these mount once and are never diffed again.
 #[component]
-fn PanelStyles() -> Element {
+pub(crate) fn PanelStyles() -> Element {
     rsx! {
         document::Style { {HOST_RESET} }
         document::Style { {FTS_THEME} }
@@ -372,12 +380,12 @@ fn dynamics_label(amount: f64) -> String {
     }
 }
 
-const BUTTON: &str = "padding:5px 12px; border-radius:4px; border:1px solid var(--border, #3a3a3a); background:var(--secondary, #232323); color:inherit; font-size:12px; cursor:pointer;";
+pub(crate) const BUTTON: &str = "padding:5px 12px; border-radius:4px; border:1px solid var(--border, #3a3a3a); background:var(--secondary, #232323); color:inherit; font-size:12px; cursor:pointer;";
 
 /// A titled block. Purely so the four sections look like four sections
 /// without each one repeating a wall of inline style.
 #[component]
-fn Section(title: String, children: Element) -> Element {
+pub(crate) fn Section(title: String, children: Element) -> Element {
     rsx! {
         div {
             style: "display:flex; flex-direction:column; gap:6px; padding:8px; border-radius:5px; border:1px solid var(--border, #2c2c2c); background:var(--card, #181818);",
@@ -402,7 +410,7 @@ fn Labelled(label: String, value: String, children: Element) -> Element {
 
 /// A small toggle/action button.
 #[component]
-fn Chip(label: String, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
+pub(crate) fn Chip(label: String, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
     let tone = if active {
         "background:var(--primary, #d2691e); color:var(--primary-foreground, #fff); border-color:transparent;"
     } else {

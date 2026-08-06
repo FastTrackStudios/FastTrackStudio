@@ -39,6 +39,11 @@ pub fn CurveEditor(
     // Which control point the current drag owns.
     let mut held = use_signal(|| Option::<usize>::None);
     let mut rect = use_signal(|| (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64));
+    // Held so the box can be re-measured at the start of each gesture.
+    // Measuring only at mount is why this used to jump: the box sits
+    // under a header whose text changes width with the note count, and
+    // the panel scrolls, so a mount-time rect goes stale almost at once.
+    let mut mounted: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
 
     let points: Vec<Point> = curve.as_ref().map(|c| c.points().to_vec()).unwrap_or_default();
 
@@ -64,6 +69,15 @@ pub fn CurveEditor(
         }
     };
 
+    let measure = move || async move {
+        let el = mounted();
+        if let Some(el) = el
+            && let Ok(r) = el.get_client_rect().await
+        {
+            rect.set((r.origin.x, r.origin.y, r.size.width, r.size.height));
+        }
+    };
+
     let count = resolved.len().max(1);
     // Below roughly a pixel per bar there's nothing to see and a gap
     // costs more than the bar; pack them flush instead.
@@ -73,10 +87,10 @@ pub fn CurveEditor(
         div {
             style: "position:relative; height:{HEIGHT}px; padding:4px; border-radius:5px; background:var(--muted, #171717); border:1px solid var(--border, #333); overflow:hidden; touch-action:none;",
             onmounted: move |e| async move {
-                if let Ok(r) = e.get_client_rect().await {
-                    rect.set((r.origin.x, r.origin.y, r.size.width, r.size.height));
-                }
+                mounted.set(Some(e.data()));
+                measure().await;
             },
+            onresize: move |_| async move { measure().await },
             onpointermove: move |e| {
                 if let Some(i) = held() {
                     let c = e.data().client_coordinates();
@@ -84,7 +98,11 @@ pub fn CurveEditor(
                 }
             },
             onpointerup: move |_| held.set(None),
-            onpointerleave: move |_| held.set(None),
+            // Deliberately no `onpointerleave`: dropping the handle the
+            // moment the pointer crosses the box edge is what made
+            // dragging a control point to the very top or bottom — i.e.
+            // to full or zero velocity, the two values you most want —
+            // feel like it kept slipping out of your hand.
 
             // The velocity bars — the actual readout.
             div {
@@ -101,8 +119,14 @@ pub fn CurveEditor(
             for (i, p) in points.iter().copied().enumerate() {
                 div {
                     key: "handle-{i}",
-                    style: "position:absolute; left:calc({p.x * 100.0}% - {HANDLE / 2.0}px); top:calc({(1.0 - p.y) * 100.0}% - {HANDLE / 2.0}px); width:{HANDLE}px; height:{HANDLE}px; border-radius:50%; background:var(--background, #101010); border:2px solid var(--primary, #d2691e); cursor:grab; box-shadow:0 0 0 1px rgba(0,0,0,0.6);",
-                    onpointerdown: move |_| held.set(Some(i)),
+                    style: "position:absolute; left:calc({p.x * 100.0}% - {HANDLE / 2.0}px); top:calc({(1.0 - p.y) * 100.0}% - {HANDLE / 2.0}px); width:{HANDLE}px; height:{HANDLE}px; border-radius:50%; background:var(--background, #101010); border:2px solid var(--primary, #d2691e); cursor:grab; box-shadow:0 0 0 1px rgba(0,0,0,0.6); touch-action:none;",
+                    onpointerdown: move |_| async move {
+                        // Re-measure before the gesture can act on a
+                        // coordinate, so the first move never snaps the
+                        // handle to a position computed from a stale box.
+                        measure().await;
+                        held.set(Some(i));
+                    },
                 }
             }
         }

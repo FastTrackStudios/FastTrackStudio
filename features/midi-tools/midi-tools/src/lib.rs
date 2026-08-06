@@ -34,7 +34,8 @@
 //! all "notes in, notes out".
 
 pub mod sink;
+pub mod arp;
 pub mod velocity;
 
-pub use sink::{DemoSink, VelocitySink};
+pub use sink::{ArpSink, DemoArpSink, DemoSink, VelocitySink};
 pub use velocity::{Note, Range, Session, VelocityEdit};
