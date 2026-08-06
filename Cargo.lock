@@ -6395,8 +6395,11 @@ dependencies = [
 name = "delay-plugin"
 version = "0.1.0"
 dependencies = [
+ "audiocore-core",
  "audiocore-dsp",
  "delay",
+ "delay-profiles",
+ "delay-ui",
  "nice-plug",
 ]
 
@@ -6405,6 +6408,24 @@ name = "delay-profiles"
 version = "0.1.0"
 dependencies = [
  "delay-dsp",
+]
+
+[[package]]
+name = "delay-ui"
+version = "0.1.0"
+dependencies = [
+ "atomic_float",
+ "crossbeam-channel",
+ "delay-dsp",
+ "delay-profiles",
+ "dioxus",
+ "dioxus-test",
+ "fts-ui",
+ "fts-ui-audio",
+ "nice-plug",
+ "nice-plug-dioxus",
+ "parking_lot",
+ "tokio",
 ]
 
 [[package]]
