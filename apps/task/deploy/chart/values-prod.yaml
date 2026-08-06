@@ -19,6 +19,15 @@ server:
     # The bearer token rides in the existingSecret as
     # TASK_HERMES_API_KEY.
     TASK_HERMES_URL: http://hermes-gateway.hermes.svc:8642/v1
+    # OpenTelemetry. task-telemetry's OTLP pipelines are inert unless this
+    # is set, so this one line is what turns traces/logs/metrics on. The
+    # collector (starcommand modules/services/observability) fans them out
+    # to Tempo/Loki/Prometheus — the app never names a backend.
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    # Distinguishes this deployment's spans from a self-hoster's in a
+    # shared backend, and from the clients that proxy through it.
+    OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod,service.namespace=task
   # Env from the cluster-managed `task-env` Secret (starcommand
   # cluster-secrets app) — carries TASK_HERMES_API_KEY today; add
   # TASK_SERVER_SEALING_KEY there when rotating off the machine-dev
