@@ -70,9 +70,14 @@ pub fn EmailView() -> Element {
     });
 
     // Settle on a default account once the list loads (first one).
+    // Accounts gate everything below — nothing is selected, so nothing
+    // is listed, until they resolve. Painting the cached list while the
+    // live call is in flight is what actually makes an offline reload
+    // instant; caching the envelopes alone still waited on this.
     let account_list: Vec<Account> = match &*accounts.read() {
         Some(Ok(list)) => list.clone(),
-        _ => Vec::new(),
+        Some(Err(_)) => Vec::new(),
+        None => slug().and_then(|s| offline::get_accounts(&s)).unwrap_or_default(),
     };
     use_effect(move || {
         if selected_account.peek().is_none() {
@@ -239,22 +244,53 @@ pub fn EmailView() -> Element {
         .iter()
         .find(|a| Some(a.id.0.as_str()) == current.as_deref())
         .map(|a| a.address.clone());
+    // While the live call is still in flight, show the cached listing
+    // rather than a blank pane.
+    //
+    // `fetch_email_envelopes` already falls back to the cache on
+    // failure, but only *after* the call gives up — and a dead server
+    // takes several seconds to give up, which reads as a hang. Painting
+    // the cache immediately and letting the live answer replace it
+    // makes the mailbox appear at once, online or off. (Fixing the
+    // underlying delay means fail-fast in the shared connection path,
+    // which every service in the app uses — not worth the blast radius
+    // for this.)
     let (rows, rows_err): (Vec<Envelope>, Option<String>) = match &*envelopes.read() {
         Some(Ok(list)) => (list.clone(), None),
         Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
+        None => (
+            match (slug(), current.clone()) {
+                (Some(s), Some(acct)) => {
+                    offline::get_envelopes(&s, &acct, &selected_folder()).unwrap_or_default()
+                }
+                _ => Vec::new(),
+            },
+            None,
+        ),
     };
     let outbox_rows: Vec<OutboxEntry> = match &*outbox.read() {
         Some(Ok(list)) => list.clone(),
         _ => Vec::new(),
     };
+    // Same for the reading pane: a body we have read before paints
+    // immediately instead of after the failed call times out.
     let (open_msg, msg_err): (Option<email_proto::Message>, Option<String>) =
         match &*message.read() {
             Some(Ok(m)) => (m.clone(), None),
             Some(Err(e)) => (None, Some(e.clone())),
-            None => (None, None),
+            None => (
+                match (slug(), current.clone(), open_message()) {
+                    (Some(s), Some(acct), Some(id)) => offline::get_message(&s, &acct, &id),
+                    _ => None,
+                },
+                None,
+            ),
         };
-    let msg_loading = open_message().is_some() && message.read().is_none();
+    // Only a *cold* open shows the spinner — with a cached body already
+    // painted, "Opening…" would replace readable content with a
+    // placeholder.
+    let msg_loading =
+        open_message().is_some() && message.read().is_none() && open_msg.is_none();
     // Destination folders for the two filing actions. Role first, then
     // a name match, so plain-Maildir backends that report no roles
     // still get working buttons (and none at all if the folder is
