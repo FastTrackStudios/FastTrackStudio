@@ -173,6 +173,11 @@ members = [
     "features/dynamic-template/dynamic-template-proto",
     "features/dynamic-template/dynamic-template-extension",
     "features/dynamic-template/music-catalog",
+    "features/chord-tool/chord-tool",
+    "features/chord-tool/chord-tool-daw",
+    "features/midi-tools/midi-tools",
+    "features/midi-tools/midi-tools-daw",
+    "features/midi-tools/midi-tools-ui",
     "features/dynamic-template/color-palette",
     "features/dynamic-template/tests",
     # ── crates/signal — signal domain core (wave 4) ───────────────────
@@ -687,6 +692,11 @@ dynamic-template-proto = { path = "features/dynamic-template/dynamic-template-pr
 # 128-slot group partition). Single source of truth shared with
 # dynamic-template.
 music-catalog = { path = "features/dynamic-template/music-catalog" }
+chord-tool = { path = "features/chord-tool/chord-tool" }
+chord-tool-daw = { path = "features/chord-tool/chord-tool-daw" }
+midi-tools = { path = "features/midi-tools/midi-tools" }
+midi-tools-daw = { path = "features/midi-tools/midi-tools-daw" }
+midi-tools-ui = { path = "features/midi-tools/midi-tools-ui" }
 color-palette = { path = "features/dynamic-template/color-palette" }
 # Monarchy hierarchy framework (dynamic-template's engine) — subtree-
 # imported at libs/monarchy so the whole graph shares one facet line.

@@ -1,0 +1,25 @@
+[package]
+name = "midi-tools-ui"
+version.workspace = true
+edition.workspace = true
+description = "midi-tools-ui — the MIDI velocity panel (Dioxus; runs standalone for iteration, ships as a Blitz REAPER panel)"
+
+[dependencies]
+# All the arithmetic comes from midi-tools — this crate is UI. If
+# something here starts computing velocities, it belongs in
+# midi_tools::velocity instead.
+midi-tools = { workspace = true }
+dioxus = { workspace = true }
+# The slider primitive. Wrapped rather than reimplemented — it handles
+# pointer capture, rect refresh on drag start, and granular (unclamped)
+# thumb state, which is what a hand-rolled slider gets wrong.
+dioxus-primitives = { workspace = true }
+
+[dev-dependencies]
+# The standalone iteration harness (examples/panel.rs) uses the desktop
+# renderer; the shipped REAPER panel uses Blitz. See the example's docs
+# for what that difference costs you.
+dioxus = { workspace = true, default-features = true, features = ["desktop", "launch"] }
+
+[lints]
+workspace = true
