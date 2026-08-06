@@ -24,8 +24,6 @@ pub mod attachments;
 pub mod capability;
 #[cfg(feature = "plugin-forge")]
 pub mod connections;
-#[cfg(feature = "plugin-forge")]
-pub mod forge_sync;
 pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
@@ -533,11 +531,6 @@ impl AppState {
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
             snapshot_status: Arc::new(std::sync::RwLock::new(snapshot::SnapshotStatus::default())),
         };
-        // Background forge-sync: pull codeberg/Forgejo issue changes
-        // back into linked tasks on an interval (outbound push is
-        // handled inline by the `ForgeSyncTaskService` decorator).
-        #[cfg(feature = "plugin-forge")]
-        forge_sync::spawn_poll_loop(state.clone());
         // Per-org notifier: subscribes to the org's event hubs
         // in-process and materializes notifications by rule
         // (see `notifier`'s module docs for the catalog).
@@ -2602,22 +2595,13 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             workstream::workstream_service_descriptor(),
             workstream::serve_workstream_service(org.workstreams.clone()),
         )
-        .with(task::task_service_descriptor(), {
-            // With the forge plugin compiled in, TaskService is wrapped
-            // in the forge-sync decorator (outbound issue push on task
-            // writes); without it the raw backend serves directly.
-            #[cfg(feature = "plugin-forge")]
-            let svc = task::serve_task_service(forge_sync::ForgeSyncTaskService::new(
-                org.tasks.clone(),
-                org.forge.clone(),
-                org.forge_agent.clone(),
-                org.slug.clone(),
-                org.issue_links_path.clone(),
-            ));
-            #[cfg(not(feature = "plugin-forge"))]
-            let svc = task::serve_task_service(org.tasks.clone());
-            svc
-        })
+        .with(
+            task::task_service_descriptor(),
+            // The raw backend serves directly. There used to be a
+            // forge-sync decorator here mirroring task writes into
+            // Forgejo issues; it went with `forge_sync` (2026-08-06).
+            task::serve_task_service(org.tasks.clone()),
+        )
         // Live task changes — the `#[subscribe]` stream sibling of
         // `TaskService`. The hub lives on the raw `TaskBackend`, so
         // every write path publishes into it: vox calls through the

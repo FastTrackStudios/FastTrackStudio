@@ -1,8 +1,8 @@
 //! The notifier — materializes [`notify_proto::Notification`]s from
 //! the org's event hubs, by rules.
 //!
-//! One instance per hosted org, spawned from [`AppState::new`] (like
-//! `forge_sync`'s poll loop). It subscribes to the org's `#[subscribe]`
+//! One instance per hosted org, spawned from [`AppState::new`]. It
+//! subscribes to the org's `#[subscribe]`
 //! streams over an **in-process** [`architect::LocalServer`] — no
 //! socket, no TCP; a raw `vox::channel` Tx attached straight to a
 //! `PubSub` never drains (nothing resolves its sink), so the local
