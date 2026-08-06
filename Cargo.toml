@@ -34,6 +34,7 @@ members = [
     "libs/fts-chrome",
     "libs/fts-ui/fts-ui",
     "libs/fts-ui/fts-ui-audio",
+    "libs/fts-ui/fts-plug-ui",
     "libs/fts-ui/showcase",
     "libs/fts-story/fts-story-core",
     "libs/fts-story/fts-story-macros",
@@ -89,6 +90,7 @@ members = [
     # ── crates/daw — daw domain core (wave 2) ─────────────────────────
     "crates/daw/daw",
     "crates/daw/proto",
+    "crates/daw/actions",
     "crates/daw/control",
     "crates/daw/module",
     # ── libs/devtools ─────────────────────────────────────────────────
@@ -215,6 +217,7 @@ members = [
     "features/fx/comp/comp-dsp",
     "features/fx/comp/comp-profiles",
     "features/fx/comp/comp-ui",
+    "features/fx/comp/limiter-ui",
     "features/fx/reverb/reverb",
     "features/fx/reverb/reverb-dsp",
     "features/fx/delay/delay",
@@ -347,6 +350,7 @@ repository = "https://codeberg.org/FastTrackStudios/FastTrackStudio"
 fts-chrome = { path = "libs/fts-chrome" }
 fts-ui = { path = "libs/fts-ui/fts-ui" }
 fts-ui-audio = { path = "libs/fts-ui/fts-ui-audio" }
+fts-plug-ui = { path = "libs/fts-ui/fts-plug-ui" }
 fts-ui-showcase = { path = "libs/fts-ui/showcase" }
 fts-story-core = { path = "libs/fts-story/fts-story-core" }
 fts-story-macros = { path = "libs/fts-story/fts-story-macros" }
@@ -357,13 +361,13 @@ fts-story-parity = { path = "libs/fts-story/fts-story-parity" }
 fts-story-fuzz = { path = "libs/fts-story/fts-story-fuzz" }
 dock-dioxus = { path = "libs/dock/dock-dioxus", default-features = false }
 dock-proto = { path = "libs/dock/dock-proto" }
-# nice-plug lives in its own fork repo (upstream RustAudio/nice-plug +
-# PR #61 baseview-0.2 + the FTS delta: nice-plug-dioxus, embedded editors,
+# nice-plug lives in its own fork repo (upstream RustAudio/nice-plug's
+# baseview-03 branch + the FTS delta: nice-plug-dioxus, embedded editors,
 # rich track-info, param rescan). The ONE sanctioned exception to
 # path-deps-only — it left the tree so it can track upstream.
-nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "7d111d8fd055f0ccfdf0642d260138667a7ab2b8" }
-nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "7d111d8fd055f0ccfdf0642d260138667a7ab2b8" }
-nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", rev = "7d111d8fd055f0ccfdf0642d260138667a7ab2b8" }
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
+nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
+nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 utils = { path = "libs/utils" }
 vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
@@ -421,6 +425,7 @@ input-keybinds = { path = "crates/input/input-keybinds" }
 # domain; consumers outside it go through the `daw` facade.
 daw = { path = "crates/daw/daw" }
 daw-proto = { path = "crates/daw/proto" }
+daw-actions = { path = "crates/daw/actions" }
 daw-control = { path = "crates/daw/control" }
 daw-module = { path = "crates/daw/module" }
 fts-devtools = { path = "libs/devtools/fts-devtools" }
@@ -588,6 +593,7 @@ comp = { path = "features/fx/comp/comp" }
 # The comp plugin editor. Core (profile view data model) is portable; the
 # nice-plug/Blitz editor is behind its `native` feature.
 comp-ui = { path = "features/fx/comp/comp-ui", default-features = false }
+limiter-ui = { path = "features/fx/comp/limiter-ui" }
 reverb = { path = "features/fx/reverb/reverb" }
 delay = { path = "features/fx/delay/delay" }
 pitch = { path = "features/fx/pitch/pitch" }

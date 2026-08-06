@@ -24,7 +24,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320"
 dependencies = [
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -207,7 +207,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vox",
 ]
 
@@ -225,7 +225,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -240,7 +240,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vox",
 ]
 
@@ -267,7 +267,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -286,7 +286,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -568,9 +568,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.103"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "anymap2"
@@ -1001,7 +1001,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-core",
  "vox-types",
@@ -1757,7 +1757,7 @@ version = "0.1.0"
 dependencies = [
  "facet 0.50.0-rc.5",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -1840,7 +1840,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "totp-rs",
- "uuid 1.23.4",
+ "uuid",
  "vox",
 ]
 
@@ -1890,7 +1890,7 @@ dependencies = [
  "fake",
  "sea-orm",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
 ]
 
@@ -2159,23 +2159,6 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "baseview"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=7d111d8fd055f0ccfdf0642d260138667a7ab2b8#7d111d8fd055f0ccfdf0642d260138667a7ab2b8"
-dependencies = [
- "cocoa 0.24.1",
- "core-foundation 0.9.4",
- "keyboard-types 0.6.2",
- "nix 0.22.3",
- "objc",
- "raw-window-handle 0.6.2",
- "uuid 0.8.2",
- "winapi",
- "x11",
- "x11rb",
-]
-
-[[package]]
-name = "baseview"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fee31c5ff593b43ef62afbaea18a6b3fa62e84171d00aaf014b9d4ea128776e"
@@ -2191,6 +2174,32 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "percent-encoding",
  "polling",
+ "raw-window-handle 0.6.2",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "windows-sys 0.61.2",
+ "x11-dl",
+ "x11rb",
+ "xkbcommon-dl",
+]
+
+[[package]]
+name = "baseview"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41e90905c0b6f990fc4e8aff1eea97c40dc3e77cbc337e2d6fee1581585ed7bb"
+dependencies = [
+ "block2 0.6.2",
+ "bytemuck",
+ "calloop 0.14.4",
+ "dispatch2",
+ "dpi",
+ "keyboard-types 0.8.3",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "percent-encoding",
  "raw-window-handle 0.6.2",
  "windows 0.62.2",
  "windows-core 0.62.2",
@@ -2706,7 +2715,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vox",
@@ -3226,7 +3235,7 @@ checksum = "d38f2da7a0a2c4ccf0065be06397cc26a81f4e528be095826eee9d4adbb8c60f"
 dependencies = [
  "byteorder",
  "fnv",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -3237,7 +3246,7 @@ checksum = "d8a4f8e55be323b378facfcf1f06aa97f6ec17cf4ac84fb17325093aaf62da41"
 dependencies = [
  "byteorder",
  "fnv",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -3592,46 +3601,16 @@ dependencies = [
 
 [[package]]
 name = "cocoa"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f425db7937052c684daec3bd6375c8abe2d146dca4b8b143d6db777c39138f3a"
-dependencies = [
- "bitflags 1.3.2",
- "block",
- "cocoa-foundation 0.1.2",
- "core-foundation 0.9.4",
- "core-graphics 0.22.3",
- "foreign-types 0.3.2",
- "libc",
- "objc",
-]
-
-[[package]]
-name = "cocoa"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad36507aeb7e16159dfe68db81ccc27571c3ccd4b76fb2fb72fc59e7a4b1b64c"
 dependencies = [
  "bitflags 2.13.0",
  "block",
- "cocoa-foundation 0.2.1",
+ "cocoa-foundation",
  "core-foundation 0.10.1",
  "core-graphics 0.24.0",
  "foreign-types 0.5.0",
- "libc",
- "objc",
-]
-
-[[package]]
-name = "cocoa-foundation"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c6234cbb2e4c785b456c0644748b1ac416dd045799740356f8363dfe00c93f7"
-dependencies = [
- "bitflags 1.3.2",
- "block",
- "core-foundation 0.9.4",
- "core-graphics-types 0.1.3",
  "libc",
  "objc",
 ]
@@ -3682,7 +3661,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vault-live",
  "vox",
  "vox-types",
@@ -3883,6 +3862,7 @@ dependencies = [
  "fts-ui-audio",
  "nice-plug",
  "nice-plug-dioxus",
+ "parking_lot",
  "tokio",
 ]
 
@@ -4136,7 +4116,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "ureq 2.12.1",
- "uuid 1.23.4",
+ "uuid",
  "vault-entity",
 ]
 
@@ -4376,19 +4356,6 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "core-graphics"
-version = "0.22.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2581bbab3b8ffc6fcbd550bf46c355135d16e9ff2a6ea032ad6b9bf1d7efe4fb"
-dependencies = [
- "bitflags 1.3.2",
- "core-foundation 0.9.4",
- "core-graphics-types 0.1.3",
- "foreign-types 0.3.2",
- "libc",
-]
-
-[[package]]
-name = "core-graphics"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c07782be35f9e1140080c6b96f0d44b739e2278479f64e02fdab4e32dfd8b081"
@@ -4604,7 +4571,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -4628,7 +4595,7 @@ dependencies = [
  "crdt",
  "sea-orm",
  "sea-orm-migration",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -5008,7 +4975,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -5247,7 +5214,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -5525,7 +5492,7 @@ dependencies = [
  "regex",
  "sha2 0.10.9",
  "unicode-segmentation",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -5850,6 +5817,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-actions"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "daw",
+ "daw-reaper",
+ "eyre",
+ "music-catalog",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "daw-allocator"
 version = "0.1.0"
 
@@ -5880,7 +5860,7 @@ dependencies = [
  "socket2 0.5.10",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -5910,7 +5890,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-stream",
 ]
@@ -6059,7 +6039,7 @@ dependencies = [
  "swell-ui",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-stream",
 ]
@@ -6073,7 +6053,7 @@ dependencies = [
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
- "cocoa 0.26.1",
+ "cocoa",
  "crossbeam",
  "daw-module",
  "daw-proto",
@@ -6132,7 +6112,7 @@ dependencies = [
 name = "daw-reaper-embed"
 version = "0.1.0"
 dependencies = [
- "cocoa 0.26.1",
+ "cocoa",
  "objc",
  "pollster",
  "raw-window-handle 0.6.2",
@@ -6176,7 +6156,7 @@ dependencies = [
  "tokio",
  "tracing",
  "ureq 2.12.1",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vst3",
  "wasm-bindgen",
@@ -6326,7 +6306,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d"
 dependencies = [
  "serde",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -7508,7 +7488,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -7517,7 +7497,7 @@ version = "0.1.0"
 dependencies = [
  "facet 0.50.0-rc.5",
  "facet-json",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -7606,9 +7586,6 @@ name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "dpp"
@@ -7908,7 +7885,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "web-sys",
 ]
 
@@ -7951,7 +7928,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "web-sys",
 ]
 
@@ -8082,7 +8059,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "walkdir",
 ]
 
@@ -8375,7 +8352,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "usvg 0.45.1",
- "uuid 1.23.4",
+ "uuid",
  "vello",
  "wgpu",
  "winit 0.30.13",
@@ -8768,7 +8745,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vox",
@@ -8856,7 +8833,7 @@ dependencies = [
  "iddqd",
  "impls",
  "indexmap 2.14.0",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -9225,7 +9202,7 @@ dependencies = [
  "dummy",
  "either",
  "rand 0.9.4",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -9408,7 +9385,7 @@ version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f"
 dependencies = [
- "memoffset 0.9.1",
+ "memoffset",
  "rustc_version",
 ]
 
@@ -9489,7 +9466,7 @@ dependencies = [
  "timer-proto",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
 ]
 
@@ -9507,7 +9484,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -9523,7 +9500,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "timer-proto",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -9556,7 +9533,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vox",
  "vox-types",
@@ -9576,7 +9553,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -9993,6 +9970,7 @@ dependencies = [
  "architect",
  "crossbeam-channel",
  "daw",
+ "daw-actions",
  "daw-extension-runtime",
  "daw-reaper",
  "daw-synchronization",
@@ -10112,6 +10090,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-plug-ui"
+version = "0.1.0"
+dependencies = [
+ "atomic_float",
+ "audiocore-core",
+ "dioxus",
+ "fts-ui",
+ "fts-ui-audio",
+ "nice-plug",
+ "nice-plug-dioxus",
+]
+
+[[package]]
 name = "fts-plugin-xtask"
 version = "0.1.0"
 dependencies = [
@@ -10159,7 +10150,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-wasm",
- "uuid 1.23.4",
+ "uuid",
  "view-knowledge-graph",
  "vox-core",
  "vox-websocket",
@@ -11234,7 +11225,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vault-proto",
@@ -11254,7 +11245,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -11269,7 +11260,7 @@ dependencies = [
  "fts-ui",
  "goal-proto",
  "task-ui-core",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -12600,7 +12591,7 @@ dependencies = [
  "sea-orm-migration",
  "thiserror 2.0.18",
  "tokio",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -12621,7 +12612,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -12786,7 +12777,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault-entity",
 ]
 
@@ -13063,7 +13054,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vox",
@@ -13097,7 +13088,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vox",
@@ -13125,7 +13116,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -13746,17 +13737,6 @@ dependencies = [
 
 [[package]]
 name = "keyboard-types"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b7668b7cff6a51fe61cdde64cd27c8a220786f399501b57ebe36f7d8112fd68"
-dependencies = [
- "bitflags 1.3.2",
- "serde",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b750dcadc39a09dbadd74e118f6dd6598df77fa01df0cfcdc52c28dece74528a"
@@ -13797,7 +13777,7 @@ dependencies = [
  "regex",
  "tracing",
  "tracing-subscriber",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -13930,7 +13910,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vox",
 ]
 
@@ -14176,7 +14156,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -14244,7 +14224,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -14510,7 +14490,7 @@ dependencies = [
  "tokio",
  "tracing",
  "twox-hash",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -14667,7 +14647,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -14755,7 +14735,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -15075,7 +15055,23 @@ name = "limiter-plugin"
 version = "0.1.0"
 dependencies = [
  "comp",
+ "limiter-ui",
  "nice-plug",
+ "nice-plug-dioxus",
+]
+
+[[package]]
+name = "limiter-ui"
+version = "0.1.0"
+dependencies = [
+ "atomic_float",
+ "audiocore-core",
+ "dioxus",
+ "dioxus-test",
+ "fts-plug-ui",
+ "nice-plug",
+ "nice-plug-dioxus",
+ "tokio",
 ]
 
 [[package]]
@@ -15255,7 +15251,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vault-live",
  "vault-obsidian",
  "vox",
@@ -15412,7 +15408,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vox",
@@ -15431,7 +15427,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -16324,7 +16320,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vox",
  "vox-types",
@@ -16343,7 +16339,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -16388,15 +16384,6 @@ name = "memmem"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a64a92489e2744ce060c349162be1c5f33c6969234104dbd99ddb5feb08b8c15"
-
-[[package]]
-name = "memoffset"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
-dependencies = [
- "autocfg",
-]
 
 [[package]]
 name = "memoffset"
@@ -16547,7 +16534,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vault-proto",
@@ -16567,7 +16554,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -16676,7 +16663,7 @@ dependencies = [
  "portable-atomic",
  "smallvec 1.15.2",
  "tagptr",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -16734,7 +16721,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "toml 0.8.2",
- "uuid 1.23.4",
+ "uuid",
  "walkdir",
 ]
 
@@ -16750,7 +16737,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -17152,16 +17139,16 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nice-log"
 version = "0.3.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=7d111d8fd055f0ccfdf0642d260138667a7ab2b8#7d111d8fd055f0ccfdf0642d260138667a7ab2b8"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#7a8d7ac2dbe8cd98f05feacf220a5e693f556ca9"
 dependencies = [
  "tracing-appender",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
 name = "nice-plug"
 version = "0.2.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=7d111d8fd055f0ccfdf0642d260138667a7ab2b8#7d111d8fd055f0ccfdf0642d260138667a7ab2b8"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#7a8d7ac2dbe8cd98f05feacf220a5e693f556ca9"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -17180,17 +17167,18 @@ dependencies = [
  "parking_lot",
  "raw-window-handle 0.6.2",
  "serde_json",
+ "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
  "vst3",
  "widestring",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
 name = "nice-plug-core"
 version = "0.2.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=7d111d8fd055f0ccfdf0642d260138667a7ab2b8#7d111d8fd055f0ccfdf0642d260138667a7ab2b8"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#7a8d7ac2dbe8cd98f05feacf220a5e693f556ca9"
 dependencies = [
  "atomic_float",
  "atomic_refcell",
@@ -17209,7 +17197,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-derive"
 version = "0.1.2"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=7d111d8fd055f0ccfdf0642d260138667a7ab2b8#7d111d8fd055f0ccfdf0642d260138667a7ab2b8"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#7a8d7ac2dbe8cd98f05feacf220a5e693f556ca9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -17219,11 +17207,11 @@ dependencies = [
 [[package]]
 name = "nice-plug-dioxus"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=7d111d8fd055f0ccfdf0642d260138667a7ab2b8#7d111d8fd055f0ccfdf0642d260138667a7ab2b8"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#7a8d7ac2dbe8cd98f05feacf220a5e693f556ca9"
 dependencies = [
  "anyrender",
  "anyrender_vello 0.11.0",
- "baseview 0.1.0",
+ "baseview 0.3.0",
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
@@ -17232,7 +17220,7 @@ dependencies = [
  "dioxus-devtools",
  "dioxus-native",
  "futures-util",
- "keyboard-types 0.6.2",
+ "keyboard-types 0.8.3",
  "libc",
  "nice-plug-core",
  "parking_lot",
@@ -17249,7 +17237,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-xtask"
 version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?rev=7d111d8fd055f0ccfdf0642d260138667a7ab2b8#7d111d8fd055f0ccfdf0642d260138667a7ab2b8"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#7a8d7ac2dbe8cd98f05feacf220a5e693f556ca9"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -17257,19 +17245,6 @@ dependencies = [
  "reflink-copy",
  "serde",
  "toml 1.1.2+spec-1.1.0",
-]
-
-[[package]]
-name = "nix"
-version = "0.22.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4916f159ed8e5de0082076562152a76b7a1f64a01fd9d1e0fea002c37624faf"
-dependencies = [
- "bitflags 1.3.2",
- "cc",
- "cfg-if",
- "libc",
- "memoffset 0.6.5",
 ]
 
 [[package]]
@@ -17282,7 +17257,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
- "memoffset 0.9.1",
+ "memoffset",
 ]
 
 [[package]]
@@ -17432,7 +17407,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -17487,7 +17462,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -18663,7 +18638,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "toml 0.8.2",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -18860,7 +18835,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vox",
@@ -18882,7 +18857,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -20077,7 +20052,7 @@ dependencies = [
  "sea-orm-migration",
  "thiserror 2.0.18",
  "tokio",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -20091,7 +20066,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -20294,7 +20269,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vault-proto",
@@ -20315,7 +20290,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -21226,7 +21201,7 @@ dependencies = [
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
- "cocoa 0.26.1",
+ "cocoa",
  "crossbeam",
  "daw",
  "dioxus-devtools",
@@ -21250,7 +21225,7 @@ dependencies = [
 name = "reaper-embed"
 version = "0.1.0"
 dependencies = [
- "cocoa 0.26.1",
+ "cocoa",
  "objc",
  "pollster",
  "raw-window-handle 0.6.2",
@@ -21414,7 +21389,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault-entity",
 ]
 
@@ -21835,7 +21810,7 @@ dependencies = [
  "rkyv_derive",
  "seahash",
  "tinyvec",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -22361,7 +22336,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
 ]
 
@@ -22590,7 +22565,7 @@ dependencies = [
  "time",
  "tracing",
  "url",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -22656,7 +22631,7 @@ dependencies = [
  "sea-query-derive",
  "serde_json",
  "time",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -22672,7 +22647,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "time",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -22991,7 +22966,7 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "url",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -23251,7 +23226,9 @@ dependencies = [
  "actions-proto",
  "architect",
  "chrono",
+ "color-palette",
  "daw",
+ "daw-actions",
  "daw-proto",
  "daw-reaper",
  "daw-standalone",
@@ -23261,6 +23238,7 @@ dependencies = [
  "futures",
  "keyflow",
  "keyflow-daw-analysis",
+ "monarchy",
  "music-catalog",
  "reaper-high",
  "reaper-low",
@@ -23268,13 +23246,14 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
+ "session-guide",
  "session-proto",
  "smallvec 1.15.2",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "utils",
- "uuid 1.23.4",
+ "uuid",
  "vox",
 ]
 
@@ -23323,7 +23302,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "utils",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -23441,7 +23420,7 @@ dependencies = [
  "signal-storage",
  "tokio",
  "utils",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -23494,7 +23473,7 @@ dependencies = [
  "signal-proto",
  "signal-sampler",
  "tokio",
- "uuid 1.23.4",
+ "uuid",
  "walkdir",
 ]
 
@@ -23638,7 +23617,7 @@ name = "signal-grid"
 version = "0.1.0"
 dependencies = [
  "signal-proto",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -23653,7 +23632,7 @@ dependencies = [
  "signal-grid",
  "signal-proto",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -23700,7 +23679,7 @@ dependencies = [
  "signal-guitar-proto",
  "signal-proto",
  "signal-widgets",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -23744,7 +23723,7 @@ dependencies = [
  "signal-controller",
  "signal-proto",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -23812,7 +23791,7 @@ dependencies = [
  "signal-proto",
  "signal-storage",
  "tokio",
- "uuid 1.23.4",
+ "uuid",
  "vox",
 ]
 
@@ -23912,7 +23891,7 @@ dependencies = [
  "signal-macromod",
  "thiserror 2.0.18",
  "utils",
- "uuid 1.23.4",
+ "uuid",
  "vox",
 ]
 
@@ -24061,7 +24040,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "utils",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -24148,7 +24127,7 @@ dependencies = [
  "signal-widgets",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -24543,7 +24522,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -24753,7 +24732,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "url",
- "uuid 1.23.4",
+ "uuid",
  "webpki-roots 0.26.11",
 ]
 
@@ -24838,7 +24817,7 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "whoami",
 ]
 
@@ -24881,7 +24860,7 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "whoami",
 ]
 
@@ -24909,7 +24888,7 @@ dependencies = [
  "time",
  "tracing",
  "url",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -25947,7 +25926,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -26066,7 +26045,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-proto",
  "vox",
@@ -26173,7 +26152,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vault-live",
@@ -26259,7 +26238,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
  "workflows-proto",
@@ -26363,7 +26342,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-collab",
  "vault-proto",
@@ -26403,7 +26382,7 @@ dependencies = [
  "serde",
  "serde_json",
  "task-proto",
- "uuid 1.23.4",
+ "uuid",
  "workflows-proto",
 ]
 
@@ -26418,7 +26397,7 @@ dependencies = [
  "serde",
  "task-plugin",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vox-core",
  "vox-websocket",
  "wasm-bindgen",
@@ -26695,7 +26674,7 @@ dependencies = [
  "threads-proto",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -26710,7 +26689,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -26725,7 +26704,7 @@ dependencies = [
  "serde",
  "threads-proto",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -26789,7 +26768,7 @@ dependencies = [
  "timer-proto",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -26804,7 +26783,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -28289,7 +28268,7 @@ dependencies = [
  "timer-proto",
  "tokio-tungstenite",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault-proto",
  "view",
  "view-calendar",
@@ -28786,16 +28765,7 @@ version = "0.1.0"
 dependencies = [
  "facet 0.50.0-rc.5",
  "serde",
- "uuid 1.23.4",
-]
-
-[[package]]
-name = "uuid"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom 0.2.17",
+ "uuid",
 ]
 
 [[package]]
@@ -28854,7 +28824,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault-live",
  "vault-proto",
 ]
@@ -28869,7 +28839,7 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
 ]
 
@@ -28894,7 +28864,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault-proto",
  "walkdir",
 ]
@@ -28918,7 +28888,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault-live",
  "vault-proto",
  "walkdir",
@@ -28936,7 +28906,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -29155,7 +29125,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -29169,7 +29139,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -29194,7 +29164,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -29219,7 +29189,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -30061,7 +30031,7 @@ dependencies = [
  "mac_address",
  "sha2 0.10.9",
  "thiserror 1.0.69",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -30443,7 +30413,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault-live",
  "walkdir",
  "wiki-extract",
@@ -30464,7 +30434,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
 ]
@@ -31429,7 +31399,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "uuid 1.23.4",
+ "uuid",
  "workflows-proto",
 ]
 
@@ -31445,7 +31415,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
 ]
 
 [[package]]
@@ -31464,7 +31434,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vox",
@@ -31488,7 +31458,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "uuid 1.23.4",
+ "uuid",
  "vault",
  "vault-entity",
  "vault-proto",
@@ -31510,7 +31480,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid 1.23.4",
+ "uuid",
  "vox",
  "vox-types",
  "workflows-proto",

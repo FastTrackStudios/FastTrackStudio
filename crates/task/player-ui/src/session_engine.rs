@@ -43,14 +43,14 @@ use std::cell::{Cell, RefCell};
 use daw::service::{ExtState as _, ProjectContext, ProjectInfo};
 use daw_standalone::bootstrap::{InProcessDaw, build_in_process_daw};
 use daw_standalone::sync::Standalone;
-use session::setlist_service::demo::{
+use session::setlist::service::demo::{
     DemoSection, DemoSong, demo_chart_for, demo_songs_base, stamp_song_with_default_tempo_native,
 };
 use session::services::setlist_service::{
     SetlistServiceStreamClient, setlist_service_stream_service_descriptor,
     stream_serve as setlist_service_stream_serve,
 };
-use session::keyflow_actions::SectionKind;
+use session::keyflow::actions::SectionKind;
 use session::{
     SetlistServiceClient, SetlistServiceImpl, serve_setlist_service,
     setlist_service_service_descriptor,
@@ -356,8 +356,8 @@ fn seed_song(
         standalone
             .set_project(
                 ProjectContext::Project(guid.to_owned()),
-                session::setlist_service::CHART_EXT_STATE_SECTION,
-                session::setlist_service::CHART_EXT_STATE_KEY,
+                session::setlist::service::CHART_EXT_STATE_SECTION,
+                session::setlist::service::CHART_EXT_STATE_KEY,
                 chart,
             )
             .map_err(|e| eyre::eyre!("stamp chart for {name}: {e:?}"))?;
@@ -458,7 +458,7 @@ fn manifest_to_demo_song(
     // Chart path — the accurate skeleton (drops the leading CountIn, which the
     // stamp path re-derives as the count-in marker).
     if let Some(chart_text) = chart {
-        if let Ok(layout) = session::chart_import::chart_to_layout(chart_text) {
+        if let Ok(layout) = session::setlist::chart_import::chart_to_layout(chart_text) {
             let sections: Vec<DemoSection> = layout
                 .sections
                 .iter()
