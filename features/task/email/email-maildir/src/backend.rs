@@ -156,6 +156,25 @@ impl Backend {
         }
     }
 
+
+    /// Publish this backend's change events into `hub` instead of its
+    /// own.
+    ///
+    /// A server that serves several accounts across different backends
+    /// mounts ONE `EmailSync` service, so there must be ONE stream for
+    /// subscribers to attach to. `architect::PubSub` has no subscribe
+    /// side to bridge with, so the multiplexer hands its hub down to
+    /// each sub-backend at build time instead. Call before the backend
+    /// is cloned or used.
+    #[must_use]
+    pub fn with_changes_hub(
+        mut self,
+        hub: architect::PubSub<email_proto::EmailChange>,
+    ) -> Self {
+        self.changes = hub;
+        self
+    }
+
     fn state(&self, account: &str) -> Result<&AccountState, EmailSyncError> {
         self.accounts
             .get(account)

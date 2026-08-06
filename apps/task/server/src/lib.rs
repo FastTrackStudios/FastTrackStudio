@@ -275,7 +275,7 @@ pub struct OrgAppState {
     /// for the `EmailSync` RPC surface (accounts / folders /
     /// envelopes).
     #[cfg(feature = "plugin-email")]
-    pub email: email_maildir::Backend,
+    pub email: email_mux::Backend,
     /// Email product layer — the staged-send outbox
     /// (`EmailProduct`: submit / approve / cancel, human-in-the-
     /// loop gate) over the same accounts. Shares the `email`
@@ -946,7 +946,10 @@ pub(crate) async fn build_org_state(
         let mail_root = std::env::var("TASK_SERVER_MAIL_ROOT")
             .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
         #[cfg(feature = "plugin-email")]
-        let mail_accounts = discover_mail_accounts(&mail_root);
+        let (mail_accounts, mail_configs) = discover_mail_accounts(&mail_root);
+        // The outbox is maildir-backed (it stores staged drafts on
+        // disk next to the account), so it covers local accounts only.
+        // Remote accounts send through IMAP/SMTP directly.
         #[cfg(feature = "plugin-email")]
         let product_accounts: Vec<email_product::ProductAccount> = mail_accounts
             .iter()
@@ -956,8 +959,32 @@ pub(crate) async fn build_org_state(
                 address: e.account.address.clone(),
             })
             .collect();
+        // One `EmailSync` service, several backends behind it: local
+        // Maildir accounts plus any remote IMAP accounts (Gmail &c)
+        // declared by an `account.json`. The mux routes by account id
+        // and gives both sub-backends one shared change hub, so
+        // subscribers still see a single stream.
         #[cfg(feature = "plugin-email")]
-        let email = email_maildir::Backend::with_configured_accounts(mail_accounts);
+        let email = email_mux::Backend::build(mail_accounts, mail_configs);
+
+        // Push delivery for remote accounts: one IDLE loop per IMAP
+        // account's INBOX, publishing into the shared hub. Failures
+        // inside the loop are its own problem (it reconnects with
+        // backoff) — startup does not depend on the server being
+        // reachable, so a wrong password degrades to "that account
+        // lists nothing" rather than blocking boot.
+        #[cfg(feature = "plugin-email")]
+        if let Some(imap) = email.imap() {
+            for account in email.imap_account_ids() {
+                let imap = imap.clone();
+                let acct = account.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = imap.start_idle(&acct, "INBOX").await {
+                        tracing::warn!(account = %acct, ?err, "imap: IDLE watcher not started");
+                    }
+                });
+            }
+        }
 
         // Known-sender scoring rides the org's contacts when that
         // plugin is compiled in; without it every sender is scored
@@ -1398,11 +1425,25 @@ impl email_product::ContactLookup for NoContactLookup {
 }
 
 #[cfg(feature = "plugin-email")]
-fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::AccountEntry> {
+/// Scan the org's mail root: one directory per account, each
+/// optionally carrying an `account.json` ([`email_config::AccountConfig`]).
+///
+/// Returns both views the multiplexer needs — the maildir entries for
+/// local accounts, and every parsed config, which is what decides
+/// whether an account is local or remote IMAP. An account directory
+/// with no config is a plain Maildir, which keeps the zero-config
+/// fixture mailbox working.
+fn discover_mail_accounts(
+    mail_root: &std::path::Path,
+) -> (
+    Vec<email_maildir::AccountEntry>,
+    Vec<email_config::AccountConfig>,
+) {
     let Ok(entries) = std::fs::read_dir(mail_root) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut accounts = Vec::new();
+    let mut configs = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
@@ -1423,6 +1464,8 @@ fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::Acc
 
         match email_config::AccountConfig::load_json(&path.join("account.json")) {
             Ok(Some(cfg)) => {
+                let is_remote = !matches!(cfg.backend, email_config::BackendKind::Maildir { .. });
+                configs.push(cfg.clone());
                 // Keep the directory name as the account id (the
                 // maildir root is keyed by it); take identity +
                 // aliases + submit from the config.
@@ -1438,6 +1481,11 @@ fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::Acc
                         smtp.clone(),
                     )));
                 }
+                // A remote account has no local maildir to serve
+                // from — routing sends its calls to IMAP instead.
+                if is_remote {
+                    continue;
+                }
             }
             Ok(None) => {}
             Err(err) => {
@@ -1452,7 +1500,7 @@ fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::Acc
             submit,
         });
     }
-    accounts
+    (accounts, configs)
 }
 
 /// Dev default — replace via config in a later phase. Length-checked

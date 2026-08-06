@@ -8081,6 +8081,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "email-mux"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "email-config",
+ "email-imap",
+ "email-maildir",
+ "email-proto",
+ "email-secret",
+ "email-smtp",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "email-product"
 version = "0.1.0"
 dependencies = [
@@ -26072,6 +26087,10 @@ dependencies = [
  "cooklang",
  "cycle",
  "dotenvy",
+ "email-config",
+ "email-imap",
+ "email-proto",
+ "email-secret",
  "exercises",
  "eyre",
  "finance",
@@ -26235,7 +26254,9 @@ dependencies = [
  "crdt",
  "ed25519-dalek 2.2.0",
  "email-config",
+ "email-imap",
  "email-maildir",
+ "email-mux",
  "email-product",
  "email-proto",
  "email-smtp",
