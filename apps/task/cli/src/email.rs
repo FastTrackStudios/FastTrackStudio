@@ -32,10 +32,19 @@
 //!
 //! `task email add-gmail you@gmail.com --password-command 'rbw get
 //! gmail-app-password'` fills in `imap.gmail.com:993` (implicit TLS)
-//! and `smtp.gmail.com:587` (STARTTLS). Gmail needs **IMAP enabled**
-//! (Settings → Forwarding and POP/IMAP) and an **app password**
-//! (Google Account → Security → 2-Step Verification → App passwords).
-//! A normal account password will not authenticate.
+//! and `smtp.gmail.com:587` (STARTTLS).
+//!
+//! The one thing Gmail still requires is an **app password** (Google
+//! Account → Security → 2-Step Verification → App passwords); a normal
+//! account password will not authenticate. Reaching that page prompts
+//! for a password re-verification, so it is a hands-on step.
+//!
+//! There is **no IMAP toggle to turn on**. Google made IMAP always-on
+//! and removed the control — the Forwarding and POP/IMAP settings page
+//! now carries only the auto-expunge / deletion / folder-size options.
+//! Checked against a live account 2026-08-05; earlier guidance here
+//! (and everywhere else on the internet) says to enable it, and that
+//! step no longer exists.
 
 use clap::Subcommand;
 use email_config::{AccountConfig, BackendKind, FolderAliases, SmtpConfig, TlsMode};
@@ -290,10 +299,16 @@ pub(crate) async fn run_email(cmd: EmailCmd, org_override: Option<&str>) -> eyre
             };
             write_account(&root, &id, &cfg)?;
             println!();
-            println!("Gmail also needs, on Google's side:");
-            println!("  1. IMAP on — Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP");
-            println!("  2. An app password — Google Account → Security → 2-Step Verification");
-            println!("     → App passwords. A normal account password will NOT authenticate.");
+            println!("Gmail still needs an APP PASSWORD on Google's side:");
+            println!("  Google Account → Security → 2-Step Verification → App passwords");
+            println!("  (https://myaccount.google.com/apppasswords)");
+            println!("  A normal account password will NOT authenticate.");
+            println!();
+            println!("You do NOT need to enable IMAP — Google made it always-on and removed");
+            println!("the setting; there is no toggle on Forwarding and POP/IMAP any more.");
+            println!();
+            println!("Then check it before restarting the server:");
+            println!("  task email test {id}");
             Ok(())
         }
         EmailCmd::Remove { id, purge_maildir } => remove(&root, &id, purge_maildir),
