@@ -31,6 +31,7 @@ pub mod link_sync;
 pub mod mcp;
 pub mod media;
 pub mod notifier;
+pub mod otlp;
 pub mod permits;
 pub mod presence;
 pub mod server_mgmt;
@@ -1867,6 +1868,13 @@ pub fn router(state: AppState) -> Router {
         .merge(server_mgmt)
         .merge(watch_bridge::watch_router())
         .merge(blob_router);
+    // Authenticated OTLP ingest, only when an upstream collector is
+    // configured — see `otlp`. Clients export through here rather than to
+    // a public collector endpoint.
+    let router = match otlp::otlp_router() {
+        Some(r) => router.merge(r),
+        None => router,
+    };
     #[cfg(feature = "plugin-forge")]
     let router = router.merge(webhook_routes);
     router.layer(cors_layer()).with_state(state)
@@ -2406,7 +2414,8 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 scheduling_proto::service::day_plans::serve(org.scheduling.clone()),
             )
             .with(
-                scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
+                scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(
+                ),
                 scheduling_proto::service::calendar_events::serve(org.scheduling.clone()),
             )
             // Scheduling — booking half (Cal.com-style): event types,

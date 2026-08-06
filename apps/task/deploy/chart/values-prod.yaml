@@ -28,6 +28,13 @@ server:
     # Distinguishes this deployment's spans from a self-hoster's in a
     # shared backend, and from the clients that proxy through it.
     OTEL_RESOURCE_ATTRIBUTES: deployment.environment=prod,service.namespace=task
+    # Authenticated OTLP ingest for out-of-cluster CLIENTS (desktop, iOS):
+    # setting this mounts `/otlp/v1/{traces,logs,metrics}`, which forwards
+    # to the same collector. The collector is a ClusterIP on purpose —
+    # clients reuse the server's auth and TLS instead of a public endpoint.
+    # Unset → the route does not exist. Clients present TASK_OTLP_TOKEN,
+    # which rides in the `task-env` Secret alongside TASK_HERMES_API_KEY.
+    TASK_OTLP_UPSTREAM: http://otel-collector.observability.svc:4318
   # Env from the cluster-managed `task-env` Secret (starcommand
   # cluster-secrets app) — carries TASK_HERMES_API_KEY today; add
   # TASK_SERVER_SEALING_KEY there when rotating off the machine-dev

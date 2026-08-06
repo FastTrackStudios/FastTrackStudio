@@ -9,9 +9,9 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
+    use tracing_subscriber::EnvFilter;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    use tracing_subscriber::EnvFilter;
 
     /// Initialise Sentry and return the guard. `service` is attached as a
     /// tag so events can be filtered per app (server / mobile / desktop).
@@ -55,24 +55,61 @@ mod native {
     /// Uses `.try_init()` so a later subscriber init (e.g. dioxus) failing
     /// to become the global default is a no-op rather than a panic.
     /// Returns the Sentry guard — hold it for the process lifetime.
-    pub fn init_tracing(service: &str, env_filter_default: &str) -> Option<sentry::ClientInitGuard> {
+    pub fn init_tracing(
+        service: &str,
+        env_filter_default: &str,
+    ) -> Option<sentry::ClientInitGuard> {
+        init_tracing_full(service, env_filter_default).0
+    }
+
+    /// [`init_tracing`] plus the OTLP guard, for callers that want both.
+    ///
+    /// Both guards must outlive the process; dropping the OTel one flushes
+    /// and stops the exporters. The client apps use [`init_tracing`] and
+    /// leak the OTel guard (see below) because their `main` hands control
+    /// to a UI event loop that never returns normally.
+    pub fn init_tracing_full(
+        service: &str,
+        env_filter_default: &str,
+    ) -> (Option<sentry::ClientInitGuard>, super::OtelHandle) {
         let guard = init(service);
 
         let filter = EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| EnvFilter::new(env_filter_default));
 
-        let _ = tracing_subscriber::registry()
+        let registry = tracing_subscriber::registry()
             .with(filter)
             .with(tracing_subscriber::fmt::layer())
-            .with(tracing_layer())
-            .try_init();
+            .with(tracing_layer());
 
-        guard
+        // With the `otel` feature the client exports the same
+        // traces/logs/metrics the server does — the whole point of
+        // instrumenting the RPC layer is that a client call and the server
+        // work it triggers can be looked at together.
+        #[cfg(feature = "otel")]
+        {
+            let service: &'static str = Box::leak(service.to_owned().into_boxed_str());
+            if let Some((otel_guard, layers)) = super::otel::init(service) {
+                let _ = registry.with(layers).try_init();
+                return (guard, Some(otel_guard));
+            }
+        }
+
+        let _ = registry.try_init();
+        (guard, None)
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{init, init_tracing, tracing_layer};
+pub use native::{init, init_tracing, init_tracing_full, tracing_layer};
+
+/// The OTLP guard, or `()` when the `otel` feature is off — so
+/// [`native::init_tracing_full`]'s signature doesn't change with the
+/// feature.
+#[cfg(all(not(target_arch = "wasm32"), feature = "otel"))]
+pub type OtelHandle = Option<otel::OtelGuard>;
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "otel")))]
+pub type OtelHandle = Option<()>;
 
 // ── OpenTelemetry (feature `otel`, native only) ──────────────────────
 //
@@ -84,10 +121,10 @@ pub use native::{init, init_tracing, tracing_layer};
 pub mod otel {
     use opentelemetry::global;
     use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::trace::SdkTracerProvider;
-    use opentelemetry_sdk::Resource;
     use tracing_subscriber::Layer;
 
     /// Re-export for callers that record custom metrics (the server's
@@ -125,6 +162,39 @@ pub mod otel {
             .unwrap_or(false)
     }
 
+    /// Resolve the shipped-client OTLP config into the standard
+    /// `OTEL_EXPORTER_OTLP_*` env vars, the same way the Sentry DSN is
+    /// resolved: build-time first, process env as the override.
+    ///
+    /// A shipped desktop/iOS build has no one to set env vars for it, and
+    /// the exporter is built once at startup — before anyone has signed in
+    /// — so a session token can't be the credential. `TASK_OTLP_TOKEN` is
+    /// a static ingest token baked in at build time (a GH Actions secret,
+    /// exactly like `TASK_SENTRY_DSN`), which the server accepts on
+    /// `/otlp` and nothing else.
+    ///
+    /// Sets nothing that is already set, so a developer pointing a local
+    /// build at a local collector always wins. Absent both, this is a
+    /// no-op and the app stays telemetry-free — the local-first default.
+    fn resolve_client_config() {
+        let baked_endpoint = option_env!("TASK_OTLP_ENDPOINT").unwrap_or("").trim();
+        if !baked_endpoint.is_empty() && std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_none() {
+            // SAFETY: called once, before the exporters (or any other
+            // thread that reads env) are built.
+            unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", baked_endpoint) };
+        }
+
+        let baked_token = option_env!("TASK_OTLP_TOKEN").unwrap_or("").trim();
+        if !baked_token.is_empty() && std::env::var_os("OTEL_EXPORTER_OTLP_HEADERS").is_none() {
+            unsafe {
+                std::env::set_var(
+                    "OTEL_EXPORTER_OTLP_HEADERS",
+                    format!("Authorization=Bearer {baked_token}"),
+                )
+            };
+        }
+    }
+
     /// Initialise the OTLP pipelines (http/protobuf; endpoint and
     /// headers come from the standard `OTEL_EXPORTER_OTLP_*` env vars)
     /// and return the guard plus the tracing layers to compose into
@@ -142,11 +212,9 @@ pub mod otel {
         service: &'static str,
     ) -> Option<(OtelGuard, Vec<Box<dyn Layer<S> + Send + Sync>>)>
     where
-        S: tracing::Subscriber
-            + for<'a> tracing_subscriber::registry::LookupSpan<'a>
-            + Send
-            + Sync,
+        S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
     {
+        resolve_client_config();
         if !enabled() {
             return None;
         }
