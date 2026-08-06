@@ -91,13 +91,13 @@ pub fn CurveEditor(
                 measure().await;
             },
             onresize: move |_| async move { measure().await },
-            onpointermove: move |e| {
+            onmousemove: move |e| {
                 if let Some(i) = held() {
                     let c = e.data().client_coordinates();
                     move_point(i, c.x, c.y);
                 }
             },
-            onpointerup: move |_| held.set(None),
+            onmouseup: move |_| held.set(None),
             // Deliberately no `onpointerleave`: dropping the handle the
             // moment the pointer crosses the box edge is what made
             // dragging a control point to the very top or bottom — i.e.
@@ -120,7 +120,7 @@ pub fn CurveEditor(
                 div {
                     key: "handle-{i}",
                     style: "position:absolute; left:calc({p.x * 100.0}% - {HANDLE / 2.0}px); top:calc({(1.0 - p.y) * 100.0}% - {HANDLE / 2.0}px); width:{HANDLE}px; height:{HANDLE}px; border-radius:50%; background:var(--background, #101010); border:2px solid var(--primary, #d2691e); cursor:grab; box-shadow:0 0 0 1px rgba(0,0,0,0.6); touch-action:none;",
-                    onpointerdown: move |_| async move {
+                    onmousedown: move |_| async move {
                         // Re-measure before the gesture can act on a
                         // coordinate, so the first move never snaps the
                         // handle to a position computed from a stale box.

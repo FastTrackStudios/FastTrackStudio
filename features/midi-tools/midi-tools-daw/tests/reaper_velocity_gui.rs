@@ -47,7 +47,7 @@ const PPQ: f64 = 960.0;
 // The seam
 // ─────────────────────────────────────────────────────────────────────
 
-/// The session the panel resolved when Apply was last pressed.
+/// The session the panel last committed.
 ///
 /// A shared cell rather than a method on the sink: `SinkHandle` takes the
 /// sink by value and boxes it, and the orphan rule blocks implementing
@@ -58,13 +58,14 @@ const PPQ: f64 = 960.0;
 struct Captured(Arc<Mutex<Option<Session>>>);
 
 impl Captured {
-    /// The session as of the last Apply, or `None` if Apply never fired.
+    /// The most recently committed session, or `None` if nothing has been
+    /// committed yet.
     fn get(&self) -> Option<Session> {
         self.0.lock().unwrap().clone()
     }
 }
 
-/// Hands the panel a fixed take and records what it resolves on Apply.
+/// Hands the panel a fixed take and records everything it commits.
 ///
 /// Deliberately not a mock that asserts on calls — it's a real
 /// `VelocitySink` whose "DAW" happens to be a `Vec`. The panel cannot
@@ -181,6 +182,17 @@ fn mount(notes: Vec<Note>) -> (dioxus_test::DocumentTester, Captured) {
     (tester, applied)
 }
 
+/// Let the panel's live-commit effect run.
+///
+/// There is no Apply button any more: a parameter change writes straight
+/// through via `use_effect`, so a test waits for the effect rather than
+/// pressing anything.
+async fn settle(tester: &dioxus_test::DocumentTester) {
+    for _ in 0..4 {
+        let _ = tester.pump().await;
+    }
+}
+
 /// Click the centre of an element, by test id.
 async fn click(tester: &dioxus_test::DocumentTester, testid: &str) -> dioxus_test::Result<()> {
     let el = tester.query(by_testid(testid)).immediately()?;
@@ -242,11 +254,11 @@ async fn gui_curve_preset_shapes_a_real_take(
 
     // "Rise" — the preset's own label, lowercased into a test id.
     click(&tester, "curve-rise").await.map_err(|e| eyre::eyre!("{e:?}"))?;
-    click(&tester, "apply").await.map_err(|e| eyre::eyre!("{e:?}"))?;
+    settle(&tester).await;
 
     let session = applied
         .get()
-        .ok_or_else(|| eyre::eyre!("Apply never reached the sink — the button did not fire"))?;
+        .ok_or_else(|| eyre::eyre!("the panel never committed — live updates are not firing"))?;
 
     let written = write(&take, &session).await?;
     let after = velocities(&take).await?;
@@ -278,11 +290,11 @@ async fn gui_dragging_the_amount_slider_blends_the_pattern(
     drag_x(&tester, "pattern-amount", 0.0, 0.95)
         .await
         .map_err(|e| eyre::eyre!("{e:?}"))?;
-    click(&tester, "apply").await.map_err(|e| eyre::eyre!("{e:?}"))?;
+    settle(&tester).await;
 
     let session = applied
         .get()
-        .ok_or_else(|| eyre::eyre!("Apply never reached the sink"))?;
+        .ok_or_else(|| eyre::eyre!("the panel never committed — live updates are not firing"))?;
 
     let amount = session.pattern_amount;
     ctx.log(&format!("amount after drag → {amount:.3}"));
@@ -322,11 +334,11 @@ async fn gui_dragging_back_to_zero_is_a_no_op(
     drag_x(&tester, "pattern-amount", 0.8, 0.0)
         .await
         .map_err(|e| eyre::eyre!("{e:?}"))?;
-    click(&tester, "apply").await.map_err(|e| eyre::eyre!("{e:?}"))?;
+    settle(&tester).await;
 
     let session = applied
         .get()
-        .ok_or_else(|| eyre::eyre!("Apply never reached the sink"))?;
+        .ok_or_else(|| eyre::eyre!("the panel never committed — live updates are not firing"))?;
     ctx.log(&format!(
         "amount back at {:.3}, {} edits",
         session.pattern_amount,
@@ -378,10 +390,10 @@ async fn gui_drawing_on_the_bars_edits_the_pattern(
     tester.pointer_up(ox + w as f64 * 0.95, y);
     let _ = tester.pump().await;
 
-    click(&tester, "apply").await.map_err(|e| eyre::eyre!("{e:?}"))?;
+    settle(&tester).await;
     let session = applied
         .get()
-        .ok_or_else(|| eyre::eyre!("Apply never reached the sink"))?;
+        .ok_or_else(|| eyre::eyre!("the panel never committed — live updates are not firing"))?;
 
     let after = session.pattern.steps().to_vec();
     ctx.log(&format!("pattern {before:?} → {after:?}"));
