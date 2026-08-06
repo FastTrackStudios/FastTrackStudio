@@ -495,6 +495,13 @@ table!(VAULT_STREAM, "vault-sync-stream", "vault/**", [rd "changes"]);
 table!(WIKI_STREAM, "wiki-events", "wiki/**", [rd "changes"]);
 #[cfg(feature = "plugin-email")]
 table!(EMAIL_STREAM, "email-stream", "email/**", [rd "changes"]);
+// Links are org-scoped metadata about mail, not mail — its own
+// resource path, so "can read the mailbox" and "can see what mail is
+// attached to this project" stay separable.
+#[cfg(feature = "plugin-email")]
+table!(EMAIL_LINKS, "email-links", "email/links/**", [
+    wr "link", wa "unlink", rd "links_for_message", rd "links_for_target",
+]);
 #[cfg(feature = "plugin-forge")]
 table!(FORGE_ISSUES_STREAM, "forge-issues-stream", "forge/issues/**", [rd "issue_events"]);
 #[cfg(feature = "plugin-forge")]
@@ -815,6 +822,7 @@ pub fn mounts() -> Vec<Mount> {
         m("email", email_proto::descriptor(), EMAIL),
         m("email", email_proto::product_descriptor(), EMAIL_PRODUCT),
         m("email", email_proto::stream_descriptor(), EMAIL_STREAM),
+        m("email", email_proto::links_descriptor(), EMAIL_LINKS),
     ]);
     #[cfg(feature = "plugin-forge")]
     v.extend([

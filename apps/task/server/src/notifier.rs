@@ -127,6 +127,12 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
         }));
     }
 
+    // Email rule — new mail in any configured mailbox.
+    #[cfg(feature = "plugin-email")]
+    if org.plugins.contains("email") {
+        spawn_email(org.clone(), Arc::clone(&deliver));
+    }
+
     // Agent rule — only when the agent plugin is mounted.
     if org.plugins.contains("agent") {
         let subscribe = {
@@ -233,6 +239,148 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
 
 /// The org's configured channel fan-out. One mint per rule hit, so
 /// every channel reports the same notification identity.
+/// New-mail notifications.
+///
+/// Unlike the other rules this is a **poll, not a stream**. The whole
+/// alert-once pipeline already exists in `email-store`: the
+/// `email-product` background pass fetches recent envelopes, baselines
+/// on first sight of an account, and marks genuinely-new messages
+/// unnotified. Nothing consumed the other end — `unnotified()` was
+/// written and never read, so mail arrived and no notification ever
+/// fired.
+///
+/// Baselining is why this must go through the store rather than off the
+/// `NewMessage` event: connecting a mailbox with a few hundred existing
+/// messages would otherwise fire a few hundred notifications. First
+/// sight records everything as already-seen and fires nothing; only
+/// mail that shows up *after* that raises anything.
+///
+/// The ids are drained, turned into notifications, and marked — in that
+/// order. A crash between deliver and mark re-notifies, which is the
+/// right way round: a duplicate is noise, a silent drop is a missed
+/// email.
+#[cfg(feature = "plugin-email")]
+fn spawn_email(org: OrgAppState, deliver: Arc<Deliverer>) {
+    use email_proto::{EmailProduct, EmailSync, SeqRange};
+
+    /// Matches `email-product`'s own poller, so a new message waits at
+    /// most one product pass plus one of these.
+    const POLL: Duration = Duration::from_secs(30);
+    /// Per-pass ceiling. `notify_observe` already caps what it marks;
+    /// this is the second belt.
+    const BATCH: u32 = 20;
+
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(POLL).await;
+
+            let accounts = {
+                let email = org.email.clone();
+                match tokio::task::spawn_blocking(move || email.accounts()).await {
+                    Ok(Ok(list)) => list,
+                    Ok(Err(err)) => {
+                        tracing::debug!(?err, "notifier: email accounts unavailable");
+                        continue;
+                    }
+                    Err(err) => {
+                        tracing::warn!(%err, "notifier: email accounts panicked");
+                        continue;
+                    }
+                }
+            };
+
+            for account in accounts {
+                let id = account.id.0.clone();
+                let product = org.email_product.clone();
+                let acct = id.clone();
+                let pending = match tokio::task::spawn_blocking(move || {
+                    product.unnotified(&acct, BATCH)
+                })
+                .await
+                {
+                    Ok(Ok(ids)) if !ids.is_empty() => ids,
+                    // An account with no store (or a transient backend
+                    // error) is not worth logging every 30s.
+                    _ => continue,
+                };
+
+                // Ids alone make a useless notification ("new message:
+                // <opaque@id>"), so pull the headers we already have
+                // cheaply. One listing covers the whole batch, and on
+                // IMAP it also warms the UID index.
+                let email = org.email.clone();
+                let acct = id.clone();
+                let envelopes = tokio::task::spawn_blocking(move || {
+                    email.fetch_envelopes(&acct, "INBOX", SeqRange::Recent(50))
+                })
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+
+                let mut delivered = Vec::new();
+                for message_id in pending {
+                    let env = envelopes.iter().find(|e| e.message_id == message_id);
+                    // A message that has aged out of the recent window
+                    // between the product pass and now still deserves a
+                    // notification — just a plainer one.
+                    let (title, body) = match env {
+                        Some(e) => {
+                            let from = e
+                                .from
+                                .first()
+                                .map(|a| {
+                                    a.name
+                                        .clone()
+                                        .filter(|n| !n.is_empty())
+                                        .unwrap_or_else(|| a.email.clone())
+                                })
+                                .unwrap_or_else(|| "unknown sender".to_owned());
+                            let subject = if e.subject.is_empty() {
+                                "(no subject)".to_owned()
+                            } else {
+                                e.subject.clone()
+                            };
+                            (subject, format!("{from} · {}", account.address))
+                        }
+                        None => ("New mail".to_owned(), account.address.clone()),
+                    };
+                    deliver.deliver(NewNotification {
+                        kind: NotifyKind::EmailReceived,
+                        title,
+                        body,
+                        source: NotifySource {
+                            service: "email".to_owned(),
+                            entity: message_id.clone(),
+                            href: "/email".to_owned(),
+                        },
+                        actor: account.address.clone(),
+                    });
+                    delivered.push(message_id);
+                }
+
+                if !delivered.is_empty() {
+                    let product = org.email_product.clone();
+                    let acct = id.clone();
+                    let n = delivered.len();
+                    match tokio::task::spawn_blocking(move || {
+                        product.mark_notified(&acct, delivered)
+                    })
+                    .await
+                    {
+                        Ok(Ok(_)) => tracing::debug!(account = %id, n, "notified new mail"),
+                        // Not marking means we re-notify next pass.
+                        // Loud, because it is a duplicate-notification
+                        // loop until it clears.
+                        Ok(Err(err)) => tracing::warn!(account = %id, ?err, "mark_notified failed"),
+                        Err(err) => tracing::warn!(account = %id, %err, "mark_notified panicked"),
+                    }
+                }
+            }
+        }
+    });
+}
+
 struct Deliverer {
     slug: String,
     channels: Vec<Arc<dyn DeliveryChannel>>,

@@ -3426,3 +3426,57 @@ async fn run_wiki_watch(cmd: WikiWatchCmd) -> eyre::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_mime_for_filename_maps_the_known_extensions() {
+        assert_eq!(archive_mime_for_filename("notes.md"), "text/markdown");
+        assert_eq!(archive_mime_for_filename("notes.markdown"), "text/markdown");
+        assert_eq!(archive_mime_for_filename("page.HTML"), "text/html");
+        assert_eq!(archive_mime_for_filename("page.htm"), "text/html");
+        assert_eq!(archive_mime_for_filename("paper.pdf"), "application/pdf");
+        assert_eq!(archive_mime_for_filename("shot.JPEG"), "image/jpeg");
+        assert_eq!(archive_mime_for_filename("shot.jpg"), "image/jpeg");
+        assert_eq!(archive_mime_for_filename("data.csv"), "text/csv");
+    }
+
+    #[test]
+    fn archive_mime_for_filename_falls_back_to_octet_stream() {
+        // No extension, an unknown one, and a dotfile (whose "name"
+        // after the last dot is the whole thing) must all be storable
+        // rather than erroring.
+        assert_eq!(
+            archive_mime_for_filename("README"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            archive_mime_for_filename("archive.tar.zst"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            archive_mime_for_filename(".gitignore"),
+            "application/octet-stream"
+        );
+    }
+
+    #[test]
+    fn archive_mime_for_filename_uses_only_the_final_extension() {
+        // `.tar.gz`-style names must not match on an inner segment.
+        assert_eq!(archive_mime_for_filename("report.pdf.zip"), "application/zip");
+        assert_eq!(archive_mime_for_filename("a.zip.pdf"), "application/pdf");
+    }
+
+    #[test]
+    fn route_vault_prefers_an_existing_local_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        match route_vault(dir.path()).expect("route") {
+            VaultRoute::Local(p) => {
+                assert_eq!(p, dir.path().canonicalize().unwrap());
+            }
+            VaultRoute::Vox(url) => panic!("existing dir must route local, got {url}"),
+        }
+    }
+}

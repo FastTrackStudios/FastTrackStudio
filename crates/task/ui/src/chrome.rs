@@ -1055,10 +1055,9 @@ pub(crate) fn resolve_org(sel: &OrgSelection, orgs: &[OrgMeta]) -> Option<(Strin
 
 /// Stable per-org "local owner" user id — a single-user stand-in until
 /// auth threads a real signed-in user id through. Deterministic so
-/// start / stop / list all key on the same user.
-pub(crate) fn owner_id(org_id: Uuid) -> Uuid {
-    Uuid::new_v5(&org_id, b"task-local-owner")
-}
+/// start / stop / list all key on the same user, and shared with the
+/// CLI and the watch bridge via `timer_proto::owner`.
+pub(crate) use timer_proto::local_owner_id as owner_id;
 
 /// `HH:MM:SS` from a (possibly negative, clamped) second count.
 pub(crate) fn fmt_hms(secs: i64) -> String {

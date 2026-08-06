@@ -1280,3 +1280,129 @@ fn render_invoice_markdown(
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fmt_seconds_omits_a_zero_hour() {
+        assert_eq!(fmt_seconds(0), "0m");
+        assert_eq!(fmt_seconds(59), "0m");
+        assert_eq!(fmt_seconds(60), "1m");
+        assert_eq!(fmt_seconds(3599), "59m");
+        assert_eq!(fmt_seconds(3600), "1h00m");
+        assert_eq!(fmt_seconds(3660), "1h01m");
+        assert_eq!(fmt_seconds(45_296), "12h34m");
+    }
+
+    #[test]
+    fn fmt_minor_keeps_the_sign_on_sub_unit_credits() {
+        assert_eq!(fmt_minor(0), "0.00");
+        assert_eq!(fmt_minor(7), "0.07");
+        assert_eq!(fmt_minor(1_234_567), "12345.67");
+        // The interesting case: naive `c / 100` renders "-0.05" as
+        // "0.05" because the integer quotient is zero and the sign is
+        // lost with it. An invoice that silently flips a credit to a
+        // charge is the worst kind of formatting bug.
+        assert_eq!(fmt_minor(-5), "-0.05");
+        assert_eq!(fmt_minor(-99), "-0.99");
+        assert_eq!(fmt_minor(-100), "-1.00");
+    }
+
+    /// Minimal invoice carrying only the field `next_invoice_number`
+    /// reads.
+    fn numbered(number: &str) -> finance_proto::Invoice {
+        let now = chrono::Utc::now();
+        finance_proto::Invoice {
+            id: uuid::Uuid::nil(),
+            book_id: uuid::Uuid::nil(),
+            party_id: uuid::Uuid::nil(),
+            kind: finance_proto::InvoiceKind::Invoice,
+            number: number.to_owned(),
+            status: finance_proto::InvoiceStatus::Draft,
+            issue_date: String::new(),
+            due_date: String::new(),
+            currency: "USD".into(),
+            exchange_rate_micro: 1_000_000,
+            line_items: Default::default(),
+            invoice_taxes: Default::default(),
+            uses_inclusive_taxes: false,
+            subtotal_minor: 0,
+            tax_total_minor: 0,
+            total_minor: 0,
+            amount_paid_minor: 0,
+            balance_minor: 0,
+            notes_public: String::new(),
+            notes_private: String::new(),
+            terms: String::new(),
+            footer: String::new(),
+            locked: false,
+            posted_at: now,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn next_invoice_number_starts_at_one_and_zero_pads() {
+        assert_eq!(next_invoice_number(&[], "INV-", 4), "INV-0001");
+        let existing = vec![numbered("INV-0001"), numbered("INV-0002")];
+        assert_eq!(next_invoice_number(&existing, "INV-", 4), "INV-0003");
+    }
+
+    #[test]
+    fn next_invoice_number_takes_the_highest_not_the_last() {
+        // Listing order is not guaranteed to be numeric order, and a
+        // deleted invoice leaves a gap. Reusing a number would collide
+        // with an already-issued document.
+        let existing = vec![
+            numbered("INV-0007"),
+            numbered("INV-0002"),
+            numbered("INV-0004"),
+        ];
+        assert_eq!(next_invoice_number(&existing, "INV-", 4), "INV-0008");
+    }
+
+    #[test]
+    fn next_invoice_number_ignores_other_prefixes_and_junk() {
+        // Drafts have an empty number; another book's series and
+        // hand-typed numbers must not advance this series.
+        let existing = vec![
+            numbered(""),
+            numbered("EST-0099"),
+            numbered("INV-draft"),
+            numbered("INV-0003"),
+        ];
+        assert_eq!(next_invoice_number(&existing, "INV-", 4), "INV-0004");
+    }
+
+    #[test]
+    fn next_invoice_number_overflows_the_pad_rather_than_truncating() {
+        let existing = vec![numbered("INV-9999")];
+        assert_eq!(next_invoice_number(&existing, "INV-", 4), "INV-10000");
+    }
+
+    #[test]
+    fn canonical_task_label_strips_the_date_prefix_and_normalizes() {
+        // Lines arrive as "<date>  <description>"; the legend wants
+        // just the description, case- and space-normalized so two
+        // spellings of the same work collapse into one slice.
+        assert_eq!(
+            canonical_task_label("2026-08-05  Video editing"),
+            "Video editing"
+        );
+        assert_eq!(
+            canonical_task_label("2026-08-05  VIDEO   EDITING"),
+            "Video editing"
+        );
+        assert_eq!(
+            canonical_task_label("2026-08-05  Video editing (mixed rates)"),
+            "Video editing"
+        );
+        // No date prefix — the whole line is the description.
+        assert_eq!(canonical_task_label("Mixing"), "Mixing");
+        assert_eq!(canonical_task_label("   "), "Untitled");
+        assert_eq!(canonical_task_label(""), "Untitled");
+    }
+}

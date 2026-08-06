@@ -71,7 +71,8 @@ async function startServer() {
     },
     { timeout: 10_000, label: "old task-server dead" },
   );
-  const repoRoot = path.resolve(__dirname, "..", "..");
+  // Four levels up — see the REPO_ROOT note in global-setup.js.
+  const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
   const serverBin = path.join(repoRoot, "target", "debug", "task-server");
   const log = fs.openSync(state.serverLog, "a");
   const server = spawn(serverBin, [], {
@@ -96,7 +97,7 @@ async function startServer() {
   return server.pid;
 }
 
-/** Mirror of crates/ui/src/auth.rs::DEV_ACCOUNTS (email → name). */
+/** Mirror of crates/task/ui/src/auth.rs::DEV_ACCOUNTS (email → name). */
 const DEV_ACCOUNTS = [
   { email: "cody@fasttrackstudios.com", name: "Cody Wright" },
   { email: "carter@fasttrackstudios.com", name: "Carter Whitlock" },
@@ -173,40 +174,35 @@ function mulberry32(seed) {
  * "Online — N" group isn't rendered yet.
  */
 const READ_ROSTER = () => {
-  const leaves = Array.from(document.querySelectorAll("aside *, div"));
-  const label = leaves.find(
-    (e) => e.childElementCount === 0 && /^Online — \d+$/.test((e.textContent || "").trim()),
-  );
-  if (!label) return null;
-  const count = parseInt((label.textContent || "").replace(/\D+/g, ""), 10);
-  // Walk up from the label until an ancestor contains the roster
-  // rows (PresenceRow roots: .rounded-md with a status-dot
-  // span.absolute[title] inside). Key on the ABSOLUTE-positioned
-  // status dot, not any span[title] — the ConnectionBadge in the
-  // group label also carries a title and satisfies the loose
-  // selector on the first hop, stranding the walk above the rows
-  // (roster forever parses as {count: N, rows: []}).
-  let group = label.parentElement;
-  for (let i = 0; group && i < 6; i++) {
-    if (
-      group.querySelector("span.absolute[title]") ||
-      /Nobody around/.test(group.textContent || "")
-    )
-      break;
-    group = group.parentElement;
-  }
-  if (!group) return { count, rows: [] };
+  // Read through `data-testid` hooks placed in presence.rs, not
+  // through classes and ancestor-walking.
+  //
+  // This used to locate the "Online — N" label by leaf text, then walk
+  // up to whichever ancestor happened to contain rows, then match rows
+  // as `div.rounded-md` with a `span.font-medium` name and an
+  // absolutely-positioned `span[title]` status dot. Every one of those
+  // is a styling detail, and the presence redesign (sidebar roster →
+  // top-bar "Who's here" dropdown) invalidated all of them at once.
+  //
+  // `data-testid` is the convention both of this stack's own tools
+  // default to — dioxus-test's `by_testid()` resolves
+  // `[data-testid="…"]`, and Playwright's `getByTestId` uses the same
+  // attribute — so the markup can be restyled freely and these keep
+  // working.
+  const roster = document.querySelector('[data-testid="presence-roster"]');
+  if (!roster) return null;
+  const countEl = document.querySelector('[data-testid="presence-count"]');
+  const count = countEl ? parseInt((countEl.textContent || "").replace(/\D+/g, ""), 10) : 0;
   const rows = [];
-  for (const row of group.querySelectorAll("div.rounded-md")) {
-    const name = row.querySelector("span.font-medium")?.textContent?.trim();
-    // The STATUS dot is the absolutely-positioned span on the
-    // avatar's corner (`title` = status label); the avatar span
-    // itself also carries a title (the peer's name) — don't grab it.
-    const status = row.querySelector("span.absolute[title]")?.getAttribute("title");
+  for (const row of roster.querySelectorAll('[data-testid="presence-row"]')) {
+    const name = row.querySelector('[data-testid="presence-name"]')?.textContent?.trim();
+    // `title` on the status dot is the human status label
+    // ("Available", "Do not disturb", …).
+    const status = row
+      .querySelector('[data-testid="presence-status"]')
+      ?.getAttribute("title");
     if (!name || !status) continue;
-    const agent = Array.from(row.querySelectorAll("span")).some(
-      (s) => (s.textContent || "").trim() === "bot" && s.className.includes("uppercase"),
-    );
+    const agent = !!row.querySelector('[data-testid="presence-agent"]');
     rows.push({ name, status, agent });
   }
   return { count, rows };
@@ -378,7 +374,7 @@ class Peer {
     await this.context.addInitScript((email) => {
       try {
         // Boot restore reads this and performs the real dev-account
-        // sign-in (crates/ui/src/auth.rs::provide_auth).
+        // sign-in (crates/task/ui/src/auth.rs::provide_auth).
         localStorage.setItem("task.auth.active", email);
       } catch {
         /* about:blank etc. */
@@ -415,14 +411,34 @@ class Peer {
     this.connected = true;
   }
 
-  /** Sidebar rendered AND our account finished signing in. */
+  /**
+   * Sidebar rendered AND our account finished signing in.
+   *
+   * The account switcher renders in two shapes (auth.rs
+   * `AccountStatusMenu`), and which one you get depends on whether the
+   * sidebar is collapsed to the icon rail:
+   *
+   *   - expanded — `title="Account & status"`, name in the button text;
+   *   - rail     — `title="Account & status — <name>"`, body is just
+   *                the avatar's initials, so the name is ONLY in the
+   *                title.
+   *
+   * Matching the exact expanded title and the text alone (what this
+   * did originally) silently misses the rail, which is what the
+   * default 1280px Playwright viewport actually renders. Accept either
+   * shape, and read the name from title-or-text.
+   */
   async waitForShell(timeout = 60_000) {
     const page = this.mustPage();
     await settle(
       () =>
         page.evaluate((name) => {
-          const switcher = document.querySelector('button[title="Account & status"]');
-          return !!switcher && (switcher.textContent || "").includes(name);
+          const switcher = document.querySelector('[data-testid="account-switcher"]');
+          if (!switcher) return false;
+          // Collapsed rail puts the name ONLY in the title (the body is
+          // the avatar's initials); expanded puts it in the text.
+          const haystack = `${switcher.getAttribute("title") || ""} ${switcher.textContent || ""}`;
+          return haystack.includes(name);
         }, this.name),
       { timeout, label: `${this.label} signed-in shell` },
     );
@@ -442,18 +458,32 @@ class Peer {
    */
   async openNote(title, { liveTimeout = 45_000 } = {}) {
     const page = this.mustPage();
-    if (!page.url().includes("/vault")) {
-      await page.goto("/vault", { waitUntil: "domcontentloaded" });
-      await this.waitForShell();
-    }
-    const row = page.locator("aside button", { hasText: title }).first();
-    await row.waitFor({ state: "visible", timeout: 30_000 });
-    await row.click();
+    // Vault notes live at the root, so path == `${title}.md`.
+    const expectedPath = `${title}.md`;
+
+    // Navigate by ROUTE, not by clicking the explorer tree.
+    //
+    // This used to click `aside button` matching the note title. The
+    // desktop VaultExplorer renders no <aside>, so that resolved the
+    // MOBILE sidebar's copy — `hidden` at md+ — and waited forever on
+    // an element that could never become visible.
+    //
+    // Clicking the desktop explorer instead is not a stable path
+    // either: notes with no folder and no tags land in the "Unfiled"
+    // `loose_section`, which is collapsed by default *on purpose*
+    // ("it exists to be ignorable"), so the seeded notes have no
+    // visible row to click at all. Driving that would mean expanding
+    // chrome this suite isn't testing — the subject here is collab
+    // convergence, and the note is directly addressable.
+    await page.goto(`/vault?path=${encodeURIComponent(expectedPath)}&org=`, {
+      waitUntil: "domcontentloaded",
+    });
+    await this.waitForShell();
+
     // Wait for THIS note's session: `live` alone can race a file
     // switch (the mirror momentarily still shows the previous file's
     // state until the page's open-effect re-arms), so pin the path
-    // too. Vault notes live at the root, so path == `${title}.md`.
-    const expectedPath = `${title}.md`;
+    // too.
     await settle(
       () =>
         page.evaluate(
@@ -561,9 +591,38 @@ class Peer {
 
   // ── presence / roster ─────────────────────────────────────────
 
-  /** Parse the sidebar roster. */
+  /**
+   * Parse the presence roster.
+   *
+   * On desktop the roster is no longer always-rendered in the sidebar
+   * — `shell/sidebar.rs` is dead code and presence moved into the top
+   * bar's `PresenceAvatarBar`, whose list only exists in the DOM while
+   * its dropdown is open. So: open it, read, close it again (leaving
+   * it open would swallow the next click behind the overlay).
+   *
+   * Mobile still renders `PresenceRoster` inline, so if the list is
+   * already readable we take it without touching the dropdown.
+   */
   async roster() {
-    return await this.mustPage().evaluate(READ_ROSTER);
+    const page = this.mustPage();
+    const direct = await page.evaluate(READ_ROSTER);
+    if (direct) return direct;
+
+    const trigger = page.getByTestId("presence-trigger");
+    if ((await trigger.count()) === 0) return null;
+    await trigger.click();
+    try {
+      // The dropdown mounts asynchronously; poll briefly rather than
+      // reading a frame too early and reporting a spurious null.
+      return await settle(() => page.evaluate(READ_ROSTER), {
+        timeout: 5_000,
+        label: `${this.label} roster dropdown`,
+      });
+    } catch {
+      return null;
+    } finally {
+      await page.keyboard.press("Escape").catch(() => {});
+    }
   }
 
   /**
@@ -572,7 +631,7 @@ class Peer {
    */
   async setStatus(label) {
     const page = this.mustPage();
-    await page.locator('button[title="Account & status"]').click();
+    await page.getByTestId("account-switcher").click();
     await page.getByText(label, { exact: true }).first().click();
     // Popover closes on select; give the publisher effect a beat.
     await page

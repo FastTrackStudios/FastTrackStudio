@@ -4,7 +4,7 @@
 // ┌─────────────────────────────────────────────────────────────────┐
 // │ KNOWN BUG — P0 6303584a: dead connections don't recover.        │
 // │ The per-org vox connection root is cached for the page's        │
-// │ lifetime (crates/ui/src/vox_clients.rs: "Reconnection after a   │
+// │ lifetime (crates/task/ui/src/vox_clients.rs: "Reconnection after a   │
 // │ server restart is a follow-up — a stale client surfaces as a    │
 // │ request error, and a reload re-establishes"), and the vault     │
 // │ page tears the collab session down on Offline without re-arming │

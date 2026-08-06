@@ -2924,3 +2924,82 @@ async fn propagate_state_to_forge(
     }
     Ok(touched)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_agent_ref_handles_the_three_forms() {
+        // Bare name = an agent; `agent:` is the explicit spelling.
+        assert_eq!(parse_agent_ref("claude").unwrap(), parse_agent_ref("agent:claude").unwrap());
+        assert_eq!(
+            parse_agent_ref("claude@2").unwrap(),
+            workflows_proto::AgentRef::agent_versioned("claude", "2")
+        );
+        assert_eq!(
+            parse_agent_ref("human:u-123").unwrap(),
+            workflows_proto::AgentRef::human("u-123")
+        );
+    }
+
+    #[test]
+    fn parse_agent_ref_tolerates_surrounding_whitespace() {
+        assert_eq!(
+            parse_agent_ref("  agent: claude @ 2 ").unwrap(),
+            workflows_proto::AgentRef::agent_versioned("claude", "2")
+        );
+        assert_eq!(
+            parse_agent_ref("human:  u-123  ").unwrap(),
+            workflows_proto::AgentRef::human("u-123")
+        );
+    }
+
+    #[test]
+    fn parse_agent_ref_drops_an_empty_version_rather_than_recording_one() {
+        // `claude@` must not become a versioned ref pinned to "".
+        assert_eq!(
+            parse_agent_ref("claude@").unwrap(),
+            workflows_proto::AgentRef::agent("claude")
+        );
+    }
+
+    #[test]
+    fn parse_agent_ref_rejects_refs_with_no_subject() {
+        for bad in ["", "   ", "human:", "human:   ", "agent:", "@2"] {
+            assert!(parse_agent_ref(bad).is_err(), "`{bad}` should not parse");
+        }
+    }
+
+    #[test]
+    fn parse_estimate_accepts_shirt_sizes_and_points() {
+        use task::model::Estimate;
+        assert!(matches!(parse_estimate("xs").unwrap(), Estimate::XS));
+        assert!(matches!(parse_estimate("S").unwrap(), Estimate::S));
+        assert!(matches!(parse_estimate(" m ").unwrap(), Estimate::M));
+        assert!(matches!(parse_estimate("L").unwrap(), Estimate::L));
+        assert!(matches!(parse_estimate("XL").unwrap(), Estimate::XL));
+        assert!(matches!(
+            parse_estimate("8").unwrap(),
+            Estimate::Points { value: 8 }
+        ));
+        assert!(matches!(
+            parse_estimate("0").unwrap(),
+            Estimate::Points { value: 0 }
+        ));
+    }
+
+    #[test]
+    fn parse_estimate_rejects_values_it_cannot_represent() {
+        // Points are a `u8`; anything else must surface as an error
+        // rather than silently wrapping or defaulting.
+        for bad in ["", "xxl", "-1", "256", "3.5", "medium"] {
+            assert!(parse_estimate(bad).is_err(), "`{bad}` should not parse");
+        }
+    }
+
+    #[test]
+    fn workflow_summary_renders_a_dash_when_there_is_nothing_to_show() {
+        assert_eq!(workflow_summary(&None), "—");
+    }
+}

@@ -16,6 +16,8 @@ fts-ui.workspace = true
 
 # `OrgMeta::id` — the org's stable UUID from the well-known endpoint.
 uuid = { workspace = true, features = ["v4", "js", "serde"] }
+# `OrgMeta` is persisted to the shell's boot cache as JSON.
+serde = { workspace = true, features = ["derive"] }
 
 # Plugin vocabulary — `plugin_set_for` resolves an org's deny-list to
 # the enabled set the shell gates nav/widgets/routes on. Wasm-clean.

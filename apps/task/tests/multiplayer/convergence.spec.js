@@ -17,7 +17,7 @@
 //     failure after that was a signal-ownership violation in the
 //     vault lazy-fetch path (root-scope spawn_forever writing the
 //     page's editor signal), fixed via the page-owned fetch worker
-//     in crates/ui/src/vault_lookup.rs.
+//     in crates/task/ui/src/vault_lookup.rs.
 //
 // The offline/return scenario is a separate spec —
 // offline-return.spec.js (skipped until P0 6303584a merges).
@@ -127,7 +127,7 @@ test.describe("5-way editor convergence", () => {
   // died after the first re-key, with "Copy Value … not a descendant of
   // the owning scope" warnings flooding the console (now suite-fatal
   // via helpers.js isSignalOwnershipViolation). The handles are now
-  // page-owned (crates/ui/src/collab.rs::use_collab_handles +
+  // page-owned (crates/task/ui/src/collab.rs::use_collab_handles +
   // architect's crdt use_doc_slot/use_synced_doc_into split).
   test("input lifecycle: vim Normal boot, backspace round-trip, file-switch + reconnect re-key keep input alive", async ({ browser }, testInfo) => {
     const state = loadState();

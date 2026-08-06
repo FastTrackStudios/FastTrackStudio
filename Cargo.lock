@@ -7339,11 +7339,32 @@ dependencies = [
 
 [[package]]
 name = "dirs"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
+dependencies = [
+ "dirs-sys 0.4.1",
+]
+
+[[package]]
+name = "dirs"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
 dependencies = [
- "dirs-sys",
+ "dirs-sys 0.5.0",
+]
+
+[[package]]
+name = "dirs-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
+dependencies = [
+ "libc",
+ "option-ext",
+ "redox_users 0.4.6",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -7354,7 +7375,7 @@ checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users",
+ "redox_users 0.5.2",
  "windows-sys 0.61.2",
 ]
 
@@ -8026,6 +8047,7 @@ dependencies = [
 name = "email-link"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "chrono",
  "email-proto",
  "email-store",
@@ -8053,6 +8075,23 @@ dependencies = [
  "maildir",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "email-mux"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "email-config",
+ "email-imap",
+ "email-maildir",
+ "email-proto",
+ "email-secret",
+ "email-smtp",
+ "email-store",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -8151,9 +8190,12 @@ dependencies = [
  "architect",
  "chrono",
  "dioxus",
+ "dirs 5.0.1",
  "email-proto",
  "fts-ui",
+ "serde_json",
  "task-ui-core",
+ "web-sys",
 ]
 
 [[package]]
@@ -9973,7 +10015,7 @@ dependencies = [
  "anyhow",
  "clap",
  "daw-proto",
- "dirs",
+ "dirs 6.0.0",
  "resvg 0.45.1",
  "serde",
  "serde_json",
@@ -11637,7 +11679,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "629d8f3bbeda9d148036d6b0de0a3ab947abd08ce90626327fc3547a49d59d97"
 dependencies = [
- "dirs",
+ "dirs 6.0.0",
  "futures",
  "http",
  "indicatif",
@@ -14410,7 +14452,7 @@ dependencies = [
  "datafusion-physical-expr",
  "datafusion-sql",
  "deepsize",
- "dirs",
+ "dirs 6.0.0",
  "fst",
  "futures",
  "half",
@@ -18969,7 +19011,7 @@ name = "patchbay"
 version = "0.1.0"
 dependencies = [
  "architect",
- "dirs",
+ "dirs 6.0.0",
  "eyre",
  "facet 0.50.0-rc.5",
  "facet-styx 5.0.0-rc.5",
@@ -21410,6 +21452,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5102a6aaa05aa011a238e178e6bca86d2cb56fc9f586d37cb80f5bca6e07759"
 dependencies = [
  "bitflags 2.13.0",
+]
+
+[[package]]
+name = "redox_users"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
+dependencies = [
+ "getrandom 0.2.17",
+ "libredox",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -26051,6 +26104,10 @@ dependencies = [
  "cooklang",
  "cycle",
  "dotenvy",
+ "email-config",
+ "email-imap",
+ "email-proto",
+ "email-secret",
  "exercises",
  "eyre",
  "finance",
@@ -26097,6 +26154,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vault",
+ "vault-entity",
  "vault-live",
  "vault-obsidian",
  "vault-proto",
@@ -26213,7 +26271,10 @@ dependencies = [
  "crdt",
  "ed25519-dalek 2.2.0",
  "email-config",
+ "email-imap",
+ "email-link",
  "email-maildir",
+ "email-mux",
  "email-product",
  "email-proto",
  "email-smtp",
@@ -26333,6 +26394,7 @@ dependencies = [
  "fts-ui",
  "futures-channel",
  "futures-util",
+ "serde",
  "task-plugin",
  "tracing",
  "uuid",
@@ -27566,7 +27628,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65ba1e5f6b9ef9fd87e21b9c6f351554dbd717960089168fcfdef854686961dc"
 dependencies = [
  "crossbeam-channel",
- "dirs",
+ "dirs 6.0.0",
  "libappindicator",
  "muda",
  "objc2 0.6.4",
@@ -28152,6 +28214,7 @@ dependencies = [
  "dioxus",
  "dioxus-icons",
  "dioxus-router",
+ "dirs 5.0.1",
  "editor",
  "editor-crdt",
  "email-ui",
@@ -31465,7 +31528,7 @@ dependencies = [
  "block2 0.6.2",
  "cookie",
  "crossbeam-channel",
- "dirs",
+ "dirs 6.0.0",
  "dom_query 0.27.0",
  "dpi",
  "dunce",

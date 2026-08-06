@@ -135,6 +135,12 @@ wiki-archive = { workspace = true, features = ["pdf"], optional = true }
 # `task-cli timer …` — local time tracking against a sqlite
 # db. No server needed; the same `timer::Store` the server
 # mounts works fine for a single-user CLI session.
+# `task email …` — writes the org's mail-account configs and can
+# connect to an IMAP endpoint to verify them before the server restarts.
+email-config = { workspace = true, optional = true }
+email-secret = { workspace = true, optional = true }
+email-imap = { workspace = true, optional = true }
+email-proto = { workspace = true, optional = true }
 timer-proto = { workspace = true, features = ["server", "vox"] }
 timer = { workspace = true }
 sea-orm = { workspace = true }
@@ -246,7 +252,13 @@ plugin-wiki = [
     "dep:agent-wiki",
 ]
 plugin-scripture = ["task-server/plugin-scripture"]
-plugin-email = ["task-server/plugin-email"]
+plugin-email = [
+    "task-server/plugin-email",
+    "dep:email-config",
+    "dep:email-secret",
+    "dep:email-imap",
+    "dep:email-proto",
+]
 plugin-forge = ["task-server/plugin-forge"]
 plugin-agent = ["task-server/plugin-agent"]
 plugin-scheduling = ["task-server/plugin-scheduling"]
@@ -260,6 +272,13 @@ plugin-contacts = ["task-server/plugin-contacts"]
 plugin-recall = ["task-server/plugin-recall"]
 plugin-home = ["task-server/plugin-home", "dep:locations"]
 
+[dev-dependencies]
+# `collection`'s local `slug()` is a 12th copy of the slugify rule and
+# diverges from the canonical one outside ASCII. The test module pins
+# that divergence against both implementations so it can't widen
+# unnoticed — see issue #68.
+vault-entity = { workspace = true }
+tempfile = "3"
 
 [lints]
 workspace = true

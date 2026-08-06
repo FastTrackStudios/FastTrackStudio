@@ -24,6 +24,7 @@ mod error;
 mod frontmatter;
 mod link;
 mod parse;
+mod backend;
 mod store;
 mod walker;
 
@@ -34,3 +35,5 @@ pub use link::EmailLink;
 pub use parse::{EmailWikilink, format_wikilink, parse_wikilinks};
 pub use store::LinkStore;
 pub use walker::{EntityResolver, WalkedFile, collect_links, default_resolver, walk_vault};
+
+pub use backend::LinkBackend;

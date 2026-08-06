@@ -240,6 +240,12 @@ pub(crate) fn NoteView(
             if (*focused_doc.peek()).map(|d| d.claim) == Some(claim) {
                 focused_doc.set(None);
             }
+            // Withdraw from the context FIRST (above), then free the
+            // buffer: the page owns it on our behalf, so this scope's
+            // teardown will not, and leaving it would leak one document
+            // per tab/file switch. Order matters — the sidebar must not
+            // be able to reach a freed buffer.
+            session.dispose_buffer();
         });
     }
 

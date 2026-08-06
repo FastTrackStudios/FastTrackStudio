@@ -49,7 +49,7 @@ fn parse_orgs(body: &str) -> Result<Vec<OrgMeta>, String> {
 
 /// Fetch the hosted org list from `/.well-known/task-server.json`.
 #[cfg(target_arch = "wasm32")]
-pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
+async fn fetch_orgs_live() -> Result<Vec<OrgMeta>, String> {
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
 
@@ -82,7 +82,7 @@ pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
 /// [`http_base`], discovery resolves the org slug, and the vox dial can
 /// proceed (`vox_clients::org_ws_url` needs a real slug).
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
+async fn fetch_orgs_live() -> Result<Vec<OrgMeta>, String> {
     let base = http_base();
     if base.is_empty() {
         return Err("no server URL configured".to_owned());
@@ -126,4 +126,113 @@ pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
         }
     }
     result
+}
+
+// ── discovery boot cache ────────────────────────────────────────────
+//
+// Discovery is a network fetch, and *everything* org-scoped is
+// downstream of it: with no org list there is no slug, so no page can
+// even name what it wants. That made every offline surface dead on
+// arrival regardless of its own caching — the email page's offline
+// cache could never be reached, because the page had no key to look
+// under.
+//
+// So the last successful list is remembered per server base, and a
+// failed discovery falls back to it. A live answer always wins and
+// refreshes; the cache only ever covers the "server unreachable" case,
+// never a server that answered with a different list.
+
+fn orgs_cache_key(base: &str) -> String {
+    // One entry per server — pointing the app at a different server
+    // must not show you the previous one's orgs.
+    let safe: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    format!("task.orgs.{safe}")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn orgs_cache_read(key: &str) -> Option<String> {
+    web_sys::window()?
+        .local_storage()
+        .ok()
+        .flatten()?
+        .get_item(key)
+        .ok()
+        .flatten()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn orgs_cache_write(key: &str, value: &str) {
+    if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = s.set_item(key, value);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn orgs_cache_path(key: &str) -> Option<std::path::PathBuf> {
+    Some(dirs::cache_dir()?.join("task").join(key))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn orgs_cache_read(key: &str) -> Option<String> {
+    std::fs::read_to_string(orgs_cache_path(key)?).ok()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn orgs_cache_write(key: &str, value: &str) {
+    let Some(path) = orgs_cache_path(key) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, value);
+}
+
+/// Discover the hosted orgs, falling back to the last known list when
+/// the server cannot be reached.
+pub async fn fetch_orgs() -> Result<Vec<OrgMeta>, String> {
+    let base = http_base();
+    match fetch_orgs_live().await {
+        Ok(list) => {
+            if !base.is_empty() {
+                if let Ok(json) = serde_json::to_string(&list) {
+                    orgs_cache_write(&orgs_cache_key(&base), &json);
+                }
+            }
+            Ok(list)
+        }
+        Err(err) => {
+            if base.is_empty() {
+                return Err(err);
+            }
+            match orgs_cache_read(&orgs_cache_key(&base))
+                .and_then(|j| serde_json::from_str::<Vec<OrgMeta>>(&j).ok())
+                .filter(|l| !l.is_empty())
+            {
+                Some(cached) => Ok(cached),
+                None => Err(err),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod orgs_cache_tests {
+    use super::orgs_cache_key;
+
+    #[test]
+    fn cache_keys_are_per_server() {
+        assert_ne!(
+            orgs_cache_key("https://tasks.starcommand.live"),
+            orgs_cache_key("http://127.0.0.1:18080")
+        );
+        // No separators survive into the filename — the base is
+        // user-supplied and lands in a path on desktop.
+        let k = orgs_cache_key("https://a.b/../../etc");
+        assert!(!k.contains('/') && !k.contains('.') || k.starts_with("task.orgs."));
+        assert!(!k["task.orgs.".len()..].contains('/'));
+    }
 }
