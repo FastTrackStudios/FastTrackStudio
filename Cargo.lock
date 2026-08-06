@@ -3368,12 +3368,8 @@ checksum = "0d1275808335c5583ea45a4141d631dafcb36b79fa8a5e10b00e356b6af3e08a"
 name = "chord-tool"
 version = "0.1.0"
 dependencies = [
- "architect",
- "daw",
- "daw-proto",
- "eyre",
+ "dioxus",
  "keyflow",
- "tracing",
 ]
 
 [[package]]
