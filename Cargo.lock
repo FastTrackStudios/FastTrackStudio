@@ -10040,6 +10040,8 @@ dependencies = [
  "daw-reaper",
  "daw-synchronization",
  "dynamic-template",
+ "expression-editor-core",
+ "expression-editor-reaper",
  "eyre",
  "fragile",
  "fts-extensions-actions",
