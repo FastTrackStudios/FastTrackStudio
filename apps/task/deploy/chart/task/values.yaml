@@ -122,6 +122,10 @@ ingress:
   # web app. /org covers per-org endpoints (/org/<slug>/vox, webhooks),
   # /server the server-management vox, /blobs attachment up/downloads,
   # /media song stems + manifests served from org resources/ (org-resolved).
+  # /otlp the authenticated telemetry ingest proxy — desktop/iOS clients
+  # export here rather than to the collector, which is a ClusterIP on
+  # purpose. Missing from this list it would silently reach the WEB app
+  # and the exports would vanish into the SPA fallback.
   serverPaths:
     - /vox
     - /org
@@ -129,6 +133,7 @@ ingress:
     - /blobs
     - /.well-known
     - /media
+    - /otlp
   # TLS is usually terminated OUTSIDE the cluster (or by cert-manager);
   # passthrough list in standard ingress.spec.tls shape:
   #   tls:

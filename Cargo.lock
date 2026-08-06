@@ -10031,8 +10031,6 @@ dependencies = [
  "fts-launcher",
  "fts-ui",
  "keyflow-orchestra",
- "midi-tools-daw",
- "midi-tools-ui",
  "reaper-config",
  "reaper-high",
  "reaper-input",
