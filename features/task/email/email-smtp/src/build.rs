@@ -99,7 +99,7 @@ fn generate_message_id(domain: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use email_proto::{Addr, Attachment, AttachmentMeta, Draft};
+    use email_proto::{Addr, Attachment, Draft};
 
     fn base_draft() -> Draft {
         Draft {
@@ -182,15 +182,8 @@ mod tests {
     #[test]
     fn attachments_produce_multipart() {
         let mut d = base_draft();
-        d.attachments.push(Attachment {
-            meta: AttachmentMeta {
-                part: "0".into(),
-                filename: Some("hello.txt".into()),
-                mime: "text/plain".into(),
-                size: 5,
-            },
-            data: b"hello".to_vec(),
-        });
+        d.attachments
+            .push(Attachment::new("hello.txt", b"hello".to_vec()).with_content_type("text/plain"));
         let (bytes, _) = build_message(&d).unwrap();
         let s = String::from_utf8_lossy(&bytes);
         assert!(s.to_lowercase().contains("multipart/mixed"));

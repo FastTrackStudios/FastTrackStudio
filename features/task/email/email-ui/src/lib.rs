@@ -16,6 +16,8 @@
 //! `submit` endpoint — a staged entry on an account without one
 //! surfaces the delivery error in the outbox panel.
 
+mod offline;
+
 use dioxus::prelude::*;
 use email_proto::{Account, Addr, Draft, Envelope, OutboxEntry, OutboxStatus};
 use fts_ui::prelude::*;
@@ -51,9 +53,19 @@ pub fn EmailView() -> Element {
     let mut composing = use_signal(|| None::<ComposeSeed>);
 
     let accounts = use_resource(move || async move {
-        match slug() {
-            Some(s) => fetch_email_accounts(&s).await,
-            None => Ok(Vec::new()),
+        let Some(s) = slug() else {
+            return Ok(Vec::new());
+        };
+        // Cached on success, served on failure — same contract as the
+        // listings. Without this the offline path never starts: no
+        // accounts means nothing selected, which means the cached
+        // envelopes are never asked for.
+        match fetch_email_accounts(&s).await {
+            Ok(list) => {
+                offline::put_accounts(&s, &list);
+                Ok(list)
+            }
+            Err(err) => offline::get_accounts(&s).ok_or(err),
         }
     });
 
@@ -1319,15 +1331,33 @@ pub async fn fetch_email_envelopes(
     folder: &str,
     count: u32,
 ) -> Result<Vec<email_proto::Envelope>, String> {
-    let client = task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
-    let mut envelopes = client
-        .fetch_envelopes(
-            account.to_owned(),
-            folder.to_owned(),
-            email_proto::SeqRange::Recent(count),
-        )
-        .await
-        .map_err(|e| format!("{slug}: fetch envelopes: {e:?}"))?;
+    // Offline read path: a live answer always wins and refreshes the
+    // cache; only a *failed* call falls back to it, so an online client
+    // can never be served stale mail.
+    let fetched = async {
+        let client =
+            task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+        client
+            .fetch_envelopes(
+                account.to_owned(),
+                folder.to_owned(),
+                email_proto::SeqRange::Recent(count),
+            )
+            .await
+            .map_err(|e| format!("{slug}: fetch envelopes: {e:?}"))
+    }
+    .await;
+
+    let mut envelopes = match fetched {
+        Ok(list) => {
+            offline::put_envelopes(slug, account, folder, &list);
+            list
+        }
+        Err(err) => match offline::get_envelopes(slug, account, folder) {
+            Some(cached) => cached,
+            None => return Err(err),
+        },
+    };
     // Newest first — the backend's `Recent` ordering isn't guaranteed
     // across implementations, so sort defensively on the date.
     envelopes.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
@@ -1436,12 +1466,25 @@ pub async fn fetch_email_message(
     account: &str,
     message_id: &str,
 ) -> Result<email_proto::Message, String> {
-    let client =
-        task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
-    client
-        .fetch_message(account.to_owned(), message_id.to_owned())
-        .await
-        .map_err(|e| format!("{slug}: fetch message: {e:?}"))
+    let fetched = async {
+        let client =
+            task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+        client
+            .fetch_message(account.to_owned(), message_id.to_owned())
+            .await
+            .map_err(|e| format!("{slug}: fetch message: {e:?}"))
+    }
+    .await;
+
+    match fetched {
+        Ok(message) => {
+            // Remember what was actually opened — that, not the whole
+            // mailbox, is the realistic offline reading set.
+            offline::put_message(slug, account, &message);
+            Ok(message)
+        }
+        Err(err) => offline::get_message(slug, account, message_id).ok_or(err),
+    }
 }
 
 /// Add/remove flags on one message. Both lists may be empty — the
