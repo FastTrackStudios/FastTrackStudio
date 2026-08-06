@@ -16,12 +16,21 @@
 //! directly. `send` composes an outbound [`Submit`] transport
 //! (SMTP via `email-smtp` in production) with a Sent-folder
 //! maildir write + a `NewMessage` event on the changes stream.
-//! The remaining writes (`set_flags` / `move_message` /
-//! `delete_message` / `append_draft`) return
-//! [`email_proto::EmailSyncError::Unsupported`] until phase 2/3;
-//! `subscribe` is wired through a per-account broadcast channel
-//! but the FS watcher attachment lands later (mirrors
-//! `vault::sync::Backend::start_watcher`).
+//! `set_flags` / `move_message` / `delete_message` are
+//! implemented against the filename conventions: flags live in
+//! the `:2,<FLAGS>` suffix and only exist under `cur`, so each
+//! mutation promotes a message out of `new` first (which is what
+//! "mark as read" means here). Each publishes its
+//! `FlagsChanged` / `Moved` / `Deleted` event, so the `/email`
+//! page updates without a refetch.
+//!
+//! `append_draft` still returns
+//! [`email_proto::EmailSyncError::Unsupported`] — the outbox in
+//! `email-product` is the drafting path today. `subscribe` is
+//! wired through a per-account broadcast channel, but the FS
+//! watcher attachment lands later (mirrors
+//! `vault::sync::Backend::start_watcher`), so *externally*
+//! delivered mail still needs a manual refresh.
 
 #![cfg(not(target_arch = "wasm32"))]
 

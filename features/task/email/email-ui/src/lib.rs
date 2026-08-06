@@ -72,10 +72,56 @@ pub fn EmailView() -> Element {
         }
     });
 
+    // Every mailbox on the account, for the folder rail. Restarted by
+    // `FoldersChanged` alongside the mailbox events below.
+    let folders = use_resource(move || async move {
+        match (slug(), selected_account()) {
+            (Some(s), Some(acct)) => fetch_email_folders(&s, &acct).await,
+            _ => Ok(Vec::new()),
+        }
+    });
+    let folder_list: Vec<email_proto::Folder> = match &*folders.read() {
+        Some(Ok(list)) => list.clone(),
+        _ => Vec::new(),
+    };
+
+    // Which mailbox is open. `INBOX` is the safe default: every
+    // backend has it, including ones that report no folder list at all.
+    let mut selected_folder = use_signal(|| "INBOX".to_owned());
+    // Which message is open in the reading pane, by message-id.
+    let mut open_message = use_signal(|| None::<String>);
+
+    // Changing account invalidates both — the folder ids and
+    // message-ids belong to the account that is going away.
+    use_effect(move || {
+        let _ = selected_account();
+        selected_folder.set("INBOX".to_owned());
+        open_message.set(None);
+    });
+    // Likewise, a message open in one folder isn't in the next.
+    use_effect(move || {
+        let _ = selected_folder();
+        open_message.set(None);
+    });
+
     let envelopes = use_resource(move || async move {
         match (slug(), selected_account()) {
-            (Some(s), Some(acct)) => fetch_email_envelopes(&s, &acct, 50).await,
+            (Some(s), Some(acct)) => {
+                fetch_email_envelopes(&s, &acct, &selected_folder(), 50).await
+            }
             _ => Ok(Vec::new()),
+        }
+    });
+
+    // The open message's full body. `None` selection resolves to
+    // `Ok(None)` so the pane renders its placeholder rather than an
+    // error.
+    let message = use_resource(move || async move {
+        match (slug(), selected_account(), open_message()) {
+            (Some(s), Some(acct), Some(id)) => {
+                fetch_email_message(&s, &acct, &id).await.map(Some)
+            }
+            _ => Ok(None),
         }
     });
 
@@ -130,13 +176,44 @@ pub fn EmailView() -> Element {
             let mut envelopes = envelopes;
             let mut outbox = outbox;
             let mut derivs = derivs;
+            let mut folders = folders;
+            let mut message = message;
+            let mut open_message = open_message;
             if selected_account.peek().as_deref() != Some(change.account.as_str()) {
                 return;
             }
             match change.event {
                 email_proto::EmailEvent::OutboxChanged { .. } => outbox.restart(),
                 email_proto::EmailEvent::DerivationsUpdated { .. } => derivs.restart(),
-                _ => envelopes.restart(),
+                // The rail carries per-folder unread counts, so a new
+                // message or a flag flip changes it too — not just an
+                // explicit folder-list change.
+                email_proto::EmailEvent::FolderListChanged => {
+                    folders.restart();
+                    envelopes.restart();
+                }
+                // A flag change on the message we are reading (ours or
+                // another client's) has to reach the open pane.
+                email_proto::EmailEvent::FlagsChanged { ref message_id, .. } => {
+                    if open_message.peek().as_deref() == Some(message_id.as_str()) {
+                        message.restart();
+                    }
+                    folders.restart();
+                    envelopes.restart();
+                }
+                // Whatever we were reading is no longer here.
+                email_proto::EmailEvent::Moved { ref message_id, .. }
+                | email_proto::EmailEvent::Deleted { ref message_id } => {
+                    if open_message.peek().as_deref() == Some(message_id.as_str()) {
+                        open_message.set(None);
+                    }
+                    folders.restart();
+                    envelopes.restart();
+                }
+                _ => {
+                    folders.restart();
+                    envelopes.restart();
+                }
             }
         },
     );
@@ -159,6 +236,24 @@ pub fn EmailView() -> Element {
         Some(Ok(list)) => list.clone(),
         _ => Vec::new(),
     };
+    let (open_msg, msg_err): (Option<email_proto::Message>, Option<String>) =
+        match &*message.read() {
+            Some(Ok(m)) => (m.clone(), None),
+            Some(Err(e)) => (None, Some(e.clone())),
+            None => (None, None),
+        };
+    let msg_loading = open_message().is_some() && message.read().is_none();
+    // Destination folders for the two filing actions. Role first, then
+    // a name match, so plain-Maildir backends that report no roles
+    // still get working buttons (and none at all if the folder is
+    // genuinely absent — the button hides rather than erroring).
+    let archive_folder = folder_for_role(
+        &folder_list,
+        email_proto::FolderRole::Archive,
+        "Archive",
+    );
+    let trash_folder =
+        folder_for_role(&folder_list, email_proto::FolderRole::Trash, "Trash");
     // message_id → (urgency, tags) from the derivation cache.
     let deriv_map: std::collections::HashMap<String, (Option<u8>, Vec<String>)> = {
         let mut map = std::collections::HashMap::new();
@@ -180,7 +275,7 @@ pub fn EmailView() -> Element {
     let loading = envelopes.read().is_none() && current.is_some();
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-5 p-4 sm:p-6 lg:p-10",
+        div { class: "mx-auto flex max-w-7xl flex-col gap-5 p-4 sm:p-6 lg:p-8",
             div { class: "flex items-baseline justify-between gap-3",
                 Heading { level: HeadingLevel::H1, "Email" }
                 if current.is_some() {
@@ -265,44 +360,161 @@ pub fn EmailView() -> Element {
                 }
             }
 
-            // ── Recent messages ────────────────────────────────────
-            if let Some(err) = rows_err {
-                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
-                    "Couldn't load messages: {err}"
+            // ── Mail: folders | messages | reader ──────────────────
+            if !account_list.is_empty() {
+                // Mailbox switcher. Deliberately buttons in the page,
+                // not a second vertical rail — the app already has one
+                // (the shell's icon rail), and stacking another beside
+                // it eats width the reading pane wants.
+                div { class: "flex flex-wrap items-center gap-1.5",
+                    FolderRail {
+                        folders: folder_list
+                            .iter()
+                            .map(|f| (f.id.clone(), folder_label(f), f.unread_count))
+                            .collect::<Vec<_>>(),
+                        selected: selected_folder(),
+                        on_select: move |id: String| selected_folder.set(id),
+                    }
                 }
-            } else if loading {
-                Text { variant: TextVariant::Muted, class: "text-sm", "Loading messages…" }
-            } else if !account_list.is_empty() && rows.is_empty() {
-                div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
-                    Text { variant: TextVariant::Muted, "Inbox empty — no recent messages." }
-                }
-            } else if !rows.is_empty() {
-                div { class: "flex flex-col gap-1.5",
-                    for env in rows {
-                        EnvelopeRow {
-                            key: "{env.message_id}",
-                            from: sender_label(&env),
-                            subject: if env.subject.is_empty() { "(no subject)".to_owned() } else { env.subject.clone() },
-                            snippet: env.snippet.clone().filter(|s| !s.is_empty()),
-                            date: format_date(env.date_ms),
-                            unread: !env.flags.iter().any(|f| f == "\\Seen" || f == "Seen"),
-                            urgency: deriv_map.get(&env.message_id).and_then(|(u, _)| *u),
-                            tags: deriv_map.get(&env.message_id).map(|(_, t)| t.clone()).unwrap_or_default(),
-                            on_reply: {
-                                let sender = env.from.first().map(|a| a.email.clone()).unwrap_or_default();
-                                let subject = reply_subject(&env.subject);
-                                let message_id = env.message_id.clone();
-                                move |_| {
-                                    composing
-                                        .set(
-                                            Some(ComposeSeed {
-                                                to: sender.clone(),
-                                                subject: subject.clone(),
-                                                in_reply_to: Some(message_id.clone()),
-                                            }),
-                                        )
+
+                div { class: "grid gap-4 xl:grid-cols-[24rem_minmax(0,1fr)]",
+                    // Message list.
+                    div { class: "flex min-w-0 flex-col gap-1.5",
+                        if let Some(err) = rows_err {
+                            div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
+                                "Couldn't load messages: {err}"
+                            }
+                        } else if loading {
+                            Text { variant: TextVariant::Muted, class: "text-sm", "Loading messages…" }
+                        } else if rows.is_empty() {
+                            div { class: "rounded-lg border border-dashed border-border px-4 py-10 text-center",
+                                Text { variant: TextVariant::Muted, "Nothing in this folder." }
+                            }
+                        } else {
+                            for env in rows {
+                                EnvelopeRow {
+                                    key: "{env.message_id}",
+                                    from: sender_label(&env),
+                                    subject: if env.subject.is_empty() { "(no subject)".to_owned() } else { env.subject.clone() },
+                                    snippet: env.snippet.clone().filter(|s| !s.is_empty()),
+                                    date: format_date(env.date_ms),
+                                    unread: is_unread(&env),
+                                    flagged: is_flagged(&env),
+                                    selected: open_message().as_deref() == Some(env.message_id.as_str()),
+                                    urgency: deriv_map.get(&env.message_id).and_then(|(u, _)| *u),
+                                    tags: deriv_map.get(&env.message_id).map(|(_, t)| t.clone()).unwrap_or_default(),
+                                    on_open: {
+                                        // Opening marks it read, the way every
+                                        // mail client does. Fire-and-forget: the
+                                        // `FlagsChanged` event re-reads the list,
+                                        // so a failure just leaves it bold.
+                                        let id = env.message_id.clone();
+                                        let was_unread = is_unread(&env);
+                                        let slug_now = slug();
+                                        let acct = current.clone();
+                                        move |_| {
+                                            open_message.set(Some(id.clone()));
+                                            if was_unread {
+                                                if let (Some(s), Some(a)) = (slug_now.clone(), acct.clone()) {
+                                                    let id = id.clone();
+                                                    spawn(async move {
+                                                        let _ = set_email_flags(
+                                                                &s,
+                                                                &a,
+                                                                &id,
+                                                                vec![FLAG_SEEN.to_owned()],
+                                                                Vec::new(),
+                                                            )
+                                                            .await;
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    },
+                                    on_reply: {
+                                        let sender = env.from.first().map(|a| a.email.clone()).unwrap_or_default();
+                                        let subject = reply_subject(&env.subject);
+                                        let message_id = env.message_id.clone();
+                                        move |_| {
+                                            composing
+                                                .set(
+                                                    Some(ComposeSeed {
+                                                        to: sender.clone(),
+                                                        subject: subject.clone(),
+                                                        in_reply_to: Some(message_id.clone()),
+                                                    }),
+                                                )
+                                        }
+                                    },
                                 }
-                            },
+                            }
+                        }
+                    }
+
+                    // Reading pane. Spans the full width below the list
+                    // until xl, where it becomes the third column.
+                    div { class: "min-w-0",
+                        if let Some(err) = msg_err {
+                            div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
+                                "Couldn't open message: {err}"
+                            }
+                        } else if msg_loading {
+                            Text { variant: TextVariant::Muted, class: "text-sm", "Opening…" }
+                        } else if let Some(msg) = open_msg {
+                            MessageReader {
+                                slug: slug().unwrap_or_default(),
+                                account: current.clone().unwrap_or_default(),
+                                id: msg.envelope.message_id.clone(),
+                                subject: msg.envelope.subject.clone(),
+                                sender: sender_label(&msg.envelope),
+                                date: format_date(msg.envelope.date_ms),
+                                to_line: msg
+                                    .envelope
+                                    .to
+                                    .iter()
+                                    .map(|a| a.email.clone())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                                body: message_body(&msg),
+                                flagged: is_flagged(&msg.envelope),
+                                attachments: msg
+                                    .attachments
+                                    .iter()
+                                    .map(|a| {
+                                        (
+                                            a.filename.clone().unwrap_or_else(|| a.part.clone()),
+                                            a.mime.clone(),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>(),
+                                archive_folder: archive_folder.clone(),
+                                trash_folder: trash_folder.clone(),
+                                on_close: move |_| open_message.set(None),
+                                on_reply: {
+                                    let sender = msg
+                                        .envelope
+                                        .from
+                                        .first()
+                                        .map(|a| a.email.clone())
+                                        .unwrap_or_default();
+                                    let subject = reply_subject(&msg.envelope.subject);
+                                    let message_id = msg.envelope.message_id.clone();
+                                    move |_| {
+                                        composing
+                                            .set(
+                                                Some(ComposeSeed {
+                                                    to: sender.clone(),
+                                                    subject: subject.clone(),
+                                                    in_reply_to: Some(message_id.clone()),
+                                                }),
+                                            )
+                                    }
+                                },
+                            }
+                        } else {
+                            div { class: "hidden rounded-lg border border-dashed border-border px-4 py-16 text-center xl:block",
+                                Text { variant: TextVariant::Muted, "Select a message to read it." }
+                            }
                         }
                     }
                 }
@@ -345,11 +557,19 @@ fn EnvelopeRow(
     snippet: Option<String>,
     date: String,
     unread: bool,
+    flagged: bool,
+    selected: bool,
     urgency: Option<u8>,
     tags: Vec<String>,
+    on_open: EventHandler<()>,
     on_reply: EventHandler<()>,
 ) -> Element {
-    let weight = if unread { "font-medium" } else { "" };
+    let weight = if unread { "font-semibold" } else { "" };
+    let row_cls = if selected {
+        "border-primary/60 bg-accent"
+    } else {
+        "border-border bg-card/40 hover:bg-accent/40"
+    };
     // Chips stay quiet for the boring cases: urgency 0 and the
     // `other` tag render nothing.
     let urgency_chip = urgency.filter(|u| *u > 0).map(|u| {
@@ -363,34 +583,53 @@ fn EnvelopeRow(
     let shown_tags: Vec<String> = tags.into_iter().filter(|t| t != "other").collect();
 
     rsx! {
-        div { class: "group flex items-baseline gap-3 rounded-lg border border-border bg-card/40 px-3 py-2",
-            span { class: "w-40 shrink-0 truncate text-sm {weight} text-foreground", "{from}" }
-            div { class: "flex min-w-0 flex-1 flex-col",
-                div { class: "flex min-w-0 items-baseline gap-1.5",
-                    if let Some((label, cls)) = urgency_chip {
-                        span { class: "shrink-0 rounded-full border px-1.5 text-[10px] font-semibold {cls}",
-                            "{label}"
-                        }
-                    }
-                    span { class: "truncate text-sm {weight} text-foreground", "{subject}" }
-                    for tag in shown_tags {
-                        span {
-                            key: "{tag}",
-                            class: "shrink-0 rounded-full border border-border px-1.5 text-[10px] text-muted-foreground",
-                            "{tag}"
-                        }
+        // The whole row opens the message; Reply is a nested button, so
+        // it stops propagation rather than doing both.
+        div {
+            // Stable test hooks, same convention as the rest of the
+            // app (dioxus-test's `by_testid` / Playwright's
+            // `getByTestId` both resolve `[data-testid]`).
+            "data-testid": "email-row",
+            class: "group flex cursor-pointer flex-col gap-0.5 rounded-lg border px-3 py-2 {row_cls}",
+            onclick: move |_| on_open.call(()),
+            div { class: "flex min-w-0 items-baseline gap-2",
+                if unread {
+                    span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-primary" }
+                }
+                span { class: "min-w-0 flex-1 truncate text-sm {weight} text-foreground", "{from}" }
+                if flagged {
+                    span { class: "shrink-0 text-xs text-amber-500", "★" }
+                }
+                span { class: "shrink-0 text-[11px] text-muted-foreground", "{date}" }
+            }
+            div { class: "flex min-w-0 items-baseline gap-1.5",
+                if let Some((label, cls)) = urgency_chip {
+                    span { class: "shrink-0 rounded-full border px-1.5 text-[10px] font-semibold {cls}",
+                        "{label}"
                     }
                 }
+                span { class: "truncate text-sm {weight} text-foreground", "{subject}" }
+                for tag in shown_tags {
+                    span {
+                        key: "{tag}",
+                        class: "shrink-0 rounded-full border border-border px-1.5 text-[10px] text-muted-foreground",
+                        "{tag}"
+                    }
+                }
+            }
+            div { class: "flex min-w-0 items-baseline gap-2",
                 if let Some(snippet) = snippet.as_ref().filter(|s| !s.is_empty()) {
-                    span { class: "truncate text-xs text-muted-foreground", "{snippet}" }
+                    span { class: "min-w-0 flex-1 truncate text-xs text-muted-foreground", "{snippet}" }
+                }
+                button {
+                    class: "shrink-0 text-[11px] text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100",
+                    onclick: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        on_reply.call(());
+                    },
+                    "Reply"
                 }
             }
-            button {
-                class: "shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100",
-                onclick: move |_| on_reply.call(()),
-                "Reply"
-            }
-            span { class: "shrink-0 text-xs text-muted-foreground", "{date}" }
         }
     }
 }
@@ -674,6 +913,384 @@ fn format_date(date_ms: i64) -> String {
         .unwrap_or_default()
 }
 
+/// The account's mailboxes as an inline row of buttons, with unread
+/// counts — Inbox / Archive / Sent / …
+///
+/// Deliberately not a second vertical rail: the app shell already owns
+/// the left rail, and a mail column beside it would spend width the
+/// reading pane needs. Falls back to a single synthetic INBOX entry
+/// when the backend reports no folders at all (plain Maildir trees
+/// often don't), so the row never renders empty next to a list that
+/// clearly has mail in it.
+#[component]
+fn FolderRail(
+    /// `(id, label, unread)` per mailbox. Primitive props: the proto
+    /// `Folder` doesn't impl `PartialEq`, which Dioxus props require
+    /// (same reason `AccountChip` takes primitives).
+    folders: Vec<(String, String, Option<u32>)>,
+    selected: String,
+    on_select: EventHandler<String>,
+) -> Element {
+    let mut shown = folders;
+    if shown.is_empty() {
+        shown.push(("INBOX".to_owned(), "Inbox".to_owned(), None));
+    }
+
+    rsx! {
+        nav { class: "flex flex-wrap items-center gap-1.5",
+            for (id, label, unread) in shown {
+                {
+                    let is_sel = id == selected;
+                    let cls = if is_sel {
+                        "border-primary/60 bg-accent text-foreground"
+                    } else {
+                        "border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    };
+                    let pick = id.clone();
+                    rsx! {
+                        button {
+                            key: "{id}",
+                            "data-testid": "email-folder",
+                            "data-folder": "{id}",
+                            r#type: "button",
+                            class: "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm {cls}",
+                            onclick: move |_| on_select.call(pick.clone()),
+                            span { class: "truncate", "{label}" }
+                            if let Some(n) = unread.filter(|n| *n > 0) {
+                                span { class: "shrink-0 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold tabular-nums text-primary",
+                                    "{n}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The reading pane: headers, body, attachment list, and the filing
+/// actions.
+///
+/// Body preference is text over HTML. The HTML alternative is rendered
+/// as its stripped text rather than injected as markup — a mail body is
+/// hostile input, and `dangerous_inner_html` on it would be an XSS sink
+/// aimed straight at the app's own origin. Rich HTML rendering needs a
+/// sandboxed iframe + a sanitizer pass; until then, readable-and-safe
+/// beats pretty-and-exploitable.
+#[component]
+#[allow(clippy::too_many_arguments)]
+fn MessageReader(
+    slug: String,
+    account: String,
+    /// Message-id of the open message.
+    id: String,
+    subject: String,
+    sender: String,
+    date: String,
+    to_line: String,
+    body: String,
+    flagged: bool,
+    /// `(filename, mime)` per part — metadata only.
+    attachments: Vec<(String, String)>,
+    archive_folder: Option<String>,
+    trash_folder: Option<String>,
+    on_close: EventHandler<()>,
+    on_reply: EventHandler<()>,
+) -> Element {
+    let mut busy = use_signal(|| false);
+    let mut action_err = use_signal(|| None::<String>);
+
+    // One shape for every action: run it, surface the error inline,
+    // and let the `EmailChange` stream refresh the lists.
+    let run = move |fut: std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>>,
+                    close_after: bool| {
+        spawn(async move {
+            busy.set(true);
+            action_err.set(None);
+            match fut.await {
+                Ok(()) => {
+                    if close_after {
+                        on_close.call(());
+                    }
+                }
+                Err(e) => action_err.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+
+    rsx! {
+        article {
+            "data-testid": "email-reader",
+            class: "flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card/40 p-4",
+            div { class: "flex items-start justify-between gap-3",
+                div { class: "flex min-w-0 flex-col gap-0.5",
+                    Heading { level: HeadingLevel::H2, class: "text-base",
+                        if subject.is_empty() { "(no subject)" } else { "{subject}" }
+                    }
+                    Text { variant: TextVariant::Muted, class: "text-xs", "{sender} · {date}" }
+                    if !to_line.is_empty() {
+                        Text { variant: TextVariant::Muted, class: "text-xs", "to {to_line}" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: "shrink-0 text-xs text-muted-foreground hover:text-foreground",
+                    onclick: move |_| on_close.call(()),
+                    "Close"
+                }
+            }
+
+            // ── Actions ────────────────────────────────────────
+            div { class: "flex flex-wrap items-center gap-2",
+                Button {
+                    size: ButtonSize::Small,
+                    on_click: move |_| on_reply.call(()),
+                    "Reply"
+                }
+                {
+                    let (s, a, m) = (slug.clone(), account.clone(), id.clone());
+                    rsx! {
+                        Button {
+                            size: ButtonSize::Small,
+                            variant: ButtonVariant::Outline,
+                            disabled: busy(),
+                            on_click: move |_| {
+                                let (s, a, m) = (s.clone(), a.clone(), m.clone());
+                                let (add, remove) = if flagged {
+                                    (Vec::new(), vec![FLAG_FLAGGED.to_owned()])
+                                } else {
+                                    (vec![FLAG_FLAGGED.to_owned()], Vec::new())
+                                };
+                                run(
+                                    Box::pin(async move {
+                                        set_email_flags(&s, &a, &m, add, remove).await
+                                    }),
+                                    false,
+                                );
+                            },
+                            if flagged { "Unstar" } else { "Star" }
+                        }
+                    }
+                }
+                {
+                    let (s, a, m) = (slug.clone(), account.clone(), id.clone());
+                    rsx! {
+                        Button {
+                            size: ButtonSize::Small,
+                            variant: ButtonVariant::Outline,
+                            disabled: busy(),
+                            on_click: move |_| {
+                                let (s, a, m) = (s.clone(), a.clone(), m.clone());
+                                run(
+                                    Box::pin(async move {
+                                        set_email_flags(
+                                                &s,
+                                                &a,
+                                                &m,
+                                                Vec::new(),
+                                                vec![FLAG_SEEN.to_owned()],
+                                            )
+                                            .await
+                                    }),
+                                    true,
+                                );
+                            },
+                            "Mark unread"
+                        }
+                    }
+                }
+                if let Some(dest) = archive_folder.clone() {
+                    {
+                        let (s, a, m) = (slug.clone(), account.clone(), id.clone());
+                        rsx! {
+                            Button {
+                                size: ButtonSize::Small,
+                                variant: ButtonVariant::Outline,
+                                disabled: busy(),
+                                on_click: move |_| {
+                                    let (s, a, m, d) = (s.clone(), a.clone(), m.clone(), dest.clone());
+                                    run(
+                                        Box::pin(async move {
+                                            move_email_message(&s, &a, &m, &d).await
+                                        }),
+                                        true,
+                                    );
+                                },
+                                "Archive"
+                            }
+                        }
+                    }
+                }
+                {
+                    // Prefer moving to Trash (recoverable) over a hard
+                    // delete; fall back to delete when the account has
+                    // no trash folder.
+                    let (s, a, m) = (slug.clone(), account.clone(), id.clone());
+                    let trash = trash_folder.clone();
+                    rsx! {
+                        Button {
+                            size: ButtonSize::Small,
+                            variant: ButtonVariant::Outline,
+                            disabled: busy(),
+                            on_click: move |_| {
+                                let (s, a, m, t) = (s.clone(), a.clone(), m.clone(), trash.clone());
+                                run(
+                                    Box::pin(async move {
+                                        match t {
+                                            Some(dest) => move_email_message(&s, &a, &m, &dest).await,
+                                            None => delete_email_message(&s, &a, &m).await,
+                                        }
+                                    }),
+                                    true,
+                                );
+                            },
+                            if trash_folder.is_some() { "Trash" } else { "Delete" }
+                        }
+                    }
+                }
+            }
+
+            if let Some(err) = action_err() {
+                div { class: "rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive",
+                    "{err}"
+                }
+            }
+
+            // ── Body ───────────────────────────────────────────
+            pre {
+                "data-testid": "email-body",
+                class: "max-h-[32rem] overflow-auto whitespace-pre-wrap break-words text-sm text-foreground",
+                "{body}"
+            }
+
+            if !attachments.is_empty() {
+                div { class: "flex flex-col gap-1 border-t border-border pt-2",
+                    Text { variant: TextVariant::Muted, class: "text-xs font-semibold uppercase tracking-wide",
+                        "Attachments"
+                    }
+                    for (filename , mime) in attachments.iter() {
+                        div { key: "{filename}", class: "flex items-baseline gap-2 text-xs",
+                            span { class: "truncate text-foreground", "{filename}" }
+                            span { class: "shrink-0 text-muted-foreground", "{mime}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Body text for the reader: the plain-text alternative when present,
+/// otherwise the HTML one reduced to text. Never returns empty — an
+/// empty pane reads as a bug.
+fn message_body(msg: &email_proto::Message) -> String {
+    msg.body_text
+        .clone()
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| msg.body_html.as_deref().map(strip_html))
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| "(no body)".to_owned())
+}
+
+/// A folder's user-visible label: the last hierarchy segment, so
+/// `INBOX.Lists.rust` reads as "rust" in the rail.
+fn folder_label(f: &email_proto::Folder) -> String {
+    let name = if f.name.is_empty() { &f.id } else { &f.name };
+    if f.delimiter.is_empty() {
+        return name.clone();
+    }
+    // Trim a trailing delimiter first: `rsplit` on "a/b/" yields an
+    // empty first segment, which would otherwise fall all the way back
+    // to the full path.
+    let trimmed = name.trim_end_matches(&f.delimiter);
+    trimmed
+        .rsplit(&f.delimiter)
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(name)
+        .to_owned()
+}
+
+/// Very small HTML → text reduction for the body fallback: drop tags,
+/// decode the handful of entities that actually show up, collapse
+/// blank runs. Deliberately not a parser — it feeds a `pre`, and the
+/// output is never treated as markup.
+fn strip_html(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    let mut skip_until: Option<&str> = None;
+    let lower = html.to_ascii_lowercase();
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if let Some(end) = skip_until {
+            if lower[i..].starts_with(end) {
+                i += end.len();
+                skip_until = None;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        let c = bytes[i] as char;
+        if c == '<' {
+            if lower[i..].starts_with("<script") {
+                skip_until = Some("</script>");
+                continue;
+            }
+            if lower[i..].starts_with("<style") {
+                skip_until = Some("</style>");
+                continue;
+            }
+            // Block-ish tags become line breaks so paragraphs survive.
+            if lower[i..].starts_with("<br")
+                || lower[i..].starts_with("</p")
+                || lower[i..].starts_with("</div")
+                || lower[i..].starts_with("</tr")
+            {
+                out.push('\n');
+            }
+            in_tag = true;
+            i += 1;
+            continue;
+        }
+        if c == '>' {
+            in_tag = false;
+            i += 1;
+            continue;
+        }
+        if !in_tag {
+            out.push(c);
+        }
+        i += 1;
+    }
+    let out = out
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'");
+    // Collapse 3+ newlines to 2.
+    let mut collapsed = String::with_capacity(out.len());
+    let mut blanks = 0;
+    for line in out.lines() {
+        if line.trim().is_empty() {
+            blanks += 1;
+            if blanks > 1 {
+                continue;
+            }
+        } else {
+            blanks = 0;
+        }
+        collapsed.push_str(line.trim_end());
+        collapsed.push('\n');
+    }
+    collapsed.trim().to_owned()
+}
+
 // ── data ────────────────────────────────────────────────────────────
 //
 // This slice's RPCs live with the page that calls them, not in the
@@ -692,20 +1309,21 @@ feeds! {
     }
 }
 
-/// Recent envelopes (header summaries) for one account's `INBOX`,
+/// Recent envelopes (header summaries) for one account's `folder`,
 /// newest first. `count` caps the slice. Returns an empty list for an
 /// empty mailbox; surfaces backend errors verbatim so the page can show
 /// them inline.
 pub async fn fetch_email_envelopes(
     slug: &str,
     account: &str,
+    folder: &str,
     count: u32,
 ) -> Result<Vec<email_proto::Envelope>, String> {
     let client = task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
     let mut envelopes = client
         .fetch_envelopes(
             account.to_owned(),
-            "INBOX".to_owned(),
+            folder.to_owned(),
             email_proto::SeqRange::Recent(count),
         )
         .await
@@ -786,4 +1404,301 @@ pub async fn outbox_action(
             .map_err(|e| format!("{slug}: cancel: {e:?}"))?;
     }
     Ok(())
+}
+
+// ── reading + organizing ────────────────────────────────────────────
+//
+// `EmailSync` has carried these five since the slice was written; the
+// page just never called them, so mail could be listed but not read,
+// filed, flagged or deleted. Same shape as the helpers above: resolve
+// the org's client, call, stringify the error for inline display.
+
+/// Every mailbox on the account, for the folder rail. An account whose
+/// backend exposes no folders returns an empty list — the page falls
+/// back to `INBOX`, which every backend has.
+pub async fn fetch_email_folders(
+    slug: &str,
+    account: &str,
+) -> Result<Vec<email_proto::Folder>, String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+    client
+        .list_folders(account.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: list folders: {e:?}"))
+}
+
+/// One message in full — headers, both body alternatives, and
+/// attachment *metadata* (bytes come separately via `fetch_attachment`,
+/// which the reader does not need until someone clicks one).
+pub async fn fetch_email_message(
+    slug: &str,
+    account: &str,
+    message_id: &str,
+) -> Result<email_proto::Message, String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+    client
+        .fetch_message(account.to_owned(), message_id.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: fetch message: {e:?}"))
+}
+
+/// Add/remove flags on one message. Both lists may be empty — the
+/// backend treats that as a no-op rather than an error.
+pub async fn set_email_flags(
+    slug: &str,
+    account: &str,
+    message_id: &str,
+    add: Vec<String>,
+    remove: Vec<String>,
+) -> Result<(), String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+    client
+        .set_flags(
+            account.to_owned(),
+            message_id.to_owned(),
+            email_proto::FlagDelta { add, remove },
+        )
+        .await
+        .map_err(|e| format!("{slug}: set flags: {e:?}"))
+}
+
+/// File a message into another folder on the same account.
+pub async fn move_email_message(
+    slug: &str,
+    account: &str,
+    message_id: &str,
+    dest_folder: &str,
+) -> Result<(), String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+    client
+        .move_message(
+            account.to_owned(),
+            message_id.to_owned(),
+            dest_folder.to_owned(),
+        )
+        .await
+        .map_err(|e| format!("{slug}: move message: {e:?}"))
+}
+
+/// Delete a message. Idempotent per the proto contract, so a
+/// double-click on Delete is harmless.
+pub async fn delete_email_message(
+    slug: &str,
+    account: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<email_proto::EmailSyncClient>(slug).await?;
+    client
+        .delete_message(account.to_owned(), message_id.to_owned())
+        .await
+        .map_err(|e| format!("{slug}: delete message: {e:?}"))
+}
+
+/// The IMAP "seen" keyword. Backends differ on whether they return the
+/// backslash form, so reads must tolerate both — see [`is_unread`].
+pub const FLAG_SEEN: &str = "\\Seen";
+/// The IMAP "flagged"/starred keyword.
+pub const FLAG_FLAGGED: &str = "\\Flagged";
+
+/// Does this flag list contain `flag`, whichever spelling the backend
+/// happens to use?
+///
+/// Three are in play at once: IMAP's `\Seen`, the bare word `Seen`,
+/// and — because the maildir backend reports the raw filename letters —
+/// a single `S`. Matching only the IMAP spelling silently mis-renders
+/// every maildir mailbox (everything looks unread, nothing looks
+/// starred), which is exactly what happened before this existed.
+fn has_flag(flags: &[String], word: &str, letter: &str) -> bool {
+    flags
+        .iter()
+        .any(|f| f.trim_start_matches('\\') == word || f == letter)
+}
+
+/// True when the envelope carries no seen-flag in any spelling.
+pub fn is_unread(env: &Envelope) -> bool {
+    !has_flag(&env.flags, "Seen", "S")
+}
+
+/// True when the envelope is starred, in any spelling.
+pub fn is_flagged(env: &Envelope) -> bool {
+    has_flag(&env.flags, "Flagged", "F")
+}
+
+/// Pick the folder id matching `role`, if the backend labelled one.
+/// Falls back to a case-insensitive name match so backends that report
+/// no roles (plain Maildir) still get working Archive / Trash actions.
+pub fn folder_for_role(
+    folders: &[email_proto::Folder],
+    role: email_proto::FolderRole,
+    fallback_name: &str,
+) -> Option<String> {
+    folders
+        .iter()
+        .find(|f| f.role.as_ref() == Some(&role))
+        .or_else(|| {
+            folders
+                .iter()
+                .find(|f| f.name.eq_ignore_ascii_case(fallback_name))
+        })
+        .map(|f| f.id.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn folder(id: &str, name: &str, delim: &str) -> email_proto::Folder {
+        email_proto::Folder {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            delimiter: delim.to_owned(),
+            role: None,
+            message_count: None,
+            unread_count: None,
+        }
+    }
+
+    #[test]
+    fn folder_label_shows_the_last_hierarchy_segment() {
+        assert_eq!(folder_label(&folder("INBOX", "INBOX", ".")), "INBOX");
+        assert_eq!(
+            folder_label(&folder("INBOX.Lists.rust", "INBOX.Lists.rust", ".")),
+            "rust"
+        );
+        // Slash-delimited backends, and a trailing delimiter.
+        assert_eq!(folder_label(&folder("a/b", "a/b", "/")), "b");
+        assert_eq!(folder_label(&folder("a/b/", "a/b/", "/")), "b");
+        // No delimiter reported: the name is the label, untouched.
+        assert_eq!(folder_label(&folder("a.b", "a.b", "")), "a.b");
+        // Empty name falls back to the id, so the rail never renders a
+        // blank, unclickable-looking row.
+        assert_eq!(folder_label(&folder("Archive", "", ".")), "Archive");
+    }
+
+    #[test]
+    fn folder_for_role_prefers_the_role_then_the_name() {
+        let mut archive = folder("Archive", "Archive", ".");
+        let inbox = folder("INBOX", "INBOX", ".");
+        // Name match when the backend reports no roles (plain Maildir).
+        let by_name = vec![inbox.clone(), archive.clone()];
+        assert_eq!(
+            folder_for_role(&by_name, email_proto::FolderRole::Archive, "Archive"),
+            Some("Archive".to_owned())
+        );
+        // Role wins over a same-named folder elsewhere in the list.
+        archive.id = "ARC".to_owned();
+        archive.name = "Stashed".to_owned();
+        archive.role = Some(email_proto::FolderRole::Archive);
+        let by_role = vec![inbox.clone(), archive];
+        assert_eq!(
+            folder_for_role(&by_role, email_proto::FolderRole::Archive, "Archive"),
+            Some("ARC".to_owned())
+        );
+        // Genuinely absent → None, so the button hides instead of
+        // moving mail somewhere arbitrary.
+        assert_eq!(
+            folder_for_role(&[inbox], email_proto::FolderRole::Archive, "Archive"),
+            None
+        );
+    }
+
+    fn env_with(flags: &[&str]) -> Envelope {
+        Envelope {
+            message_id: "m".into(),
+            thread_id: None,
+            folder: "INBOX".into(),
+            subject: String::new(),
+            from: Vec::new(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            date_ms: 0,
+            flags: flags.iter().map(|s| (*s).to_owned()).collect(),
+            size: 0,
+            has_attachments: false,
+            snippet: None,
+        }
+    }
+
+    #[test]
+    fn flag_reads_accept_every_backend_spelling() {
+        // IMAP (`\\Seen`), the bare word, and the maildir filename
+        // letter all mean the same thing. The maildir backend reports
+        // the letter, so missing that case makes every maildir message
+        // render as unread and never starred.
+        for seen in [r"\Seen", "Seen", "S"] {
+            assert!(!is_unread(&env_with(&[seen])), "{seen} should read as seen");
+        }
+        for star in [r"\Flagged", "Flagged", "F"] {
+            assert!(is_flagged(&env_with(&[star])), "{star} should read as starred");
+        }
+        assert!(is_unread(&env_with(&[])));
+        assert!(!is_flagged(&env_with(&["S"])));
+        // A real maildir pair: seen + flagged.
+        let both = env_with(&["F", "S"]);
+        assert!(!is_unread(&both));
+        assert!(is_flagged(&both));
+    }
+
+    #[test]
+    fn strip_html_drops_markup_and_keeps_the_text() {
+        assert_eq!(strip_html("<p>Hello <b>there</b></p>"), "Hello there");
+        // Entities that actually show up in mail.
+        assert_eq!(strip_html("a&nbsp;b &amp; c &lt;d&gt;"), "a b & c <d>");
+    }
+
+    #[test]
+    fn strip_html_never_emits_script_or_style_bodies() {
+        // The reader renders this into a `pre`, never as markup — but
+        // script/style CONTENT is not display text either, and leaking
+        // it would dump JS source into the reading pane.
+        let got = strip_html(
+            "<style>.x{color:red}</style><p>Body</p><script>alert('xss')</script>",
+        );
+        assert_eq!(got, "Body");
+        assert!(!got.contains("alert"), "{got}");
+        assert!(!got.contains("color:red"), "{got}");
+    }
+
+    #[test]
+    fn strip_html_turns_block_ends_into_line_breaks() {
+        let got = strip_html("<p>one</p><p>two</p>");
+        assert_eq!(got, "one\ntwo");
+        assert_eq!(strip_html("a<br>b"), "a\nb");
+    }
+
+    #[test]
+    fn message_body_prefers_text_then_html_then_a_placeholder() {
+        let env = email_proto::Envelope {
+            message_id: "m1".into(),
+            thread_id: None,
+            folder: "INBOX".into(),
+            subject: "s".into(),
+            from: Vec::new(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            date_ms: 0,
+            flags: Vec::new(),
+            size: 0,
+            has_attachments: false,
+            snippet: None,
+        };
+        let mk = |text: Option<&str>, html: Option<&str>| email_proto::Message {
+            envelope: env.clone(),
+            headers_raw: String::new(),
+            body_text: text.map(str::to_owned),
+            body_html: html.map(str::to_owned),
+            attachments: Vec::new(),
+            references: Vec::new(),
+        };
+        assert_eq!(message_body(&mk(Some("plain"), Some("<p>rich</p>"))), "plain");
+        assert_eq!(message_body(&mk(None, Some("<p>rich</p>"))), "rich");
+        // A whitespace-only text part must not win over real HTML.
+        assert_eq!(message_body(&mk(Some("   "), Some("<p>rich</p>"))), "rich");
+        assert_eq!(message_body(&mk(None, None)), "(no body)");
+    }
 }

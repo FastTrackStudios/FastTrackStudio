@@ -187,6 +187,114 @@ impl Backend {
             event,
         });
     }
+
+    /// [`Self::emit`] from the synchronous `EmailSync` methods.
+    ///
+    /// The trait's mutations are sync, but `emit` needs the async
+    /// channel map. When a runtime handle is available we hand the
+    /// publish to it; a change that fails to announce must NOT fail the
+    /// mutation, which already committed to disk — the worst case is a
+    /// client that refreshes a beat later.
+    fn emit_blocking(&self, account: &str, event: EmailEvent) {
+        let Some(runtime) = self.runtime.clone() else {
+            // No runtime (unit tests): the write still happened.
+            self.changes.publish(email_proto::EmailChange {
+                account: account.to_string(),
+                event,
+            });
+            return;
+        };
+        let (this_changes, account, ev) = (self.changes.clone(), account.to_string(), event);
+        // `block_on` from inside a runtime worker would panic, so this
+        // is spawned rather than awaited.
+        let channels = self.channels.clone();
+        runtime.spawn(async move {
+            if let Some(tx) = channels.read().await.get(&account) {
+                let _ = tx.send(ev.clone());
+            }
+            this_changes.publish(email_proto::EmailChange {
+                account,
+                event: ev,
+            });
+        });
+    }
+
+    /// Find a message by RFC-2822 Message-ID.
+    ///
+    /// Returns `(folder alias id, maildir entry id, is_in_new)`. The
+    /// maildir crate addresses entries by their filename-derived id,
+    /// and only within `cur` — hence the third element, which every
+    /// mutation uses to promote out of `new` first.
+    ///
+    /// O(N) over the tree, same as [`EmailSync::fetch_message`]; the
+    /// `email-store` SQLite index makes it O(1) when that is wired in.
+    fn locate(
+        &self,
+        account: &str,
+        message_id: &str,
+    ) -> Result<(String, String, bool), EmailSyncError> {
+        let state = self.state(account)?;
+        let want = message_id.trim_matches(|c| c == '<' || c == '>');
+        for folder in self.list_folders(account)? {
+            let backend_name = state.aliases.resolve(&folder.id).to_string();
+            let Some(path) = FolderName(backend_name).to_path(&state.root) else {
+                continue;
+            };
+            if !is_maildir(&path) {
+                continue;
+            }
+            let md = Maildir::from(path);
+            for (entry, in_new) in md
+                .list_cur()
+                .map(|e| (e, false))
+                .chain(md.list_new().map(|e| (e, true)))
+            {
+                let Ok(entry) = entry else { continue };
+                let Ok(bytes) = std::fs::read(entry.path()) else {
+                    continue;
+                };
+                let Ok(env) = parse::envelope_from_bytes(&bytes, &folder.id, Vec::new()) else {
+                    continue;
+                };
+                if env.message_id.trim_matches(|c| c == '<' || c == '>') == want {
+                    return Ok((folder.id.clone(), entry.id().to_owned(), in_new));
+                }
+            }
+        }
+        Err(EmailSyncError::NotFound)
+    }
+
+    /// The `Maildir` handle for one alias-side folder name.
+    fn folder_maildir(
+        &self,
+        state: &AccountState,
+        folder: &str,
+    ) -> Result<Maildir, EmailSyncError> {
+        let backend_name = state.aliases.resolve(folder).to_string();
+        let path = FolderName(backend_name)
+            .to_path(&state.root)
+            .ok_or_else(|| EmailSyncError::Protocol(format!("bad folder name: {folder}")))?;
+        Ok(Maildir::from(path))
+    }
+}
+
+/// Proto flag string → the maildir filename flag letter.
+///
+/// The proto deliberately carries free-form strings so IMAP keywords
+/// and JMAP labels pass through untranslated, and backends differ on
+/// whether they emit the leading backslash — so both spellings map, as
+/// does the bare maildir letter. Anything else is a custom keyword
+/// maildir cannot represent in a filename; it is dropped rather than
+/// failing the whole call.
+fn flag_letter(flag: &str) -> Option<char> {
+    match flag.trim_start_matches('\\') {
+        "Seen" | "S" => Some('S'),
+        "Flagged" | "F" => Some('F'),
+        "Answered" | "Replied" | "R" => Some('R'),
+        "Draft" | "D" => Some('D'),
+        "Deleted" | "Trashed" | "T" => Some('T'),
+        _ => None,
+    }
 }
 
 impl EmailSync for Backend {
@@ -392,30 +500,116 @@ impl EmailSync for Backend {
 
     fn set_flags(
         &self,
-        _account: &str,
-        _message_id: &str,
-        _delta: FlagDelta,
+        account: &str,
+        message_id: &str,
+        delta: FlagDelta,
     ) -> Result<(), EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "maildir: set_flags lands in phase 2".into(),
-        ))
+        let state = self.state(account)?;
+        let (folder, id, in_new) = self.locate(account, message_id)?;
+        let md = self.folder_maildir(state, &folder)?;
+
+        // Maildir keeps flags in the filename, and only for messages
+        // in `cur` — a message still in `new` has nowhere to put them.
+        // Promote first; that is also exactly what "mark as read"
+        // means in maildir terms.
+        if in_new {
+            md.move_new_to_cur(&id)
+                .map_err(|e| EmailSyncError::Io(format!("move new→cur: {e}")))?;
+        }
+
+        let add: String = delta.add.iter().filter_map(|f| flag_letter(f)).collect();
+        let remove: String = delta.remove.iter().filter_map(|f| flag_letter(f)).collect();
+        if !add.is_empty() {
+            md.add_flags(&id, &add)
+                .map_err(|e| EmailSyncError::Io(format!("add flags: {e}")))?;
+        }
+        if !remove.is_empty() {
+            md.remove_flags(&id, &remove)
+                .map_err(|e| EmailSyncError::Io(format!("remove flags: {e}")))?;
+        }
+
+        // Report the resulting flag set, not the delta — subscribers
+        // re-read anyway, and the absolute set is what the event type
+        // promises.
+        let flags = md
+            .find(&id)
+            .map(|e| e.flags().chars().map(|c| c.to_string()).collect())
+            .unwrap_or_default();
+        self.emit_blocking(
+            account,
+            EmailEvent::FlagsChanged {
+                message_id: message_id.to_owned(),
+                flags,
+            },
+        );
+        Ok(())
     }
 
     fn move_message(
         &self,
-        _account: &str,
-        _message_id: &str,
-        _dest_folder: &str,
+        account: &str,
+        message_id: &str,
+        dest_folder: &str,
     ) -> Result<(), EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "maildir: move_message lands in phase 2".into(),
-        ))
+        let state = self.state(account)?;
+        let (folder, id, in_new) = self.locate(account, message_id)?;
+        if folder == dest_folder {
+            return Ok(());
+        }
+        let src = self.folder_maildir(state, &folder)?;
+        // Create the destination on demand: Archive / Trash usually do
+        // not exist yet in a fixture mailbox, and failing the first
+        // Archive click because of that would be silly.
+        let dest_backend = state.aliases.resolve(dest_folder).to_string();
+        let dest_path = FolderName(dest_backend)
+            .to_path(&state.root)
+            .ok_or_else(|| EmailSyncError::Protocol(format!("bad folder name: {dest_folder}")))?;
+        ensure_maildir(&dest_path).map_err(|e| EmailSyncError::Io(e.to_string()))?;
+
+        // `move_to` addresses the entry by maildir id, which only
+        // resolves in `cur` — promote a still-unread message first.
+        if in_new {
+            src.move_new_to_cur(&id)
+                .map_err(|e| EmailSyncError::Io(format!("move new→cur: {e}")))?;
+        }
+        src.move_to(&id, &Maildir::from(dest_path))
+            .map_err(|e| EmailSyncError::Io(format!("move message: {e}")))?;
+
+        self.emit_blocking(
+            account,
+            EmailEvent::Moved {
+                message_id: message_id.to_owned(),
+                from_folder: folder,
+                to_folder: dest_folder.to_owned(),
+            },
+        );
+        Ok(())
     }
 
-    fn delete_message(&self, _account: &str, _message_id: &str) -> Result<(), EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "maildir: delete_message lands in phase 2".into(),
-        ))
+    fn delete_message(&self, account: &str, message_id: &str) -> Result<(), EmailSyncError> {
+        let state = self.state(account)?;
+        // Idempotent per the proto contract: deleting a message that
+        // is already gone succeeds.
+        let (folder, id, in_new) = match self.locate(account, message_id) {
+            Ok(found) => found,
+            Err(EmailSyncError::NotFound) => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        let md = self.folder_maildir(state, &folder)?;
+        if in_new {
+            md.move_new_to_cur(&id)
+                .map_err(|e| EmailSyncError::Io(format!("move new→cur: {e}")))?;
+        }
+        md.delete(&id)
+            .map_err(|e| EmailSyncError::Io(format!("delete message: {e}")))?;
+
+        self.emit_blocking(
+            account,
+            EmailEvent::Deleted {
+                message_id: message_id.to_owned(),
+            },
+        );
+        Ok(())
     }
 
     fn append_draft(&self, _account: &str, _draft: Draft) -> Result<String, EmailSyncError> {
@@ -491,13 +685,14 @@ impl EmailSync for Backend {
 /// attaches subscriber sinks to. Publishing happens in
 /// [`Backend::emit`].
 ///
-/// Publishers today: `send` (a `NewMessage` for the Sent copy)
-/// and the `email-product` backend (outbox / derivation events,
-/// via a clone of this hub). The remaining maildir mutations
-/// (`set_flags` / `move_message` / `delete_message`) are still
-/// `Unsupported` and there is no filesystem watcher on the mail
-/// root, so inbound new-mail events wait on those landing.
-/// `email-imap` already publishes from its IDLE loop.
+/// Publishers today: `send` (a `NewMessage` for the Sent copy),
+/// the mutations (`set_flags` → `FlagsChanged`, `move_message` →
+/// `Moved`, `delete_message` → `Deleted`), and the
+/// `email-product` backend (outbox / derivation events, via a
+/// clone of this hub). There is still no filesystem watcher on
+/// the mail root, so mail delivered *externally* into the
+/// maildir raises no event until that lands. `email-imap`
+/// already publishes from its IDLE loop.
 impl email_proto::EmailSyncStreamSource for Backend {
     fn changes_hub(&self) -> &architect::PubSub<email_proto::EmailChange> {
         &self.changes
@@ -788,6 +983,148 @@ mod tests {
             }
             other => panic!("expected NewMessage, got {other:?}"),
         }
+    }
+
+    // ── mutations ─────────────────────────────────────────────
+    //
+    // These were `Unsupported` stubs; the `/email` page's read/flag/
+    // file/delete actions all go through them.
+
+    #[test]
+    fn set_flags_marks_seen_and_promotes_out_of_new() {
+        let (_dir, backend, acct) = fixture();
+        // The fixture's INBOX message lives in `new/` — unread, and
+        // with nowhere to record a flag until it moves to `cur/`.
+        let before = backend.fetch_envelopes(&acct.id.0, "INBOX", SeqRange::Recent(10)).unwrap();
+        assert!(!before[0].flags.iter().any(|f| f == "S"), "starts unread");
+
+        backend
+            .set_flags(
+                &acct.id.0,
+                "a@example.com",
+                FlagDelta { add: vec!["\\Seen".into()], remove: Vec::new() },
+            )
+            .unwrap();
+
+        let after = backend.fetch_envelopes(&acct.id.0, "INBOX", SeqRange::Recent(10)).unwrap();
+        assert!(after[0].flags.iter().any(|f| f == "S"), "now seen: {:?}", after[0].flags);
+    }
+
+    #[test]
+    fn set_flags_round_trips_flagged() {
+        let (_dir, backend, acct) = fixture();
+        let id = "a@example.com";
+        backend
+            .set_flags(
+                &acct.id.0,
+                id,
+                FlagDelta { add: vec!["\\Flagged".into()], remove: Vec::new() },
+            )
+            .unwrap();
+        let seen = |b: &Backend| {
+            b.fetch_envelopes(&acct.id.0, "INBOX", SeqRange::Recent(10)).unwrap()[0]
+                .flags
+                .iter()
+                .any(|f| f == "F")
+        };
+        assert!(seen(&backend), "starred");
+        backend
+            .set_flags(
+                &acct.id.0,
+                id,
+                FlagDelta { add: Vec::new(), remove: vec!["\\Flagged".into()] },
+            )
+            .unwrap();
+        assert!(!seen(&backend), "unstarred");
+    }
+
+    #[test]
+    fn set_flags_ignores_keywords_maildir_cannot_store() {
+        // A custom IMAP keyword has no filename letter. Dropping it
+        // must not fail the call — the `\Seen` alongside it still
+        // applies.
+        let (_dir, backend, acct) = fixture();
+        backend
+            .set_flags(
+                &acct.id.0,
+                "a@example.com",
+                FlagDelta {
+                    add: vec!["$Important".into(), "\\Seen".into()],
+                    remove: Vec::new(),
+                },
+            )
+            .unwrap();
+        let env = backend.fetch_envelopes(&acct.id.0, "INBOX", SeqRange::Recent(10)).unwrap();
+        assert!(env[0].flags.iter().any(|f| f == "S"));
+    }
+
+    #[test]
+    fn move_message_files_into_a_folder_created_on_demand() {
+        let (_dir, backend, acct) = fixture();
+        // Archive does not exist in the fixture — the first Archive
+        // click has to create it rather than error.
+        backend
+            .move_message(&acct.id.0, "a@example.com", "Archive")
+            .unwrap();
+
+        let inbox = backend.fetch_envelopes(&acct.id.0, "INBOX", SeqRange::Recent(10)).unwrap();
+        assert!(inbox.is_empty(), "left the inbox");
+        let archived = backend.fetch_envelopes(&acct.id.0, "Archive", SeqRange::Recent(10)).unwrap();
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].subject, "Hello");
+        // And it is still reachable by id from its new home.
+        assert!(backend.fetch_message(&acct.id.0, "a@example.com").is_ok());
+    }
+
+    #[test]
+    fn move_message_to_its_current_folder_is_a_no_op() {
+        let (_dir, backend, acct) = fixture();
+        backend
+            .move_message(&acct.id.0, "a@example.com", "INBOX")
+            .unwrap();
+        let inbox = backend.fetch_envelopes(&acct.id.0, "INBOX", SeqRange::Recent(10)).unwrap();
+        assert_eq!(inbox.len(), 1, "still there, not duplicated or lost");
+    }
+
+    #[test]
+    fn delete_message_removes_it_and_is_idempotent() {
+        let (_dir, backend, acct) = fixture();
+        backend.delete_message(&acct.id.0, "a@example.com").unwrap();
+        assert!(
+            backend
+                .fetch_envelopes(&acct.id.0, "INBOX", SeqRange::Recent(10))
+                .unwrap()
+                .is_empty()
+        );
+        // The proto contract says deleting a missing message succeeds.
+        backend.delete_message(&acct.id.0, "a@example.com").unwrap();
+        backend.delete_message(&acct.id.0, "never@existed").unwrap();
+    }
+
+    #[test]
+    fn mutations_on_an_unknown_message_report_not_found() {
+        let (_dir, backend, acct) = fixture();
+        assert!(matches!(
+            backend.set_flags(
+                &acct.id.0,
+                "nope@example.com",
+                FlagDelta { add: vec!["\\Seen".into()], remove: Vec::new() },
+            ),
+            Err(EmailSyncError::NotFound)
+        ));
+        assert!(matches!(
+            backend.move_message(&acct.id.0, "nope@example.com", "Archive"),
+            Err(EmailSyncError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn flag_letter_accepts_both_spellings() {
+        assert_eq!(flag_letter("\\Seen"), Some('S'));
+        assert_eq!(flag_letter("Seen"), Some('S'));
+        assert_eq!(flag_letter("S"), Some('S'));
+        assert_eq!(flag_letter("\\Answered"), Some('R'));
+        assert_eq!(flag_letter("$Custom"), None);
     }
 
     #[test]
