@@ -125,6 +125,22 @@ pub(crate) enum EmailCmd {
         /// Account id.
         id: String,
     },
+    /// Turn a message into a task, linked back to the email it came
+    /// from.
+    ToTask {
+        /// RFC 2822 Message-ID, with or without angle brackets.
+        message_id: String,
+        /// Account holding the message. Defaults to the only
+        /// configured account.
+        #[arg(long)]
+        account: Option<String>,
+        /// Override the task title. Defaults to the message subject.
+        #[arg(long)]
+        title: Option<String>,
+        /// Also file the email (and the task) under this project.
+        #[arg(long)]
+        project: Option<String>,
+    },
     /// Attach a message to a project / task / note, so "every email on
     /// this project" is answerable.
     Link {
@@ -396,6 +412,9 @@ pub(crate) async fn run_email(cmd: EmailCmd, org_override: Option<&str>) -> eyre
         }
         EmailCmd::Remove { id, purge_maildir } => remove(&root, &id, purge_maildir),
         EmailCmd::Test { id } => test(&root, &id).await,
+        EmailCmd::ToTask { message_id, account, title, project } => {
+            to_task(&slug, &root, &message_id, account, title, project).await
+        }
         EmailCmd::Link { message_id, project, task, note, entity, by } => {
             let target = target_from(project, task, note, entity)?;
             let client = crate::establish_client::<email_proto::EmailLinksClient>(None, &slug).await?;
@@ -600,4 +619,118 @@ async fn test(root: &std::path::Path, id: &str) -> eyre::Result<()> {
         println!("  {}{unread}", f.name);
     }
     Ok(())
+}
+
+/// `task email to-task` — capture a message as a task and record the
+/// link back to it.
+///
+/// The link is the point. A task that says "reply to Cheryl about the
+/// ASHA page" is much less useful than one you can follow back to the
+/// actual thread, and recording it here means the connection exists
+/// from the moment the task does rather than being reconstructed later.
+async fn to_task(
+    slug: &str,
+    root: &std::path::Path,
+    message_id: &str,
+    account: Option<String>,
+    title: Option<String>,
+    project: Option<String>,
+) -> eyre::Result<()> {
+    let url = crate::resolve_org_vox_url(None, slug);
+
+    // Title from the message unless overridden. Fetching also confirms
+    // the message exists before a task is created pointing at it.
+    let title = match title {
+        Some(t) => t,
+        None => {
+            let account = match account {
+                Some(a) => a,
+                None => sole_account(root)?,
+            };
+            let mail =
+                crate::establish_client::<email_proto::EmailSyncClient>(None, slug).await?;
+            let msg = mail
+                .fetch_message(account, message_id.to_owned())
+                .await
+                .map_err(|e| eyre::eyre!("fetch message: {e:?}"))?;
+            let subject = msg.envelope.subject.trim().to_owned();
+            let from = msg
+                .envelope
+                .from
+                .first()
+                .map(|a| a.name.clone().unwrap_or_else(|| a.email.clone()))
+                .unwrap_or_default();
+            match (subject.is_empty(), from.is_empty()) {
+                (false, false) => format!("{subject} — {from}"),
+                (false, true) => subject,
+                (true, false) => format!("Email from {from}"),
+                (true, true) => "Email".to_owned(),
+            }
+        }
+    };
+
+    let mut info = task::capture(&title);
+    info.path = task::write::default_task_path(&info.title, None);
+    if let Some(p) = project.clone() {
+        let pc = crate::project::connect_project_client(&url).await?;
+        info.project_id = Some(crate::project::resolve_project_target(&pc, &p).await?.id);
+    }
+    let client = crate::task_cmd::connect_task_client(&url).await?;
+    let created = client
+        .create(info)
+        .await
+        .map_err(|e| eyre::eyre!("create task: {e:?}"))?;
+
+    // Link the email to the task — and to the project too when one was
+    // given, so the thread shows up in the project's mail either way.
+    let links = crate::establish_client::<email_proto::EmailLinksClient>(None, slug).await?;
+    links
+        .link(
+            message_id.to_owned(),
+            email_proto::LinkTarget {
+                kind: "task".into(),
+                id: created.id.to_string(),
+            },
+            "user".to_owned(),
+        )
+        .await
+        .map_err(|e| eyre::eyre!("link task: {e:?}"))?;
+    if let Some(p) = project {
+        links
+            .link(
+                message_id.to_owned(),
+                email_proto::LinkTarget { kind: "project".into(), id: p.clone() },
+                "user".to_owned(),
+            )
+            .await
+            .map_err(|e| eyre::eyre!("link project: {e:?}"))?;
+    }
+
+    println!("created task {} — {}", created.id, created.title);
+    println!("linked {message_id} → task:{}", created.id);
+    Ok(())
+}
+
+/// The account to use when the caller did not name one. Only
+/// unambiguous when there is exactly one configured — otherwise say so
+/// rather than picking.
+fn sole_account(root: &std::path::Path) -> eyre::Result<String> {
+    let mut ids = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for e in entries.flatten() {
+            if e.path().is_dir() {
+                if let Some(n) = e.path().file_name().and_then(|s| s.to_str()) {
+                    ids.push(n.to_owned());
+                }
+            }
+        }
+    }
+    match ids.len() {
+        1 => Ok(ids.remove(0)),
+        0 => eyre::bail!("no mail accounts configured"),
+        _ => {
+            ids.sort();
+            eyre::bail!("several accounts ({}); pass --account", ids.join(", "))
+        }
+    }
 }
