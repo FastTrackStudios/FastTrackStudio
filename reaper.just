@@ -98,3 +98,11 @@ integration-test-gui *args:
 daw-test *args:
     FTS_REAPER_EXECUTABLE="{{_wrapper}}" \
     cargo run -p daw-reaper-xtask -- {{args}}
+
+# Same, with a VISIBLE REAPER window, left open afterwards so you can
+# look at what the test did. Watch one test rather than the suite:
+#
+#   just reaper daw-test-watch chord_notes_survive_the_round_trip
+daw-test-watch *args:
+    FTS_REAPER_EXECUTABLE="{{_wrapper}}" \
+    cargo run -p daw-reaper-xtask -- --gui --keep-open {{args}}
