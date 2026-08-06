@@ -203,6 +203,8 @@ members = [
     # inside each FX dir; they stay implicit members via path deps.
     "features/fx/saturate/saturate",
     "features/fx/saturate/saturate-dsp",
+    "features/fx/saturate/saturate-profiles",
+    "features/fx/saturate/saturate-ui",
     "features/fx/trigger/trigger",
     "features/fx/trigger/trigger-dsp",
     "features/fx/trigger/trigger-ui",
@@ -580,6 +582,8 @@ signal-synth-rig = { path = "features/rigs/synth/rig" }
 # Facade crates — the public FX deps (downstream uses these, not `*-dsp`).
 saturate = { path = "features/fx/saturate/saturate" }
 saturate-dsp = { path = "features/fx/saturate/saturate-dsp" }
+saturate-profiles = { path = "features/fx/saturate/saturate-profiles" }
+saturate-ui = { path = "features/fx/saturate/saturate-ui" }
 trigger = { path = "features/fx/trigger/trigger" }
 trigger-dsp = { path = "features/fx/trigger/trigger-dsp" }
 # The trigger plugin editor. Core (waveform/threshold SVG math) is portable;
