@@ -284,6 +284,12 @@ pub struct OrgAppState {
     /// `EmailSync::send`.
     #[cfg(feature = "plugin-email")]
     pub email_product: email_product::ProductBackend,
+
+    /// Messages as linkable objects — "every email on this project".
+    /// One sqlite table per org, keyed on Message-ID so a link
+    /// survives archiving, moving and re-syncing.
+    #[cfg(feature = "plugin-email")]
+    pub email_links: email_link::LinkBackend,
     /// Forge backend (Forgejo) serving `RepoCatalog` +
     /// `IssueTracker` + `ReviewSurface`. Built from
     /// `TASK_FORGEJO_BASE_URL` + `TASK_FORGEJO_TOKEN`; when either
@@ -1043,6 +1049,12 @@ pub(crate) async fn build_org_state(
         #[cfg(feature = "plugin-email")]
         let _email_poller = email_product.spawn_poller(std::time::Duration::from_secs(30));
 
+        // Link store lives beside the org's other databases, not under
+        // a mailbox: links are org-scoped and outlive any one account.
+        #[cfg(feature = "plugin-email")]
+        let email_links = email_link::LinkBackend::open(org_root.path())
+            .map_err(|e| eyre::eyre!("email link store: {e}"))?;
+
         // Forge backend — Forgejo, the org's primary forge. Base
         // URL + token come from the same env vars the CLI's forge
         // sync uses (`TASK_FORGEJO_BASE_URL` / `TASK_FORGEJO_TOKEN`,
@@ -1389,6 +1401,8 @@ pub(crate) async fn build_org_state(
             email,
             #[cfg(feature = "plugin-email")]
             email_product,
+            #[cfg(feature = "plugin-email")]
+            email_links,
             #[cfg(feature = "plugin-forge")]
             forge,
             #[cfg(feature = "plugin-forge")]
@@ -2719,6 +2733,11 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 email_proto::product_descriptor(),
                 email_proto::product_serve(org.email_product.clone()),
+            )
+            // Message↔entity links — "every email on this project".
+            .with(
+                email_proto::links_descriptor(),
+                email_proto::links_serve(org.email_links.clone()),
             )
             // Live mailbox changes — `EmailSync`'s `#[subscribe]`
             // stream sibling, served from the backend's hub.

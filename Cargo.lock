@@ -8049,6 +8049,7 @@ dependencies = [
 name = "email-link"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "chrono",
  "email-proto",
  "email-store",
@@ -26257,6 +26258,7 @@ dependencies = [
  "ed25519-dalek 2.2.0",
  "email-config",
  "email-imap",
+ "email-link",
  "email-maildir",
  "email-mux",
  "email-product",

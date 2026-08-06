@@ -28,6 +28,7 @@ mod error;
 mod event;
 mod flag;
 mod folder;
+mod link;
 mod message;
 mod outbox;
 mod product;
@@ -45,6 +46,7 @@ pub use folder::{Folder, FolderRole};
 pub use message::{Message, MessageId, ThreadId};
 pub use outbox::{OutboxEntry, OutboxStatus};
 pub use product::{EmailProduct, EmailProductRpc};
+
 pub use range::SeqRange;
 pub use service::{EmailSync, EmailSyncRpc};
 
@@ -77,4 +79,12 @@ pub use product::{
     EmailProductClient, EmailProductRpcDispatcher as ProductDispatcher,
     email_product_rpc_service_descriptor as product_descriptor, layer as product_layer,
     serve as product_serve,
+};
+
+// Same aliasing for the link service: `email_proto::links_descriptor()`
+// / `links_serve(backend)` at the mount site.
+pub use link::{
+    EmailLinks, LinkTarget, MessageLink,
+    email_links_rpc_service_descriptor as links_descriptor, layer as links_layer,
+    serve as links_serve,
 };

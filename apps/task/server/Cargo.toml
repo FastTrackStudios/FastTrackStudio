@@ -146,6 +146,8 @@ email-maildir = { workspace = true, optional = true }
 # backend that lets one org mix them with a local Maildir.
 email-imap = { workspace = true, optional = true }
 email-mux = { workspace = true, optional = true }
+# Message↔entity links (email on a project / task).
+email-link = { workspace = true, optional = true }
 # `FolderAliases` for the per-account Maildir registration.
 email-config = { workspace = true, optional = true }
 # SMTP submitter wired into discovered maildir accounts whose
@@ -206,6 +208,7 @@ plugin-email = [
     "dep:email-maildir",
     "dep:email-imap",
     "dep:email-mux",
+    "dep:email-link",
     "dep:email-config",
     "dep:email-smtp",
     "dep:email-product",
