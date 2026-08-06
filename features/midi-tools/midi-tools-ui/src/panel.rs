@@ -175,6 +175,7 @@ pub fn VelocityPanel() -> Element {
                         Chip {
                             label: preset.label().to_string(),
                             active: false,
+                            testid: format!("curve-{}", preset.label().to_lowercase().replace(' ', "-")),
                             onclick: move |_| session.write().curve = Some(preset.curve()),
                         }
                     }
@@ -201,6 +202,7 @@ pub fn VelocityPanel() -> Element {
                     div {
                         style: "flex:1; min-width:120px;",
                         BarEditor {
+                            testid: "pattern-bars".to_string(),
                             values: session.read().pattern.steps().to_vec(),
                             on_change: move |(i, v)| session.write().pattern.set(i, v),
                         }
@@ -227,6 +229,7 @@ pub fn VelocityPanel() -> Element {
                     label: "Amount".to_string(),
                     value: format!("{:.0}%", session.read().pattern_amount * 100.0),
                     Slider {
+                        testid: "pattern-amount".to_string(),
                         value: session.read().pattern_amount,
                         min: 0.0,
                         max: 1.0,
@@ -253,6 +256,7 @@ pub fn VelocityPanel() -> Element {
                     label: "Amount".to_string(),
                     value: format!("{:.0}%", session.read().randomize_amount * 100.0),
                     Slider {
+                        testid: "randomize-amount".to_string(),
                         value: session.read().randomize_amount,
                         min: 0.0,
                         max: 1.0,
@@ -267,6 +271,7 @@ pub fn VelocityPanel() -> Element {
                     label: dynamics_label(session.read().dynamics.amount),
                     value: format!("{:+.0}%", session.read().dynamics.amount * 100.0),
                     Slider {
+                        testid: "dynamics-amount".to_string(),
                         value: session.read().dynamics.amount,
                         min: -1.0,
                         max: 1.0,
@@ -340,12 +345,14 @@ pub fn VelocityPanel() -> Element {
                 style: "display:flex; align-items:center; gap:8px; margin-top:auto; padding-top:8px; border-top:1px solid var(--border, #2c2c2c);",
                 button {
                     style: "{BUTTON} background:var(--primary, #d2691e); color:var(--primary-foreground, #fff); border-color:transparent;",
+                    "data-testid": "apply",
                     onclick: apply,
                     "Apply"
                 }
-                button { style: "{BUTTON}", onclick: revert, "Revert" }
+                button { "data-testid": "revert", style: "{BUTTON}", onclick: revert, "Revert" }
                 button { style: "{BUTTON}", onclick: reopen, "Reload" }
                 div {
+                    "data-testid": "status",
                     style: "flex:1; text-align:right; opacity:0.7;",
                     if pending > 0 { "{status} · {pending} pending" } else { "{status}" }
                 }
@@ -410,7 +417,14 @@ fn Labelled(label: String, value: String, children: Element) -> Element {
 
 /// A small toggle/action button.
 #[component]
-pub(crate) fn Chip(label: String, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
+pub(crate) fn Chip(
+    label: String,
+    active: bool,
+    /// Test hook. Empty in production.
+    #[props(default)]
+    testid: String,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
     let tone = if active {
         "background:var(--primary, #d2691e); color:var(--primary-foreground, #fff); border-color:transparent;"
     } else {
@@ -418,6 +432,7 @@ pub(crate) fn Chip(label: String, active: bool, onclick: EventHandler<MouseEvent
     };
     rsx! {
         button {
+            "data-testid": "{testid}",
             style: "padding:3px 8px; border-radius:4px; border:1px solid var(--border, #3a3a3a); font-size:11px; cursor:pointer; {tone}",
             onclick: move |e| onclick.call(e),
             "{label}"

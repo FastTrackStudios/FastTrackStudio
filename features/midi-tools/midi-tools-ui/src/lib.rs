@@ -33,5 +33,13 @@ mod drag;
 mod panel;
 
 pub use curve_editor::CurveEditor;
+/// The raw widgets, for tests that need to drive one in isolation.
+///
+/// Not part of the panel API — exported so `tests/slider_drag.rs` can
+/// mount a single control without the whole panel around it.
+pub mod test_support {
+    pub use crate::drag::{BarEditor, RangeSlider, Slider};
+}
+
 pub use arp_panel::{ArpPanel, ArpSinkHandle};
 pub use panel::{SinkHandle, VelocityPanel};
