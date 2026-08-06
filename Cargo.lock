@@ -6401,6 +6401,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "delay-profiles"
+version = "0.1.0"
+dependencies = [
+ "delay-dsp",
+]
+
+[[package]]
 name = "deltae"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21692,6 +21699,7 @@ version = "0.1.0"
 dependencies = [
  "audiocore-core",
  "audiocore-dsp",
+ "crossbeam-channel",
  "nice-plug",
  "reverb",
  "reverb-profiles",
@@ -21710,6 +21718,7 @@ name = "reverb-ui"
 version = "0.1.0"
 dependencies = [
  "atomic_float",
+ "crossbeam-channel",
  "dioxus",
  "dioxus-test",
  "fts-ui",
