@@ -947,9 +947,14 @@ pub(crate) async fn build_org_state(
             .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
         #[cfg(feature = "plugin-email")]
         let (mail_accounts, mail_configs) = discover_mail_accounts(&mail_root);
-        // The outbox is maildir-backed (it stores staged drafts on
-        // disk next to the account), so it covers local accounts only.
-        // Remote accounts send through IMAP/SMTP directly.
+        // Every account gets a product store, remote ones included.
+        //
+        // The store is a sqlite file in the account's directory — which
+        // exists for an IMAP account too, since that is where its
+        // `account.json` lives. It backs the triage pass, the
+        // derivation cache, and the alert-once notification state, so
+        // excluding remote accounts here would mean a Gmail mailbox
+        // silently never raises a new-mail notification.
         #[cfg(feature = "plugin-email")]
         let product_accounts: Vec<email_product::ProductAccount> = mail_accounts
             .iter()
@@ -958,6 +963,17 @@ pub(crate) async fn build_org_state(
                 root: e.root.clone(),
                 address: e.account.address.clone(),
             })
+            .chain(mail_configs.iter().filter_map(|c| {
+                matches!(c.backend, email_config::BackendKind::Maildir { .. })
+                    .then(|| None)
+                    .unwrap_or_else(|| {
+                        Some(email_product::ProductAccount {
+                            id: c.id.0.clone(),
+                            root: mail_root.join(&c.id.0),
+                            address: c.address.clone(),
+                        })
+                    })
+            }))
             .collect();
         // One `EmailSync` service, several backends behind it: local
         // Maildir accounts plus any remote IMAP accounts (Gmail &c)
