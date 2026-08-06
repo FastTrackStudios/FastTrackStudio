@@ -98,11 +98,23 @@ pub fn message_from_bytes(
             PartType::Text(t) | PartType::Html(t) => t.len() as u64,
             _ => 0,
         };
+        // `Content-ID` marks a part the HTML body references as
+        // `cid:…` rather than one the client lists at the bottom.
+        // Stored bare; the header's angle brackets are not part of the
+        // identifier.
+        let content_id = part
+            .headers
+            .iter()
+            .find(|h| h.name().eq_ignore_ascii_case("content-id"))
+            .and_then(|h| h.value().as_text())
+            .map(|v| v.trim().trim_start_matches('<').trim_end_matches('>').to_owned())
+            .filter(|v| !v.is_empty());
         attachments.push(AttachmentMeta {
             part: idx.to_string(),
             filename,
             mime,
             size,
+            content_id,
         });
     }
 
