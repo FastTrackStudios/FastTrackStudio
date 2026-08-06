@@ -980,8 +980,21 @@ pub(crate) async fn build_org_state(
         // declared by an `account.json`. The mux routes by account id
         // and gives both sub-backends one shared change hub, so
         // subscribers still see a single stream.
+        // Every account's on-disk directory, for the mux's sqlite
+        // index. Local accounts keep it beside their maildir; remote
+        // ones beside their `account.json`.
         #[cfg(feature = "plugin-email")]
-        let email = email_mux::Backend::build(mail_accounts, mail_configs);
+        let account_dirs: std::collections::HashMap<String, PathBuf> = mail_accounts
+            .iter()
+            .map(|e| (e.account.id.0.clone(), e.root.clone()))
+            .chain(
+                mail_configs
+                    .iter()
+                    .map(|c| (c.id.0.clone(), mail_root.join(&c.id.0))),
+            )
+            .collect();
+        #[cfg(feature = "plugin-email")]
+        let email = email_mux::Backend::build(mail_accounts, mail_configs, account_dirs);
 
         // Push delivery for remote accounts: one IDLE loop per IMAP
         // account's INBOX, publishing into the shared hub. Failures

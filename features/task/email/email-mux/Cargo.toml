@@ -13,6 +13,8 @@ email-proto = { workspace = true }
 email-config = { workspace = true }
 email-maildir = { workspace = true }
 email-imap = { workspace = true }
+# The sqlite+FTS5 index that backs the envelope-listing cache.
+email-store = { workspace = true }
 email-smtp = { workspace = true }
 # `dispatch-tokio`: the IMAP backend's sync methods wrap
 # `runtime.block_on`, which panics on a runtime worker thread — they
@@ -25,6 +27,7 @@ tracing = { workspace = true }
 # `email_imap::Backend::from_configs` captures the current handle.
 email-secret = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
+tempfile = "3"
 
 [lints]
 workspace = true

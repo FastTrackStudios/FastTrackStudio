@@ -28,9 +28,23 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use email_proto::{
     Account, Draft, EmailSync, EmailSyncError, Envelope, FlagDelta, Folder, Message, SeqRange,
 };
+use email_store::Store;
+
+/// How long a folder listing served from the store is considered
+/// current.
+///
+/// The store is kept warm independently — `email-product`'s pass runs
+/// every 30s and IMAP IDLE pushes changes as they happen — so this is
+/// not the freshness mechanism, just a ceiling on how long we will
+/// serve a listing without re-checking the backend ourselves.
+const LISTING_TTL: Duration = Duration::from_secs(60);
 
 /// Which backend owns an account.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -57,6 +71,15 @@ pub struct Backend {
     imap: Option<email_imap::Backend>,
     routes: Arc<HashMap<String, Route>>,
     changes: architect::PubSub<email_proto::EmailChange>,
+    /// Per-account sqlite index, when the account has a directory to
+    /// keep it in. Envelope listings are served from here rather than
+    /// round-tripping the backend — on IMAP that is the difference
+    /// between a network fetch and a local query every time you switch
+    /// folders.
+    stores: Arc<HashMap<String, Arc<Mutex<Store>>>>,
+    /// `(account, folder)` → when we last refreshed that listing from
+    /// the backend.
+    refreshed: Arc<Mutex<HashMap<(String, String), Instant>>>,
 }
 
 impl Backend {
@@ -70,6 +93,7 @@ impl Backend {
     pub fn build(
         maildir_entries: Vec<email_maildir::AccountEntry>,
         configs: Vec<email_config::AccountConfig>,
+        account_dirs: HashMap<String, PathBuf>,
     ) -> Self {
         let changes = architect::PubSub::sliding(256);
 
@@ -108,11 +132,62 @@ impl Backend {
             }
         };
 
+        // One sqlite index per account that has somewhere to keep it.
+        // A store that fails to open is not fatal — the account just
+        // loses caching and serves straight from the backend.
+        let mut stores = HashMap::new();
+        for (id, dir) in account_dirs {
+            if !routes.contains_key(&id) {
+                continue;
+            }
+            match Store::open(&dir) {
+                Ok(store) => {
+                    stores.insert(id, Arc::new(Mutex::new(store)));
+                }
+                Err(err) => {
+                    tracing::warn!(account = %id, %err, "email index unavailable; serving uncached");
+                }
+            }
+        }
+
         Self {
             maildir,
             imap,
             routes: Arc::new(routes),
             changes,
+            stores: Arc::new(stores),
+            refreshed: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Is our cached listing for `(account, folder)` still inside
+    /// [`LISTING_TTL`]?
+    fn listing_fresh(&self, account: &str, folder: &str) -> bool {
+        self.refreshed
+            .lock()
+            .map(|m| {
+                m.get(&(account.to_owned(), folder.to_owned()))
+                    .is_some_and(|t| t.elapsed() < LISTING_TTL)
+            })
+            .unwrap_or(false)
+    }
+
+    fn mark_refreshed(&self, account: &str, folder: &str) {
+        if let Ok(mut m) = self.refreshed.lock() {
+            m.insert((account.to_owned(), folder.to_owned()), Instant::now());
+        }
+    }
+
+    /// Drop the cached-listing marks for an account, so the next read
+    /// re-checks the backend.
+    ///
+    /// Called after any mutation we performed: a flag flip, a move or a
+    /// delete changes what the listing should say, and continuing to
+    /// serve the pre-mutation rows for up to a minute would look like
+    /// the action silently failed.
+    fn invalidate(&self, account: &str) {
+        if let Ok(mut m) = self.refreshed.lock() {
+            m.retain(|(a, _), _| a != account);
         }
     }
 
@@ -173,13 +248,65 @@ impl EmailSync for Backend {
         self.route(account)?.list_folders(account)
     }
 
+    /// Read-through: serve the listing from the local index when it is
+    /// current, otherwise fetch from the backend and write through.
+    ///
+    /// This is the hot path — the UI lists a folder on every switch,
+    /// and on IMAP each of those was a TLS connect, LOGIN, SELECT and
+    /// FETCH of 50 message headers. Serving it from sqlite turns a
+    /// network round trip into a local query.
+    ///
+    /// Only `Recent` listings are cached. `All` and explicit ranges are
+    /// asking for something specific and are rare; sending them to the
+    /// backend keeps the cache honest rather than guessing whether the
+    /// stored rows satisfy the range.
     fn fetch_envelopes(
         &self,
         account: &str,
         folder: &str,
         range: SeqRange,
     ) -> Result<Vec<Envelope>, EmailSyncError> {
-        self.route(account)?.fetch_envelopes(account, folder, range)
+        let cacheable = matches!(range, SeqRange::Recent(_));
+        let limit = match range {
+            SeqRange::Recent(n) => n,
+            _ => 0,
+        };
+
+        if cacheable && self.listing_fresh(account, folder) {
+            if let Some(store) = self.stores.get(account) {
+                if let Ok(store) = store.lock() {
+                    match store.query_envelopes(folder, limit) {
+                        // An empty result is ambiguous — an empty
+                        // folder and a cold index look identical — so
+                        // only a non-empty hit short-circuits.
+                        Ok(rows) if !rows.is_empty() => {
+                            return Ok(rows.into_iter().map(|r| r.envelope).collect());
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            tracing::warn!(account, folder, %err, "email index read failed")
+                        }
+                    }
+                }
+            }
+        }
+
+        let envelopes = self.route(account)?.fetch_envelopes(account, folder, range)?;
+
+        if cacheable {
+            if let Some(store) = self.stores.get(account) {
+                if let Ok(mut store) = store.lock() {
+                    for env in &envelopes {
+                        if let Err(err) = store.upsert_envelope(env, None, None, None) {
+                            tracing::warn!(account, %err, "email index write failed");
+                            break;
+                        }
+                    }
+                }
+            }
+            self.mark_refreshed(account, folder);
+        }
+        Ok(envelopes)
     }
 
     fn fetch_message(&self, account: &str, message_id: &str) -> Result<Message, EmailSyncError> {
@@ -202,7 +329,11 @@ impl EmailSync for Backend {
         message_id: &str,
         delta: FlagDelta,
     ) -> Result<(), EmailSyncError> {
-        self.route(account)?.set_flags(account, message_id, delta)
+        let out = self.route(account)?.set_flags(account, message_id, delta);
+        if out.is_ok() {
+            self.invalidate(account);
+        }
+        out
     }
 
     fn move_message(
@@ -211,12 +342,27 @@ impl EmailSync for Backend {
         message_id: &str,
         dest_folder: &str,
     ) -> Result<(), EmailSyncError> {
-        self.route(account)?
-            .move_message(account, message_id, dest_folder)
+        let out = self
+            .route(account)?
+            .move_message(account, message_id, dest_folder);
+        if out.is_ok() {
+            self.invalidate(account);
+        }
+        out
     }
 
     fn delete_message(&self, account: &str, message_id: &str) -> Result<(), EmailSyncError> {
-        self.route(account)?.delete_message(account, message_id)
+        let out = self.route(account)?.delete_message(account, message_id);
+        if out.is_ok() {
+            // Also drop the row so a stale listing cannot resurrect it.
+            if let Some(store) = self.stores.get(account) {
+                if let Ok(mut store) = store.lock() {
+                    let _ = store.delete_message(message_id);
+                }
+            }
+            self.invalidate(account);
+        }
+        out
     }
 
     fn append_draft(&self, account: &str, draft: Draft) -> Result<String, EmailSyncError> {
@@ -265,7 +411,7 @@ mod tests {
         // which is exactly the degraded path worth pinning: the mux
         // must still construct, and must not answer for an account it
         // cannot serve.
-        let mux = Backend::build(Vec::new(), vec![imap_cfg("gmail")]);
+        let mux = Backend::build(Vec::new(), vec![imap_cfg("gmail")], HashMap::new());
         assert!(matches!(
             mux.list_folders("nope"),
             Err(EmailSyncError::UnknownAccount)
@@ -292,9 +438,116 @@ mod tests {
         tokio::task::spawn_blocking(f).await.expect("join")
     }
 
+
+    /// A maildir account whose store is warmed, then whose maildir is
+    /// emptied underneath it. A cached read still returns the rows; an
+    /// invalidated one does not. That is the whole contract, and it is
+    /// observable without a network backend.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn listings_come_from_the_index_until_invalidated() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        for sub in ["cur", "new", "tmp"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        std::fs::write(
+            root.join("cur").join("1785900000.M1.host:2,S"),
+            "Message-ID: <a@example.com>\r\nFrom: Alice <alice@example.com>\r\n\
+             To: you@example.com\r\nSubject: Cached\r\n\
+             Date: Mon, 04 Aug 2026 09:00:00 +0000\r\n\r\nbody\r\n",
+        )
+        .unwrap();
+
+        let account = email_proto::Account {
+            id: email_proto::AccountId("local".into()),
+            name: "local".into(),
+            address: "you@example.com".into(),
+            display_name: None,
+        };
+        let entry = email_maildir::AccountEntry {
+            account,
+            root: root.clone(),
+            aliases: email_config::FolderAliases::new(),
+            submit: None,
+        };
+        let dirs = HashMap::from([("local".to_owned(), root.clone())]);
+        let mux = Backend::build(vec![entry], Vec::new(), dirs);
+
+        // Cold: goes to the maildir and writes through.
+        let m = mux.clone();
+        let first = tokio::task::spawn_blocking(move || {
+            m.fetch_envelopes("local", "INBOX", SeqRange::Recent(50))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(first.len(), 1, "cold read hits the backend");
+        assert_eq!(first[0].subject, "Cached");
+
+        // Delete the message on disk. A backend read would now return
+        // nothing; a cached read still answers.
+        std::fs::remove_file(root.join("cur").join("1785900000.M1.host:2,S")).unwrap();
+
+        let m = mux.clone();
+        let cached = tokio::task::spawn_blocking(move || {
+            m.fetch_envelopes("local", "INBOX", SeqRange::Recent(50))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(cached.len(), 1, "served from the index, not the maildir");
+
+        // A mutation drops the mark, so the next read re-checks.
+        mux.invalidate("local");
+        let m = mux.clone();
+        let after = tokio::task::spawn_blocking(move || {
+            m.fetch_envelopes("local", "INBOX", SeqRange::Recent(50))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(after.is_empty(), "invalidated: back to the backend");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn explicit_ranges_are_never_served_from_the_index() {
+        // `All` / `Range` ask for something specific; the stored rows
+        // may not satisfy them, so they must reach the backend.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        for sub in ["cur", "new", "tmp"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        let account = email_proto::Account {
+            id: email_proto::AccountId("local".into()),
+            name: "local".into(),
+            address: "you@example.com".into(),
+            display_name: None,
+        };
+        let entry = email_maildir::AccountEntry {
+            account,
+            root: root.clone(),
+            aliases: email_config::FolderAliases::new(),
+            submit: None,
+        };
+        let mux = Backend::build(
+            vec![entry],
+            Vec::new(),
+            HashMap::from([("local".to_owned(), root)]),
+        );
+        // Not cacheable, so no freshness mark is recorded.
+        let m = mux.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            m.fetch_envelopes("local", "INBOX", SeqRange::All)
+        })
+        .await
+        .unwrap();
+        assert!(!mux.listing_fresh("local", "INBOX"));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn imap_accounts_route_to_imap() {
-        let mux = Backend::build(Vec::new(), vec![imap_cfg("gmail")]);
+        let mux = Backend::build(Vec::new(), vec![imap_cfg("gmail")], HashMap::new());
         assert_eq!(mux.imap_account_ids(), vec!["gmail".to_owned()]);
         assert!(mux.imap().is_some());
         // Reachability isn't asserted (no server here) — routing is:
@@ -309,7 +562,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn accounts_lists_both_backends() {
-        let mux = Backend::build(Vec::new(), vec![imap_cfg("gmail")]);
+        let mux = Backend::build(Vec::new(), vec![imap_cfg("gmail")], HashMap::new());
         let ids: Vec<String> = blocking(move || mux.accounts())
             .await
             .unwrap()

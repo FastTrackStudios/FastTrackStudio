@@ -8091,6 +8091,8 @@ dependencies = [
  "email-proto",
  "email-secret",
  "email-smtp",
+ "email-store",
+ "tempfile",
  "tokio",
  "tracing",
 ]
