@@ -220,6 +220,7 @@ members = [
     "features/fx/comp/limiter-ui",
     "features/fx/reverb/reverb",
     "features/fx/reverb/reverb-dsp",
+    "features/fx/reverb/reverb-profiles",
     "features/fx/delay/delay",
     "features/fx/delay/delay-dsp",
     "features/fx/pitch/pitch",
@@ -608,6 +609,7 @@ modulation = { path = "features/fx/modulation/modulation" }
 eq-dsp = { path = "features/fx/eq/eq-dsp" }
 comp-dsp = { path = "features/fx/comp/comp-dsp" }
 reverb-dsp = { path = "features/fx/reverb/reverb-dsp" }
+reverb-profiles = { path = "features/fx/reverb/reverb-profiles" }
 delay-dsp = { path = "features/fx/delay/delay-dsp" }
 chorus-dsp = { path = "features/fx/modulation/chorus-dsp" }
 multiband-dsp = { path = "features/fx/multiband" }

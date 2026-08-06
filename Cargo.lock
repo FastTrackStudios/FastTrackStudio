@@ -21696,6 +21696,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverb-profiles"
+version = "0.1.0"
+dependencies = [
+ "reverb-dsp",
+]
+
+[[package]]
 name = "rfd"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
