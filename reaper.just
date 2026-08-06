@@ -139,3 +139,44 @@ midi-tools-toolbar target="floating toolbar 1":
         --target "{{target}}" --workflow midi-tools --icon fts_midi_arp.png
     cargo run -q -p daw --features cli --bin daw -- \
         toolbar-live --target "{{target}}"
+
+# ── Theme ──────────────────────────────────────────────────────────────
+# The FastTrackStudio REAPER theme lives UNPACKED in-tree at
+# features/reaper/fts-theme. REAPER loads unpacked themes straight out of
+# ColorThemes/ (a <name>/ folder next to a <name>.ReaperTheme), so the dev
+# loop is: symlink once, edit rtconfig.txt / PNGs in the repo, hit
+# "Theme development: Reload theme" in REAPER. No zip round-trip.
+
+theme_dir  := justfile_directory() / "features/reaper/fts-theme"
+theme_name := "FastTrackStudio"
+
+# Symlink the in-tree theme into $REAPER_HOME/ColorThemes (live-editable)
+theme-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dest="{{reaper_home}}/ColorThemes"
+    mkdir -p "$dest"
+    ln -sfn "{{theme_dir}}/{{theme_name}}"                "$dest/{{theme_name}}"
+    ln -sfn "{{theme_dir}}/{{theme_name}}.ReaperTheme"    "$dest/{{theme_name}}.ReaperTheme"
+    echo "Symlinked -> $dest/{{theme_name}}{,.ReaperTheme}"
+    echo "Pick it in REAPER: Options > Themes > {{theme_name}}"
+
+# Remove the theme symlinks
+theme-uninstall:
+    rm -f "{{reaper_home}}/ColorThemes/{{theme_name}}" \
+          "{{reaper_home}}/ColorThemes/{{theme_name}}.ReaperTheme"
+    @echo "Removed {{theme_name}} from {{reaper_home}}/ColorThemes"
+
+# Pack the theme into dist/<name>.ReaperThemeZip for distribution
+theme-pack:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{justfile_directory()}}/dist/{{theme_name}}.ReaperThemeZip"
+    mkdir -p "$(dirname "$out")"
+    rm -f "$out"
+    # Paths inside the zip must be relative to the theme dir: REAPER wants
+    # <name>.ReaperTheme and <name>/ at the archive root.
+    (cd "{{theme_dir}}" && zip -qr "$out" \
+        "{{theme_name}}.ReaperTheme" "{{theme_name}}" \
+        -x '*/.DS_Store' '*/Thumbs.db')
+    echo "Packed -> $out ($(du -h "$out" | cut -f1))"

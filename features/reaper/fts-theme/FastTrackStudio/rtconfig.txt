@@ -1,0 +1,3744 @@
+;
+;   FastTrackStudio Theme
+;
+;   Derived from the Reapertips Theme v1.93 (Dark Version) by Alejandro
+;   Hernandez and FeedTheCat (Ilias-Timon Poulakis) — reapertips.com —
+;   which is itself based on REAPER's Default_v6.0 theme.
+;
+;   Licensing: see ../README.md. This fork is internal to FastTrackStudio
+;   and must not be redistributed without permission from the Reapertips
+;   authors.
+
+#>----------------------------------- GLOBALS -----------------------------------------
+
+version 6.0
+use_pngs 1
+use_overlays 0
+tcp_showborders 0
+mcp_showborders 0
+transport_showborders 0
+tcp_vupeakwidth 2
+mcp_vupeakheight 2
+mcp_mastervupeakheight 4
+mcp_altmeterpos 0
+tcp_vol_zeroline FF666666
+tcp_pan_zeroline 66000000
+mcp_vol_zeroline FF666666
+mcp_pan_zeroline 85000000
+trans_speed_zeroline 85000000
+gen_vol_zeroline FF000000
+gen_pan_zeroline FF000000
+item_volknobfg 2A2A2A  2A2A2A  2A2A2A
+tcp_master_minheight 56
+mcp_voltext_flags 5 5
+tcp_voltext_flags 12
+no_meter_reclbl 1
+mcp_min_height 215
+tcp_heights 4 26 61 61   ; supercollapsed, collapsed, small(norecarm), recarm size
+tcp_folderindent 0
+envcp_min_height 27
+misc_dpi_translate 50 100
+misc_dpi_translate 134 150
+misc_dpi_translate 174 200
+tinttcp 298
+peaksedges 0
+want_os_type 1
+adjuster_script "Default_6.0_theme_adjuster.lua"
+
+; ----------------- WALTER -------------------
+
+set theme_version 1
+set theme_accent 1
+
+set is_windows os_type==0 1 0
+set is_macos   os_type==1 1 os_type==3 1 0
+set is_linux   os_type==2 1 os_type==4 1 0
+
+define_parameter 'defaultV6' 'defaultV6_version' 1
+define_parameter label_hint                     'Note: Please resize this window to display only one column.' 0
+
+define_parameter label_global                   'GLOBAL' 1
+define_parameter tint_label                     'Global: Tint track name' 0 0 1
+define_parameter tint_folder_label              'Global: Tint track name only for folders' 0 0 1
+define_parameter label_transport                'TRANSPORT' 1
+define_parameter trans_centered                 'Transport: Center controls' 1 0 1
+define_parameter trans_height                   'Transport: Docked height' 36 30 50
+define_parameter label_tcp_colors               'TCP - PANEL COLORS' 1
+
+; ----- Dark version ------
+define_parameter tcp_tint_strength              'TCP: Tint panel' 100 0 100
+define_parameter tcp_dim_strength               'TCP: Dim panel' 30 0 60
+define_parameter tcp_tint_sel_strength          'TCP: Tint panel when selected' 100 0 100
+define_parameter tcp_dim_sel_strength           'TCP: Dim panel when selected' 15 0 60
+define_parameter tcp_sel_strength               'TCP: Brighten panel when selected' 0 0 50
+define_parameter tcp_idx_tint_strength          'TCP: Tint index background' 100 0 100
+define_parameter tcp_idx_dim_strength           'TCP: Dim index background' 30 0 60
+
+; ----- Hybrid version -----
+; define_parameter tcp_tint_strength              'TCP: Tint panel' 90 0 100
+; define_parameter tcp_dim_strength               'TCP: Dim panel' 20 0 60
+; define_parameter tcp_tint_sel_strength          'TCP: Tint panel when selected' 90 0 100
+; define_parameter tcp_dim_sel_strength           'TCP: Dim panel when selected' 10 0 60
+; define_parameter tcp_sel_strength               'TCP: Brighten panel when selected' 10 0 50
+; define_parameter tcp_idx_tint_strength          'TCP: Tint index background' 90 0 100
+; define_parameter tcp_idx_dim_strength           'TCP: Dim index background' 20 0 60
+
+; ----- Light version -----
+; define_parameter tcp_tint_strength              'TCP: Tint panel' 70 0 100
+; define_parameter tcp_dim_strength               'TCP: Dim panel' 10 0 60
+; define_parameter tcp_tint_sel_strength          'TCP: Tint panel when selected' 80 0 100
+; define_parameter tcp_dim_sel_strength           'TCP: Dim panel when selected' 00 0 60
+; define_parameter tcp_sel_strength               'TCP: Brighten panel when selected' 10 0 50
+; define_parameter tcp_idx_tint_strength          'TCP: Tint index background' 70 0 100
+; define_parameter tcp_idx_dim_strength           'TCP: Dim index background' 10 0 60
+; -------------------------
+
+define_parameter tcp_idx_sel_strength           'TCP: Brighten index background when selected' 50 0 50
+define_parameter label_tcp_lists                'TCP - FX, PARAMETERS & SENDS' 1
+define_parameter tcp_side_fx                    'TCP: Show FX list on the side' 1 0 1
+define_parameter tcp_sep_parms                  'TCP: Separate FX parameter list' 0 0 1
+define_parameter tcp_side_parms                 'TCP: Show FX parameter list on the side' 1 0 1
+define_parameter tcp_sep_sends                  'TCP: Separate sends list' 0 0 1
+define_parameter tcp_side_sends                 'TCP: Show sends list on the side' 1 0 1
+define_parameter tcp_show_side_buttons          'TCP: Move FX / IO buttons to the side' 0 0 1
+define_parameter tcp_side_button_hide           'TCP: Hide side FX / IO buttons at minimum height' 1 0 1
+
+define_parameter tcp_list_margin                'TCP: Margin between lists' 4 0 32
+define_parameter tcp_list_row_h                 'TCP: List row height' 17 8 200
+define_parameter tcp_fx_section_width           'TCP: FX width' 84 20 200   
+define_parameter tcp_fx_num_columns             'TCP: FX column limit' 5 1 8
+define_parameter tcp_parm_section_width         'TCP: FX parameter width' 64 20 200
+define_parameter tcp_parm_num_columns           'TCP: FX parameter column limit' 3 1 8
+define_parameter tcp_send_section_width         'TCP: Send width' 64 20 200
+define_parameter tcp_send_num_columns           'TCP: Send column limit' 3 1 8
+
+define_parameter label_tcp_layout               'TCP - BEHAVIOR AND SIZES' 1
+define_parameter tcp_show_fixed_lanes           'TCP: Show fixed lanes button' 1 0 1
+define_parameter tcp_show_comping               'TCP: Show comping button' 1 0 1
+define_parameter tcp_show_pin                   'TCP: Show pin button' 1 0 1
+define_parameter tcp_show_folder_recarm         'TCP: Show folder label indicator' 0 0 1
+define_parameter tcp_swap_fx_io                 'TCP: Swap FX / IO buttons' 0 0 1
+define_parameter tcp_avoid_solo_flip          	'TCP: Avoid flipping mute/solo' 0 0 1
+define_parameter tcp_infoblock                  'TCP: Use InfoBlock' 0 0 1
+define_parameter tcp_infoblock_wrap             'TCP: Move InfoBlock next to Pan' 1 0 1
+define_parameter tcp_infoblock_width            'TCP: Infoblock width' 44 24 100
+define_parameter tcp_dual_pan_align             'TCP: Dual pan alignment mode' 1 1 4
+define_parameter tcp_allow_shrink               'TCP: Allow shrinking long controls' 1 0 1
+define_parameter tcp_expand_input               'TCP: Expand input to end of row' 1 0 1
+define_parameter tcp_label_len_offs             'TCP: Name size offset' 0 0 400
+define_parameter tcp_vol_len_offs               'TCP: Volume size offset' 0 0 400
+define_parameter tcp_input_len_offs             'TCP: Input size offset' 0 0 400
+define_parameter tcp_env_label_len_offs         'TCP: Envelope name size offset' 0 0 400
+define_parameter label_mcp_colors               'MCP - PANEL COLORS' 1
+
+; ----- Dark version ------
+define_parameter mcp_tint_strength              'MCP: Tint panel' 100 0 100
+define_parameter mcp_dim_strength               'MCP: Dim panel' 25 0 60
+define_parameter mcp_tint_sel_strength          'MCP: Tint panel when selected' 100 0 100
+define_parameter mcp_dim_sel_strength           'MCP: Dim panel when selected' 20 0 60
+define_parameter mcp_sel_strength               'MCP: Brighten panel when selected' 0 0 50
+define_parameter mcp_idx_tint_strength          'MCP: Tint index background' 100 0 100
+define_parameter mcp_idx_dim_strength           'MCP: Dim index background' 25 0 60
+
+; ----- Hybrid version -----
+; define_parameter mcp_tint_strength              'MCP: Tint panel' 90 0 100
+; define_parameter mcp_dim_strength               'MCP: Dim panel' 20 0 60
+; define_parameter mcp_tint_sel_strength          'MCP: Tint panel when selected' 90 0 100
+; define_parameter mcp_dim_sel_strength           'MCP: Dim panel when selected' 10 0 60
+; define_parameter mcp_sel_strength               'MCP: Brighten panel when selected' 10 0 50
+; define_parameter mcp_idx_tint_strength          'MCP: Tint index background' 90 0 100
+; define_parameter mcp_idx_dim_strength           'MCP: Dim index background' 20 0 60
+
+; ----- Light version -----
+; define_parameter mcp_tint_strength              'MCP: Tint panel' 70 0 100
+; define_parameter mcp_dim_strength               'MCP: Dim panel' 10 0 60
+; define_parameter mcp_tint_sel_strength          'MCP: Tint panel when selected' 80 0 100
+; define_parameter mcp_dim_sel_strength           'MCP: Dim panel when selected' 00 0 60
+; define_parameter mcp_sel_strength               'MCP: Brighten panel when selected' 10 0 50
+; define_parameter mcp_idx_tint_strength          'MCP: Tint index background' 70 0 100
+; define_parameter mcp_idx_dim_strength           'MCP: Dim index background' 10 0 60
+; -------------------------
+
+define_parameter mcp_idx_sel_strength           'MCP: Brighten index background when selected' 50 0 50
+define_parameter mcp_sel_gradient               'MCP: Show bright gradient when selected' 1 0 1
+define_parameter label_mcp_layout               'MCP - BEHAVIOR AND SIZES' 1
+define_parameter mcp_wide_w                     'MCP: Normal layout width' 86 86 250
+define_parameter mcp_narrow_w                   'MCP: Narrow layout width' 54 54 200
+define_parameter mcp_strip_w                    'MCP: Strip layout width' 34 34 150
+define_parameter mcp_separator_w                'MCP: Separator layout width' 27 24 300
+define_parameter mcp_sidebar_w                  'MCP: Sidebar width' 86 34 150
+define_parameter mcp_gap_w                      'MCP: Border width' 11 2 30
+define_parameter mcp_show_sel_handle            'MCP: Show selection handle' 1 0 1
+define_parameter mcp_list_row_h                 'MCP: List row height' 17 8 200
+define_parameter mcp_extmix_offs                'MCP: Extmixer height offset' 0 -200 200
+
+define_parameter label_master                   'MASTER TCP & MCP' 1
+define_parameter master_tcp_show_sends          'Master TCP: Show sends' 0 0 1
+define_parameter master_mcp_hide_icon           'Master MCP: Hide track icon' 0 0 1
+define_parameter master_mcp_extmix_offs         'Master MCP: Extmixer height offset' 0 -200 200
+define_parameter label_fonts                    'TEXT & FONTS' 1
+
+; ----- Dark version ------
+define_parameter text_luma_thres                'Text over color: Black text threshold' 100 0 255
+; ----- Hybrid/Light version -----
+; define_parameter text_luma_thres                'Text over color: Black text threshold' 120 0 255
+; -------------------------
+
+define_parameter font100_main                   'Font override: 100% Main' 0 0 16
+define_parameter font100_transport              'Font override: 100% Transport' 0 0 16
+define_parameter font100_header                 'Font override: 100% Track name' 0 0 16
+define_parameter font100_list                   'Font override: 100% FX/parameters/sends' 0 0 16
+
+define_parameter font150_main                   'Font override: 150% Main' 0 0 16
+define_parameter font150_transport              'Font override: 150% Transport' 0 0 16
+define_parameter font150_header                 'Font override: 150% Track name' 0 0 16
+define_parameter font150_list                   'Font override: 150% FX/parameters/sends' 0 0 16
+
+define_parameter font200_main                   'Font override: 200% Main' 0 0 16
+define_parameter font200_transport              'Font override: 200% Transport' 0 0 16
+define_parameter font200_header                 'Font override: 200% Track name' 0 0 16
+define_parameter font200_list                   'Font override: 200% FX/parameters/sends' 0 0 16
+
+define_parameter user_notice                    '-------- For options below use Default_6.0 Theme Adjuster ------------------' 1
+define_parameter user_notice_line               '----------------------------------------------------------------------------------' 1
+
+macro indexParams desc val min max idx
+	define_parameter param##idx desc val min max
+endmacro
+
+;			description					val	min	max	idx
+indexParams 'A_mcp_indent' 				1 	1 	7 	1
+indexParams 'A_tcp_indent' 				4 	1 	7 	2
+indexParams 'A_tcp_vol_size' 			1 	1 	7 	3
+indexParams 'A_tcp_MeterSize' 			2 	1 	7 	4
+indexParams 'A_tcp_Record_Arm' 			0 	0 	15 	5
+indexParams 'A_tcp_Monitor' 			4 	0 	15 	6
+indexParams 'A_tcp_Track_Name' 			0 	0 	15 	7
+indexParams 'A_tcp_Volume' 				0 	0 	15 	8
+indexParams 'A_tcp_Routing' 			0 	0 	15 	9
+indexParams 'A_tcp_Effects' 			0 	0 	15 	10
+indexParams 'A_tcp_Envelope' 			0 	0 	15 	11
+indexParams 'A_tcp_Pan_&_Width' 		0 	0 	15 	12
+indexParams 'A_tcp_Record_Mode' 		8 	0 	15 	13
+indexParams 'A_tcp_Input' 				0 	0 	15 	14
+indexParams 'A_tcp_Values'		 		2 	0 	15 	15
+indexParams 'A_tcp_Meter_Values'		0 	0 	15 	16
+indexParams 'A_tcp_MeterLoc'			2 	1 	3 	17
+indexParams 'A_tcp_LabelSize'	 		5 	1 	7 	18
+indexParams 'A_tcp_LabelMeasure' 		100	1 	200	19
+indexParams 'A_tcp_InputSize'	 		5 	1 	7	20
+indexParams 'A_envcp_labelSize'			6 	1 	7 	21
+indexParams 'A_envcp_LabelMeasure' 		100	1 	200	22
+indexParams 'A_envcp_fader_size' 		1 	1 	7 	23
+indexParams 'A_envcp_folder_indent'		1 	0 	1 	24
+indexParams 'A_mcp_Sidebar'				0 	1 	5 	25
+indexParams 'A_mcp_Narrow'				0 	1 	5 	26
+indexParams 'A_mcp_Meter_Expansion'		0 	1 	5 	27
+indexParams 'A_mcp_Labels'				3 	1 	5 	28
+indexParams 'A_mcp_meterExpSize' 		1 	1 	4 	29
+indexParams 'A_mcp_border' 				1 	1 	5 	30
+
+indexParams 'B_tcp_vol_size' 			4 	1 	7 	31
+indexParams 'B_tcp_MeterSize' 			2 	1 	7 	32
+indexParams 'B_tcp_Record_Arm' 			0 	0 	15 	33
+indexParams 'B_tcp_Monitor' 			4 	0 	15 	34
+indexParams 'B_tcp_Track_Name' 			0 	0 	15 	35
+indexParams 'B_tcp_Volume' 				0 	0 	15 	36
+indexParams 'B_tcp_Routing' 			0 	0 	15 	37
+indexParams 'B_tcp_Effects' 			0 	0 	15 	38
+indexParams 'B_tcp_Envelope' 			0 	0 	15 	39
+indexParams 'B_tcp_Pan_&_Width' 		0 	0 	15 	40
+indexParams 'B_tcp_Record_Mode' 		8 	0 	15 	41
+indexParams 'B_tcp_Input' 				0 	0 	15 	42
+indexParams 'B_tcp_Values'	 			2 	0 	15 	43
+indexParams 'B_tcp_Meter_Values'	 	0 	0 	15 	44
+indexParams 'B_tcp_MeterLoc' 			2 	1 	3 	45
+indexParams 'B_tcp_InputSize'	 		5 	1 	7	46
+indexParams 'B_tcp_LabelSize'	 		5 	1 	7 	47
+indexParams 'B_mcp_Sidebar'				0 	1 	5 	48
+indexParams 'B_mcp_Narrow'				3 	1 	5 	49
+indexParams 'B_mcp_Meter_Expansion'		0 	1 	5 	50
+indexParams 'B_mcp_Labels'				3 	1 	5 	51
+indexParams 'B_mcp_meterExpSize' 		1 	1 	4 	52
+indexParams 'B_mcp_border' 				1 	1 	5 	53
+
+indexParams 'C_tcp_vol_size' 			1 	1 	7 	54
+indexParams 'C_tcp_MeterSize' 			2 	1 	7 	55
+indexParams 'C_tcp_Record_Arm' 			0 	0 	15 	56
+indexParams 'C_tcp_Monitor' 			4 	0 	15 	57
+indexParams 'C_tcp_Track_Name' 			0 	0 	15 	58
+indexParams 'C_tcp_Volume' 				0 	0 	15 	59
+indexParams 'C_tcp_Routing' 			0 	0 	15 	60
+indexParams 'C_tcp_Effects' 			0 	0 	15 	61
+indexParams 'C_tcp_Envelope' 			0 	0 	15 	62
+indexParams 'C_tcp_Pan_&_Width' 		0 	0 	15 	63
+indexParams 'C_tcp_Record_Mode' 		8 	0 	15 	64
+indexParams 'C_tcp_Input' 				0 	0 	15 	65
+indexParams 'C_tcp_Values'	 			2 	0 	15 	66
+indexParams 'C_tcp_Meter_Values'		0 	0 	15 	67
+indexParams 'C_tcp_MeterLoc'			2 	1 	3 	68
+indexParams 'C_tcp_InputSize'	 		5 	1 	7	69
+indexParams 'C_tcp_LabelSize'	 		5 	1 	7 	70
+indexParams 'C_mcp_Sidebar'				1 	1 	5 	71
+indexParams 'C_mcp_Narrow'				3 	1 	5 	72
+indexParams 'C_mcp_Meter_Expansion'		0 	1 	5 	73
+indexParams 'C_mcp_Labels'				3 	1 	5 	74
+indexParams 'C_mcp_meterExpSize' 		1 	1 	4 	75
+indexParams 'C_mcp_border' 				1 	1 	5 	76
+
+indexParams 'A_trans_rate_size' 		1 	1 	7 	77
+indexParams 'A_mcp_control_align' 		2 	1 	2 	78
+indexParams 'A_tcp_control_align' 		3 	1 	3 	79
+indexParams 'A_glb_track_label_color'	1 	0 	1 	80
+indexParams 'A_tcp_sepSends'			1	1	2	81
+indexParams 'B_tcp_sepSends'			1	1	2 	82
+indexParams 'C_tcp_sepSends'			2	1	2 	83
+
+; ---------------------------
+
+macro get_luma result color
+    set result + + * 0.212 color{0} * 0.701 color{1} * 0.087 color{2} 
+endmacro
+
+macro initTrackGlobals
+    set width_visible trackpanmode<4 [0] trackpanmode==6 [2] [1]  ; can be ==3 instead of <4 if width desired for 3.x
+    set gl_pan_color                width_visible{0}!=2 [0 0 0 120] [84 63 63]
+    set gl_width_color              width_visible{0}==1 [255 255 255 210] [63 84 63]
+    set gl_fader_swap               width_visible{0}==2 [0] [1]
+
+    set hide_inputFX			    400 	; height below which input effects is hidden.
+    set hide_input                  350 	; height below which input dropdown is hidden.
+    set hide_pan_labels             320 	; height below which pan labels are hidden.
+    set hide_pan				    260 	; height below which pan controls are hidden.
+    set hide_volume_label           250 	; height below which volume label is hidden.
+
+    set track_color [trackcolor_r trackcolor_g trackcolor_b] 
+    set bright_text_color   + ?track_selected [220 220 220] [200 200 200] ?trackcolor_valid [10 10 10] [0]
+    set dark_text_color     [23 23 23]
+
+    ; Colored text settings
+
+    ; Target luma brighntess value for text (0-255)
+    set tinted_text_luma_target ?track_selected theme_version>1 225 212 theme_version>1 205 190
+    ; Saturation (0-1)
+    set tinted_text_sat ?track_selected theme_version>1 0.75 0.35 theme_version>1 0.5 0.2
+    ; Amount of saturation that will be applied to push the brightness up to target level (0-1).
+    set tinted_text_push_sat ?track_selected 0.8 0.5
+
+    get_luma track_color_luma track_color
+    set tinted_text_color + * track_color - 1 tinted_text_sat * [track_color_luma{0} track_color_luma{0} track_color_luma{0}] tinted_text_sat
+    get_luma tinted_text_luma tinted_text_color
+
+    set target_luma_factor  / tinted_text_luma_target tinted_text_luma
+
+    set norm / 255 tinted_text_color
+    set max_luma_factor norm{0}<norm{1} norm{0}<norm{2} norm{0} norm{2} norm{1}<norm{2} norm{1} norm{2}
+
+    set luma_factor_diff - target_luma_factor max_luma_factor
+    set tinted_text_color * . luma_factor_diff>0 max_luma_factor target_luma_factor
+
+    set push_sat * / * luma_factor_diff tinted_text_luma 255 tinted_text_push_sat
+    set tinted_text_color luma_factor_diff>0 + * . - 1 push_sat  * [255 255 255] push_sat
+
+    set tint_label_text !trackcolor_valid 0 ?tint_folder_label folderstate==1 1 0 ?tint_label 1 0
+    set label_text_color ?tint_label_text tinted_text_color ?track_selected [235 235 235] [217 217 217]
+
+    set mcp_bg_color            theme_version>1 [0 0 0 0 61 61 61] [0 0 0 0 51 51 51]
+    set meter_bg_color          theme_version>2 [0 0 0 0 46 46 46] [0 0 0 0 38 38 38]
+    set track_default_bg_color  [0 0 0 0 130 130 130]
+    set track_bg_color          [0 0 0 0 trackcolor_r trackcolor_g trackcolor_b]
+
+    set accent_color            theme_accent==1 [70 185 254] \
+                                theme_accent==2 [62 225 189] \
+                                theme_accent==3 [180 153 255]
+    set brighter_accent_color + * accent_color 0.92 * [255 255 255] 0.08
+endmacro
+
+#>---------------------------- TRACK CONTROL PANELS -----------------------------------
+
+macro resetHides
+	set hideValues 			0
+	set hide_tcp.recarm  	0
+	set hide_tcp.recmon  	0
+	set hide_tcp.label  	0
+	set hide_tcp.volume  	0
+	set hide_pan_group  	0
+	set hide_tcp.io  		0
+	set hide_fx_group  		0
+	set hide_tcp.env  		0
+	set hide_tcp.recmode  	0
+	set hide_input_group  	0
+	set hide_values  		0
+	set hide_meter_values	0
+endMacro
+
+macro shrinkLabelAndVolume min_label_len min_vol_len max_shrink_total
+
+	set max_shrink_label - tcp_LabelSize + indent_offs - min_label_len + recmon_w tcp_dual_pan_align==2 ?width_visible 23 0 0
+	set max_shrink_label max_shrink_label<0 0
+
+	set max_shrink_vol - tcp_Volsize min_vol_len
+	set max_shrink_vol max_shrink_vol<0 0
+
+    ; Calculate the ratio of max shrink values
+    set shrink_ratio / max_shrink_label max_shrink_vol
+    
+    ; Calculate initial proportional shrink values
+    set shrink_vol / max_shrink_total + shrink_ratio 1
+    set shrink_label * shrink_vol shrink_ratio
+    
+    ; Check if either volume or label exceeds its max shrink
+	set shrink_label shrink_label>max_shrink_label max_shrink_label
+	set shrink_vol shrink_label>max_shrink_label - max_shrink_total max_shrink_label
+
+	set shrink_label shrink_vol>max_shrink_vol - max_shrink_total max_shrink_vol
+	set shrink_vol shrink_vol>max_shrink_vol max_shrink_vol
+
+    set did_shrink 0
+	set did_shrink max_shrink_total>0 shrink_label<=max_shrink_label shrink_vol<=max_shrink_vol 1
+	set did_shrink !tcp_allow_shrink 0
+
+	set tcp_LabelSize 	?did_shrink - . shrink_label
+	set tcp_VolSize  	?did_shrink - . shrink_vol
+endmacro
+
+; Compatibility font adjustments
+; Font-size         Windows     MacOS/Linux
+; WALTER font 1     7           10
+; WALTER font 2     8           11
+; WALTER font 3     9           12
+; WALTER font 4     10          13
+; WALTER font 5     11          15
+; WALTER font 6     12          16
+; WALTER font 7     13          17
+; WALTER font 8     14          19
+; WALTER font 9     15          20
+; WALTER font 10    16          21
+; WALTER font 11    17          23
+; WALTER font 12    18          24
+; WALTER font 13    19          25
+; WALTER font 14    20          27
+; WALTER font 15    21          28
+; WALTER font 16    22          29
+
+macro calcFontSizes scale
+
+    ; Windows font
+    set main_font           os_type==0 scale==1 [2] scale==1.5 [5] [8]
+    set list_font           os_type==0 scale==1 [2] scale==1.5 [5] [9]
+    set trans_font          os_type==0 scale==1 [2] scale==1.5 [6] [10]
+    set header_font         os_type==0 scale==1 [3] scale==1.5 [8] [11]
+
+    set main_font_voffs     os_type==0 scale==1 0.5 scale==1.5 -0.5 -0.5
+    set trans_font_voffs    os_type==0 scale==1 0   scale==1.5  0    0
+    set header_font_voffs   os_type==0 scale==1 1   scale==1.5  0    0
+
+    ; MacOS font
+    set main_font           os_type==1 scale==1 [4] scale==1.5 [7]  [12]
+    set list_font           os_type==1 scale==1 [3] scale==1.5 [9]  [13]
+    set trans_font          os_type==1 scale==1 [4] scale==1.5 [9]  [15]
+    set header_font         os_type==1 scale==1 [6] scale==1.5 [11] [16]
+
+    set main_font_voffs     os_type==1 scale==1 0.5 scale==1.5 -0.5 -0.5
+    set trans_font_voffs    os_type==1 scale==1 0   scale==1.5  0    0
+    set header_font_voffs   os_type==1 scale==1 1   scale==1.5  2    0
+
+    set main_font           os_type==3 scale==1 [1] scale==1.5 [5] [8]
+    set list_font           os_type==3 scale==1 [1] scale==1.5 [4] [8]
+    set trans_font          os_type==3 scale==1 [2] scale==1.5 [6] [9]
+    set header_font         os_type==3 scale==1 [3] scale==1.5 [9] [12]
+
+    set main_font_voffs     os_type==3 scale==1 0.5 scale==1.5 -0.5 -0.5
+    set trans_font_voffs    os_type==3 scale==1 0   scale==1.5  1    1
+    set header_font_voffs   os_type==3 scale==1 1   scale==1.5  2    0
+
+    ; Linux font
+    set main_font           os_type==2 scale==1 [3] scale==1.5 [8]  [12]
+    set list_font           os_type==2 scale==1 [3] scale==1.5 [9]  [13]
+    set trans_font          os_type==2 scale==1 [4] scale==1.5 [10] [15]
+    set header_font         os_type==2 scale==1 [5] scale==1.5 [11] [16]
+
+    set main_font_voffs     os_type==2 scale==1 0.5 scale==1.5 -0.5 -0.5
+    set trans_font_voffs    os_type==2 scale==1 0   scale==1.5  1    0
+    set header_font_voffs   os_type==2 scale==1 1   scale==1.5  1    1
+
+    set main_font           os_type==4 scale==1 [1] scale==1.5 [5]  [8]
+    set list_font           os_type==4 scale==1 [1] scale==1.5 [4]  [8]
+    set trans_font          os_type==4 scale==1 [2] scale==1.5 [6]  [9]
+    set header_font         os_type==4 scale==1 [3] scale==1.5 [9]  [12]
+
+    set main_font_voffs     os_type==4 scale==1 0.5 scale==1.5 -0.5 -0.5
+    set trans_font_voffs    os_type==4 scale==1 1   scale==1.5  0    0
+    set header_font_voffs   os_type==4 scale==1 1   scale==1.5  0.5  1
+
+    ; User font overrides (only used when value > 0)
+    set main_font   scale==1    font100_main==0 . font100_main \
+                    scale==1.5  font150_main==0 . font150_main \
+                    scale==2    font200_main==0 . font200_main
+
+    set list_font   scale==1    font100_list==0 . font100_list \
+                    scale==1.5  font150_list==0 . font150_list \
+                    scale==2    font200_list==0 . font200_list
+
+    set trans_font  scale==1    font100_transport==0 . font100_transport \
+                    scale==1.5  font150_transport==0 . font150_transport \
+                    scale==2    font200_transport==0 . font200_transport
+
+    set header_font scale==1    font100_header==0 . font100_header \
+                    scale==1.5  font150_header==0 . font150_header \
+                    scale==2    font200_header==0 . font200_header
+
+endMacro
+
+macro floor value ; Fml...
+    set value value<=0 0 value>64 value \
+            value<032 \
+                value<016 \
+                    value<008 \
+                        value<004 \
+                            value<002 \
+                                value<001 000 001 \
+                                value<003 002 003 \
+                            value<006 \
+                                value<005 004 005 \
+                                value<007 006 007 \
+                        value<012 \
+                            value<010 \
+                                value<009 008 009 \
+                                value<011 010 011 \
+                            value<014 \
+                                value<013 012 013 \
+                                value<015 014 015 \
+                    value<024 \
+                        value<020 \
+                            value<018 \
+                                value<017 016 017 \
+                                value<019 018 019 \
+                            value<022 \
+                                value<021 020 021 \
+                                value<023 022 023 \
+                        value<028 \
+                            value<026 \
+                                value<025 024 025 \
+                                value<027 026 027 \
+                            value<030 \
+                                value<029 028 029 \
+                                value<031 030 031 \
+                value<048 \
+                    value<040 \
+                        value<036 \
+                            value<034 \
+                                value<033 032 033 \
+                                value<035 034 035 \
+                            value<038 \
+                                value<037 036 037 \
+                                value<039 038 039 \
+                        value<044 \
+                            value<042 \
+                                value<041 040 041 \
+                                value<043 042 043 \
+                            value<046 \
+                                value<045 044 045 \
+                                value<047 046 047 \
+                    value<056 \
+                        value<052 \
+                            value<050 \
+                                value<049 048 049 \
+                                value<051 050 051 \
+                            value<054 \
+                                value<053 052 053 \
+                                value<055 054 055 \
+                        value<060 \
+                            value<058 \
+                                value<057 056 057 \
+                                value<059 058 059 \
+                            value<062 \
+                                value<061 060 061 \
+                                value<063 062 063 
+endMacro
+
+macro ceil value
+    set value value>0 + 0.999999
+    floor value
+endMacro
+
+macro calcTcpSecs scale
+	set element_h 								* scale 15  ; supercollapsed threshold is a bit smaller than the actual element size, in case our non-supercollapsed size is small due to UI scaling
+	set supercollapsed							h<element_h{0} 1 0
+	set element_h 								* scale 20
+	set tcp_padding								* scale [7 7]
+	set tcp_LabelSize_min						scale==2 100 scale==1.5 90 80 ; MOD longer default label for AUTO setting
+	set tcp_LabelSize 							tcp_LabelPair{0}==0 tcpLabelAutoMeasured{0}<tcp_LabelSize_min{0} tcp_LabelSize_min{0} + tcpLabelAutoMeasured{0} 10 tcp_LabelPair
+
+	set this_tcp_indent							* * scale tcp_indent{0} folderdepth{0}
+	set tcp_PanSize								tcp_dual_pan_align==4 43 width_visible{0}==0 20 43
+	set soloFlip_h								* scale 51 ; height to switch solo&mute from stacked to side-by-side
+	set is_solo_flipped							?tcp_avoid_solo_flip 0 h>=soloFlip_h{0} 1 0
+	set folder_sec								* scale tcp_control_align{0}==1 \
+													+ [0 0 20] * [0 0 1] * tcp_indent{0} maxfolderdepth{0} \
+													+ [0 0 20] * [0 0 1] * tcp_indent{0} folderdepth{0}
+	set tcp_MeterSize_min						* scale ?tcp_avoid_solo_flip 1000 18
+	set meter_sec								+ + + * scale + [0 0 tcp_MeterSize{0}] [0 0 34] [folder_sec{2} 0 0 h] !is_solo_flipped tcp_MeterSize{0}<tcp_MeterSize_min{0} * scale [0 0 17] [0] [0] [0]
+	set meterRight								tcp_MeterLoc{0}<2 tcp_MeterLoc{0} ?recarm 0 1
+	set meter_sec								?meterRight{0} - [w  0 meter_sec meter_sec] [meter_sec{2}]
+	set main_sec 								+ - - [folder_sec{2} 0 w h] [0 0 folder_sec{2}] [0 0 meter_sec{2}] !meterRight{0} [meter_sec{2}] [0]
+    
+    ;*** FTC MOD (part 1): FX-list on the right side / shrink behavior ***
+
+	set indent_offs tcp_control_align==2 * - maxfolderdepth folderdepth tcp_indent 0
+
+	set side_margin_r   * scale 4
+	set list_margin     * scale tcp_list_margin
+
+	; Calculate side section width based on settings
+    set has_tcp_fxlist reaper_version<700 tcp_fxparms>tcp_fxembed 1 0 tcp_fxlist_enabled 1 0
+	set default_behavior !has_tcp_fxlist 1 0
+
+	set show_side_fx !has_tcp_fxlist 0 !tcp_side_fx 0 1
+	set fx_sec_w * scale tcp_fx_section_width
+	set side_sec_w + side_margin_r ?show_side_fx fx_sec_w 0
+	set sec_cnt ?show_side_fx 1 0
+
+    set tcp_sepSends ?tcp_sep_sends 1
+	set show_side_sends !tcp_sends_enabled 0 !tcp_sepSends 0 !tcp_side_sends 0 1
+	set send_sec_w * scale tcp_send_section_width
+	set side_sec_w ?show_side_sends + send_sec_w
+	set sec_cnt ?show_side_sends + 1
+
+	set show_side_parms !tcp_side_parms 0 !tcp_sep_parms 0 1
+	set parm_sec_w * scale tcp_parm_section_width
+	set fx_sec_w !has_tcp_fxlist parm_sec_w
+	set side_sec_w ?show_side_parms + parm_sec_w
+	set sec_cnt ?show_side_parms + 1
+
+	set show_side_sec ?supercollapsed 0 ?show_side_fx 1 ?show_side_parms 1 ?show_side_sends 1 0
+	set side_sec_w + . * list_margin - sec_cnt 1
+	set side_sec_w !show_side_sec 0
+
+    ; Check placement of side buttons
+    set show_side_fx_button !tcp_show_side_buttons 0 ?show_side_fx    1 ?show_side_parms 1 0
+    set show_side_io_button !tcp_show_side_buttons 0 ?show_side_sends 1 0
+    set show_side_buttons   ?show_side_fx_button 1  ?show_side_io_button 1 0
+
+    ; Custom width offset
+	set min_fader_w 	20
+    set tcp_VolSize     tcp_VolPair{0}
+    set tcp_InSize      tcp_InPair{0}
+    
+	set tcp_VolSize 	tcp_VolSize>20  + tcp_vol_len_offs 
+	set tcp_InSize 		tcp_InSize>49   + tcp_input_len_offs 
+	set tcp_LabelSize 	+ tcp_label_len_offs 
+
+    set recmon_w    15
+    set recarm_w    20
+
+    set include_infoblock !tcp_infoblock 0 !tcp_infoblock_wrap 0 1
+
+    set extra_w     ?include_infoblock tcp_infoblock_width ?tcp_swap_fx_io 36 28
+    set hide_extra  ?tcp_swap_fx_io hide_fx_group hide_tcp.io
+    set align_PanSize tcp_dual_pan_align==1 20 tcp_dual_pan_align==3 43 tcp_PanSize
+
+    ; Add 15 width for record monitor button, substract later if not visible
+    set tcp_LabelSize - . recmon_w 
+    set tcp_LabelSize	+ indent_offs
+
+    ; Calculate position where pan knob ends
+	set tcp_LabelSize 	?hide_tcp.label 	0
+	set tcp_VolSize 	?hide_tcp.volume 	0
+	set tcp_InSize 	    ?hide_input_group 	0
+
+    set pan_end     + * scale + + + tcp_LabelSize tcp_VolSize recmon_w 1 * 2 tcp_padding{0}
+	set pan_end 	!hide_tcp.recarm    + . * scale recarm_w
+	set pan_end 	!hide_pan_group     + . + * scale align_PanSize tcp_padding{0}
+
+    set include_extra ?include_infoblock 1 ?hide_extra 0 tcp_dual_pan_align>1 0 show_side_sends&show_side_fx 0 1
+    set added_extra_w + * scale extra_w tcp_padding{0}
+
+    ; Shrink label and volume until io/fx button has to be hidden (if not already hidden)
+	set shrink_w / - + + pan_end side_sec_w ?include_extra added_extra_w 0 main_sec{w} scale
+	set shrink_w !include_extra 0 
+
+	shrinkLabelAndVolume 72 72 shrink_w
+    set include_extra  !did_shrink 0
+
+    ; Shrink label and volume until side section has to be hidden (if not already hidden)
+	set shrink_w / - + + pan_end side_sec_w ?include_extra added_extra_w 0 main_sec{w} scale
+	set shrink_w ?did_shrink 0 !show_side_sec 0 
+
+	shrinkLabelAndVolume 48 40 shrink_w
+
+	set show_side_sec   !tcp_allow_shrink shrink_w>0 0
+	set show_side_sec   ?tcp_allow_shrink shrink_w>0 !did_shrink 0
+	set side_sec_w          !show_side_sec 0
+    set show_side_fx_button !show_side_sec 0
+    set show_side_io_button !show_side_sec 0
+    set show_side_buttons   !show_side_sec 0
+    set show_side_fx    !show_side_sec 0
+	set show_side_sends !show_side_sec 0
+	set show_side_parms !show_side_sec 0
+
+	set main_sec - . side_sec_w@w
+
+    ; Shrink label and volume until label has to be flipped
+	set shrink_w / - pan_end main_sec{w} scale
+	set shrink_w ?show_side_sec 0 ?include_extra 0
+
+	shrinkLabelAndVolume 40 40 shrink_w
+
+	set labelFlip 		?show_side_sec 0 shrink_w<=0 0 !did_shrink 1 0
+    set labelEnd		+ tcp_LabelSize{0} 54 ; tune 54 by eye. Sorry.
+	set labelFlip 		!tcp_allow_shrink main_sec{2}<labelEnd{0} 1 0
+
+	set hide_folder_recmon !tcp_show_folder_recarm 0 !folderstate==1 0 ?recarm 0 1
+	set tcp_LabelSize   ?hide_tcp.recmon  + . recmon_w ?hide_folder_recmon + . recmon_w  
+	set tcp_LabelSize   tcp_dual_pan_align==1 ?width_visible !hide_pan_group - . 23
+	set tcp_VolSize  	?labelFlip 20
+
+	set mainCollapse_w							* scale 90
+	set mainCollapse							!labelFlip 0 main_sec{2}<mainCollapse_w{0} 1 0 ; collapse main_sec to enough for a flipped label if its too small to be useful, then scale meter to fill the gap
+	
+    ;*** FTC MOD end ***
+
+	set main_sec 								?supercollapsed{0} [0] ?mainCollapse{0} ?meterRight{0} \
+																							[folder_sec{2} 0 element_h{0} h] \
+																							- [w 0 element_h{0} h] [element_h{0}] \
+																						?labelFlip{0} - main_sec [0 0 element_h{0}] main_sec ; reduce main_sec if label is flipped
+	set main_eff								?mainCollapse{0} 0 main_sec{2} ; effective width of main_sec, used to determine row end
+	set meter_sec 								?mainCollapse{0} ?meterRight{0} \
+													- + [main_sec 0 w h] [main_sec{2} 0] + [0 0 main_sec{0}] [0 0 main_sec] \
+													- - [folder_sec{2} 0 w h] [0 0 folder_sec] * scale [0 0 20]
+	set tcpMinSize								+ + * scale !is_solo_flipped 60 44 folder_sec{2} element_h{0}
+	set tcp.size 								+ * scale [300 100] [0 0 tcpMinSize{0}]
+	set tcp_LabelSize							?labelFlip{0} [0] 	; not included in mainsec calculations if flipped
+	set tcp_squash_height 						+ + * scale 20 tcp_padding{1} tcp_padding{1}
+	set h_less_border							- h 1
+	set tcp_padding								h_less_border{0}<tcp_squash_height{0} + [tcp_padding] * [0 1] / - h_less_border{0} element_h 2
+	set tcpNullElement							+ [main_sec] + [tcp_padding tcp_padding] * scale [0 0 0 20]
+	set previous_element 						tcpNullElement		; Let's start at the very beginning. A very good place to start.
+	set main_sec_last tcp_padding{y}
+endMacro
+
+macro doHideLogic element paramIdx
+	set hide_##element param##paramIdx##&1 ?mixer_visible 1 0 0
+	set hide_##element param##paramIdx##&2 !track_selected 1 hide_##element
+	set hide_##element param##paramIdx##&4 !recarm 1 hide_##element
+	set hide_##element param##paramIdx##&8 1 hide_##element
+endmacro
+
+macro resizeInput is_next_row
+    set min_input_w         * scale element{y}<element_h 104 49
+    set fill_end            element{y}<element_h main_eff{0} ?labelFlip main_eff{0} first_row_r
+    set remainder           tcp_InSize<=49 0 - this_end{0} fill_end
+    set remainder           remainder<0 !tcp_expand_input 0
+    set remainder           remainder>0 !tcp_allow_shrink 0
+    set adj_width           - s_width remainder
+    set min_input_w         element{y}>=element_h !labelFlip !tcp_control_align==1 + . * * scale tcp_indent - maxfolderdepth folderdepth
+    set element		        element{w}>0 ?fill adj_width>min_input_w - . remainder@w
+    set this_end			element{w}>0 ?fill adj_width>min_input_w - . remainder
+    set this_end			element{w}>0 ?fill adj_width<=min_input_w ?tcp_allow_shrink ?tcp_expand_input !is_next_row  + main_eff{0} 1
+endMacro
+
+macro then element width use_padding fill exclude swap
+	; apply scale
+	set s_width				* width scale
+
+	set prev_end 			!swap + [previous_element] [previous_element{2}]								; find the end of the previous element
+	set element 			!swap [prev_end previous_element s_width element_h]								; ...and place the element there
+
+    set is_hidden           ?hide_##element{0} 1 ?exclude 1 0   ; FTC MOD
+    set element				!swap ?is_hidden [. . 0 element_h]										        ; apply hide params
+
+	; x-axis
+	set element 			!swap ?use_padding !is_hidden + [tcp_padding] 							        ; if x-padding is required, add it
+	set this_end			!swap - + + [element] [element{2}] [tcp_padding] [main_sec]						; okay, and what does that make the x-end of this element, realtive to main_sec?
+    
+    resizeInput 0 ;FTC MOD: Shrink/expand input ***
+    
+	set element				!swap ?mainCollapse{0} [. . 0 0]
+
+	; y-axis
+	set next_row			!swap + [0 element] [0 previous_element{3}] 									; find the y of the next row
+	set element 			!swap this_end{0}>main_eff{0} + [main_sec next_row element element] tcp_padding	; move it to the next row
+	set this_end			!swap - + + [element] [element{2}] [tcp_padding] [main_sec]						; recalculate this_end, now that the element is on a new row
+	
+    resizeInput 1 ;FTC MOD: Shrink/expand input ***
+    
+	set element				!swap this_end{0}>main_eff{0} [. . 0 0]											; ... and cull if there's still not enough main_sec width to fit
+	set this_y_end			!swap + + + element{1} element{3} tcp_padding{1} scale==1.5 -0.5 0				; find its bottom
+	set element				!swap this_y_end{0}>main_sec{3} [0] !previous_element{2} !previous_element{3} [0] . .	; cull if there's not enough height to fit, or if previous_element was culled
+    
+    ;FTC MOD Gather info on where rows end
+    set first_row_r 		!swap element{y}<element_h this_end{0}
+    set any_row_r   		!swap element{w}>0 this_end{0}>any_row_r{0} this_end{0}<=main_eff{0} this_end{0}
+
+	; values readout control
+	set valuesRoom			!swap - - main_sec{3} this_y_end{0} tcp_padding{1}								; is the remaining height after this element enough for the values to fit?
+	set hideValues			!swap valuesRoom{0}<8 element{3}!=0 [1] . .										; if not, and this element isn't already hidden, cull the values
+
+	set previous_element    !swap element
+	set main_sec_last 		!swap element{w}>0 this_y_end{0} .
+	
+endmacro
+
+macro drawTcp scale
+
+	;*** FTC MOD
+
+    set lscale scale==2 2 1
+    set uscale scale==1 1 2
+
+	; Set any_row_r to main_sec width (only happens when all elements are hidden in adjuster)
+	set any_row_r any_row_r==0 main_sec{w}
+
+    ; Add track background overlays
+    custom tcp.custom.bg
+    custom tcp.custom.bg_sh1
+    custom tcp.custom.bg_sh2
+    custom tcp.custom.bg_hl1
+    custom tcp.custom.bg_hl2
+
+    set bg_sec + + main_sec side_sec_w@w ?meterRight * scale [-2 0 5] + * [-1 0 1] meter_sec{w} * scale [-2 0 2]
+	set bg_sec tcp_control_align==1  - + . * [-1 0 1] * - maxfolderdepth folderdepth * scale tcp_indent 0.4@w
+
+    set tint_strength !trackcolor_valid 0 / ?track_selected tcp_tint_sel_strength tcp_tint_strength 100
+    set dim_strength / ?track_selected tcp_dim_sel_strength tcp_dim_strength 100
+    set sel_strength !track_selected 0 / tcp_sel_strength 100
+
+    set tcp.custom.bg ?supercollapsed + + + [0 0 w h] -1@h * [1 0 -1] bg_sec{x} * scale [1 0 -2] + bg_sec * lscale [1 0 -2 -1]
+    set tcp.custom.bg tcp_dim_strength>tcp_idx_dim_strength + * lscale [-1 0 1]
+
+    set tcp.custom.bg.color + * track_default_bg_color - 1 tint_strength * track_bg_color tint_strength 
+    set tcp.custom.bg.color * . - 1 dim_strength
+    set tcp.custom.bg.color + * . - 1 sel_strength  * [0 0 0 0 255 255 255] sel_strength
+
+    set trackidx_offs * scale [-18 0 18]
+    set tcp.custom.bg_hl1 + + * [1 1 1 0] tcp.custom.bg * lscale [0 0 0 1] trackidx_offs
+    set tcp.custom.bg_hl1.color [0 0 0 0 255 255 255 9]
+
+    set tcp.custom.bg_hl2 + + * [1 1 1 0] tcp.custom.bg * lscale [0 1 0 1] trackidx_offs
+    set tcp.custom.bg_hl2.color [0 0 0 0 255 255 255 22]
+
+    set tcp.custom.bg_sh1 + + * [1 0 1 0] tcp.custom.bg + h@y * lscale [0 -3 0 1] trackidx_offs
+    set tcp.custom.bg_sh1.color [0 0 0 0 0 0 0 37]
+
+    set tcp.custom.bg_sh2 + + * [1 0 1 0] tcp.custom.bg + h@y * lscale [0 -2 0 1] trackidx_offs
+    set tcp.custom.bg_sh2.color [0 0 0 0 0 0 0 24]
+
+    set bg_color [tcp.custom.bg.color{4} tcp.custom.bg.color{5} tcp.custom.bg.color{6}]
+    get_luma bg_luma bg_color
+    set tcp_text_color bg_luma<=text_luma_thres bright_text_color dark_text_color
+
+    ; Draw custom meter background
+    custom tcp.custom.meter_sec_bg
+    set tcp.custom.meter_sec_bg       + + meter_sec * lscale ?meterRight{0} [1 -1 -2] [-2 -1 2] 
+    set tcp.custom.meter_sec_bg.color meter_bg_color
+    set meter_sec ?supercollapsed [0]
+
+    custom tcp.custom.div_b
+    set tcp.custom.div_b.color [0 0 0 0 30 30 30]
+    set tcp.custom.div_b   + - [0 h w lscale] lscale@y * [1 0 -1] this_tcp_indent
+
+    custom tcp.custom.div_r
+    set tcp.custom.div_r.color tcp.custom.div_b.color
+    set tcp.custom.div_r   - [w 0 lscale h] lscale@x
+
+    ; Draw label backgrounds
+    custom tcp.custom.recarm_bg   '' 0 '' 'custom_track_recarm_bg'
+    set tcp.custom.recarm_bg tcp.recarm{w}==0 [0] + tcp.recarm * lscale [-1 -1 2 2]
+
+    custom tcp.custom.name_bg   '' 0 '' 'custom_tcp_namebg'
+    set tcp.custom.name_bg tcp.recmon{w}>0  + + + + tcp.recmon  \
+                                                * lscale [0 -1 0 2] \
+                                                tcp.recarm{w}>0 * scale [-12 0 12] 0 \
+                                                ?labelFlip 0 tcp.label{w}>0 tcp.label{w}@w 0 \
+                                                tcp.volume{w}>0 * scale [0 0 4] 0 \
+                          ?labelFlip [0] \
+                          tcp.label{w}>0    + + + tcp.label \
+                                                * scale [0 -1 0 2] \
+                                                tcp.recarm{w}>0 * scale [-4 0 4] 0 \
+                                                tcp.volume{w}>0 * scale [0 0 4] 0
+
+    ; ***********
+
+	set tcp.foldercomp              			?supercollapsed{0} [0] ?trackpinned [0] + + [this_tcp_indent] [folder_sec] + * scale [0 0 17 13] lscale@x
+    set tcp.folder                  			?supercollapsed{0} [0] + [this_tcp_indent] * [1 scale{0} scale{0} scale{0} 1 1 1 1] [folder_sec 86 18 14 0 1 0 1]
+	
+    ;*** FTC MOD add custom folder indent images for TCP ***
+    custom tcp.custom.folder_1-1 '' 0 '' 'custom_track_folder_1-1'
+    custom tcp.custom.folder_1-2 '' 0 '' 'custom_track_folder_1-2'
+    custom tcp.custom.folder_1-4 '' 0 '' 'custom_track_folder_1-4'
+    custom tcp.custom.folder_1-8 '' 0 '' 'custom_track_folder_1-8'
+
+    custom tcp.custom.folder_half_1-1 '' 0 '' 'custom_track_folder_half_1-1'
+    custom tcp.custom.folder_half_1-2 '' 0 '' 'custom_track_folder_half_1-2'
+    custom tcp.custom.folder_half_1-4 '' 0 '' 'custom_track_folder_half_1-4'
+    custom tcp.custom.folder_half_1-8 '' 0 '' 'custom_track_folder_half_1-8'
+
+    set tcp_folder_min					* scale 40
+	set tcp.custom.folder_1-1 			h<tcp_folder_min [0] folderstate<1 [0] param2{0}>=5 tcp.folder [0]
+	set tcp.custom.folder_1-2 			h<tcp_folder_min [0] folderstate<1 [0] param2{0}==4 tcp.folder [0]
+	set tcp.custom.folder_1-4 			h<tcp_folder_min [0] folderstate<1 [0] param2{0}==3 tcp.folder [0]
+	set tcp.custom.folder_1-8 			h<tcp_folder_min [0] folderstate<1 [0] param2{0}==2 tcp.folder [0]
+
+    set tcp.custom.folder_half_1-1 		h>=tcp_folder_min [0] folderstate<1 [0] param2{0}>=5 tcp.folder [0]
+	set tcp.custom.folder_half_1-2 		h>=tcp_folder_min [0] folderstate<1 [0] param2{0}==4 tcp.folder [0]
+	set tcp.custom.folder_half_1-4 		h>=tcp_folder_min [0] folderstate<1 [0] param2{0}==3 tcp.folder [0]
+	set tcp.custom.folder_half_1-8 		h>=tcp_folder_min [0] folderstate<1 [0] param2{0}==2 tcp.folder [0]
+  
+	set tcp.folder                		h<tcp_folder_min folderstate>=0 [0]
+    ;**************
+
+    custom tcp.custom.pin_on    '' 40000 '' 'custom_track_pin_on'
+    custom tcp.custom.pin_off   '' 40000 '' 'custom_track_pin_off'
+
+    set min_pin_h                               scale==1 60 scale==1.5 91 120
+    set tcp.custom.pin                          + + [this_tcp_indent] [folder_sec] * scale [0 0 19 19]
+    set tcp.custom.pin                          folderstate==1 !trackpinned + * scale 12@y
+    set tcp.custom.pin                          !tcp_show_pin [0] h<min_pin_h [0] 
+    
+    set tcp.custom.pin_on                       ?trackpinned tcp.custom.pin [0]
+    set tcp.custom.pin_off                      !trackpinned tcp.custom.pin [0]
+                             
+    set tcp.trackidx                            + + [0 0 this_tcp_indent] [folder_sec 0 0 0 0 0 0 1] + * scale [0 0 18 100] * lscale [0 -1 0 1]
+        set tcp.trackidx                        ?supercollapsed scale==2 + 1@h
+      set tcp_idx_margin						trackidx>999 0 - / h 2 * scale 18
+      set tcp.trackidx.margin                   [this_tcp_indent tcp_idx_margin 0 tcp_idx_margin 0.5]
+	  set tcp.trackidx.margin        			+ folderstate<0 * scale [0 -6 0 6] folderstate==1 !trackpinned * scale [0 6 0 -6] 0 0
+      set tcp.trackidx.margin                   ?tcp_show_pin ?trackpinned h>=min_pin_h + * scale [0 6 0 -6]
+	  set tcp.trackidx.margin					trackidx>999 h<tcp_squash_height{0} [. . . . 1] 
+      set tcp.trackidx.margin                   + * lscale [-1 0 -1]     
+      set tcp.trackidx.margin                   ?supercollapsed + * scale 40@y
+      set tcp.trackidx.margin                   + * main_font_voffs [0 1 0 -1]
+	  set tcp.trackidx.font						main_font
+    set tcp.mute               					+ + [meter_sec] [meter_sec{w}] ?is_solo_flipped * scale [-25 3 21 20] + [0 tcp_padding] * scale [-44 0 21 20]
+	set tcp.solo 								?is_solo_flipped + + uscale@y tcp.mute [0 tcp.mute{3}] \
+																- + tcp.mute [tcp.mute{w}] lscale@x
+	set phaseHide_h								+ + + * scale 12 element_h tcp.solo{1} tcp.solo{3}
+    set phaseHide_h                             ?tcp_show_fixed_lanes + * scale 17
+    set tcp.phase 								h<phaseHide_h{0} [0] + * scale [3 -24 16 20] [tcp.solo meter_sec{3}]
+
+    set tcp.mute + * scale 2@h
+    set tcp.solo + * scale 2@h
+
+    ;*** Draw custom trackidx background
+    set trackidx_tint_strength !trackcolor_valid 0 / tcp_idx_tint_strength 100
+    set trackidx_sel_strength  !track_selected 0 / tcp_idx_sel_strength 100
+
+    custom tcp.custom.trackidx_bg
+    set tcp.custom.trackidx_bg + tcp.trackidx * lscale [0 0 0 -1] 
+    set tcp.custom.trackidx_bg tcp_idx_dim_strength>=tcp_dim_strength + * lscale 1@w
+    set tcp.custom.trackidx_bg.color + * track_default_bg_color - 1 trackidx_tint_strength * track_bg_color trackidx_tint_strength
+    set tcp.custom.trackidx_bg.color * . - 1 / tcp_idx_dim_strength 100
+    set tcp.custom.trackidx_bg.color + * . - 1 trackidx_sel_strength  * [0 0 0 0 255 255 255] trackidx_sel_strength
+
+    set trackidx_bg_color [tcp.custom.trackidx_bg.color{4} tcp.custom.trackidx_bg.color{5} tcp.custom.trackidx_bg.color{6}]
+    get_luma trackidx_bg_luma trackidx_bg_color
+    set tcp.trackidx.color trackidx_bg_luma<=text_luma_thres bright_text_color dark_text_color
+
+    custom tcp.custom.hide_overlay
+    set tcp.custom.hide_overlay.color [0 0 0 0 0 0 0 135]
+    set tcp.custom.hide_overlay tcp_hidden_overridden==0 [0] + + tcp.trackidx * this_tcp_indent [1 0 -1] scale==2 [2 0 0 2] scale==1.5 [1 0 0 2] [1 0 0 1]
+
+    ;*** FTC MOD add custom fixed lanes button
+    custom tcp.custom.fixed_lanes_off   '' 42430 'Lanes'    'custom_fixed_lanes_off'
+    custom tcp.custom.fixed_lanes_on    '' 42430 'Lanes'    'custom_fixed_lanes_on'
+
+	set fixed_lanes_hide_h					    - phaseHide_h{0} * scale 17
+    set tcp.custom.fixed_lanes_on 				h<fixed_lanes_hide_h{0} [0] + * scale [1 -47 20 24] [tcp.solo meter_sec{3}]
+    set tcp.custom.fixed_lanes_on               h<phaseHide_h{0}  + + [. tcp.solo . .] tcp.solo{h}@y * scale 2@y
+    set tcp.custom.fixed_lanes_off				tcp.custom.fixed_lanes_on
+
+    set tcp.custom.fixed_lanes_on                trackfixedlanes==0 [0] !tcp_show_fixed_lanes [0]
+    set tcp.custom.fixed_lanes_off               trackfixedlanes>0  [0] !tcp_show_fixed_lanes [0]
+
+    custom tcp.custom.comping           '' 42645 'Comping'  'custom_comping'
+    set lane_h              + * trackfixedlanes * scale 19 * scale 15
+    set icon_size           tcp_iconsize
+    set icon_size           ?is_macos scale>1 * 2 tcp_iconsize   ; Fix retina scaling on MacOS
+    set tcp.custom.comping  !tcp_show_comping [0] trackfixedlanes==0 [0] !track_selected [0] h<=lane_h [0] h<phaseHide_h [0] + + * scale [-20 -16 20 15] [w h] icon_size@x
+
+    ;************** 
+
+    set tcp.meter                   			- - - + meter_sec * scale [5 2 -6 -5] [0 0 tcp.mute{2}] [0 0 tcp_padding{0}] !is_solo_flipped * scale [0 0 18] [0]
+
+	  set tcp.meter.vu.div                    	[1]
+	  set tcp.meter.readout.color             	?hide_meter_values{0} [0 0 0 0 0 0 0 0] theme_version>1 [200 200 200 255 255 183 171 255] [100 100 100 255 255 183 171 255]
+	  set tcp.meter.rmsreadout.color            tcp.meter.readout.color
+      set tcp.meter.scale.color.lit.bottom    	?hide_meter_values{0} [0 0 0 0 0 0 0 0] [0 0 0 170 0 0 0 0]
+	  set tcp.meter.scale.color.lit.top       	?hide_meter_values{0} [0 0 0 0 0 0 0 0] [0 0 0 170 0 0 0 0]
+	  set tcp.meter.scale.color.unlit.bottom  	?hide_meter_values{0} [0 0 0 0 0 0 0 0] ?recarm [255 64 0 255 0 0 0 0] theme_version>1 [255 255 255 70 0 0 0 0] [255 255 255 60 0 0 0 0]
+	  set tcp.meter.scale.color.unlit.top     	?hide_meter_values{0} [0 0 0 0 0 0 0 0] ?recarm [255 64 0 255 0 0 0 0] theme_version>1 [255 255 255 140 0 0 0 0] [255 255 255 60 0 0 0 0]
+	
+    set tcp.label 								?labelFlip + + [main_eff{0} 0 element_h{0} h] main_sec@x * scale [-2 0 3]
+		set tcp.label.font					    header_font
+        set tcp.label.margin                    * scale ?hide_tcp.recarm [5 0 1 0] [3 0 1 0] ; FTC MOD
+        set tcp.label.margin                    ?labelFlip + 0.5@ls
+        set tcp.label.margin                    + header_font_voffs@y
+	    set tcp.label.color                     label_text_color 
+    
+    custom tcp.custom.label_flip_bg
+    set tcp.custom.label_flip_bg        !labelFlip [0] tcp.label
+    set tcp.custom.label_flip_bg.color  tcp.custom.meter_sec_bg.color
+
+    ; Margin for border when you enter label text
+    set tcp.label tcp.label{w}>0 + * scale [1 0 -2]
+     
+	set tcp.fx 									!fx_group{2} [0] + [fx_group fx_group] + * scale [0 0 20] [0 0 0 element_h{0}]
+	set tcp.fxbyp 								!fx_group{2} [0] + + [tcp.fx tcp.fx] [tcp.fx{2}] + * scale [0 0 16] [0 0 0 element_h{0}]
+	set tcp.fxin 								!input_group{2} [0] + [input_group input_group] + * scale [0 0 29] [0 0 0 element_h{0}]
+	set tcp.recinput							!input_group{2} [0] - + + [tcp.fxin tcp.fxin] [tcp.fxin{2} 0 input_group] [0 0 0 element_h{0}] [0 0 tcp.fxin{2}]
+	set tcp.recinput							scale==1.5 + 0.5@x
+		set tcp.recinput.color           		?track_selected [255 255 255] [225 225 225]
+		set tcp.recinput.font					main_font
+		set tcp.recinput.margin        			* [scale scale scale scale 1] [0 0 20 0 0.5]
+		set tcp.recinput.margin        			+ main_font_voffs@y
+        ;*** FTC MOD *** Hide recinput text at narrow widths; Note: Setting opacity seems unpredictable so also settting margin
+        set min_input_text_w * scale 30
+        set tcp.recinput.color           		?tcp.recinput{w}<min_input_text_w [. . . 1] [. . . 255]
+        set tcp.recinput.margin           		?tcp.recinput{w}<min_input_text_w + min_input_text_w@x
+        ;*** MOD end ***;
+
+    ; FTC MOD Add label folder indicator    
+    custom tcp.custom.folder_recarm   '' 0 '' 'custom_track_folder_recarm'  
+    set tcp.custom.folder_recarm !tcp_show_folder_recarm [0] !folderstate==1 [0] ?recarm [0] tcp.recarm
+
+	set tcp.pan 								!pan_group{2} [0 0 0 0] width_visible{0}==2 \
+													* [pan_group pan_group pan_group pan_group element_h{0}] [1 1 1 0.5] \
+													[pan_group pan_group element_h{0} element_h{0}] ; knobs have the same h and w
+		set tcp.pan.fadermode         			gl_fader_swap
+		set tcp.pan.color              			gl_pan_color
+	set tcp.width								width_visible{0}==0 [0] !pan_group{2} [0 0 0 0] width_visible{0}==2 \
+													+ [tcp.pan tcp.pan tcp.pan tcp.pan] [0 tcp.pan{3}] \
+													- + [pan_group pan_group element_h{0} element_h{0}] [pan_group{2}] [element_h{0}]
+		set tcp.width.fadermode        			gl_fader_swap
+		set tcp.width.color            			gl_width_color
+	set volume_fader_w							* 21 scale
+	set tcp.volume.fadermode         			tcp.volume{w}>volume_fader_w{0} [0] [1]
+		set tcp.volume.color           			[0 0 0]
+	set hideValues								?hide_values{0} 1 .
+	set values_sec								hideValues{0}==1 [0] + [main_sec main_sec_last{0} any_row_r{0}] * scale [0 0 0 9] ; FTC MOD
+	set tcp.volume.label						!values_sec{0} [0] + + * scale [1 -2 42 2] [values_sec values_sec 0 values_sec] [tcp_padding]
+		set tcp.volume.label.font				main_font
+        set tcp.volume.label.margin             main_font_voffs@y
+		set tcp.volume.label.color     			tcp_text_color
+	set tcp.width.label							!values_sec{0} [0] main_eff{0}<122 [0] width_visible{0}==0 [0]	+ + * scale [0 -2 36 2] [values_sec values_sec 0 values_sec] - [values_sec{2}] + * scale [36] [tcp_padding]
+		set tcp.width.label.margin     			+ tcp.volume.label.margin 1@ls ; FTC MOD  + * scale [0 1] + OSoffs [0 0 0 0 1]
+		set tcp.width.label.font				main_font
+		set tcp.width.label.color      			tcp_text_color
+	set tcp.pan.label							!values_sec{0} [0] main_eff{0}<122 [0] + + * scale [0 -2 36 2] [values_sec values_sec 0 values_sec] - [values_sec{2}] + + * scale [36] [tcp_padding] [tcp.width.label{2}]
+		set tcp.pan.label.margin       			tcp.width.label.margin
+		set tcp.pan.label.font					tcp.width.label.font
+		set tcp.pan.label.color        			tcp_text_color
+
+    ; Make labels non-interactive
+    custom tcp.custom.interaction_block_overlay "" 2000
+    set tcp.custom.interaction_block_overlay values_sec{w}==0 [0] + values_sec * scale [0 -2 0 4]
+
+    set tcp.infoblock           ?tcp_infoblock !tcp_infoblock_wrap + values_sec  + [tcp_padding] * scale [2 -1]
+    set tcp.infoblock.font      main_font
+    set tcp.infoblock.color     tcp_text_color
+    set tcp.infoblock.margin    + main_font_voffs@y tcp.infoblock{y}<element_h 0.5@ls [0]
+    
+    set values_sec                              ?tcp_infoblock ?tcp_infoblock_wrap [0]
+	set tcp.volume.label   	                    ?tcp_infoblock [0]
+	set tcp.width.label   	                    ?tcp_infoblock [0]
+	set tcp.pan.label   	                    ?tcp_infoblock [0]
+    set tcp.custom.interaction_block_overlay    ?tcp_infoblock [0]
+
+	; x-axis label hiding
+	set tcpVolLabelSpace						+ tcp.volume.label{2} tcp_padding{0}
+	set tcp.volume.label						main_sec{2}<tcpVolLabelSpace{0} [0] .
+	set tcpPanLabelSpace						+ + + tcp.volume.label{2} tcp_padding{0} tcp.pan.label{2} tcp.width.label{2}
+	set tcp.pan.label							main_sec{2}<tcpPanLabelSpace{0} [0] .
+	set tcpWidthLabelSpace						+ + tcp.volume.label{2} tcp_padding{0} tcp.width.label{2}
+	set tcp.width.label							main_sec{2}<tcpWidthLabelSpace{0} [0] .
+
+	set tcp.dragdropinfo 						+ [this_tcp_indent this_tcp_indent] * scale [0 tcp_indent{0}]
+
+	;*** FTC MOD (part 2): FX-list on the right side ***
+
+
+    ; --------------- SIDE LIST SECTION ----------------------
+	
+    set double_row_h    * scale 43
+    set stick_row_h     * scale 70
+    set is_dense_row   h>=double_row_h h<stick_row_h 1 0
+
+    ; Calculate placement for side section
+    set show_side_buttons h<double_row_h ?tcp_side_button_hide 0
+
+    set side_button_y  h>stick_row_h tcp_padding{y} h<double_row_h tcp_padding{y} * scale 3
+    set side_button_h  * scale ?is_dense_row 19 20
+
+	set side_x  - tcp.size{0} side_sec_w{0} 
+	set side_x  ?meterRight{0} - . meter_sec{w} 
+    set side_y  h>stick_row_h  tcp_padding{y} * scale 1
+    set side_y  ?show_side_buttons + + side_button_y side_button_h * scale h>stick_row_h 1 -1
+	set side_h  - h side_y{0}
+
+	; Calculate list row height
+	set row_h * scale tcp_list_row_h
+    set row_h ?show_side_buttons ?is_dense_row tcp_list_row_h>17 tcp_list_row_h<21 * scale 17
+
+	set scrollbar_size  * scale 4
+    set scrollbar_padding * scrollbar_size 1.5
+    set scrollbar_gap   scale==2 3 scale=1.5 2 1
+
+	set min_row_h  - side_h + scrollbar_size scale
+    set row_h row_h>min_row_h min_row_h
+    floor row_h
+
+    ; Calculate list element widths (fonts) based on user defined width and columns
+    set col_gap * scale 2
+
+	set fx_min_w / - - fx_sec_w scrollbar_padding * col_gap - tcp_fx_num_columns 1 tcp_fx_num_columns
+
+	set send_min_w / - - send_sec_w scrollbar_padding * col_gap - tcp_send_num_columns 1 tcp_send_num_columns
+
+	set parm_min_w / - - parm_sec_w scrollbar_padding * col_gap - tcp_parm_num_columns 1 tcp_parm_num_columns
+
+    set lspacing tcp_list_row_h>=34 0 1000
+	set tcp.fxlist.font		[list_font{0} row_h{0} fx_min_w{0}   fx_sec_w{0}   lspacing{0} 0 scrollbar_gap{0} scrollbar_size{0}]
+	set tcp.sendlist.font	[list_font{0} row_h{0} send_min_w{0} send_sec_w{0} lspacing{0} 0 scrollbar_gap{0} scrollbar_size{0}]
+	set tcp.fxparm.font		[list_font{0} row_h{0} parm_min_w{0} parm_sec_w{0} lspacing{0} 0 scrollbar_gap{0} scrollbar_size{0}]
+
+    ; Limit side section height to a multiple of fx height
+    ; This avoids stretched fx slots on MacOS and helps align scrollbars
+	set side_row_cnt  !show_side_sec 0 / - side_h scrollbar_padding row_h
+    floor side_row_cnt
+    set side_row_cnt side_row_cnt<1 1
+
+    ; Calculate how many fx/params/sends are shown on the side to check if scrollbar will be visible
+	set side_fx_cnt     ?show_side_fx       fx_cnt 0
+	set side_fx_cnt     ?show_side_fx       !tcp_sep_parms 	+ fx_parm_cnt
+	set side_fx_cnt     ?show_side_fx       !tcp_sepSends 	+ send_cnt
+	set side_parm_cnt   ?show_side_parms    fx_parm_cnt 0
+	set side_parm_cnt   ?show_side_parms    !tcp_sepSends   + send_cnt
+	set side_send_cnt   ?show_side_sends    send_cnt 0
+
+    set vis_side_fx_cnt     * side_row_cnt tcp_fx_num_columns 
+    set vis_side_parm_cnt   * side_row_cnt tcp_parm_num_columns 
+    set vis_side_send_cnt   * side_row_cnt tcp_send_num_columns 
+
+    set show_scrollbar  0
+	set show_scrollbar  ?show_side_fx 	 tcp_fx_num_columns>1   side_fx_cnt>=vis_side_fx_cnt      1
+	set show_scrollbar  ?show_side_parms tcp_parm_num_columns>1	side_parm_cnt>=vis_side_parm_cnt  1
+	set show_scrollbar  ?show_side_sends tcp_send_num_columns>1	side_send_cnt>=vis_side_send_cnt  1
+
+    ; Move row down a bit if scrollbar isn't visible
+    set side_y  !show_side_buttons !show_scrollbar + scale
+
+    set side_list_h * side_row_cnt row_h
+    set remaining_h - side_h + side_list_h scrollbar_size
+
+    ; Reduce scrollbar gap height if there isn't much space
+    set is_compact_scrollbar !show_scrollbar 0 remaining_h<scrollbar_size 1 0
+    set side_scrollbar_gap   !is_compact_scrollbar scrollbar_gap    - scrollbar_gap  scale==2 2 scale=1.5 2 1
+    set side_scrollbar_size  !is_compact_scrollbar scrollbar_size   - scrollbar_size scale==2 2 scale=1.5 2 1
+
+    set tcp.fxlist.font     ?is_compact_scrollbar ?show_side_fx     ?tcp_fx_num_columns>1   [. . . . . . side_scrollbar_gap{0} side_scrollbar_size{0}]
+    set tcp.sendlist.font   ?is_compact_scrollbar ?show_side_sends  ?tcp_send_num_columns>1 [. . . . . . side_scrollbar_gap{0} side_scrollbar_size{0}]
+    set tcp.fxparm.font     ?is_compact_scrollbar ?show_side_parms  ?tcp_parm_num_columns>1 [. . . . . . side_scrollbar_gap{0} side_scrollbar_size{0}]
+
+    ; Center rows, but when more than 3 rows stick to tcp_padding
+    set stick_to_padding h>stick_row_h 1 side_row_cnt>=3 1 0
+    set side_button_gap * scale 1
+    set side_button_gap h>stick_row_h side_row_cnt>=3 * . 2 remaining_h>side_button_gap * . 2
+    set remaining_h     ?show_side_buttons  - . + side_button_gap * scale ?show_scrollbar 3 1
+    set remaining_h     remaining_h<0 0
+
+    set stick_y - tcp_padding{y} * scale !show_side_buttons 1 0
+    set side_y  !show_side_buttons h<=stick_row_h + / remaining_h 2
+    set side_y  !show_side_buttons h>stick_row_h stick_y side_y>stick_y side_row_cnt>=3 stick_y
+    
+    set side_button_y   ?show_side_buttons  h>=double_row_h h<=stick_row_h + / remaining_h 2
+    set side_button_y   ?show_side_buttons  h>stick_row_h stick_y side_button_y>=stick_y  stick_y
+    set side_y          ?show_side_buttons  + + side_button_y side_button_h side_button_gap
+
+    set side_list_h + side_scrollbar_size
+
+    ; Place side lists and side buttons
+	set tcp.fxlist [0]
+	set tcp.fxlist ?show_side_fx [side_x{0} side_y{0} fx_sec_w{0} side_list_h{0} 1 0 1 0]
+    
+    set show_side_fx_button !show_side_buttons 0
+    set tcp.fx      ?show_side_fx   ?show_side_fx_button    + [side_x{0} side_button_y{0} fx_sec_w{0} side_button_h{0} 1 0 1 0] * scale -16@w
+	set tcp.fxbyp 	?show_side_fx   ?show_side_fx_button    + + [tcp.fx tcp.fx 0 side_button_h{0} 1 0 1 0] tcp.fx{w}@x * scale 16@w
+    set tcp.fxlist  ?show_side_buttons  h<double_row_h [0]
+
+	set side_x ?show_side_fx + + fx_sec_w list_margin
+
+	set tcp.fxparm [0]
+	set tcp.fxparm ?show_side_parms [side_x{0} side_y{0} parm_sec_w{0} side_list_h{0} 1 0 1 0] 
+
+    set tcp.fx      ?show_side_parms    ?show_side_fx_button    !show_side_fx   + [side_x{0} side_button_y{0} parm_sec_w{0} side_button_h{0} 1 0 1 0] * scale -16@w
+	set tcp.fx      ?show_side_parms    ?show_side_fx_button    ?show_side_fx   + + . list_margin@w parm_sec_w@w
+    set tcp.fxbyp 	?show_side_parms    ?show_side_fx_button	+ + [tcp.fx tcp.fx 0 side_button_h{0} 1 0 1 0] tcp.fx{w}@x * scale 16@w
+    set tcp.fxparm  ?show_side_buttons  h<double_row_h [0]
+
+	set side_x ?show_side_parms + + parm_sec_w list_margin
+
+	set tcp.sendlist [0]
+	set tcp.sendlist ?show_side_sends [side_x{0} side_y{0} send_sec_w{0} side_list_h{0} 1 0 1 0]
+
+    set show_side_io_button !show_side_buttons 0
+    set tcp.io 	        ?show_side_io_button [side_x{0} side_button_y{0} send_sec_w side_button_h{0}  1 0 1 0]
+    set tcp.sendlist    ?show_side_buttons h<double_row_h [0]
+
+    custom tcp.custom.track_io_text_on  '' 0 '' 'custom_track_io_text_on'
+    custom tcp.custom.track_io_text_off '' 0 '' 'custom_track_io_text_off'
+    custom tcp.custom.track_io_darker   '' 0 '' 'custom_track_io_darker'
+
+    set tcp.custom.track_io_darker      !show_side_io_button [0]  send_cnt==0 [0]   tcp.io
+    set tcp.custom.track_io_text_on     !show_side_io_button [0]  send_cnt==0 [0] + tcp.io ?is_dense_row * scale 0@y 0
+    set tcp.custom.track_io_text_off    !show_side_io_button [0]  send_cnt>0  [0] + tcp.io ?is_dense_row * scale 0@y 0
+
+    ; --------------- MAIN LIST SECTION ----------------------
+
+    set main_list_sec       ?supercollapsed [0] \
+                            - + + [main_sec main_sec_last{0}] [tcp_padding] \
+                            + - - [0 0 main_sec] [0 0 tcp_padding{0}] [0 0 tcp_padding{0}] \
+                            - [0 0 0 main_sec] [0 0 0 main_sec_last{0}] \
+                            [0]
+    set main_list_sec       !previous_element{w} !previous_element{h} [0]   
+	
+    set main_list_sec main_list_sec{h}>0 hideValues{0}==0 + * [0 1 0 -1] + values_sec{h} * scale 4
+    ; Limit width to last row element
+    set main_list_sec_max_w - + - any_row_r main_list_sec{x} main_sec{x} tcp_padding{0}
+    set main_list_sec  [. . main_list_sec_max_w .]
+
+    set main_list_sec_min_h + row_h scrollbar_padding
+    set show_main_list_sec main_list_sec{h}<0 0 main_list_sec{h}<main_list_sec_min_h 0 1 
+
+	set show_main_fx 	!show_main_list_sec 0 ?show_side_fx       0   !has_tcp_fxlist     0   1
+	set show_main_parms !show_main_list_sec 0 ?show_side_parms    0   !tcp_sep_parms      0   1 
+	set show_main_parms !show_main_list_sec 0 ?default_behavior   tcp_fxparms>tcp_fxembed 1
+	set show_main_sends !show_main_list_sec 0 ?show_side_sends    0   !tcp_sepSends       0   !tcp_sends_enabled 0  1
+	set show_fxembed 	!show_main_list_sec 0 tcp_fxembed>0 1 0
+
+    ; Calculate list and embedded FX placements
+	set avail_w main_list_sec{w}
+	set is_full 0
+
+	set avail_w 			        ?show_main_fx 		- . + fx_sec_w 		list_margin
+	set is_full         !is_full 	?show_main_parms 	avail_w<parm_sec_w 1
+    set tcp.fxparm      !is_full    ?show_main_parms    [. . parm_sec_w . ]
+	set avail_w         !is_full 	?show_main_parms	- . + parm_sec_w 	list_margin
+	set is_full         !is_full 	?show_main_sends 	avail_w<send_sec_w 	1
+    set tcp.sendlist    !is_full    ?show_main_sends    [. . send_sec_w . ]
+	set avail_w         !is_full	?show_main_sends 	- . + send_sec_w 	list_margin
+
+    set min_fxembed_size    * scale 50
+	set fxembed_ratio_w     * main_list_sec{w} 0.35
+    set fxembed_ratio_h     * main_list_sec{h} 0.85
+    set has_fxembed_col     !show_fxembed 0 ?is_full 0  avail_w==main_list_sec{w} 1 avail_w<min_fxembed_size 0 \
+                                                        avail_w<fxembed_ratio_w   0 main_list_sec{w}<fxembed_ratio_h 0 1
+	set avail_w             !has_fxembed_col + list_margin
+
+    ; Calculate how many fx/parms/sends are shown in each list
+    set join_params !tcp_sep_parms 1 !show_main_parms 0 tcp.fxparm{w}>0   0 1
+    set join_sends  !tcp_sep_sends 1 !show_main_sends 0 tcp.sendlist{w}>0 0 1
+
+    set main_fx_cnt     ?show_main_fx       fx_cnt 0
+	set main_fx_cnt     ?show_main_fx       ?join_params 	+ fx_parm_cnt
+	set main_fx_cnt     ?show_main_fx       ?join_sends     tcp.fxparm{w}==0    + send_cnt
+	set main_parm_cnt   ?show_main_parms    fx_parm_cnt 0
+	set main_parm_cnt   ?show_main_parms    ?join_sends     tcp.fxparm{w}>0     + send_cnt
+	set main_send_cnt   ?show_main_sends    send_cnt 0
+
+    set main_fx_row_cnt     + main_fx_cnt   1 
+    set main_send_row_cnt   + main_send_cnt 1 
+    set main_parm_row_cnt   + main_parm_cnt 1
+
+    ; Limit main section height to a multiple of fx height
+	set main_row_cnt !show_main_list_sec 0 / - main_list_sec{h} scrollbar_padding row_h
+    set main_row_cnt ?show_fxembed !has_fxembed_col main_row_cnt>=2 / main_row_cnt 2
+    floor main_row_cnt
+    
+    ; Occupy available width with new list columns
+    set main_fx_sec_w       fx_sec_w
+    set main_parm_sec_w     parm_sec_w
+    set main_send_sec_w     send_sec_w
+    
+    set main_fx_cols    / main_fx_row_cnt   main_row_cnt
+    set main_fx_cols    !show_main_fx    0 main_fx_cols<=1   0 ?has_fxembed_col 0
+    ceil main_fx_cols
+    
+    set main_parm_cols  / main_parm_row_cnt main_row_cnt
+    set main_parm_cols  !show_main_parms 0 main_parm_cols<=1 0 ?has_fxembed_col 0
+    ceil main_parm_cols
+    
+    set main_send_cols  / main_send_row_cnt main_row_cnt
+    set main_send_cols  !show_main_sends 0 main_send_cols<=1 0 ?has_fxembed_col 0
+    ceil main_send_cols
+
+    ; Add FX columns
+    set fx_col_w + fx_sec_w col_gap
+    set avail_fx_cols main_fx_cols==0 0 / avail_w fx_col_w
+    ceil avail_fx_cols
+
+    set add_fx_cols main_fx_cols>tcp_fx_num_columns tcp_fx_num_columns main_fx_cols
+    set added_main_fx_sec_w avail_w<0 avail_w reaper_version<700 avail_w add_fx_cols<=0 0 avail_fx_cols>=add_fx_cols * - add_fx_cols 1 fx_col_w tcp_fx_num_columns>1 avail_w 0
+    set main_fx_sec_w   + . added_main_fx_sec_w
+    set avail_w         - . added_main_fx_sec_w
+
+    set main_fx_min_w   added_main_fx_sec_w==0 0 / - - main_fx_sec_w   scrollbar_padding * col_gap - tcp_fx_num_columns   1 tcp_fx_num_columns
+    set tcp.fxlist.font main_fx_min_w>0  [. . main_fx_min_w{0} . . . . .]
+    
+    ; Add parameter columns
+    set parm_col_w + parm_sec_w col_gap
+    set avail_parm_cols main_parm_cols==0 0 / avail_w parm_col_w
+    ceil avail_parm_cols
+
+    set add_parm_cols  main_parm_cols>tcp_parm_num_columns tcp_parm_num_columns main_parm_cols
+    set added_main_parm_sec_w avail_w<0 avail_w reaper_version<700 avail_w add_parm_cols<=0 0 avail_parm_cols>=add_parm_cols * - add_parm_cols 1 parm_col_w tcp_parm_num_columns>1 avail_w 0
+    set main_parm_sec_w + . added_main_parm_sec_w
+    set avail_w         - . added_main_parm_sec_w
+
+    set main_parm_min_w added_main_parm_sec_w==0 0 / - - main_parm_sec_w scrollbar_padding * col_gap - tcp_parm_num_columns 1 tcp_parm_num_columns
+    set tcp.fxparm.font main_parm_min_w>0   [. . main_parm_min_w{0} . . . . .]
+
+    ; Add send columns
+    set send_col_w + send_sec_w col_gap
+    set avail_send_cols main_send_cols==0 0 / avail_w send_col_w
+    ceil avail_send_cols
+
+    set add_send_cols main_send_cols>tcp_send_num_columns tcp_send_num_columns main_send_cols
+    set added_main_send_sec_w avail_w<0 avail_w reaper_version<700 avail_w add_send_cols<=0 0 avail_send_cols>=add_send_cols * - add_send_cols 1 send_col_w tcp_send_num_columns>1 avail_w 0
+    set main_send_sec_w + . added_main_send_sec_w
+    set avail_w         - . added_main_send_sec_w
+
+    set main_send_min_w added_main_send_sec_w==0 0 / - - main_send_sec_w scrollbar_padding * col_gap - tcp_send_num_columns 1 tcp_send_num_columns
+    set tcp.sendlist.font main_send_min_w>0 [. . main_send_min_w{0} . . . . .]
+
+    ; Reduce scrollbar gap height if there isn't enough space for scrollbar
+    set main_list_h * main_row_cnt row_h
+    set remaining_h - main_list_sec{h} + main_list_h scrollbar_size
+
+    set is_compact_scrollbar remaining_h<scrollbar_size 1 0
+    set main_scrollbar_gap   !is_compact_scrollbar scrollbar_gap    - scrollbar_gap  scale==2 2 scale=1.5 2 1
+    set main_scrollbar_size  !is_compact_scrollbar scrollbar_size   - scrollbar_size scale==2 2 scale=1.5 2 1
+
+    set is_single_fx_col    tcp_fx_num_columns>1   0 main_fx_sec_w>fx_sec_w     0 1
+    set is_single_parm_col  tcp_parm_num_columns>1 0 main_parm_sec_w>parm_sec_w 0 1
+    set is_single_send_col  tcp_send_num_columns>1 0 main_send_sec_w>send_sec_w 0 1
+
+	set tcp.fxlist.font     ?is_compact_scrollbar ?show_main_fx    !is_single_fx_col    [. . . . . . main_scrollbar_gap{0} main_scrollbar_size{0}]
+	set tcp.fxparm.font     ?is_compact_scrollbar ?show_main_parms !is_single_parm_col  [. . . . . . main_scrollbar_gap{0} main_scrollbar_size{0}]
+	set tcp.sendlist.font   ?is_compact_scrollbar ?show_main_sends !is_single_send_col  [. . . . . . main_scrollbar_gap{0} main_scrollbar_size{0}]
+
+    ; Place main section lists and embedded FX
+    set main_r + main_list_sec{x} main_list_sec{w}
+	set main_x main_list_sec{x}
+
+    set main_max_row_cnt  main_fx_row_cnt>main_send_row_cnt main_fx_row_cnt>main_parm_row_cnt main_fx_row_cnt main_parm_row_cnt main_send_row_cnt>main_parm_row_cnt main_send_row_cnt main_parm_row_cnt
+    set is_reduced_h reaper_version<700 0 main_max_row_cnt==0 0 main_max_row_cnt<main_row_cnt 1 0
+
+    set main_list_h ?is_reduced_h * main_max_row_cnt row_h
+	set main_list_h + main_scrollbar_size
+
+	set tcp.fxlist 		?show_main_fx [main_x main_list_sec main_fx_sec_w{0} main_list_h{0}]
+	set main_x			?show_main_fx + + tcp.fxlist{w} list_margin
+
+	set add_r			+ main_x main_parm_sec_w
+	set tcp.fxparm 		?show_main_parms add_r<=main_r [main_x main_list_sec main_parm_sec_w{0} main_list_h{0}]
+	set main_x			?show_main_parms + + tcp.fxparm{w} list_margin
+
+	set add_r			+ main_x main_send_sec_w
+	set tcp.sendlist 	?show_main_sends add_r<=main_r [main_x main_list_sec main_send_sec_w{0} main_list_h{0}]
+	set main_x			?show_main_sends + + tcp.sendlist{w} list_margin
+
+    set tcp.fxembed     [0]
+	set tcp.fxembed 	?has_fxembed_col    + [main_x main_list_sec avail_w{0} main_list_sec]  + -main_scrollbar_size@h * scale + [0 0 0 -2] main_x==main_list_sec{x} [-2 0 2] [0]
+    set tcp.fxembed     ?has_fxembed_col    tcp.fxembed{h}<=main_list_sec_min_h  + [. . . main_list_sec_min_h{0}] * scale 1@h
+    set tcp.fxembed     ?show_fxembed !has_fxembed_col   + - + main_list_sec * [0 1 0 -1] + * row_h ?is_reduced_h main_max_row_cnt main_row_cnt scrollbar_padding scrollbar_size@w * scale main_max_row_cnt>main_row_cnt [-2 4 2 -6] [-2 0 2 -2]
+
+    ; Avoid bug where 2 rows won't show
+    set tcp.fxlist.font     ?is_single_fx_col    * . [1 1 0.6 1 1 1 1 1]
+    set tcp.fxparm.font     ?is_single_parm_col  * . [1 1 0.6 1 1 1 1 1]
+    set tcp.sendlist.font   ?is_single_send_col  * . [1 1 0.6 1 1 1 1 1]
+
+    ; Enforce a minimum column width (in relation to row height)
+    set min_col_w * 0.9 row_h
+    set tcp.fxparm.font     tcp.fxparm.font{2}<min_col_w    [. . min_col_w{0} . . . . .]
+    set tcp.fxlist.font     tcp.fxlist.font{2}<min_col_w    [. . min_col_w{0} . . . . .]
+    set tcp.sendlist.font   tcp.sendlist.font{2}<min_col_w  [. . min_col_w{0} . . . . .]
+
+    ; Swap fx and fxparm list placements when necessary
+    set needs_swap ?default_behavior 0 !tcp_sep_parms 1 show_side_parms!=show_side_fx 0 tcp.fxparm{w}>0 0 1
+
+	set swap_tmp tcp.fxparm
+	set swap_tmp.font tcp.fxparm.font
+
+	set tcp.fxparm 			?needs_swap tcp.fxlist
+	set tcp.fxparm.font 	?needs_swap tcp.fxlist.font
+
+	set tcp.fxlist 			?needs_swap swap_tmp
+	set tcp.fxlist.font 	?needs_swap swap_tmp.font
+
+    ; Set fxparm visibility flags based on usage
+	set tcp.fxparm.visflags                     [1 0 0]
+	set tcp.fxparm.visflags ?default_behavior   [0 0 0]
+	set tcp.fxparm.visflags !join_params        [. -1 .]
+	set tcp.fxparm.visflags !join_sends 	    [. . -1]
+
+    ; Set list element margins
+    set has_sends_in_fxparm !join_sends 0 send_cnt==0 0 1 
+    set list_margin          + * scale [2 0 2 0 0 14] [0 0 0 0 0 0 0.5 col_gap{0}]  
+	set tcp.sendlist.margin	 + list_margin * scale 1@x
+	set tcp.fxlist.margin	 + + list_margin * scale -1@x 0.5@ls
+	set tcp.fxparm.margin  	 + list_margin ?has_sends_in_fxparm 0 * scale -1@x
+
+    ; Fix MacOS retina scaling
+    set tcp.fxparm.margin  	?is_macos scale>=1.5 + [. . . .]
+	set tcp.sendlist.margin	?is_macos scale>=1.5 + [. . . .]
+    set tcp.fxlist.margin   ?is_macos scale>=1.5 + [. . . .]
+
+    ; Make empty FX slots work when no FX parameters present
+    set needs_swap tcp.fxparm{w}==0 0 !join_params 0 ?join_sends 0 fx_parm_cnt==0 1 0
+    set tcp.fxlist          ?needs_swap tcp.fxparm
+    set tcp.fxparm          ?needs_swap [0]
+
+    ; Set Z-order of elements
+    front tcp.custom.trackidx_bg tcp.custom.bg tcp.custom.bg_hl1 tcp.custom.bg_hl2 tcp.custom.bg_sh1 tcp.custom.bg_sh2
+
+    front tcp.custom.meter_sec_bg tcp.custom.recarm_bg tcp.custom.name_bg tcp.custom.label_flip_bg
+    front tcp.label tcp.trackidx tcp.custom.pin_on tcp.custom.pin_off tcp.custom.hide_overlay  
+    front tcp.fxparm tcp.fxlist tcp.sendlist tcp.fxembed tcp.recarm tcp.volume tcp.volume.label tcp.pan.label tcp.width.label tcp.recmon tcp.solo tcp.mute tcp.phase tcp.pan tcp.width tcp.recmode tcp.foldercomp tcp.folder tcp.meter tcp.io tcp.fx tcp.fxbyp tcp.env tcp.fxin tcp.recinput tcp.infoblock
+    front tcp.custom.track_io_text_on tcp.custom.track_io_text_off tcp.custom.track_io_darker tcp.custom.folder_recarm tcp.custom.fixed_lanes_on tcp.custom.fixed_lanes_off
+
+    front tcp.custom.div_r tcp.custom.div_b 
+    front tcp.custom.folder_1-1 tcp.custom.folder_1-2 tcp.custom.folder_1-4 tcp.custom.folder_1-8 tcp.folder
+	front tcp.custom.folder_half_1-1 tcp.custom.folder_half_1-2 tcp.custom.folder_half_1-4 tcp.custom.folder_half_1-8 tcp.folder
+    front tcp.custom.interaction_block_overlay
+endMacro
+
+macro calcTcpFlow
+    set any_row_r 0
+    set first_row_r 0
+    set max_info_w / - main_sec{w} * 2 tcp_padding{0} scale
+    set tcp_info_Size   tcp_infoblock_width>max_info_w max_info_w tcp_infoblock_width
+    set show_info ?tcp_infoblock ?tcp_infoblock_wrap 1 0
+
+    ;    element        size  	        padding?    fill    exclude             swap
+    then tcp.recarm     20 			    0           0       0                   0
+    then tcp.recmon     15 			    0           0       hide_folder_recmon  0
+    then tcp.label 	    tcp_LabelSize 	0           0       0                   0    
+    then tcp.volume     tcp_VolSize 	0           0       0                   0
+    then pan_group	    tcp_PanSize		1           0       0                   0
+    then tcp.infoblock  tcp_info_Size   1           0       !show_info 0
+    then tcp.io 	    28 			    1           0       show_side_io_button tcp_swap_fx_io
+    then fx_group 	    36 			    1           0       show_side_fx_button tcp_swap_fx_io
+    then fx_group 	    36 			    1           0       show_side_fx_button !tcp_swap_fx_io
+    then tcp.io 	    28 			    1           0       show_side_io_button !tcp_swap_fx_io
+    then tcp.env 	    20 			    1           0       0                   0
+    then tcp.recmode    20 			    1           0       0                   0
+    then input_group    tcp_InSize		1           1       0                   0
+endMacro
+
+macro paramPair scalar Idx n1 n2 n3 n4 n5 n6 n7 n8 n9 n10
+	set scalar param##Idx<=1 n1 param##Idx==2 n2 param##Idx==3 n3 param##Idx==4 n4 param##Idx==5 n5 param##Idx==6 n6 param##Idx==7 n7 param##Idx==8 n8 param##Idx==9 n9 param##Idx>=10 n10
+endmacro
+
+macro loadTcpParams_A
+    paramPair 	tcp_indent 						2 0 3 5 9 18 36 54 ;reARKMOD //Align TCP indent correctly with the skin images
+    paramPair 	tcp_control_align 				79 0 1 2
+    set tcpLabelAutoMeasured 					param19
+
+    paramPair 	tcp_MeterSize 					4 4 12 23 39 99 179 319 ;reARKMOD //Improve TCP meter readability by making the space between both meters 1 pixel instead of 2 pixels
+    paramPair 	tcp_MeterLoc 					17 0 1 2
+    paramPair 	tcp_VolPair 					3 20 40 70 100 130 160 190 ;FTC MOD change name to VolPair
+    paramPair 	tcp_InPair 						20 49 64 80 100 130 190 240 ;FTC MOD change name to InPair
+    paramPair 	tcp_LabelPair 					18 0 20 50 80 110 140 170
+    paramPair 	tcp_sepSends					81 0 1
+
+    resetHides
+    doHideLogic 	tcp.recarm 		5
+    doHideLogic 	tcp.recmon 		6
+    doHideLogic 	tcp.label 		7
+    doHideLogic 	tcp.volume 		8
+    doHideLogic 	tcp.io 			9
+    doHideLogic 	fx_group 		10
+    doHideLogic 	tcp.env 		11
+    doHideLogic 	pan_group 		12
+    doHideLogic 	tcp.recmode 	13
+    doHideLogic 	input_group 	14
+    doHideLogic 	values 			15
+    doHideLogic 	meter_values	16
+endmacro
+
+macro loadTcpParams_B
+    paramPair 	tcp_indent 						2 0 3 5 9 18 36 54 ;reARKMOD //Align TCP indent correctly with the skin images
+    paramPair 	tcp_control_align 				79 0 1 2
+    set tcpLabelAutoMeasured 					param19
+
+	paramPair 	tcp_MeterSize 	32 4 12 23 39 99 179 319 ;reARKMOD //Improve TCP meter readability by making the space between both meters 1 pixel instead of 2 pixels
+	paramPair 	tcp_MeterLoc 	45 0 1 2
+	paramPair   tcp_VolPair     31 20 40 70 100 130 160 190 ;FTC MOD change name to VolPair
+	paramPair   tcp_InPair      46 49 64 80 100 130 190 240 ;FTC MOD change name to InPair
+	paramPair 	tcp_LabelPair 	47 0 20 50 80 110 140 170
+	paramPair 	tcp_sepSends	82 0 1
+
+	resetHides
+	doHideLogic 	tcp.recarm 		33
+	doHideLogic 	tcp.recmon 		34
+	doHideLogic 	tcp.label 		35
+	doHideLogic 	tcp.volume 		36
+	doHideLogic 	tcp.io 			37
+	doHideLogic 	fx_group 		38
+	doHideLogic 	tcp.env 		39
+	doHideLogic 	pan_group 		40
+	doHideLogic 	tcp.recmode 	41
+	doHideLogic 	input_group 	42
+	doHideLogic 	values 			43
+	doHideLogic 	meter_values	44
+endmacro
+
+macro loadTcpParams_C
+    paramPair 	tcp_indent 						2 0 3 5 9 18 36 54 ;reARKMOD //Align TCP indent correctly with the skin images
+    paramPair 	tcp_control_align 				79 0 1 2
+    set tcpLabelAutoMeasured 					param19
+
+	paramPair 	tcp_MeterSize   55 4 12 23 39 99 179 319 ;reARKMOD //Improve TCP meter readability by making the space between both meters 1 pixel instead of 2 pixels
+	paramPair 	tcp_MeterLoc 	68 0 1 2
+	paramPair 	tcp_VolPair 	54 20 40 70 100 130 160 190  ;FTC MOD change name to VolPair
+	paramPair 	tcp_InPair 		69 49 64 80 100 130 190 240 ;FTC MOD change name to InPair
+	paramPair 	tcp_LabelPair 	70 0 20 50 80 110 140 170
+	paramPair 	tcp_sepSends	83 0 1
+
+	resetHides
+	doHideLogic 	tcp.recarm 		56
+	doHideLogic 	tcp.recmon 		57
+	doHideLogic 	tcp.label 		58
+	doHideLogic 	tcp.volume 		59
+	doHideLogic 	tcp.io 			60
+	doHideLogic 	fx_group 		61
+	doHideLogic 	tcp.env 		62
+	doHideLogic 	pan_group 		63
+	doHideLogic 	tcp.recmode 	64
+	doHideLogic 	input_group 	65
+	doHideLogic 	values 			66
+	doHideLogic 	meter_values	67
+endmacro
+
+Layout ""
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_A
+    
+    set scale 1
+    calcFontSizes scale
+    calcTcpSecs scale
+    calcTcpFlow
+    drawTcp scale
+EndLayout
+
+Layout "A"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_A
+    
+    set scale 1
+    calcFontSizes scale
+    calcTcpSecs scale
+    calcTcpFlow
+    drawTcp scale
+
+	Layout "A_Solid" "alt" 
+		set tcp.label .
+	EndLayout
+EndLayout
+
+Layout "150%_A" "150"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_A
+
+    set scale 1.5
+    calcFontSizes scale
+    calcTcpSecs scale
+    calcTcpFlow
+    drawTcp scale
+
+    Layout "150%_A_Solid" "150/alt"
+        set tcp.label .
+    EndLayout
+EndLayout
+
+Layout "200%_A" "200"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_A
+
+    set scale 2
+    calcFontSizes scale
+    calcTcpSecs scale
+    calcTcpFlow
+    drawTcp scale
+
+    Layout "200%_A_Solid" "200/alt"
+        set tcp.label .
+    EndLayout
+EndLayout
+
+Layout "B"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_B
+
+	set scale 1
+    calcFontSizes scale
+	calcTcpSecs scale
+	calcTcpFlow
+	drawTcp scale
+
+    Layout "B_Solid" "alt" 
+		set tcp.label .
+	EndLayout
+EndLayout
+
+
+Layout "150%_B" "150"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_B
+
+    set scale 1.5
+    calcFontSizes scale
+    calcTcpSecs scale
+    calcTcpFlow
+    drawTcp scale
+
+    Layout "150%_B_Solid" "150/alt"
+        set tcp.label .
+    EndLayout
+EndLayout
+
+Layout "200%_B" "200"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_B
+
+    set scale 2
+    calcFontSizes scale
+    calcTcpSecs scale
+    calcTcpFlow
+    drawTcp scale
+
+    Layout "200%_B_Solid" "200/alt"
+        set tcp.label .
+    EndLayout
+EndLayout
+
+Layout "C"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_C
+
+	set scale 1
+    calcFontSizes scale
+	calcTcpSecs
+    calcTcpFlow
+	drawTcp
+
+    Layout "C_Solid" "alt" 
+        set tcp.label .
+    EndLayout
+EndLayout
+
+Layout "150%_C" "150"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_C
+
+    set scale 1.5
+    calcFontSizes scale
+    calcTcpSecs scale
+    calcTcpFlow
+    drawTcp scale
+
+    Layout "150%_C_Solid" "150/alt"
+        set tcp.label .
+    EndLayout
+EndLayout
+
+Layout "200%_C" "200"
+    clear tcp.*
+    initTrackGlobals
+    loadTcpParams_C
+
+    set scale 2
+    calcFontSizes scale
+    calcTcpSecs scale
+    calcTcpFlow
+    drawTcp scale
+
+    Layout "200%_C_Solid" "200/alt"
+        set tcp.label .
+    EndLayout
+EndLayout
+
+macro drawTcpSeparator scale
+    set tcp.size [w h]
+    set tcp.label               [0 0 w h]
+    set tcp.label.font          header_font
+    set tcp.label.margin        + * scale [6 4 6 4] [0 0 0 0 0.5]
+    set tcp.label.color         ?track_selected [225 225 225] [190 190 190] 
+    set tcp.label.color         ?trackcolor_valid [trackcolor_r trackcolor_g trackcolor_b] 
+endmacro
+
+Layout "Separator" "separator"
+    clear tcp.*
+    set scale 1
+    calcFontSizes scale
+    drawTcpSeparator scale
+EndLayout
+
+Layout "150%_Separator" "separator"
+    clear tcp.*
+    set scale 1.5
+    calcFontSizes scale
+    drawTcpSeparator scale
+EndLayout
+
+Layout "200%_Separator" "separator"
+    clear tcp.*
+    set scale 2
+    calcFontSizes scale
+    drawTcpSeparator scale
+EndLayout
+
+#<
+#>------------------------- MASTER TRACK CONTROL PANEL --------------------------------
+
+macro calcMasterTcpSecs scale
+	set element_h 								* scale 20
+	set tcp_MeterSize_s							* scale tcp_MeterSize
+	set mTcp_PanSize							width_visible{0}==0 20 43
+	set meter_flip_v							* scale [100 140 183] 	;[narrow_width flip_height flip_height(narrow)]
+	set meter_flip								w>meter_flip_v{0} h<meter_flip_v{1} [1] [0] h<meter_flip_v{2} [1] [0]
+	set meterRight								tcp_MeterLoc{0}
+	set meter_sec								!meter_flip{0} [0] !meterRight{0} \
+													* scale + [0 0 33 0] [0 0 tcp_MeterSize_s h] \
+													+ - + * scale [-33 0 33] [0 0 tcp_MeterSize_s h] [tcp_MeterSize_s] [w]
+	set vol_sec									!meter_flip{0} [0] !meterRight{0} \
+													+ - [meter_sec{2} h w] [0 0 meter_sec{2}] * scale [3 -20 -2 21] \
+													- + [0 h w] * scale [0 -22 -3 22] [0 0 meter_sec{2}]
+	set main_sec								?meter_flip{0} \
+													!meterRight{0} \
+														- - - [meter_sec{2} 0 w h] * scale [0 6] [0 0 meter_sec{2}] [0 0 0 vol_sec] \
+														- - [0 0 w h] * scale [6 6] [0 0 meter_sec{2} vol_sec] \
+													- - [0 0 w h] * scale [6 6] [0 0 0 meter_sec]
+	set main_eff								main_sec{2}
+	set mainCollapse_h							* scale 64
+	set mainCollapse							main_sec{2}<mainCollapse_h{0} 1 0
+	set tcp_padding								* scale [7 7]
+	set tcpNullElement							+ + [main_sec main_sec] [tcp_padding tcp_padding] * scale [0 6 0 20]
+	set previous_element 						tcpNullElement
+    set hide_master.tcp.custom.pin              !tcp_show_pin 1 0
+endMacro
+
+macro drawMasterTcp scale
+	set master.tcp.size							* scale [300 100 40 56]
+	set main_sec								!meter_flip{0} + [0 0 0 this_y_end{0}] * scale [0 0 0 8]  + . * scale [5 0 -10] ; recalculate sections now we know this_y_end
+	set vol_sec									!meter_flip{0} + [0 main_sec{3} w tcp_padding{1}] * scale 18@h
+	set meter_sec								?mainCollapse{0} [0 0 w h] !meter_flip{0} tcp_fxparms>0 \
+																									+ + * scale 70@h [0 vol_sec w] [0 vol_sec{3}] \
+																									- - + [0 vol_sec w h] [0 vol_sec{3}] [0 0 0 main_sec] [0 0 0 vol_sec]
+
+    custom master.tcp.custom.pin_on '' 40000 '' 'custom_master_track_pin_on'
+    custom master.tcp.custom.pin_off '' 40000 '' 'custom_master_track_pin_off'
+
+    set master.tcp.custom.pin !tcp_show_pin [0] [. . . master.tcp.custom.pin{w}]
+    set master.tcp.custom.pin_on    ?trackpinned master.tcp.custom.pin [0]
+    set master.tcp.custom.pin_off   !trackpinned master.tcp.custom.pin [0]
+
+    ; Draw custom meter background
+    custom master.tcp.custom.meter_sec_bg
+    set master.tcp.custom.meter_sec_bg       meter_sec
+    set master.tcp.custom.meter_sec_bg.color meter_bg_color
+
+    set master.tcp.meter                   		- - + meter_sec * scale [4 2 -5 -5] [0 0 tcp.mute{2}] [0 0 tcp_padding{0}]
+	  set master.tcp.meter.vu.div                    [1]
+	  set master.tcp.meter.readout.color             theme_version>1 [200 200 200 255 255 183 171 255] [100 100 100 255 255 183 171 255]
+	  set master.tcp.meter.rmsreadout.color          master.tcp.meter.readout.color
+      set master.tcp.meter.scale.color.lit.bottom    theme_version>1 [0 0 0 170 0 0 0 0] [0 0 0 200 0 0 0 0]
+	  set master.tcp.meter.scale.color.lit.top       theme_version>1 [0 0 0 170 0 0 0 0] [0 0 0 200 0 0 0 0]
+	  set master.tcp.meter.scale.color.unlit.bottom  theme_version>1 [255 255 255 70 0 0 0 0] [255 255 255 120 0 0 0 0]
+	  set master.tcp.meter.scale.color.unlit.top     theme_version>1 [255 255 255 140 0 0 0 0] [255 255 255 120 0 0 0 0]
+	set master.tcp.mute               			+ + [meter_sec meter_sec] [meter_sec{2}] * scale [-25 4 21 20]
+	set master.tcp.solo 						+ + * scale [0 2] master.tcp.mute [0 master.tcp.mute{3}]
+	set master.tcp.label.color					tcp.label.color
+	set master.tcp.label.font					header_font
+    set master.tcp.label.margin                 + * scale [2 0 -2] header_font_voffs@y
+	set master.tcp.volume						?mainCollapse{0} [0] + vol_sec * scale + [0 0 -2 -2] ?meter_flip{0} [1 0 -1 0] [1 0 -1 -3]
+		set volume_fader_w						* 21 scale
+		set master.tcp.volume.fadermode         master.tcp.volume{w}>volume_fader_w{0} [0] [1]
+		set master.tcp.volume.color           	[0 0 0]
+	set master.tcp.fx 							!master_fx_group{2} [0] + * scale [0 0 20] [master_fx_group master_fx_group 0 element_h{0}]
+	set master.tcp.fxbyp 						!master_fx_group{2} [0] + + * scale [0 0 16] [master.tcp.fx master.tcp.fx 0 element_h{0}] [master.tcp.fx{2}]
+	set master.tcp.pan 							!master_pan_group{2} [0 0 0 0] width_visible{0}==2 \
+													* [master_pan_group master_pan_group master_pan_group master_pan_group element_h{0}] [1 1 1 0.5] \
+													[master_pan_group master_pan_group element_h{0} element_h{0}] ; knobs have the same h and w
+		set master.tcp.pan.fadermode         	gl_fader_swap
+		set master.tcp.pan.color              	gl_pan_color
+	set master.tcp.width						width_visible{0}==0 [0] !master_pan_group{2} [0 0 0 0] width_visible{0}==2 \
+													+ [master.tcp.pan master.tcp.pan master.tcp.pan master.tcp.pan] [0 master.tcp.pan{3}] \
+													- + [master_pan_group master_pan_group element_h{0} element_h{0}] [master_pan_group{2}] [element_h{0}]
+		set master.tcp.width.fadermode        	gl_fader_swap
+		set master.tcp.width.color            	gl_pan_color
+	set hideValues								?mainCollapse{0} 1 ?hide_values{0} 1 . .	
+	set master_mcp_text_color							?track_selected [160 160 160] [115 115 115]
+	set master.tcp.volume.label					hideValues{0}==1 [0] + + * scale + [-1 0 100 4] * + main_font 10 [0 -1 0 1] [main_sec main_sec{3}] - [tcp_padding] [0 tcp_padding]
+		set master.tcp.volume.label.color     	master_mcp_text_color
+		set master.tcp.volume.label.font		main_font
+		set master.tcp.volume.label.margin    	[0]
+        set master.tcp.volume.label.margin      + main_font_voffs@y
+	set master.tcp.width.label					hideValues{0}==1 [0] main_eff{0}<122 [0] width_visible{0}==0 [0] + [main_sec master.tcp.volume.label] - + [main_eff{0}] * scale [-36 0 36 9] [tcp_padding]
+		set master.tcp.width.label.margin     	+ [0 0 0 0 1] * scale [0 1]
+		set master.tcp.width.label.color      	master_mcp_text_color
+		set master.tcp.width.label.font			master.tcp.volume.label.font
+        set master.tcp.width.label.margin       + main_font_voffs@y
+	set master.tcp.pan.label					hideValues{0}==1 [0] main_eff{0}<86 [0] + [main_sec master.tcp.volume.label] - - + [main_eff{0}] * scale [-36 0 36 9] [tcp_padding] [master.tcp.width.label{2}]
+		set master.tcp.pan.label.margin       	+ [0 0 0 0 1] * scale [0 1]
+		set master.tcp.pan.label.color        	master_mcp_text_color
+		set master.tcp.pan.label.font			master.tcp.volume.label.font	
+        set master.tcp.pan.label.margin         + main_font_voffs@y								+ 	
+    set master.tcp.fxparm  						- + + [0 meter_sec w h] [0 meter_sec{3}] [0 tcp_padding] + + [0 0 0 meter_sec{1}] [0 0 0 meter_sec{3}] [0 0 0 tcp_padding{1}] 
+	set master.tcp.fxparm  						+ * scale [4 -2 -8 -4]
+	set master.tcp.fxparm.font            		tcp.fxlist.font
+	set master.tcp.fxparm.margin				tcp.fxlist.margin
+    set master.tcp.fxparm.visflags ?master_tcp_show_sends [0 0 0] [0 0 -1]
+endMacro
+
+macro loadMasterTcpParams
+    paramPair 	tcp_MeterSize 					4 4 12 23 39 99 179 319 //reARKMOD fix (FTC)
+    paramPair 	tcp_MeterLoc 					17 0 1 2
+
+    resetHides
+    doHideLogic 	master_pan_group 	12
+    doHideLogic 	values 				15
+    doHideLogic 	meter_values		16
+endmacro
+
+macro calcMasterTcpFlow
+    ;    element        			size  	padding?    fill    exclude
+    then master.tcp.custom.pin      19          0       0       reaper_version<700
+    then master.tcp.label 	   		48 			0
+    then master.tcp.io 				28 			1
+    then master_fx_group 			36 			1
+    then master.tcp.env 			20 			1
+    then master_pan_group		mTcp_PanSize	1
+    then master.tcp.mono			50			1
+endMacro
+
+Layout ""
+    clear master.tcp.*
+    initTrackGlobals
+    loadMasterTcpParams
+
+    set scale 1
+    calcFontSizes scale
+    calcMasterTcpSecs scale
+    calcMasterTcpFlow
+    drawMasterTcp scale
+EndLayout
+
+Layout "A"
+    clear master.tcp.*
+    initTrackGlobals
+    loadMasterTcpParams
+
+    set scale 1
+    calcFontSizes scale
+    calcMasterTcpSecs scale
+    calcMasterTcpFlow
+    drawMasterTcp scale
+EndLayout
+
+Layout "150%_A" "150"
+    clear master.tcp.*
+    initTrackGlobals
+    loadMasterTcpParams
+
+	set scale 1.5
+	calcFontSizes scale
+	calcMasterTcpSecs scale
+	calcMasterTcpFlow
+	drawMasterTcp scale
+EndLayout
+
+Layout "200%_A" "200"
+    clear master.tcp.*
+    initTrackGlobals
+    loadMasterTcpParams
+
+	set scale 2
+	calcFontSizes scale
+	calcMasterTcpSecs scale
+	calcMasterTcpFlow
+	drawMasterTcp scale
+EndLayout
+
+#<
+#> -------------------------- ENVELOPE CONTROL PANELS ---------------------------------
+
+macro loadEnvParams
+    paramPair 	envcp_LabelPair 				21 0 20 50 80 110 140 170
+    paramPair 	envcp_VolPair 					23 20 40 70 100 130 160 190
+    set EnvLabelAutoMeasured 					param22
+    set EnvFolderIndent							param24
+endmacro
+
+macro shrinkEnvLabelAndVolume min_label_len min_vol_len max_shrink_total
+
+	set max_shrink_label - envcp_LabelSize min_label_len
+	set max_shrink_label max_shrink_label<0 0
+
+	set max_shrink_vol - envcp_Volsize min_vol_len
+	set max_shrink_vol max_shrink_vol<0 0
+
+    ; Calculate the ratio of max shrink values
+    set shrink_ratio / max_shrink_label max_shrink_vol
+    
+    ; Calculate initial proportional shrink values
+    set shrink_vol / max_shrink_total + shrink_ratio 1
+    set shrink_label * shrink_vol shrink_ratio
+    
+    ; Check if either volume or label exceeds its max shrink
+	set shrink_label shrink_label>max_shrink_label max_shrink_label
+	set shrink_vol shrink_label>max_shrink_label - max_shrink_total max_shrink_label
+
+	set shrink_label shrink_vol>max_shrink_vol - max_shrink_total max_shrink_vol
+	set shrink_vol shrink_vol>max_shrink_vol max_shrink_vol
+
+    set did_shrink 0
+	set did_shrink max_shrink_total>0 shrink_label<=max_shrink_label shrink_vol<=max_shrink_vol 1
+	set did_shrink !tcp_allow_shrink 0
+
+	set envcp_LabelSize 	?did_shrink - . shrink_label
+	set envcp_VolSize  	    ?did_shrink - . shrink_vol
+endmacro
+
+macro calcEnvSecs scale
+	set envcp.size								* scale [300 100]
+	set element_h 								* scale 20
+	set envcp_padding							* scale [6 10]
+	set values_w								* scale 60
+	set envcp_squash_height 					+ + * scale 20 envcp_padding{1} envcp_padding{1}
+	set valuesFlipH								+ + envcp_squash_height * scale 13 envcp_padding{1}
+	set h_less_border							- h 1
+	set envcp_padding							h_less_border{0}<envcp_squash_height{0} + [envcp_padding] * [0 1] / - h_less_border{0} element_h * scale 2
+	set envLabelMin								* scale 30
+	set envcp_LabelSize 						envcp_LabelPair{0}==0 EnvLabelAutoMeasured{0}<envLabelMin{0} envLabelMin{0} + EnvLabelAutoMeasured{0} * scale 10 envcp_LabelPair
+	set envcp_LabelSize                         + tcp_env_label_len_offs
+    set this_envcp_indent						+ ?EnvFolderIndent{0} * * scale tcp_indent{0} folderdepth{0} [0] * scale [-3 0 -6] ; subtracting 3px to match the lack of visible borders
+	set main_sec								- + * [1 0 -1] this_envcp_indent [0 0 w h] h<valuesFlipH{0} [0 0 values_w 0] + * scale [0 0 0 13] [0 0 0 envcp_padding{1}]
+    set main_sec + * scale [24 0 -30]
+	set values_sec								h<valuesFlipH{0} + + [main_sec envcp_padding{1} values_w{0}] [main_sec{2}] * scale [0 4 0 13] + [0 main_sec{3} w] * scale [0 0 0 13]
+	set envcpNullElement						+ + [main_sec] [envcp_padding envcp_padding] * scale [0 0 0 20]
+	set previous_element 						envcpNullElement		; Let's start at the very beginning. A very good place to start.
+	set addCont									envcp_type==4 [30 1] [0 0]
+
+    set envcp_VolSize                           envcp_VolPair
+
+    set vol_end     + envcp_padding{0} * scale + + + envcp_padding{0} envcp_LabelSize envcp_VolSize 35
+    set hide_w      + envcp_padding{0} * scale 36
+
+    ; Shrink label and volume until hide button has to be hidden
+	set shrink_w / - + vol_end hide_w main_sec{w} scale
+
+	shrinkEnvLabelAndVolume 80 40 shrink_w
+
+    ; Shrink label and volume until both have to be hidden
+	set shrink_w / - vol_end main_sec{w} scale
+    set shrink_w ?did_shrink 0
+
+	shrinkEnvLabelAndVolume 30 40 shrink_w
+
+    set envcp_LabelSize ?tcp_allow_shrink !did_shrink shrink_w>0 0
+    set envcp_VolSize   ?tcp_allow_shrink !did_shrink shrink_w>0 0
+
+endMacro
+
+macro envThen element width use_padding
+	; apply scale
+	set s_width				* width scale
+
+	set prev_end 			+ [previous_element] [previous_element{2}]									; find the end of the previous element
+	set element 			[prev_end previous_element s_width element_h]									; ...and place the element there
+
+	; x-axis
+	set element 			?use_padding + [envcp_padding] 												; if x-padding is required, add it
+	set this_end			- + + [element] [element{2}] [envcp_padding] [main_sec]						; okay, and what does that make the x-end of this element, realtive to main_sec?
+
+	; y-axis
+	set next_row			+ [0 element] [0 previous_element{3}] 										; find the y of the next row
+	set element 			this_end{0}>main_sec{2} + [main_sec next_row element element] envcp_padding	; move it to the next row
+	set this_end			- + + [element] [element{2}] [envcp_padding] [main_sec]						; recalculate this_end, now that the element is on a new row
+	set element				this_end{0}>main_sec{2} [. . 0 .]											; ... and cull if there's still not enough main_sec width to fit
+	set this_y_end			+ + element{1} element{3} envcp_padding{1}									; find its bottom
+	set element				this_y_end{0}>main_sec{3} [0] !previous_element{1} [0] .					; cull if there's not enough height to fit, or if previous_element was culled
+	set main_sec_last 		element{3}>0 this_y_end{0} .
+
+	; values readout control
+	set valuesRoom			- - main_sec{3} this_y_end{0} envcp_padding{1}								; is the remaining height after this element enough for the values to fit?
+	set hideValues			valuesRoom{0}<8 element{3}!=0 [1] . 										; if not, and this element isn't already hidden, cull the values
+
+	set previous_element element
+endmacro
+
+macro calcEnvFlow
+    ;    element        		size  	padding?  
+    envThen envcp.arm  			20 			0     
+    envThen envcp.bypass  		15 			0     
+    envThen envcp.label   envcp_LabelSize 	0     
+    envThen envcp.fader    envcp_VolSize 	0     
+    envThen envcp.hide 			36 			1     
+    envThen envcp.mod 		addCont{0}  addCont{1}
+    envThen envcp.learn		addCont{0}  addCont{1}
+endMacro
+
+macro drawEnvcp scale
+    custom envcp.custom.arm_bg '' 0 '' 'custom_envcp_arm_bg'
+    set envcp.custom.arm_bg envcp.arm{w}==0 0 + + envcp.arm \
+                                                    * scale [-1 0 2 0] \
+                                                    envcp.bypass{w}>0 envcp.bypass{w}@w 0
+
+	set envcp.label.color      					?env_selected [202 202 202] [184 184 184]
+		set envcp.label.font					main_font
+		set envcp.label.margin     				* scale [4 0 4 0 0]
+		set envcp.label.margin					+ main_font_voffs@y
+	set envcp.value								+ values_sec [0 0 0 4]
+		set envcp.value.font       				main_font
+		set envcp.value.color      				?env_selected brighter_accent_color accent_color
+		set envcp.value.margin     				* [0 0 scale 0 1] [0 0 7 0 1]
+		set envcp.value.margin					+ main_font_voffs@y
+	set envcp.fader.color      					accent_color
+		set env_fader_w							* 21 scale
+		set envcp.fader.fadermode         		envcp.fader{w}>env_fader_w{0} [0] [1]
+
+    front envcp.custom.arm_bg
+    front envcp.fader envcp.arm envcp.bypass
+endMacro
+
+Layout ""
+    clear envcp.*
+    initTrackGlobals
+    loadEnvParams
+
+    set scale 1
+    calcFontSizes scale
+    calcEnvSecs scale
+    calcEnvFlow
+    drawEnvcp
+EndLayout
+
+Layout "A"
+    clear envcp.*
+    initTrackGlobals
+    loadEnvParams
+
+    set scale 1
+    calcFontSizes scale
+    calcEnvSecs scale
+    calcEnvFlow
+    drawEnvcp
+EndLayout
+
+Layout "150%_A" "150"
+    clear envcp.*
+    initTrackGlobals
+    loadEnvParams
+
+	set scale 1.5
+	calcFontSizes scale
+	calcEnvSecs scale
+	calcEnvFlow
+	drawEnvcp scale
+EndLayout
+
+Layout "200%_A" "200"
+    clear envcp.*
+    initTrackGlobals
+    loadEnvParams
+
+	set scale 2
+	calcFontSizes scale
+	calcEnvSecs scale
+	calcEnvFlow
+	drawEnvcp scale
+EndLayout
+
+#<
+#>---------------------------------- THE MIXER ----------------------------------------
+
+macro doModeLogic variable paramIdx
+	set variable param##paramIdx##&1 ?track_selected 1 0 0
+	set variable param##paramIdx##&2 !track_selected 1 variable
+	set variable param##paramIdx##&4 ?recarm 1 variable
+	set variable param##paramIdx##&8 !recarm 1 variable
+endmacro
+
+macro drawMcp scale
+    set lscale scale==2 2 1
+    set uscale scale==1 1 2
+
+    set narrowMode  ?stripMode 0
+    set wideMode    ?stripMode 0 ?narrowMode 0 1
+
+	set hide_inputFX_s 							* scale hide_inputFX
+	set hide_input_s 							* scale hide_input
+	set hide_pan_labels_s 						* scale hide_pan_labels
+	set hide_pan_s 								* scale hide_pan
+	set hide_volume_label_s 					* scale hide_volume_label
+	set sidebar_w_s 							!sidebarMode 0 * scale mcp_sidebar_w
+    set sidebarMode                             ?sidebarMode ?mcp_wantextmix&7 1 0
+    set hide_vol_label                          ?stripMode 0 h<hide_volume_label_s 1 0
+
+    set folder_end + folderdepth folderstate
+	set gapmode									mcp_border{0}<1 0 \
+												    mcp_border{0}==1 1 \
+												    mcp_border{0}==2 2 \
+												    mcp_border{0}==3 folderstate==0 0 folderstate==1 folderdepth==0 1 0 folder_end==0 2 0 \
+                                                    mcp_border{0}==4 folderstate==0 0 folderstate==1 1 folderstate<0 2
+    set gap_size_s                              gapmode==0 0 * scale mcp_gap_w
+    set mcp_indent_s							* scale mcp_indent
+    set mcp_indent_offs_s                       * - mcp_maxfolderdepth folderdepth mcp_indent_s
+	set mcp_meterExp_s 							?meterExpMode * scale mcp_meterExp 1
+	set panLabelsMode 							h<hide_pan_labels_s{x} 0 labelsMode
+    set extmix_margin_s                         * scale 2
+
+
+    set width_offs                              * scale ?stripMode - mcp_strip_w 34 ?narrowMode - mcp_narrow_w 54 - mcp_wide_w 86
+	set nchan_offs 								+ width_offs ?meterExpMode{0} * - tracknch 2 mcp_meterExp_s 0
+	set nchan_offs_half 						/ nchan_offs 2
+	set nchan_offs_third 						/ nchan_offs 3
+	set nchan_offs_twothird 					* nchan_offs_third 2
+    
+    set mcp_x                                   gapmode==1 gap_size_s 0
+    set mcp_w                                   + * scale ?narrowMode 54 86 nchan_offs{0} 0
+    set mcp_h                                   * scale 371
+    set mcp_min_h                               * scale + 180 * mcp_maxfolderdepth mcp_indent_s 
+
+	set mcp.size                                + + [mcp_w mcp_h 0 mcp_min_h] sidebar_w_s@0 gap_size_s@0
+    set mcp_w                                   scale==1.5 + 0.5
+
+    set fx_sec								 	+ [mcp_x 0 mcp_w] * scale 33@h
+    set pan_sec 						     	+ [mcp_x fx_sec{h} mcp_w] * scale !panLabelsMode{0} h<hide_pan_s 6@h 33@h 50@h
+	set in_sec 						         	+ + [mcp_x pan_sec{y} mcp_w] pan_sec{h}@y * scale h<hide_input_s 22@h h<hide_inputFX_s 42@h 54@h
+
+    set bot_sec_h						 	    + * scale 47 * mcp_indent_s ?mcp_control_align mcp_maxfolderdepth folderdepth
+	set bot_sec								 	- [0 h w bot_sec_h] bot_sec_h@y
+    set label_sec 							 	+ + + [mcp_x bot_sec mcp_w] sidebar_w_s@w * scale 26@h ?mcp_control_align mcp_indent_offs_s@h 0 
+    set idx_sec                                 + + [bot_sec label_sec bot_sec] label_sec{h}@y * scale 20@h
+
+	set stretch_sec_y					 	    + + fx_sec{h} pan_sec{h} in_sec{h}
+	set stretch_sec_h					 	    - - h stretch_sec_y bot_sec{h}
+	set stretch_sec 						 	[mcp_x stretch_sec_y mcp_w stretch_sec_h]
+    set sidebar_sec								+ + + [mcp_x 0 sidebar_w_s] mcp_w@x stretch_sec{y}@h stretch_sec{h}@h
+
+	set padding_reduction_h						+ * scale [350 250] !mcp_control_align [mcp_indent_offs_s mcp_indent_offs_s] [0]
+	set padding 							 	* scale stretch_sec_h<padding_reduction_h{0} stretch_sec_h<padding_reduction_h{1} [0 2] [0 3] [0 4]
+
+    ; v7 adjustable background color
+    set tint_strength !trackcolor_valid 0 / ?track_selected mcp_tint_sel_strength mcp_tint_strength 100
+    set dim_strength / ?track_selected mcp_dim_sel_strength mcp_dim_strength 100
+    set sel_strength !track_selected 0 / mcp_sel_strength 100
+
+    custom mcp.custom.bg_hl_t
+    custom mcp.custom.bg_hl_r
+    custom mcp.custom.bg
+
+    set mcp.custom.bg + + + pan_sec in_sec{h}@h * lscale [1 0 -1] * uscale [0 -1 0 1]
+
+    set mcp.custom.bg.color + * track_default_bg_color - 1 tint_strength * track_bg_color tint_strength 
+    set mcp.custom.bg.color * . - 1 dim_strength
+    set mcp.custom.bg.color + * . - 1 sel_strength  * [0 0 0 0 255 255 255] sel_strength
+
+    set hl_color [0 0 0 0 255 255 255 22]
+    set mcp.custom.bg_hl_t + * [1 1 1 0] mcp.custom.bg * lscale [0 0 0 1]
+    set mcp.custom.bg_hl_t.color hl_color
+
+    set show_bg_hl_r ?sidebarMode 1 gapmode==2 0 1
+    set mcp.custom.bg_hl_r !show_bg_hl_r [0] + + * [1 1 0 1] mcp.custom.bg * lscale [-1 1 1 -1] mcp.custom.bg{w}@x
+    set mcp.custom.bg_hl_r.color hl_color
+
+    custom mcp.custom.gap_hl_t
+    custom mcp.custom.gap_hl_r
+    custom mcp.custom.gap
+
+    set mcp.custom.gap          gapmode==0 [0] gapmode>0 + + + + [lscale mcp.custom.bg 0 mcp.custom.bg] stretch_sec{h}@h label_sec{h}@h ?mcp_control_align mcp_indent_offs_s@h 0 gap_size_s@w
+    set mcp.custom.gap          gapmode==2 - - + .  w@x mcp.custom.gap{w}@x lscale@x
+    set mcp.custom.gap_hl_t     gapmode==0 [0] + * [1 1 1 0] mcp.custom.gap lscale@h
+    set mcp.custom.gap_hl_r     !gapmode==2 [0]  + + * [1 1 0 1] mcp.custom.gap * lscale [-1 1 1 -1] mcp.custom.gap{w}@x
+
+    set mcp.custom.gap.color            mcp.custom.bg.color
+    set mcp.custom.gap_hl_t.color       hl_color
+    set mcp.custom.gap_hl_r.color       hl_color
+
+    set bg_color [mcp.custom.bg.color{4} mcp.custom.bg.color{5} mcp.custom.bg.color{6}]
+    get_luma bg_luma bg_color
+    set mcp_text_color bg_luma<=text_luma_thres bright_text_color dark_text_color
+
+    custom mcp.custom.sel_gradient '' 0 '' 'custom_mcp_sel_gradient'
+    set mcp.custom.sel_gradient !track_selected [0] !mcp_sel_gradient [0] + + * [1 1 1 0] mcp.custom.bg * scale 50@h * gap_size_s gapmode==1 [-1 0 1] gapmode==2 !sidebarMode [0 0 1] [0] [0]
+
+    custom mcp.custom.bot_bg
+    set mcp.custom.bot_bg + bot_sec * [0 1 0 -1] + mcp.trackidx{h} label_sec{h}
+    set mcp.custom.bot_bg.color [0 0 0 0 42 42 42 0]
+
+    custom mcp.custom.stretch_bg
+    set mcp.custom.stretch_bg + stretch_sec ?mcp_control_align mcp_indent_offs_s@h 0
+    set mcp.custom.stretch_bg.color meter_bg_color
+
+    custom mcp.custom.label_bg
+    set mcp.custom.label_bg label_sec
+    set mcp.custom.label_bg.color  mcp.custom.stretch_bg.color
+
+    custom mcp.custom.div
+    set mcp.custom.div + [mcp_x stretch_sec lscale stretch_sec] label_sec{h}@h
+    set mcp.custom.div.color [0 0 0 0 23 23 23 0]
+
+    custom mcp.custom.sel_bar_inner
+    custom mcp.custom.sel_bar
+
+    set mcp.custom.sel_bar + !track_selected [0] + + [0 label_sec w] label_sec{h}@y * scale [0 -2 0 2] * lscale [1 -2 -1 2]
+    set mcp.custom.sel_bar.color meter_bg_color
+
+    set mcp.custom.sel_bar_inner !track_selected [0] + mcp.custom.sel_bar * lscale [0 1 0 -2]
+    set mcp.custom.sel_bar_inner.color [0 0 0 0 234 234 234 0]
+
+    ; ------------- ;
+
+    set mcp.extmixer.mode        				!sidebarMode [-1] [1]
+    
+	set mcp.extmixer.position					!sidebarMode + * scale mcp_extmix_offs@h scale==1 [3 0 -3] scale==1.5 [5 0 -3] [7 0 -4]
+    set mcp.extmixer.position                   !sidebarMode gapmode==1 + * [1 0 -1] gap_size_s
+    set mcp.extmixer.position                   !sidebarMode gapmode==2 + * [0 0 1]  gap_size_s 
+	set mcp.extmixer.position					?sidebarMode + sidebar_sec scale==1 [3 0 -4] scale==1.5 [5 0 -8] [6 0 -10]
+    set mcp.extmixer.position                   + extmix_margin_s@y
+
+    set row_h * scale mcp_list_row_h
+    set scrollbar_size                          scale==1  [2 5] scale==1.5  [3 7]  [4 10]
+    set line_spacing                            mcp_list_row_h>=34 0 1000
+
+    set mcp.fxlist.font                         [list_font row_h{0} 0 0 line_spacing{0} 0 scrollbar_size{0} scrollbar_size{1}] 
+    set mcp.sendlist.font                       [list_font row_h{0} 0 0 line_spacing{0} 0 scrollbar_size{0} scrollbar_size{1}]
+    set mcp.fxparm.font                         [list_font row_h{0} 0 0 line_spacing{0} 0 scrollbar_size{0} scrollbar_size{1}] 
+      
+	set mcp.fxlist.margin                	    + * scale   [2 0 2 0 0 14] 0.5@ls
+	set mcp.sendlist.margin              	      * scale + [3 0 0 0 0 14] ?stripMode 0@w 6@w 
+	set mcp.fxparm.margin                	      * scale   [0 0 2 0 0 14]
+
+    ; Fix MacOS retina scaling for slot text margins
+    set mcp.fxlist.margin                       ?is_macos scale>=1.5 + [. . .]
+    set mcp.sendlist.margin                     ?is_macos scale>=1.5 + [. . .]
+    set mcp.fxparm.margin                       ?is_macos scale>=1.5 + [. . .]
+		
+    set mcp.fx                               	+ + [fx_sec 0 nchan_offs_twothird{0}] * scale ?narrowMode [4 7 28 20] [7 7 43 20]
+	set mcp.fxbyp                            	+ + [mcp.fx mcp.fx nchan_offs_third{0}] [mcp.fx{w}] * scale ?narrowMode [0 0 19 20] [0 0 29 20]
+    set mcp.fx      + extmix_margin_s@y
+    set mcp.fxbyp   + extmix_margin_s@y
+
+	set mcp.pan   							 	?narrowMode \
+													+ [pan_sec pan_sec] 	width_visible{0}==2 	+ [0 0 nchan_offs{0}] * scale !panLabelsMode{0} [3 6 48 9] [3 15 48 9] \
+																								width_visible{0}!=0		+ [nchan_offs_third{0}] * scale !panLabelsMode{0} [28 4 20 20] [26 7 20 20] \
+																													+ [nchan_offs_half{0}] * scale !panLabelsMode{0} [18 4 20 20] [18 7 20 20] \
+													+ [pan_sec pan_sec] 	width_visible{0}==2 	+ [0 0 nchan_offs{0}] * scale !panLabelsMode{0} [7 6 73 9] [7 15 73 9] \
+																							width_visible{0}!=0		+ [nchan_offs_third{0}] * scale !panLabelsMode{0} [20 4 20 20] [20 7 20 20] \
+																							+ [nchan_offs_half{0}] * scale !panLabelsMode{0} [33 4 20 20] [33 7 20 20]
+        set mcp.pan.fadermode                  	gl_fader_swap
+	  set mcp.pan.color                      	gl_pan_color
+	  set mcp.pan.label                      	?narrowMode \
+													!panLabelsMode{0} [0] + [pan_sec mcp.pan] width_visible{0}!=0 width_visible{0}==2 + [nchan_offs_half{0}] * scale [11 -11 35 9] + [nchan_offs_half{0}] h<hide_input_s [0] * scale [17 25 35 10] + [nchan_offs_half{0}] * scale [10 25 35 10] \
+													!panLabelsMode{0} [0] + [pan_sec mcp.pan] width_visible{0}!=0 width_visible{0}==2 + [nchan_offs_half{0}] * scale [23 -11 40 9] + [nchan_offs_third{0}] * scale [8 25 35 10] + [nchan_offs_half{0}] * scale [26 25 35 10]
+	  set mcp.pan.label.color					mcp_text_color
+	  set mcp.pan.label.font					main_font
+	  set mcp.pan.label.margin               	+ + * scale [-8 -8 -8 -8] 0.5@ls main_font_voffs@y
+	set mcp.width  							 	?narrowMode \
+													+ [pan_sec pan_sec] 	width_visible{0}==2 	+ [0 0 nchan_offs{0}] * scale !panLabelsMode{0} [3 14 48 9] [3 23 48 9] \
+																								width_visible{0}!=0		+ [nchan_offs_third{0}] * scale !panLabelsMode{0} [7 20 20 20] h<hide_input_s [9 31 20 20] [9 46 20 20] [0] \
+													+ [pan_sec pan_sec] 	width_visible{0}==2 	+ [0 0 nchan_offs{0}] * scale !panLabelsMode{0} [7 14 73 9] [7 23 73 9] \
+																								width_visible{0}!=0		+ [nchan_offs_third{0}] * scale !panLabelsMode{0} [48 4 20 20] [48 7 20 20] [0]
+	  set mcp.width.fadermode                	gl_fader_swap
+	  set mcp.width.color                    	gl_width_color
+	  set mcp.width.label                    	?narrowMode \
+													!panLabelsMode{0} [0] + [0 mcp.width] width_visible{0}!=0 width_visible{0}==2 + [mcp.pan.label] * scale [0 11 35 9] h<hide_inputFX_s [0] * scale [3 25 35 9] [0] \
+													!panLabelsMode{0} [0] + [0 mcp.width] width_visible{0}!=0 width_visible{0}==2 + [mcp.pan.label] * scale [0 11 40 9] + * scale [-5 25 35 10] [mcp.width] [0]
+	  set mcp.width.label.color					mcp_text_color
+	  set mcp.width.label.font					main_font
+	  set mcp.width.label.margin             	mcp.pan.label.margin
+
+    set mcp.pan     mcp.pan{w}>0    !stripMode !trackpanmode==6 + * scale [-2 -2 4 4]
+    set mcp.width   mcp.width{w}>0  !stripMode !trackpanmode==6 + * scale [-2 -2 4 4]
+
+    set mcp.pan     trackpanmode==5 !stripMode + * scale ?narrowMode 1@x -1@x
+    set mcp.width   trackpanmode==5 !stripMode + * scale ?narrowMode -1@x 1@x
+
+    set mcp.pan     trackpanmode==6 + scale==1 [0 -4 0 2]   scale==1.5 [0 -5] [0 -8 0 2]
+    set mcp.width   trackpanmode==6 + scale==1 [0  -1 0 2]  scale==1.5 [0  0] [0  -1 0 2]
+
+    set mcp.pan                         + * scale !panLabelsMode 2@y 1@y
+    set mcp.width                       + * scale !panLabelsMode 2@y 1@y
+
+    set mcp.pan.label       + * scale                   trackpanmode==6  -2.6@y 2@y  
+    set mcp.width.label     + * scale ?stripMode 3@y    trackpanmode==6   1@y 2@y
+
+    set mcp.width       ?narrowMode trackpanmode==5 + * scale 2@y
+    set mcp.width.label ?narrowMode trackpanmode==5 + * scale 2@y 
+
+    set mcp.width.label trackpanmode==6 + * scale 2@y
+
+    set mcp.recinput                         	h<hide_input_s [0] + [in_sec in_sec nchan_offs{0}] * scale ?narrowMode width_visible{0}==1 [0] [6 0 43 16] [6 0 75 16]
+	  set mcp.recinput.color                 	?track_selected [225 225 225] [200 200 200]
+	  set mcp.recinput.font						main_font
+	  set mcp.recinput.margin                	+ * scale [4 0 15 0 0] scale>1 [0 0.5] [0]
+	  set mcp.recinput.margin             	    + main_font_voffs@y
+
+	set mcp.fxin                             	!wideMode [0] h<hide_inputFX_s [0] + [mcp.recinput mcp.recinput] + / [nchan_offs{0}] 2 *  scale [0 16 75 12]
+	set mcp.recmode                          	+ + [in_sec in_sec nchan_offs{0}] [0 mcp.fxin{3}] * scale + [6 4 42 16] mcp.recinput{3}>0 [0 16] [0 -4]
+    
+    set mcp.pan                                 h<hide_pan_s trackpanmode!=6 + [mcp.recmode mcp.recmode] * scale + [0 -2 20 20] ?narrowMode [-1] trackpanmode==5 [1] [7]
+    set mcp.width                               h<hide_pan_s trackpanmode!=6 ?narrowMode [0] trackpanmode==5 + [mcp.recmode mcp.recmode] * scale [25 -2 20 20]
+
+    set mcp.pan                                 h<hide_pan_s trackpanmode==6 + + [mcp.recmode mcp.recmode 0 .] nchan_offs@w * scale + [-2 -3 47] ?narrowMode [-2 0 -24] [0]
+    set mcp.width                               h<hide_pan_s trackpanmode==6 + + [mcp.recmode mcp.recmode 0 .] nchan_offs@w * scale + [-2 8 47] ?narrowMode [-2 0 -24] [0]
+
+    set mcp.recmode                             ?narrowMode [0] h<hide_pan_s [0]
+	
+    set mcp.meter                            	?narrowMode + * scale [4 4 20 -31] [stretch_sec stretch_sec nchan_offs{0} stretch_sec] \
+													 + [stretch_sec stretch_sec nchan_offs{0} stretch_sec] * scale ?hide_vol_label [4 4 22 -4] !labelsMode{0} [4 4 22 -4] [4 23 22 -24]
+	  set mcp.meter.vu.div                   	[1 1]
+	  set mcp.meter.readout.color               !labelsMode{0} [0] theme_version>1 [140 140 140 255 255 183 171 255] [100 100 100 255 255 183 171 255]
+      set mcp.meter.rmsreadout.color            mcp.meter.readout.color
+	  set mcp.meter.scale.color.lit.bottom      !labelsMode{0} [0] [0 0 0 170 0 0 0 0]
+	  set mcp.meter.scale.color.lit.top         !labelsMode{0} [0] [0 0 0 170 0 0 0 0]
+	  set mcp.meter.scale.color.unlit.bottom    !labelsMode{0} [0] ?recarm [255 64 0 255 0 0 0 0] theme_version>1 [255 255 255 70 0 0 0 0]  [255 255 255 60 0 0 0 0]
+	  set mcp.meter.scale.color.unlit.top       !labelsMode{0} [0] ?recarm [255 64 0 255 0 0 0 0] theme_version>1 [255 255 255 180 0 0 0 0] [255 255 255 60 0 0 0 0]
+    set mcp.meter ?wideMode + * scale 2@w
+    set mcp.volume.label                     	?narrowMode [0] \
+													+ [stretch_sec stretch_sec mcp.meter{2}] * scale ?hide_vol_label [1 0 26 4] !labelsMode{0} [1 0 26 4] [1 0 26 23]
+      set mcp.volume                         	?narrowMode + - + [stretch_sec stretch_sec] [nchan_offs_half stretch_sec{3}] * scale [-4 21] * scale [0 0 21 21] \
+													- + * [1 1 scale 1] [mcp.meter stretch_sec 21 stretch_sec] [mcp.meter{2} mcp.volume.label{3}] [-2 0 0 mcp.volume.label{3}]
+	  set mcp.volume.fadermode 					!narrowMode -1 .
+	  set mcp.volume.label.color                mcp.volume.label{h}>2 theme_version>1 [200 200 200] [100 100 100] theme_version>1 [100 100 100] [meter_bg_color{4} meter_bg_color{5} meter_bg_color{6}]
+	  set mcp.volume.label.font					main_font
+	  set mcp.volume.label.margin            	* [scale scale scale scale 1] ?narrowMode [0 80 0 0 0.5] [0 4 0 0 0.5]
+	  set mcp.volume.label.margin          	    + main_font_voffs@y
+      set mcp.volume.label.margin               ?hide_vol_label + * scale [0 4] ; FTC Mod fix glitch on Windows (label remains partly visible when it should be hidden)
+
+    ; Show fader in narrowMode
+    set narrow_fader_swap_h * scale 280
+    set mcp.volume ?narrowMode h>=narrow_fader_swap_h  + * / mcp.meter{h} 1.8 [0 -1 0 1]
+    set mcp.meter  ?narrowMode h>=narrow_fader_swap_h  + + * / mcp.meter{h} 1.8 [0 0 0 -1] * scale 4@h
+      
+	set mcp.recarm                           	+ * scale [0 0 36 24] ?narrowMode - + [mcp.meter{2}] [stretch_sec stretch_sec] * scale [-2 17] \
+														+ - [stretch_sec stretch_sec] * scale [-27 17] [mcp.meter{2}]
+    set mcp.recmon                           	+ + [0 padding] [mcp.recarm mcp.recarm] * scale [7 20 21 20]
+    set mcp.recarm scale==1.5 + 1@y
+    set mcp.mute                             	+ + [0 padding] [mcp.recmon mcp.recmon] * scale [0 19 21 20]
+	set mcp.solo                             	+ + [0 padding] [mcp.mute mcp.mute] * scale [0 21 21 20]
+	set mcp_io_hide_h							* scale 106
+	set mcp.io                               	stretch_sec_h<mcp_io_hide_h{0} [0] + + [0 padding] [mcp.solo mcp.solo] * scale !labelsMode{0} [-1 23 23 30] [-1 23 23 30]
+	set mcp_env_hide_h							* scale [125 141]
+	set mcpHideEnv								!labelsMode{0} stretch_sec_h<mcp_env_hide_h{0} 1 0 stretch_sec_h<mcp_env_hide_h{1} 1 0
+	set mcp.env                              	?mcpHideEnv{0} [0 0 0 0] + [0 stretch_sec{3}] + [mcp.io stretch_sec] * scale !labelsMode{0} [1 -22 21 22] [1 -30 21 30]
+	set mcp_phase_hide_h						* scale [144 162]
+	set mcpHidePhase							!labelsMode{0} stretch_sec_h<mcp_phase_hide_h{0} 1 0 stretch_sec_h<mcp_phase_hide_h{1} 1 0
+	set mcp.phase                            	?mcpHidePhase{0} [0] + [mcp.env mcp.env] - * scale [3 -18 16 18] padding
+	set mcp.label 							 	+ label_sec * lscale [1 0 -1]
+	set mcp.label 							 	!gapmode==1 + [-1 0 1]
+	set mcp.label 							 	!gapmode==2 + [0 0 1]
+	    set mcp.label.font						header_font
+	    set mcp.label.margin                   	* [scale scale scale scale 1] [4 0 4 0 0.5]
+	    set mcp.label.margin					+ 1.5@y ; FTC MOD
+        set mcp.label.margin 		            ?mcp_control_align + mcp_indent_offs_s@y
+	    set mcp.label.color                     label_text_color
+
+	set mcp.trackidx                         	idx_sec
+	  set mcp.trackidx.margin 				    + [0 0 0 0 0.5] folderstate==1 * scale ?narrowMode [4] [8] 0
+	  set mcp.trackidx.color					?track_selected [24 24 24] .
+	  set mcp.trackidx.font                  	main_font
+
+    ; v7 adjustable track idx background color
+    set trackidx_tint_strength !trackcolor_valid 0 / mcp_idx_tint_strength 100
+    set trackidx_sel_strength !track_selected 0 / mcp_idx_sel_strength 100
+
+    custom mcp.custom.trackidx_bg_hl_t
+    custom mcp.custom.trackidx_bg_hl_r
+    custom mcp.custom.trackidx_bg
+
+    set mcp.custom.trackidx_bg + idx_sec * lscale [1 0 -1 0]
+    set mcp.custom.trackidx_bg.color + * track_default_bg_color - 1 trackidx_tint_strength * track_bg_color trackidx_tint_strength
+    set mcp.custom.trackidx_bg.color * . - 1 / mcp_idx_dim_strength 100
+    set mcp.custom.trackidx_bg.color + * . - 1 trackidx_sel_strength  * [0 0 0 0 255 255 255] trackidx_sel_strength
+
+    set mcp.custom.trackidx_bg_hl_t + * [1 1 1 0] mcp.custom.trackidx_bg * lscale [0 0 0 1]
+    set mcp.custom.trackidx_bg_hl_t gapmode==1 folderstate<1 + + * [1 0 -1] gap_size_s * lscale [-1 0 1]
+    set mcp.custom.trackidx_bg_hl_t gapmode==2 + * [0 0 -1] gap_size_s
+    set mcp.custom.trackidx_bg_hl_t.color hl_color
+
+    set mcp.custom.trackidx_bg_hl_r + + * [1 1 0 1] mcp.custom.trackidx_bg * lscale [-1 1 1 -1] mcp.custom.trackidx_bg{w}@x
+    set mcp.custom.trackidx_bg_hl_r gapmode==2 + * [0 -1 0 1] lscale
+    set mcp.custom.trackidx_bg_hl_r.color hl_color
+
+    set trackidx_bg_color [mcp.custom.trackidx_bg.color{4} mcp.custom.trackidx_bg.color{5} mcp.custom.trackidx_bg.color{6}]
+    get_luma trackidx_bg_luma trackidx_bg_color
+    set mcp.trackidx.color trackidx_bg_luma<=text_luma_thres bright_text_color dark_text_color 
+
+    ; V7 adjustable handle
+    custom mcp.custom.handle_hl_t
+    custom mcp.custom.handle_hl_b
+    custom mcp.custom.handle
+
+    set show_handle !mcp_show_sel_handle 0 ?track_selected 1 0
+    set handle + + [fx_sec fx_sec fx_sec] * [1 0 -1] lscale extmix_margin_s@y
+    set handle gapmode==1 + * [-1 0 1] gap_size_s
+    set handle gapmode==2 !sidebarMode + * [0 0 1] gap_size_s
+
+    set mcp.custom.handle !show_handle [0] + handle * uscale 4@h
+    set mcp.custom.handle.color  ?trackcolor_valid * track_bg_color 0.7 * track_default_bg_color 0.75
+
+    set mcp.custom.handle_hl_t !show_handle [0] + handle * uscale 1@h
+    set mcp.custom.handle_hl_t.color [0 0 0 0 255 255 255 75]
+
+    set mcp.custom.handle_hl_b !show_handle [0] + mcp.custom.handle_hl_t * uscale 3@y
+    set mcp.custom.handle_hl_b.color [0 0 0 0 0 0 0 110]
+
+    custom mcp.custom.fx_bg
+    set mcp.custom.fx_bg !show_handle [0] + [handle fx_sec handle fx_sec] * [-1 2 1 -3] uscale !sidebarMode 0
+
+    set fx_bg_tint_strength ?show_handle 0 !track_selected 0 0.122
+    set mcp.custom.fx_bg.color + * mcp_bg_color - 1 fx_bg_tint_strength * ?trackcolor_valid track_bg_color track_default_bg_color fx_bg_tint_strength
+    
+    ; ------------------
+
+    set mcp.meter   ?wideMode + * scale 1@w
+    set mcp.volume  ?wideMode + * scale 1@x
+
+    set mcp.folder + [idx_sec idx_sec idx_sec] * scale [0 -2 0 22]
+
+    set mcp.folder folderstate<0  + + [idx_sec idx_sec] idx_sec{w}@x * scale [-21 -2 21 22]
+    ; FTC Hide folder dot image when indent > 0 (by increasing size and moving it out of view)
+    set mcp.folder folderstate==1 param1{0}>1 + * scale 30@w
+
+    ;*** FTC MOD add custom folder indent images for MCP    
+    custom mcp.custom.folder_1-1 '' 0 '' 'custom_mcp_folder_1-1'
+    custom mcp.custom.folder_1-2 '' 0 '' 'custom_mcp_folder_1-2'
+    custom mcp.custom.folder_1-4 '' 0 '' 'custom_mcp_folder_1-4'
+    custom mcp.custom.folder_1-8 '' 0 '' 'custom_mcp_folder_1-8'
+    custom mcp.custom.folder_start '' 0 '' 'custom_mcp_folder_start'
+
+	set custom_folder scale==1.0 - + [w mcp.folder{y}] [0 0 16 21] [16 -1]
+	set custom_folder scale==1.5 - + [w mcp.folder{y}] [0 0 25 33] [25 0]
+	set custom_folder scale==2.0 - + [w mcp.folder{y}] [0 0 32 42] [32 -2]
+	
+	set mcp.custom.folder_1-1 			folderstate==1 param1{0}>=5 custom_folder [0]
+	set mcp.custom.folder_1-2 			folderstate==1 param1{0}==4 custom_folder [0]
+	set mcp.custom.folder_1-4 			folderstate==1 param1{0}==3 custom_folder [0]
+	set mcp.custom.folder_1-8 			folderstate==1 param1{0}==2 custom_folder [0]
+
+	set custom_folder_start  - [mcp.folder custom_folder custom_folder custom_folder] uscale@x
+	set mcp.custom.folder_start			!folderstate==1 [0] !folderdepth==0 param1{0}==1 custom_folder_start [0] custom_folder_start
+    ;*************
+
+    ; Make only folder arrow clickable
+    custom mcp.custom.folder_overlay "" 2000
+    set mcp.custom.folder_overlay folderstate==1 + mcp.folder * scale 16@x [0]
+
+    front mcp.custom.label_bg mcp.custom.div mcp.custom.sel_bar mcp.custom.sel_bar_inner
+    front mcp.custom.trackidx_bg mcp.custom.trackidx_bg_hl_t mcp.custom.trackidx_bg_hl_r
+	front mcp.label mcp.volume.label mcp.recarm mcp.recmon mcp.mute mcp.solo mcp.env mcp.io mcp.phase mcp.width mcp.trackidx mcp.folder mcp.volume
+	front mcp.custom.folder_1-1 mcp.custom.folder_1-2 mcp.custom.folder_1-4 mcp.custom.folder_1-8 mcp.folder mcp.custom.folder_start  
+    front mcp.custom.folder_overlay
+endMacro
+
+macro drawMcpStrip scale
+    set mcp.recinput	[0]
+    set mcp.recmode		[0]
+    set mcp.fxin		[0]
+
+    set size_diff  * scale -52
+    set mcp.size   + size_diff@0
+
+    ; Reposition elements
+    set size_diff_w size_diff@w
+    set mcp.label                   + size_diff@w
+    set mcp.custom.sel_gradient     + size_diff_w
+    set mcp.custom.handle_hl_t      + size_diff_w
+    set mcp.custom.handle_hl_b      + size_diff_w
+    set mcp.custom.handle           + size_diff_w
+    set mcp.custom.fx_bg            + size_diff_w
+    set mcp.custom.bg_hl_t          + size_diff_w
+    set mcp.custom.bg               + size_diff_w
+    set mcp.custom.stretch_bg       + size_diff_w
+    set mcp.custom.label_bg         + size_diff_w
+    set mcp.custom.bg_hl_r          + size_diff@x
+
+    set mcp.extmixer.position ?sidebarMode + size_diff@x
+    set mcp.trackidx.margin folderstate==1 + * scale [7]
+
+    set mcp.folder folderstate==1 + * scale 30@w 
+
+	set mcp.custom.folder_1-1 [0]
+	set mcp.custom.folder_1-2 [0]
+	set mcp.custom.folder_1-4 [0]
+	set mcp.custom.folder_1-8 [0]
+
+    set mcp.fx		    + * scale [-6 0 -22]
+    set mcp.fxbyp		+ * scale [-28 0 -17]
+
+    set elem_diff * scale -46@x
+    set mcp.mute		+ elem_diff
+    set mcp.solo		+ elem_diff
+    set mcp.io		    + elem_diff
+    set mcp.phase		+ elem_diff
+    set mcp.env		    + elem_diff
+
+    set mcp.meter		    + * scale [-2 -1 -15.5 1.5]
+    set mcp.volume.label	+ * scale [0 0 -15 1]
+    
+    set mcp.volume.label.margin	+ * scale 3@y 0.5@ls
+    set mcp.volume.label.margin	!labelsMode{0} * scale [300]	
+
+    set mcp.recarm		+ * scale [-49]
+    set mcp.recmon		+ * scale [-49 -43]
+
+    set mcp.pan		    + * scale h<hide_pan_s [-6] [-26]
+    set mcp.pan.label	+ * scale [-26]
+
+    set mcp.width		+ * scale [0 1]
+    set mcp.width.label	+ * scale [-26 1]
+
+    set mcp.pan         trackpanmode==5 + * scale h<hide_pan_s [6] [13]
+    set mcp.pan.label	trackpanmode==5 + * scale [18]
+    set mcp.width	    trackpanmode==5 + * scale [-41 39] 
+    set mcp.width.label	trackpanmode==5 + * scale [-17 38]
+    set mcp.recmon	    trackpanmode==5 !recarm [0]
+    set mcp.width	    trackpanmode==5 ?recarm [0]
+    set mcp.width.label	trackpanmode==5 ?recarm [0]
+
+    set mcp.pan		    trackpanmode==6 + * scale h<hide_pan_s [4 0 -17] [21 0 -43]
+    set mcp.width       trackpanmode==6 + * scale h<hide_pan_s [-2 0 -17] [-5 0 -43]
+    set mcp.pan.label	trackpanmode==6 + * scale h<hide_pan_s [0] [4 0 -8]
+
+    set mcp.width       h<hide_pan_s !trackpanmode==6 [0]
+    set mcp.recarm      h<hide_pan_s [0]
+
+    ; Get height of area between rec button and FX button
+    set pan_area - mcp.recarm{y} + mcp.fx{y} mcp.fx{h}
+    set pan_h0  * scale 20
+    set pan_h1  * scale 45
+    set pan_h2  * scale 75
+    set pan_h3  * scale 90
+
+    ; Move elements based on height
+    set mcp.width	trackpanmode==5 pan_area<pan_h3 + * scale -10@y
+    set mcp.width	trackpanmode==5 pan_area<pan_h2 + * scale -6@y
+    set mcp.pan 	trackpanmode==6 pan_area<pan_h2 + * scale -8@y
+    set mcp.width	trackpanmode==6 pan_area<pan_h2 + * scale -8@y
+    set mcp.pan 	trackpanmode==6 pan_area<pan_h1 + * scale 8@y
+    set mcp.width	trackpanmode==6 pan_area<pan_h1 + * scale 7@y
+    set mcp.pan 	trackpanmode==6 pan_area>pan_h1 !labelsMode{0} + * scale 8@y
+    set mcp.width	trackpanmode==6 pan_area>pan_h1 !labelsMode{0} + * scale 8@y
+
+    ; Hide elements based on height
+    set mcp.recmon	pan_area<pan_h0 [0]
+    set mcp.recmon  pan_area<pan_h1 !recarm [0]
+    set mcp.recmon  trackpanmode==5 pan_area<pan_h2 !recarm [0]
+
+    set mcp.pan         ?recarm pan_area<pan_h1 pan_area>=pan_h0 [0]
+
+    set mcp.pan.label   pan_area<pan_h2 [0]
+    set mcp.pan.label	trackpanmode==5 pan_area<pan_h3 [0]
+
+    set mcp.width	trackpanmode<=5 pan_area<pan_h1 [0]
+    set mcp.width   trackpanmode<=5 pan_area<pan_h2 ?recarm [0]
+    set mcp.width	trackpanmode==6 pan_area<pan_h1 pan_area>=pan_h0 ?recarm [0]
+
+    set mcp.width.label pan_area<pan_h2 [0]
+    set mcp.width.label trackpanmode<6 pan_area<pan_h3 [0]
+
+    ; Get height of area between label and route button
+    set io_b + mcp.io{y} mcp.io{h}
+    set fader_area  - mcp.label{y} io_b
+
+    set vol_knob_size * scale 20
+    set min_vol_knob_h + vol_knob_size * scale 5
+
+    set fader_env_h   * scale 125
+    set fader_phase_h * scale 180
+
+    set mcp.env fader_area<fader_env_h [0]
+    set mcp.phase fader_area<fader_phase_h [0]
+
+    ; Give fader the remaining height
+    set vol_margin_t    * scale 3
+    set vol_margin_b    * scale mcp.phase{w}>0 3 1
+    set small_fader_h   * scale 62
+    set vol_margin_t fader_area<small_fader_h + * scale 2
+    set vol_margin_b fader_area<small_fader_h + * scale 1
+    set vol_t + + mcp.io{y} mcp.io{h} vol_margin_t
+    set vol_b - mcp.phase{h}>0 mcp.phase{y} mcp.env{h}>0 mcp.env{y} mcp.label{y} vol_margin_b
+    set vol_h - vol_b vol_t
+   
+    set mcp.volume [mcp.io{x} vol_t{0} mcp.io{w} vol_h{0}]
+    
+    set min_vol_h * scale 45
+    set min_vol_x + mcp.io{x} * [scale] [2]
+    set min_vol_margin_b mcp.env{w}>0 3 0
+    set min_vol_y - - vol_b vol_knob_size * scale min_vol_margin_b
+    
+    set mcp.volume.fadermode vol_h<min_vol_h [1] [0]
+    set mcp.volume vol_h<min_vol_h [min_vol_x{0} min_vol_y{0} vol_knob_size{0} vol_knob_size{0}]
+
+    set mcp.io vol_h<min_vol_knob_h mcp.env{w}==0 [0]
+endMacro
+
+macro loadMcpParams_A
+    paramPair mcp_indent 			1 0 5 10 15 20 25 30
+    paramPair mcp_control_align 	78 0 1
+
+	doModeLogic sidebarMode 	25
+    doModeLogic narrowMode 		26
+    doModeLogic meterExpMode 	27
+    doModeLogic labelsMode 		28
+    paramPair mcp_meterExp 		29 0 2 4 8
+    paramPair mcp_border 		30 0 1 2 3 4
+endmacro
+
+macro loadMcpParams_B
+    paramPair mcp_indent 			1 0 5 10 15 20 25 30
+    paramPair mcp_control_align 	78 0 1
+
+	doModeLogic sidebarMode 	48
+	doModeLogic narrowMode 		49
+	doModeLogic meterExpMode 	50
+	doModeLogic labelsMode 		51
+	paramPair mcp_meterExp 		52 0 2 4 8
+	paramPair mcp_border 		53 0 1 2 3 4
+endmacro
+
+macro loadMcpParams_C
+    paramPair mcp_indent 			1 0 5 10 15 20 25 30
+    paramPair mcp_control_align 	78 0 1
+
+	doModeLogic sidebarMode 	71
+	doModeLogic narrowMode 		72
+	doModeLogic meterExpMode 	73
+	doModeLogic labelsMode 		74
+	paramPair mcp_meterExp 		75 0 2 4 8
+	paramPair mcp_border 		76 0 1 2 3 4
+endmacro
+
+Layout ""
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_A
+
+    set scale 1
+    set stripMode 0
+    calcFontSizes scale
+    drawMcp scale
+EndLayout
+
+Layout "A"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_A
+
+    set scale 1
+    set stripMode 0
+    calcFontSizes scale
+    drawMcp scale
+
+	Layout "A_Fader_Red" "red"
+		set mcp.label .
+	EndLayout
+		
+	Layout "A_Fader_Orange" "orange"
+		set mcp.label .
+	EndLayout
+		
+	Layout "A_Fader_Yellow" "yellow"
+		set mcp.label .
+	EndLayout
+		
+	Layout "A_Fader_Green" "green"
+		set mcp.label .
+	EndLayout
+
+	Layout "A_Fader_Teal" "teal"
+		set mcp.label .
+	EndLayout
+		
+	Layout "A_Fader_Blue" "blue"
+        set mcp.label .
+    EndLayout
+		
+	Layout "A_Fader_Purple" "purple"
+		set mcp.label .
+	EndLayout
+		
+	Layout "A_Fader_Pink" "pink"
+		set mcp.label .
+	EndLayout
+
+	Layout "A_Fader_White" "white"
+		set mcp.label .
+	EndLayout
+EndLayout
+
+Layout "150%_A" "150"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_A
+
+    set scale 1.5
+    set stripMode 0
+    calcFontSizes scale
+    drawMcp scale
+
+    Layout "150%_A_Fader_Red" "150/red"
+        set mcp.label .
+    EndLayout
+    
+    Layout "150%_A_Fader_Orange" "150/orange"
+        set mcp.label .
+    EndLayout
+    
+    Layout "150%_A_Fader_Yellow" "150/yellow"
+        set mcp.label .
+    EndLayout
+    
+    Layout "150%_A_Fader_Green" "150/green"
+        set mcp.label .
+    EndLayout
+    
+    Layout "150%_A_Fader_Teal" "150/teal"
+        set mcp.label .
+    EndLayout
+    
+    Layout "150%_A_Fader_Blue" "150/blue"
+        set mcp.label .
+    EndLayout
+    
+    Layout "150%_A_Fader_Purple" "150/purple"
+        set mcp.label .
+    EndLayout
+    
+    Layout "150%_A_Fader_Pink" "150/pink"
+        set mcp.label .
+    EndLayout
+
+    Layout "150%_A_Fader_White" "150/white"
+        set mcp.label .
+    EndLayout
+EndLayout
+
+Layout "200%_A" "200"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_A
+    
+    set scale 2
+    set stripMode 0
+    calcFontSizes scale
+    drawMcp scale
+
+    Layout "200%_A_Fader_Red" "200/red"
+        set mcp.label .
+    EndLayout
+    
+    Layout "200%_A_Fader_Orange" "200/orange"
+        set mcp.label .
+    EndLayout
+    
+    Layout "200%_A_Fader_Yellow" "200/yellow"
+        set mcp.label .
+    EndLayout
+    
+    Layout "200%_A_Fader_Green" "200/green"
+        set mcp.label .
+    EndLayout
+    
+    Layout "200%_A_Fader_Teal" "200/teal"
+        set mcp.label .
+    EndLayout
+    
+    Layout "200%_A_Fader_Blue" "200/blue"
+        set mcp.label .
+    EndLayout
+    
+    Layout "200%_A_Fader_Purple" "200/purple"
+        set mcp.label .
+    EndLayout
+    
+    Layout "200%_A_Fader_Pink" "200/pink"
+        set mcp.label .
+    EndLayout
+
+    Layout "200%_A_Fader_White" "200/white"
+        set mcp.label .
+    EndLayout
+EndLayout
+
+Layout "A_Strip" "strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_A
+
+    set scale 1
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout
+
+Layout "150%_A_Strip" "150/strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_A
+
+    set scale 1.5
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout   
+
+Layout "200%_A_Strip" "200/strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_A
+
+    set scale 2
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout
+
+Layout "B"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_B
+    
+    set scale 1
+    set stripMode 0
+    calcFontSizes scale
+	drawMcp scale
+EndLayout
+
+Layout "150%_B" "150"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_B
+
+    set scale 1.5
+    set stripMode 0
+    calcFontSizes scale
+    drawMcp scale
+EndLayout
+
+Layout "200%_B" "200"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_B
+
+    set scale 2
+    set stripMode 0
+    calcFontSizes scale
+    drawMcp scale
+EndLayout
+
+Layout "B_Strip" "strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_B
+
+    set scale 1
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout
+    
+Layout "150%_B_Strip" "150/strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_B
+    
+    set scale 1.5
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout
+
+Layout "200%_B_Strip" "200/strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_B
+    
+    set scale 2
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout
+
+Layout "C"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_C
+    
+    set scale 1
+    set stripMode 0
+    calcFontSizes scale
+	drawMcp scale
+EndLayout
+
+Layout "150%_C" "150"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_C
+
+    set scale 1.5
+    set stripMode 0
+    calcFontSizes scale
+    drawMcp scale
+EndLayout
+
+Layout "200%_C" "200"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_C
+    
+    set scale 2
+    set stripMode 0
+    calcFontSizes scale
+    drawMcp scale
+EndLayout
+
+Layout "C_Strip" "strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_C
+    
+    set scale 1
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout
+    
+Layout "150%_C_Strip" "150/strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_C
+    
+    set scale 1.5
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout    
+
+Layout "200%_C_Strip" "200/strip"
+    clear mcp.*
+    initTrackGlobals
+    loadMcpParams_C
+    
+    set scale 2
+    set stripMode 1
+    calcFontSizes scale
+    drawMcp scale
+    drawMcpStrip scale
+EndLayout
+
+; ====== Start OF MCP SEPARATOR LAYOUTS ====== : (thank you LCS!)
+
+macro drawMcpSeparator scale
+    set mcp.size	            + [0 h] * scale [mcp_separator_w]
+    set mcp.label               [0 0 w h]
+    set mcp.label.font          header_font
+    set mcp.label.margin        + * scale [4 6 4 6] [0 0 0 0 0.5]
+    set mcp.label.color         ?track_selected [225 225 225] [190 190 190]
+    set mcp.label.color         ?trackcolor_valid [trackcolor_r trackcolor_g trackcolor_b] 
+    set mcp.extmixer.mode       [1]
+    set mcp.extmixer.position   [0]
+endMacro
+
+Layout "Separator" "separator"
+    clear mcp.*
+    set scale 1
+    calcFontSizes scale
+    drawMcpSeparator scale
+EndLayout
+
+Layout "150%_Separator" "separator"
+    clear mcp.*
+    set scale 1.5
+    calcFontSizes scale
+    drawMcpSeparator scale
+EndLayout
+
+Layout "200%_Separator" "separator"
+    clear mcp.*
+    set scale 2
+    calcFontSizes scale
+    drawMcpSeparator scale
+EndLayout
+
+;== END OF SEPARATORS
+
+#<
+#>--------------------------------- MASTER MIXER --------------------------------------
+
+macro drawMasterMcp scale
+	front                							master.mcp.menubutton master.mcp.io master.mcp.env master.mcp.mute master.mcp.solo
+	set master.mcp.size         					* scale [125 370]
+    set master.mcp.size                             ?sidebarMode + * scale  + [mcp_sidebar_w] 1@x
+	set hide_pan_sm 								* scale hide_pan
+	set hide_pan_labels_sm							* scale hide_pan_labels
+	set fx_sec								 		+ [0 0 master.mcp.size{0}] * scale [0 0 0 27]
+	set pan_sec 						     		+ [0 fx_sec{3} master.mcp.size{0}] * scale h<hide_pan_labels_sm{0} h<hide_pan_sm{0} [0 0 0 6] [0 0 0 33] [0 0 0 50]
+	set bot_sec								 		+ [0 h master.mcp.size{0}] * scale [0 -23 0 23]
+	set stretch_sec_start					 		+ fx_sec{3} pan_sec{3}
+	set stretch_sec_height					 		- - - h fx_sec{3} pan_sec{3} bot_sec{3}
+	set stretch_sec 						 		[0 stretch_sec_start{0} master.mcp.size{0} stretch_sec_height{0}]
+	set padding_reduction_h							* scale [350 250]
+	set padding 							 		* scale stretch_sec_height{0}<padding_reduction_h{0} stretch_sec_height{0}<padding_reduction_h{1} [0 2] [0 3] [0 4]
+	set master.mcp.fx                               * scale [7 7 82 20]
+	set master.mcp.fxbyp                            * scale [89 7 29 20]
+	set master.mcp.pan   							+ [0 pan_sec] * scale h<hide_pan_sm{0} [0]  	width_visible{0}==2 	h<hide_pan_labels_sm{0} [7 5 67 9] [7 15 67 9] \
+																								width_visible{0}!=0		h<hide_pan_labels_sm{0} [20 4 20 20] [20 7 20 20] \
+																													h<hide_pan_labels_sm{0} [31 4 20 20] [31 7 20 20]      
+      set master.mcp.pan.fadermode              	gl_fader_swap
+	  set master.mcp.pan.color                  	gl_pan_color
+	  set master.mcp.pan.label                  	h<hide_pan_labels_sm{x} [0] + [0 master.mcp.pan] * scale width_visible{0}!=0 width_visible{0}==2 [24 -11 35 9] [7 25 35 10] [24 25 35 10]
+	  set master.mcp.pan.label.color				theme_version>1 [220 220 220] [140 140 140]
+	  set master.mcp.pan.label.font					main_font
+	  set master.mcp.pan.label.margin           	+ + * scale [-8 -8 -8 -8] 0.5@ls main_font_voffs@y
+	set master.mcp.width  							+ [0 pan_sec] * scale h<hide_pan_sm{0} [0]  	width_visible{0}==2 	h<hide_pan_labels_sm{0} [7 13 67 9] [7 23 67 9] \
+																								width_visible{0}!=0		h<hide_pan_labels_sm{0} [48 4 20 20] [48 7 20 20] [0]
+	  set master.mcp.width.fadermode            	gl_fader_swap
+	  set master.mcp.width.color                	gl_width_color
+	  set master.mcp.width.label                	h<hide_pan_labels_sm{x} [0] + [0 master.mcp.width] * scale width_visible{0}!=0 width_visible{0}==2 [24 11 35 9] [42 25 35 10] [0]
+	  set master.mcp.width.label.color				[140 140 140]
+	  set master.mcp.width.label.font				main_font
+	  set master.mcp.width.label.margin         	master.mcp.pan.label.margin
+
+    set master.mcp.pan      master.mcp.pan{w}>0     !trackpanmode==6 + * scale [-2 -1 4 4]
+    set master.mcp.width    master.mcp.width{w}>0   !trackpanmode==6 + * scale [-2 -1 4 4]
+
+    set master.mcp.pan     trackpanmode==5 + * scale -1@x
+    set master.mcp.width   trackpanmode==5 + * scale 1@x
+
+    set master.mcp.pan     trackpanmode==6 + * scale [0 -3 0 2]
+    set master.mcp.width   trackpanmode==6 + * scale [0  0 0 2]
+
+    set master.mcp.pan     trackpanmode==6 + + . * scale 2@y scale==1 [0 0 0 0] scale==1.5 [0 -1 0 -2] [0 -2 0 -2]
+    set master.mcp.width   trackpanmode==6 + + . * scale 2@y scale==1 [0 0 0 0] scale==1.5 [0  1 0 -2] [0  0 0 -2]
+
+    set master.mcp.pan.label       +  * scale trackpanmode==6 0@y 2@y 
+    set master.mcp.width.label     +  * scale trackpanmode==6 4@y 2@y
+
+	set master.mcp.mono                             + [0 pan_sec] * scale h<hide_pan_labels_sm{0} h<hide_pan_sm{0} [0] [93 4 25 22] [93 8 25 33]
+	set master.mcp.volume.label                     + [0 stretch_sec] * scale [0 0 91 23]
+	  set master.mcp.volume                         - + + * scale [69 0 21] [0 stretch_sec 0 stretch_sec] [0 master.mcp.volume.label{3}] [0 0 0 master.mcp.volume.label{3}]
+	  set master.mcp.volume.label.color             master.mcp.volume.label{h}>2 theme_version>1 accent_color [100 100 100] [meter_bg_color{4} meter_bg_color{5} meter_bg_color{6}]
+	  set master.mcp.volume.label.font				main_font
+	  set master.mcp.volume.label.margin            + [0 0 0 0 0.5] * scale [0 4]
+	  set master.mcp.volume.label.margin           	+ main_font_voffs@y
+    set master.mcp.volume.label + scale==1 -1@w scale==1.5 2@w scale==2 2@w
+    
+    set master.mcp.meter                            + [0 master.mcp.volume 0 master.mcp.volume] * scale [4 0 59 -6]
+	  set master.mcp.meter.vu.div                   [1]
+	  set master.mcp.meter.vu.rmsdiv                [2]
+	  set master.mcp.meter.readout.color            theme_version>1 [180 180 180 255 255 183 171 255] [255 255 255 200 0 0 0 0]
+	  set master.mcp.meter.rmsreadout.color         master.mcp.meter.readout.color
+	  set master.mcp.meter.scale.color.lit.bottom   theme_version>1 [0 0 0 170 0 0 0 0] [0 0 0 200 0 0 0 0]
+	  set master.mcp.meter.scale.color.lit.top      theme_version>1 [0 0 0 170 0 0 0 0] [0 0 0 200 0 0 0 0]
+	  set master.mcp.meter.scale.color.unlit.bottom theme_version>1 [255 255 255 140 0 0 0 0] [255 255 255 120 0 0 0 0]
+	  set master.mcp.meter.scale.color.unlit.top    theme_version>1 [255 255 255 180 0 0 0 0] [255 255 255 120 0 0 0 0]
+    set master.mcp.label                            bot_sec
+	  set master.mcp.label.color                    [184 184 184]
+	  set master.mcp.label.font						header_font
+	  set master.mcp.label.margin                   + * scale [20 0] [0 0 0 0 0.5]
+	  set master.mcp.label.margin					+ 0.5@y ; FTC MOD
+	set master.mcp.mute                             + [0 stretch_sec] * scale [95 6 21 20]
+	set master.mcp.solo                             + + [0 padding] [master.mcp.mute master.mcp.mute] * scale [0 21 21 20]
+	set master_mcp_env_hide_h						* scale 141
+	set master.mcp.env                              stretch_sec_height{0}<master_mcp_env_hide_h{0} [0] + + [0 stretch_sec] [0 stretch_sec{3}] * scale [95 -37 21 30]
+	set master_mcp_io_hide_h						* scale 106
+	set master.mcp.io                               stretch_sec_height{0}<master_mcp_io_hide_h{0} [0] + + [0 padding] [master.mcp.solo master.mcp.solo] * scale [-1 23 23 30]
+	set master.mcp.menubutton                       + * scale [0 2 20 20] [bot_sec bot_sec]
+
+    front master.mcp.label master.mcp.menubutton
+
+    ; FTC MOD Hide master track icon
+    set lscale scale==2 2 1
+    set icon_size                                   mcp_iconsize
+    set icon_size                                   ?is_macos scale>1 * 2 mcp_iconsize  ; Fix retina scaling on MacOS
+    set master.mcp.extmixer.mode                    ?sidebarMode [1] [-1]
+    set master.mcp.extmixer.position                !master_mcp_hide_icon [0] ?sidebarMode icon_size@h  + * -1 icon_size@y lscale@y
+    set master.mcp.margin                           !master_mcp_hide_icon [0] + * icon_size>mcp_iconsize [0 -1 0 -1] [0 -1] icon_size !sidebarMode lscale@y 0
+
+    set master.mcp.extmixer.position				!sidebarMode + scale==1 [3 0 -2] scale==1.5 [5 0 -4] [7 0 -4]
+    set master.mcp.extmixer.position                ?sidebarMode + + + + [w 0 0 h] - * scale -2@h bot_sec{h}@h * * scale mcp_sidebar_w [-1 0 1] scale==1 [4 0 -5] scale==1.5 [7 0 -10] scale==2 [8 0 -12]
+
+    custom master.mcp.custom.bg
+    set master.mcp.custom.bg                        + + fx_sec pan_sec{h}@h lscale@x
+    set master.mcp.custom.bg                        ?sidebarMode [. . . h]
+    set master.mcp.custom.bg.color                  + mcp_bg_color ?track_selected [0 0 0 0 13 13 13] [0]
+    ; *** end of mod ***    
+
+    ; FTC MOD extmixer offset
+    set extmix_margin_s    * scale 2
+    set master.mcp.fx      + extmix_margin_s@y
+    set master.mcp.fxbyp   + extmix_margin_s@y
+	set master.mcp.extmixer.position			+ + extmix_margin_s@y !sidebarMode * scale master_mcp_extmix_offs@h 0
+    ; *** end of mod ***
+
+    set dim_strength / ?track_selected mcp_dim_sel_strength mcp_dim_strength 100
+    set sel_strength !track_selected 0 / mcp_sel_strength 100
+
+    set row_h * scale mcp_list_row_h
+    set scrollbar_size                          scale==1  [2 5] scale==1.5  [3 7]  [4 10]
+    set line_spacing                            mcp_list_row_h>=34 0 1000 
+
+    set master.mcp.fxlist.font                         [list_font row_h{0} 0 0 line_spacing{0} 0 scrollbar_size{0} scrollbar_size{1}] 
+    set master.mcp.sendlist.font                       [list_font row_h{0} 0 0 line_spacing{0} 0 scrollbar_size{0} scrollbar_size{1}]
+    set master.mcp.fxparm.font                         [list_font row_h{0} 0 0 line_spacing{0} 0 scrollbar_size{0} scrollbar_size{1}] 
+      	
+	set master.mcp.fxlist.margin                	+ * scale [2 0 2 0 0 14] 0.5@ls
+	set master.mcp.sendlist.margin              	*   scale [3 0 6 0 0 14]
+	set master.mcp.fxparm.margin                	*   scale [0 0 2 0 0 14]
+
+    ; Fix MacOS retina scaling for slot text margins
+    set master.mcp.fxlist.margin                    ?is_macos scale>=1.5 + [. . .]
+    set master.mcp.sendlist.margin                  ?is_macos scale>=1.5 + [. . .]
+    set master.mcp.fxparm.margin                    ?is_macos scale>=1.5 + [. . .]
+endmacro
+
+Layout ""
+    clear master.mcp.*
+    initTrackGlobals
+
+    set scale 1
+    set sidebarMode 0
+    calcFontSizes scale
+    drawMasterMcp scale
+EndLayout
+
+Layout "A"
+    clear master.mcp.*
+    initTrackGlobals
+
+    set scale 1
+    set sidebarMode 0
+    calcFontSizes scale
+    drawMasterMcp scale
+EndLayout
+
+Layout "150%_A" "150"
+    clear master.mcp.*
+    initTrackGlobals
+
+    set scale 1.5
+    set sidebarMode 0
+    calcFontSizes scale
+    drawMasterMcp scale
+EndLayout
+
+Layout "200%_A" "200"
+    clear master.mcp.*
+    initTrackGlobals
+
+    set scale 2
+    set sidebarMode 0
+    calcFontSizes scale
+    drawMasterMcp scale
+EndLayout
+
+Layout "A_Sidebar"
+    clear master.mcp.*
+    initTrackGlobals
+
+    set scale 1
+    set sidebarMode 1
+    calcFontSizes scale
+    drawMasterMcp scale
+EndLayout
+
+Layout "150%_A_Sidebar" "150"
+    clear master.mcp.*
+    initTrackGlobals
+
+    set scale 1.5
+    set sidebarMode 1
+    calcFontSizes scale
+    drawMasterMcp scale
+EndLayout
+
+Layout "200%_A_Sidebar" "200"
+    clear master.mcp.*
+    initTrackGlobals
+
+    set scale 2
+    set sidebarMode 1
+    calcFontSizes scale
+    drawMasterMcp scale
+EndLayout
+
+#<
+#>---------------------------------- TRANSPORT ----------------------------------------
+
+;returns [padding x, padding y, width, height, width + padding x]
+macro size element   px  py  w  h
+  set size_##element * scale + [px py w h px] [0 0 0 0 w]
+endmacro
+
+macro drawTransport scale
+    set status_min	 			138		; the size below which status readout looks weird
+    set selection_min 			242		; the size below which selection readout looks weird
+    set text_color             	[194 198 206]	; the color of the text
+
+	set trans.size             	* scale [100 100]
+
+	; Set absolute sizes...
+	;     element   px  py  w   h
+	size  selection 0   8   300 22
+	size  rew       0   6   36  26
+	size  fwd       0   6   36  26
+	size  stop      0	6   36	26
+	size  play      0   6   36  26
+	size  pause     0   6   36	26
+	size  rec       0   6   36  26
+	size  repeat    0   7   32  24
+	size  status    0   7   338 24
+	size  automode  0   6   60  26
+	size  bpm_tap   0   7   33  24
+	size  bpm_edit  0   8   32  22
+	size  timesig   0   8   33  22
+    size  timebase  0   8   33  22
+
+    set div_w scale==2 2 1
+    set status_min_s                * scale status_min 
+    set selection_min_s             * scale selection_min
+    set trans_margin                * scale 4
+    set sec_margin                  * scale 6
+	set sec_proj_margin             * scale 12
+
+	set row_height      			* scale [36]
+	set row_height_x2            	* 2 row_height
+	set row_height_x3            	* 3 row_height
+	set row_height_x4            	* 4 row_height
+    set trans_height_offs           * scale - trans_height 36
+
+	paramPair trans_rateSize		77 60 90 104 118 132 146 160
+    set size_rate 					+ * scale [0 8 0 22] * scale [0 0 trans_rateSize{0} 0 trans_rateSize{0}] 
+
+	set show_rate 					?trans_flags&2 1 0
+    set show_timesig                ?trans_flags&4 1 0
+    set show_timebase               reaper_version>=746 1 0
+
+	set size_rate                	!show_rate [0]
+    set size_timebase               !show_timebase [0]
+	set size_timesig             	!trans_flags&4 [0]
+    set size_status                 + . * size_repeat{4} [0 0 1 0 1]
+    set size_status                 ?classicMode + * scale [0 -1 0 2]
+    set size_selection              !trans_centered - . * scale [0 0 16 0 16]
+
+	; size the sections
+    set sec_buttons_width          + + + + + + + size_rew{4} size_fwd{4} size_stop{4} size_play{4} size_pause{4} size_rec{4} * 2 sec_margin * -5 div_w
+    set sec_buttons_width          ?classicMode + * scale 234 * 2 sec_margin
+    set sec_buttons                 [0 0 sec_buttons_width{0} row_height{0}]
+    set proj_group_width            + + + size_bpm_tap{4} size_bpm_edit{4} size_timesig{4} size_timebase{4}
+	set sec_proj_width           	+ + + + size_automode{4} proj_group_width size_rate{4} * 2 sec_margin * ?show_rate 2 1 sec_proj_margin
+	set sec_proj                 	[0 0 sec_proj_width{0} row_height{0}]
+	set all_width                	+ + + sec_buttons_width size_status{4} sec_proj_width size_selection{4}
+	set buttons_proj_width			+ sec_buttons_width sec_proj_width
+	set buttons_proj_cutoff			- buttons_proj_width{0} w
+
+	set w_stretch					- all_width w
+	set sec_status_width			- h<row_height_x2{0} w<all_width{0} - size_status{4} * w_stretch 0.6 size_status{4} size_status{4} size_status{0}
+    set sec_sel_width				h<row_height_x2{0} w<all_width{0} - size_selection{4} * w_stretch 0.4 size_selection{4} size_selection{4}
+    set sec_sel						[0 0 sec_sel_width{0}]
+
+	; layout the sections
+	set sec_status					[sec_buttons{2} 0 sec_status_width{0} size_status]
+	set sec_status					sec_sel{2}<selection_min_s + sec_status [0 0 sec_sel] ; proj section is going to be hidden, so steal its width
+	set sec_status					sec_status_width{0}<status_min_s [0] .
+	set sec_proj					- [w 0 sec_proj{2} sec_proj] [sec_proj{2}]
+	set sec_proj					h<row_height_x2{0} w<buttons_proj_width{0} [0] . . ; single row, hide proj section if it still doesn't fit
+	set sec_sel						sec_sel{2}<selection_min_s [0] - - [w size_selection sec_sel size_selection] [sec_proj{2}] [sec_sel{2}]
+
+		; jumping rows when panel is narrow
+		; ...2 rows
+		set sec_sel		            w<all_width{0} h<row_height_x2{0} . + [0 row_height{0}] [0 sec_sel sec_sel sec_sel] .
+		set sec_proj	            w<all_width{0} h<row_height_x2{0} . + [sec_sel row_height{0}] [sec_sel{2} 0 sec_proj sec_proj] .
+		; ...4 rows
+		set row_1_width				+ sec_buttons_width sec_status_width
+		set row_2_width				+ sec_proj_width sec_sel_width
+		set 2rows_max				row_1_width{0}>row_2_width{0} row_1_width{0} row_2_width{0}
+		set sec_status_width		w<sec_status_width{0} - w size_status{0}
+		set sec_status				w<2rows_max{0} [0 row_height{0} sec_status_width{0} size_status] .
+		set sec_sel					w<sec_sel{2} [sec_sel sec_sel w sec_sel]
+		set sec_sel					w<2rows_max{0} + [0 row_height_x2{0}] [size_selection size_selection sec_sel size_selection] .
+		set sec_proj				w<sec_proj{2} [sec_proj sec_proj w sec_proj]
+		set sec_proj				w<2rows_max{0} [0 row_height_x3{0} sec_proj sec_proj] .
+
+		set trans_min_width			h>row_height{0} sec_status_width{0}<sec_proj_width{0} sec_proj_width{0} sec_status_width{0} + * scale [216] [0 row_height{0}]
+		set trans.size.dockedheight	+ row_height{0} trans_height_offs
+		set trans.size.minmax		[trans_min_width row_height{0} 10000 row_height_x4{0}]
+
+	; transport center
+	set transCenter 			!sec_sel{2} 0 w<all_width{0} h>row_height_x2{0} 0 ?trans_centered 1 0 ?trans_centered 1 0
+	set sec_buttons_center      * 0.5 - w +  + + sec_buttons_width{0} sec_status_width{0} sec_proj_width{0} sec_sel_width{0}
+	set sec_buttons             ?transCenter{0} + sec_sel_width{0}>0 + [sec_sel_width{0}] [sec_buttons_center{0}] [0] [0 0 sec_buttons] .
+	set sec_status              ?transCenter{0} + [sec_buttons 0 sec_status size_status] [sec_buttons{2}] .
+	set sec_sel					?transCenter{0} [0 size_selection sec_sel size_selection] .
+	
+    set sec_buttons     sec_buttons{w}>0    + * [1 0 -2] sec_margin
+    set sec_proj        sec_proj{w}>0       + * [1 0 -2] sec_margin
+    set sec_sel         sec_sel{w}>0        + * [1 0 -2] sec_margin
+    set sec_status      sec_status{w}>0     + * [1 0 -2] sec_margin
+
+    ; draw content in sec_buttons
+    set compat_div_w    * div_w reaper_version<700 2 1 
+	set trans.rew       +     [sec_buttons sec_buttons]                 [size_rew size_rew size_rew size_rew]
+	set trans.fwd       - + + [trans.rew sec_buttons]   [size_rew{2}]   [size_fwd size_fwd size_fwd size_fwd]           compat_div_w@x
+	set trans.stop      - + + [trans.fwd sec_buttons]   [size_fwd{2}]   [size_stop size_stop size_stop size_stop]       compat_div_w@x
+	set trans.play      - + + [trans.stop sec_buttons]  [size_stop{2}]  [size_play size_play size_play size_play]       compat_div_w@x
+	set trans.pause     - + + [trans.play sec_buttons]  [size_play{2}]  [size_pause size_pause size_pause size_pause]   compat_div_w@x
+	set trans.rec       - + + [trans.pause sec_buttons] [size_pause{2}] [size_rec size_rec size_rec size_rec]           compat_div_w@x
+	set trans.repeat    + +   [trans.play sec_buttons]  [size_play{2}]  [size_repeat size_repeat size_repeat size_repeat]
+
+    set trans.rew       ?classicMode +   [sec_buttons sec_buttons]                      * scale [6 8 28 30]
+    set trans.fwd       ?classicMode + + [trans.rew sec_buttons]    [trans.rew{2}]      * scale [0 8 28 30]
+    set trans.rec       ?classicMode + + [trans.fwd sec_buttons]    [trans.fwd{2}]      * scale [10 6 26 28]
+    set trans.play      ?classicMode + + [trans.rec sec_buttons]    [trans.rec{2}]      * scale [6 6 26 28]
+    set trans.repeat    ?classicMode + + [trans.play sec_buttons]   [trans.play{2}]     * scale [6 6 26 28]
+    set trans.stop      ?classicMode + + [trans.repeat sec_buttons] [trans.repeat{2}]   * scale [10 8 28 30]
+    set trans.pause     ?classicMode + + [trans.stop sec_buttons]   [trans.stop{2}]     * scale [0 8 28 30]
+
+	; draw content in sec_status
+    set trans.repeat                !classicMode sec_status{w}==0 [0] + [sec_status sec_status] [size_repeat size_repeat size_repeat size_repeat]
+	set trans.status             	+ + sec_status [size_status size_status] ?classicMode 0 - size_repeat{4}@x size_repeat{4}@w
+
+	; draw content in sec_proj
+    set trans.automode      sec_proj{w}==0 [0]     + [sec_proj sec_proj]                                [size_automode size_automode size_automode size_automode]
+	set trans.bpm.tap       sec_proj{w}==0 [0] + + + [trans.automode sec_proj]  [trans.automode{2}]     [size_bpm_tap size_bpm_tap size_bpm_tap size_bpm_tap] sec_proj_margin@x
+	set trans.bpm.edit      sec_proj{w}==0 [0]   + + [trans.bpm.tap sec_proj]   [trans.bpm.tap{2}]      [size_bpm_edit size_bpm_edit size_bpm_edit size_bpm_edit]
+	set trans.curtimesig    sec_proj{w}==0 [0]   + + [trans.bpm.edit sec_proj]  [trans.bpm.edit{2}]     [size_timesig size_timesig size_timesig size_timesig] 
+    set trans.timebase      sec_proj{w}==0 [0]   + + [trans.curtimesig sec_proj] [trans.curtimesig{2}]  [size_timebase size_timebase size_timebase size_timebase]
+    set trans_rate          sec_proj{w}==0 [0] + + + [trans.timebase sec_proj]  [trans.timebase{2}]     [size_rate size_rate size_rate size_rate] ?show_rate sec_proj_margin@x 0
+    set rate_mode_change			* scale 80
+    set trans_rate_mode			size_rate{w}<rate_mode_change{0} 1 0
+    set trans.rate             	sec_proj{w}==0 [0] !show_rate{0} [0] + + [trans_rate trans_rate 0 trans_rate] * scale [-36 0 36] trans_rate{w}@x 
+    set trans.rate.fader       	sec_proj{w}==0 [0] !show_rate{0} [0] + [trans_rate trans_rate] \
+                                        ?trans_rate_mode{0} \
+                                            * scale [-4 -3 28 28] \
+                                            + - trans_rate{w}@w trans.rate{w}@w * scale [9 3 -9 16] 
+
+
+    set is_compat_font   os_type==0 0 os_type>2 0 1
+    set rate_text_w  * + main_font{0} 6.65 ?is_compat_font 3 3.8
+    set trans.rate sec_proj{w}>0 + * [-1 0 1] rate_text_w
+    set trans.rate.margin + * scale [2000] main_font_voffs@y
+
+    set trans.rate.fader.fadermode	?trans_rate_mode{0} 1 0
+    set trans.rate.fader.color 	[255 255 255 100]
+    front trans.rate.fader
+
+    custom trans.custom.rate_bg  '' 0 '' 'custom_transport_edit_bg'
+    set trans.custom.rate_bg  trans.rate{w}==0 [0] + trans_rate * scale ?trans_rate_mode{0} [12 0 -12] [0]
+
+    custom trans.custom.proj_div1 '' 0 '' 'custom_transport_edit_div'
+    custom trans.custom.proj_div2 '' 0 '' 'custom_transport_edit_div'
+    custom trans.custom.proj_div3 '' 0 '' 'custom_transport_edit_div'
+
+    set proj_div + div_w@w + * trans.bpm.edit [0 1 0 1] * scale [0 4 0 -8]
+
+    set trans.custom.proj_div1 trans.bpm.edit{w}>0 - + proj_div trans.bpm.edit{x}@x div_w@x
+    set trans.custom.proj_div2 size_timesig{w}>0     + proj_div trans.curtimesig{x}@x
+    set trans.custom.proj_div3 trans.timebase{w}>0   + proj_div trans.timebase{x}@x
+
+    custom trans.custom.proj_bg  '' 0 '' 'custom_transport_edit_bg'
+    set trans.custom.proj_bg [trans.bpm.tap trans.bpm.edit proj_group_width trans.bpm.edit]
+
+    set trans.curtimesig    trans.curtimesig{w}>0 + * scale [-2 0 5]
+
+    custom trans.custom.auto  '' 0 '' 'custom_transport_edit_bg'
+    set trans.custom.auto  + trans.automode * scale [0 2 0 -4]
+
+	; draw content in sec_sel
+    set trans_sel  + sec_sel * scale [18 0 -16]
+
+    set sel_text_w  * + trans_font{0} 6.65 ?is_compat_font 5.15 6.35
+    set sel_box_w / - - trans_sel{w} sel_text_w * 2 div_w 3
+
+    custom trans.custom.sel_div1 '' 0 '' 'custom_transport_edit_div'
+    custom trans.custom.sel_div2 '' 0 '' 'custom_transport_edit_div'
+    custom trans.custom.sel_div3 '' 0 '' 'custom_transport_edit_div'
+
+    set trans.custom.sel_div1 sec_sel{w}>0 + + [trans_sel trans_sel div_w trans_sel] sel_text_w@x * scale [0 4 0 -8]
+    set trans.custom.sel_div2 sec_sel{w}>0 + trans.custom.sel_div1 sel_box_w@x
+    set trans.custom.sel_div3 sec_sel{w}>0 + trans.custom.sel_div2 sel_box_w@x
+
+    custom trans.custom.sel_start  '' 0 '' 'custom_transport_sel_start'
+    set trans.custom.sel_start  sec_sel{w}>0 + [trans.custom.sel_div1 trans_sel] * scale [0 3 6 6]
+
+    custom trans.custom.sel_end  '' 0 '' 'custom_transport_sel_end'
+    set trans.custom.sel_end    sec_sel{w}>0  +  + [trans.custom.sel_div3 trans_sel] * scale [-6 3 6 6] div_w@x
+
+    front trans.custom.sel_start trans.custom.sel_end 
+
+    custom trans.custom.sel_bg  '' 0 '' 'custom_transport_edit_bg'
+
+	set trans.sel					trans_sel
+    set trans.custom.sel_bg         sec_sel 
+
+    ; Set margins
+	set trans.margin				+ [trans_margin 0 trans_margin 0] / trans_height_offs@y 2
+
+    set status_min_margin_w         * scale 290
+    set status_margin_factor        / - status_min_margin_w trans.status{w} / status_min_margin_w 8
+    set status_margin_factor        status_margin_factor<0 0 status_margin_factor>1 1
+	set trans.status.margin    		* scale trans_flags&1 \
+                                        + [-4 0 32 0] * [-10 0 -18 0] status_margin_factor \
+                                        + [10 0 28 0] * [-4 0 -18 0] status_margin_factor
+
+	set trans.status.margin    		?is_windows  + . scale==1 [0 0] scale==1.5 [0 1 0 -1] scale==2 [0 1 0 1] [0]
+	set trans.status.margin    		?is_macos  + . scale==1 [0 1] scale==1.5 [0 1 0 1]  scale==2 [0 1 0 1] [0]
+	set trans.status.margin    		?is_linux  + . scale==1 [0 1] scale==1.5 [0 2 0 0]  scale==2 [0 1 0 1] [0]
+	
+	set trans.bpm.tap.margin   		[0.5 0 0 0 0.5]
+	set trans.bpm.edit.margin 	 	[0 0 0.5 0 0.5]
+	set trans.sel.margin      	 	* sel_text_w -0.08@x
+
+    ; Note: trans.sel and trans.curtimesig don't support vertical margins
+    set trans_font_offs * trans_font_voffs [0 1 0 -1]
+    set trans.sel                   + trans_font_offs
+	set trans.bpm.edit 	 	        + trans_font_offs
+    set trans.curtimesig            + trans_font_offs
+    set trans.bpm.tap.margin  		+ trans_font_offs
+
+    ; Set fonts
+    set trans.sel.font        	 	trans_font
+	set trans.bpm.tap.font  		trans_font
+	set trans.bpm.edit.font  		trans_font
+	set trans.curtimesig.font  		trans_font
+    set trans.rate.font             main_font
+
+	set trans.sel.color      	  	text_color
+	set trans.bpm.tap.color   	 	text_color
+	set trans.bpm.edit.color   		text_color
+	set trans.curtimesig.color  	text_color
+	set trans.rate.color      	 	text_color
+endMacro
+
+Layout ""
+    clear trans.*
+	set scale 1
+    set classicMode 0
+    calcFontSizes scale
+    drawTransport scale
+EndLayout
+
+Layout "A"
+    clear trans.*
+	set scale 1
+    set classicMode 0
+    calcFontSizes scale
+    drawTransport scale
+EndLayout
+
+Layout "150%_A" "150"
+    clear trans.*
+	set scale 1.5
+    set classicMode 0
+    calcFontSizes scale
+    drawTransport scale
+EndLayout
+
+Layout "200%_A" "200"
+    clear trans.*
+	set scale 2
+    set classicMode 0
+    calcFontSizes scale
+    drawTransport scale
+EndLayout
+
+Layout "A_Classic" "transport_classic"
+    clear trans.*
+	set scale 1
+    set classicMode 1
+    calcFontSizes scale
+    drawTransport scale
+EndLayout
+
+Layout "150%_A_Classic" "150/transport_classic"
+    clear trans.*
+	set scale 1.5
+    set classicMode 1
+    calcFontSizes scale
+    drawTransport scale
+EndLayout
+
+Layout "200%_A_Classic" "200/transport_classic"
+    clear trans.*
+	set scale 2
+    set classicMode 1
+    calcFontSizes scale
+    drawTransport scale
+EndLayout
+
+#<
+#>------------------------------- DPI TRANSLATION -------------------------------------
+
+; ------ DUMMY LAYOUTS ---------
+
+Layout "50%_A"
+	set tcp.label  			.
+	set mcp.label  			.
+	set envcp.label			.
+	set master.mcp.label 	.
+	set master.tcp.label 	.
+	set trans.status 		.
+EndLayout
+
+Layout "75%_A"
+	set tcp.label  			.
+	set mcp.label  			.
+	set envcp.label			.
+	set master.mcp.label 	.
+	set master.tcp.label 	.	
+	set trans.status 		.
+EndLayout
+
+Layout "50%_B"
+	set tcp.label  			.
+	set mcp.label  			.
+EndLayout
+
+Layout "75%_B"
+	set tcp.label  			.
+	set mcp.label  			.
+EndLayout
+
+Layout "50%_C"
+	set tcp.label  			.
+	set mcp.label  			.
+EndLayout
+
+Layout "75%_C"
+	set tcp.label  			.
+	set mcp.label  			.
+EndLayout
+
+;						requested	scale >	use
+layout_dpi_translate 	'50%_A' 	1.0 	'A'
+layout_dpi_translate 	'50%_B' 	1.0 	'B'
+layout_dpi_translate 	'50%_C' 	1.0 	'C'
+
+layout_dpi_translate 	'75%_A' 	1.0 	'A'
+layout_dpi_translate 	'75%_B' 	1.0 	'B'
+layout_dpi_translate 	'75%_C' 	1.0 	'C'
+
+layout_dpi_translate 	'75%_A' 	1.74 	'150%_A'
+layout_dpi_translate 	'75%_B' 	1.74 	'150%_B'
+layout_dpi_translate 	'75%_C' 	1.74 	'150%_C'
+
+layout_dpi_translate 	'A' 		1.34 	'150%_A'
+layout_dpi_translate 	'B' 		1.34	'150%_B'
+layout_dpi_translate 	'C' 		1.34 	'150%_C'
+
+layout_dpi_translate 	'A' 		1.74 	'200%_A'
+layout_dpi_translate 	'B' 		1.74 	'200%_B'
+layout_dpi_translate 	'C' 		1.74 	'200%_C'
+
+layout_dpi_translate 	'150%_A' 	1.34 	'200%_A'
+layout_dpi_translate 	'150%_B' 	1.34 	'200%_B'
+layout_dpi_translate 	'150%_C' 	1.34 	'200%_C'
+
+; -- no layout chosen, dpi_translate as A
+
+layout_dpi_translate 	'' 			1.34 	'150%_A'
+layout_dpi_translate 	'' 			1.74 	'200%_A'
+
+;-------------------------- REAPERTIPS Translations --------------------------
+
+Layout "50%_A_Solid"
+	set tcp.label  			.
+EndLayout
+
+Layout "75%_A_Solid"
+	set tcp.label  			.
+EndLayout
+
+Layout "50%_B_Solid"
+	set tcp.label  			.
+EndLayout
+
+Layout "75%_B_Solid"
+	set tcp.label  			.
+EndLayout
+
+Layout "50%_C_Solid"
+	set tcp.label  			.
+EndLayout
+
+Layout "75%_C_Solid"
+	set tcp.label  			.
+EndLayout
+
+Layout "50%_A_Strip"
+	set mcp.label  			.
+EndLayout
+
+Layout "75%_A_Strip"
+	set mcp.label  			.
+EndLayout
+
+Layout "50%_B_Strip"
+	set mcp.label  			.
+EndLayout
+
+Layout "75%_B_Strip"
+	set mcp.label  			.
+EndLayout
+
+Layout "50%_C_Strip"
+	set mcp.label  			.
+EndLayout
+
+Layout "75%_C_Strip"
+	set mcp.label  			.
+EndLayout
+
+Layout "50%_Separator"
+	set tcp.label			.
+	set mcp.label  			.
+EndLayout
+
+Layout "75%_Separator"
+	set tcp.label			.
+	set mcp.label  			.
+EndLayout
+
+Layout "50%_A_Sidebar"
+	set master.mcp.label	.
+EndLayout
+
+Layout "75%_A_Sidebar"
+	set master.mcp.label	.
+EndLayout
+
+Layout "50%_A_Classic"
+	set trans.status        .
+EndLayout
+
+Layout "75%_A_Classic"
+	set trans.status        .
+EndLayout
+
+;						requested	        scale  > use
+layout_dpi_translate 	'50%_A_Solid' 	    1.0 	'A_Solid'
+layout_dpi_translate 	'50%_B_Solid' 	    1.0 	'B_Solid'
+layout_dpi_translate 	'50%_C_Solid' 	    1.0 	'C_Solid'
+layout_dpi_translate 	'50%_A_Strip' 		1.0 	'A_Strip'
+layout_dpi_translate 	'50%_B_Strip' 		1.0 	'B_Strip'
+layout_dpi_translate 	'50%_C_Strip' 		1.0 	'C_Strip'
+layout_dpi_translate 	'50%_Separator' 	1.0 	'Separator'
+layout_dpi_translate 	'50%_A_Sidebar' 	1.0 	'A_Sidebar'
+layout_dpi_translate 	'50%_A_Classic' 	1.0 	'A_Classic'
+
+layout_dpi_translate 	'75%_A_Solid' 	    1.0 	'A_Solid'
+layout_dpi_translate 	'75%_B_Solid' 	    1.0 	'B_Solid'
+layout_dpi_translate 	'75%_C_Solid' 	    1.0 	'C_Solid'
+layout_dpi_translate 	'75%_A_Strip' 		1.0 	'A_Strip'
+layout_dpi_translate 	'75%_B_Strip' 		1.0 	'B_Strip'
+layout_dpi_translate 	'75%_C_Strip' 		1.0 	'C_Strip'
+layout_dpi_translate 	'75%_Separator' 	1.0 	'Separator'
+layout_dpi_translate 	'75%_A_Sidebar' 	1.0 	'A_Sidebar'
+layout_dpi_translate 	'75%_A_Classic' 	1.0 	'A_Classic'
+
+layout_dpi_translate 	'75%_A_Solid' 	    1.74 	'150%_A_Solid'
+layout_dpi_translate 	'75%_B_Solid' 	    1.74 	'150%_B_Solid'
+layout_dpi_translate 	'75%_C_Solid' 	    1.74 	'150%_C_Solid'
+layout_dpi_translate 	'75%_A_Strip' 		1.74 	'150%_A_Strip'
+layout_dpi_translate 	'75%_B_Strip' 		1.74 	'150%_B_Strip'
+layout_dpi_translate 	'75%_C_Strip' 		1.74 	'150%_C_Strip'
+layout_dpi_translate 	'75%_Separator' 	1.74 	'150%_Separator'
+layout_dpi_translate 	'75%_A_Sidebar' 	1.74 	'150%_A_Sidebar'
+layout_dpi_translate 	'75%_A_Classic' 	1.74 	'150%_A_Classic'
+
+layout_dpi_translate 	'A_Solid' 		    1.34 	'150%_A_Solid'
+layout_dpi_translate 	'B_Solid' 		    1.34 	'150%_B_Solid'
+layout_dpi_translate 	'C_Solid' 		    1.34 	'150%_C_Solid'
+layout_dpi_translate 	'A_Strip' 			1.34 	'150%_A_Strip'
+layout_dpi_translate 	'B_Strip' 			1.34 	'150%_B_Strip'
+layout_dpi_translate 	'C_Strip' 			1.34 	'150%_C_Strip'
+layout_dpi_translate 	'Separator'	 		1.34 	'150%_Separator'
+layout_dpi_translate 	'A_Sidebar' 	    1.34 	'150%_A_Sidebar'
+layout_dpi_translate 	'A_Classic' 	    1.34 	'150%_A_Classic'
+
+layout_dpi_translate 	'A_Solid' 		    1.74 	'200%_A_Solid'
+layout_dpi_translate 	'B_Solid' 		    1.74 	'200%_B_Solid'
+layout_dpi_translate 	'C_Solid' 		    1.74 	'200%_C_Solid'
+layout_dpi_translate 	'A_Strip' 			1.74 	'200%_A_Strip'
+layout_dpi_translate 	'B_Strip' 			1.74 	'200%_B_Strip'
+layout_dpi_translate 	'C_Strip' 			1.74 	'200%_C_Strip'
+layout_dpi_translate 	'Separator'	 		1.74 	'200%_Separator'
+layout_dpi_translate 	'A_Sidebar' 	    1.74 	'200%_A_Sidebar'
+layout_dpi_translate 	'A_Classic' 	    1.74 	'200%_A_Classic'
+
+layout_dpi_translate 	'150%_A_Solid' 	    1.34 	'200%_A_Solid'
+layout_dpi_translate 	'150%_B_Solid' 	    1.34 	'200%_B_Solid'
+layout_dpi_translate 	'150%_C_Solid' 	    1.34 	'200%_C_Solid'
+layout_dpi_translate 	'150%_A_Strip' 		1.34 	'200%_A_Strip'
+layout_dpi_translate 	'150%_B_Strip' 		1.34 	'200%_B_Strip'
+layout_dpi_translate 	'150%_C_Strip' 		1.34 	'200%_C_Strip'
+layout_dpi_translate 	'150%_Separator'	1.34 	'200%_Separator'
+layout_dpi_translate 	'150%_A_Sidebar' 	1.34 	'200%_A_Sidebar'
+layout_dpi_translate 	'150%_A_Classic' 	1.34 	'200%_A_Classic'
+
+;MCP Colored_Fader_Layouts
+
+;						requested	        	scale  > use
+layout_dpi_translate 	'A_Fader_Red'	 	    1.34 	'150%_A_Fader_Red'
+layout_dpi_translate 	'A_Fader_Orange' 	    1.34 	'150%_A_Fader_Orange'
+layout_dpi_translate 	'A_Fader_Yellow' 	    1.34 	'150%_A_Fader_Yellow'
+layout_dpi_translate 	'A_Fader_Green'	        1.34 	'150%_A_Fader_Green'
+layout_dpi_translate 	'A_Fader_Teal'	        1.34 	'150%_A_Fader_Teal'
+layout_dpi_translate 	'A_Fader_Blue' 	        1.34 	'150%_A_Fader_Blue'
+layout_dpi_translate 	'A_Fader_Purple' 	    1.34 	'150%_A_Fader_Purple'
+layout_dpi_translate 	'A_Fader_Pink' 	        1.34 	'150%_A_Fader_Pink'
+layout_dpi_translate 	'A_Fader_White' 	    1.34 	'150%_A_Fader_White'
+
+layout_dpi_translate 	'A_Fader_Red'	 	    1.74 	'200%_A_Fader_Red'
+layout_dpi_translate 	'A_Fader_Orange' 	    1.74 	'200%_A_Fader_Orange'
+layout_dpi_translate 	'A_Fader_Yellow' 	    1.74 	'200%_A_Fader_Yellow'
+layout_dpi_translate 	'A_Fader_Green'	        1.74 	'200%_A_Fader_Green'
+layout_dpi_translate 	'A_Fader_Teal'	        1.74 	'200%_A_Fader_Teal'
+layout_dpi_translate 	'A_Fader_Blue' 	        1.74 	'200%_A_Fader_Blue'
+layout_dpi_translate 	'A_Fader_Purple' 	    1.74 	'200%_A_Fader_Purple'
+layout_dpi_translate 	'A_Fader_Pink' 	        1.74 	'200%_A_Fader_Pink'
+layout_dpi_translate 	'A_Fader_White' 	    1.74 	'200%_A_Fader_White'
+
+layout_dpi_translate 	'150%_A_Fader_Red'	 	1.34 	'200%_A_Fader_Red'
+layout_dpi_translate 	'150%_A_Fader_Orange' 	1.34 	'200%_A_Fader_Orange'
+layout_dpi_translate 	'150%_A_Fader_Yellow' 	1.34 	'200%_A_Fader_Yellow'
+layout_dpi_translate 	'150%_A_Fader_Green'	1.34 	'200%_A_Fader_Green'
+layout_dpi_translate 	'150%_A_Fader_Teal'	 	1.34 	'200%_A_Fader_Teal'
+layout_dpi_translate 	'150%_A_Fader_Blue' 	1.34 	'200%_A_Fader_Blue'
+layout_dpi_translate 	'150%_A_Fader_Purple' 	1.34 	'200%_A_Fader_Purple'
+layout_dpi_translate 	'150%_A_Fader_Pink' 	1.34 	'200%_A_Fader_Pink'
+layout_dpi_translate 	'150%_A_Fader_White' 	1.34 	'200%_A_Fader_White'
+
+#<
