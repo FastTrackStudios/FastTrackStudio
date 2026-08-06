@@ -3369,6 +3369,7 @@ name = "chord-tool"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "fts-ui",
  "keyflow",
 ]
 
