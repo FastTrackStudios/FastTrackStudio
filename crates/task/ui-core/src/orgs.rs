@@ -20,7 +20,10 @@
 pub struct DiscoveryError(pub dioxus::prelude::Signal<Option<String>>);
 
 /// One hosted org, as surfaced by the server's well-known endpoint.
-#[derive(Clone, PartialEq, Eq, Debug)]
+// serde so the shell can keep the discovered org list in a boot cache:
+// without it an offline client has no slug, and every org-scoped
+// surface (email included) cannot even name what it wants.
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct OrgMeta {
     pub slug: String,
     pub name: String,

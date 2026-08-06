@@ -36,6 +36,8 @@ mod code;
 #[cfg(feature = "plugin-fasttrackstudio")]
 mod collection;
 mod cycle;
+#[cfg(feature = "plugin-email")]
+mod email;
 mod errors;
 #[cfg(feature = "plugin-fitness")]
 mod exercise;
@@ -121,6 +123,8 @@ use crate::task_cmd::{TaskCmd, run_task};
 use crate::threads::{ThreadsCmd, run_threads};
 use crate::timer::{TimerCmd, run_timer};
 use crate::vault::{VaultCmd, run_vault, run_vault_sync};
+#[cfg(feature = "plugin-email")]
+use crate::email::{EmailCmd, run_email};
 #[cfg(feature = "plugin-wiki")]
 use crate::wiki::{WikiCmd, run_wiki};
 #[cfg(feature = "plugin-fitness")]
@@ -197,6 +201,13 @@ enum Commands {
     #[cfg(not(feature = "plugin-agent"))]
     #[command(hide = true)]
     Agent(NotCompiled),
+    /// Mail accounts for this org (add / list / remove / test).
+    #[cfg(feature = "plugin-email")]
+    #[command(subcommand)]
+    Email(EmailCmd),
+    #[cfg(not(feature = "plugin-email"))]
+    #[command(hide = true)]
+    Email(NotCompiled),
     /// `Wiki/` operations — currently the LLM-driven
     /// ingest pipeline. Sister surface to `agent`; the
     /// command itself routes through `agent-wiki::bridge`.
@@ -735,6 +746,14 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         #[cfg(not(feature = "plugin-agent"))]
         Commands::Agent(_) => {
             return Err(not_compiled("agent"));
+        }
+        #[cfg(feature = "plugin-email")]
+        Commands::Email(cmd) => {
+            return run_email(cmd, cli.org.as_deref()).await;
+        }
+        #[cfg(not(feature = "plugin-email"))]
+        Commands::Email(_) => {
+            return Err(not_compiled("email"));
         }
         #[cfg(feature = "plugin-wiki")]
         Commands::Wiki(cmd) => {

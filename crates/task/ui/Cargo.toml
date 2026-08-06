@@ -177,6 +177,8 @@ fake.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+# Desktop side of the org-discovery boot cache (web uses localStorage).
+dirs = "5"
 
 # Browser glue. Compiles cleanly on native too; the source uses
 # them only inside `cfg(target_arch = "wasm32")` blocks.

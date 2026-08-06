@@ -16,6 +16,8 @@ publish = false
 tokio = { workspace = true, features = ["full"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+# Forwarding client for the OTLP proxy (src/otlp.rs).
+reqwest = { workspace = true }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 task-telemetry = { workspace = true, features = ["otel"] }
@@ -142,6 +144,12 @@ finance = { workspace = true, optional = true }
 # account set.
 email-proto = { workspace = true, features = ["vox"], optional = true }
 email-maildir = { workspace = true, optional = true }
+# Remote IMAP accounts (Gmail, Fastmail, …) and the account-dispatching
+# backend that lets one org mix them with a local Maildir.
+email-imap = { workspace = true, optional = true }
+email-mux = { workspace = true, optional = true }
+# Message↔entity links (email on a project / task).
+email-link = { workspace = true, optional = true }
 # `FolderAliases` for the per-account Maildir registration.
 email-config = { workspace = true, optional = true }
 # SMTP submitter wired into discovered maildir accounts whose
@@ -200,6 +208,9 @@ plugin-scripture = ["dep:scripture"]
 plugin-email = [
     "dep:email-proto",
     "dep:email-maildir",
+    "dep:email-imap",
+    "dep:email-mux",
+    "dep:email-link",
     "dep:email-config",
     "dep:email-smtp",
     "dep:email-product",

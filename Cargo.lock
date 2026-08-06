@@ -2310,7 +2310,7 @@ dependencies = [
  "bitflags 2.13.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -3363,6 +3363,28 @@ name = "chinese-variant"
 version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d1275808335c5583ea45a4141d631dafcb36b79fa8a5e10b00e356b6af3e08a"
+
+[[package]]
+name = "chord-tool"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "fts-ui",
+ "keyflow",
+ "tracing",
+]
+
+[[package]]
+name = "chord-tool-daw"
+version = "0.1.0"
+dependencies = [
+ "chord-tool",
+ "daw",
+ "daw-proto",
+ "eyre",
+ "keyflow",
+ "tracing",
+]
 
 [[package]]
 name = "chorus-dsp"
@@ -7367,11 +7389,32 @@ dependencies = [
 
 [[package]]
 name = "dirs"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
+dependencies = [
+ "dirs-sys 0.4.1",
+]
+
+[[package]]
+name = "dirs"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
 dependencies = [
- "dirs-sys",
+ "dirs-sys 0.5.0",
+]
+
+[[package]]
+name = "dirs-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
+dependencies = [
+ "libc",
+ "option-ext",
+ "redox_users 0.4.6",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -7382,7 +7425,7 @@ checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users",
+ "redox_users 0.5.2",
  "windows-sys 0.61.2",
 ]
 
@@ -8054,6 +8097,7 @@ dependencies = [
 name = "email-link"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "chrono",
  "email-proto",
  "email-store",
@@ -8081,6 +8125,23 @@ dependencies = [
  "maildir",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "email-mux"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "email-config",
+ "email-imap",
+ "email-maildir",
+ "email-proto",
+ "email-secret",
+ "email-smtp",
+ "email-store",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -8179,9 +8240,12 @@ dependencies = [
  "architect",
  "chrono",
  "dioxus",
+ "dirs 5.0.1",
  "email-proto",
  "fts-ui",
+ "serde_json",
  "task-ui-core",
+ "web-sys",
 ]
 
 [[package]]
@@ -9967,6 +10031,8 @@ dependencies = [
  "fts-launcher",
  "fts-ui",
  "keyflow-orchestra",
+ "midi-tools-daw",
+ "midi-tools-ui",
  "reaper-config",
  "reaper-high",
  "reaper-input",
@@ -10001,7 +10067,7 @@ dependencies = [
  "anyhow",
  "clap",
  "daw-proto",
- "dirs",
+ "dirs 6.0.0",
  "resvg 0.45.1",
  "serde",
  "serde_json",
@@ -11667,7 +11733,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "629d8f3bbeda9d148036d6b0de0a3ab947abd08ce90626327fc3547a49d59d97"
 dependencies = [
- "dirs",
+ "dirs 6.0.0",
  "futures",
  "http",
  "indicatif",
@@ -14440,7 +14506,7 @@ dependencies = [
  "datafusion-physical-expr",
  "datafusion-sql",
  "deepsize",
- "dirs",
+ "dirs 6.0.0",
  "fst",
  "futures",
  "half",
@@ -16436,6 +16502,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f2dd5c7f8aaf48a76e389068ab25ed80bdbc226b887f9013844c415698c9952"
 
 [[package]]
+name = "midi-tools"
+version = "0.1.0"
+dependencies = [
+ "rand 0.8.6",
+ "tracing",
+]
+
+[[package]]
+name = "midi-tools-daw"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-proto",
+ "dioxus",
+ "dioxus-test",
+ "eyre",
+ "midi-tools",
+ "midi-tools-ui",
+]
+
+[[package]]
+name = "midi-tools-ui"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "dioxus-test",
+ "midi-tools",
+ "tokio",
+]
+
+[[package]]
 name = "midicore"
 version = "0.1.0"
 dependencies = [
@@ -17664,7 +17761,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 2.0.2",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -19026,7 +19123,7 @@ name = "patchbay"
 version = "0.1.0"
 dependencies = [
  "architect",
- "dirs",
+ "dirs 6.0.0",
  "eyre",
  "facet 0.50.0-rc.5",
  "facet-styx 5.0.0-rc.5",
@@ -19175,9 +19272,9 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "image",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "js-sys",
- "libloading 0.9.0",
+ "libloading 0.8.9",
  "log",
  "maybe-owned",
  "once_cell",
@@ -20365,8 +20462,8 @@ version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
- "heck 0.4.1",
- "itertools 0.10.5",
+ "heck 0.5.0",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "petgraph 0.8.3",
@@ -20398,7 +20495,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -20411,7 +20508,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -21467,6 +21564,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5102a6aaa05aa011a238e178e6bca86d2cb56fc9f586d37cb80f5bca6e07759"
 dependencies = [
  "bitflags 2.13.0",
+]
+
+[[package]]
+name = "redox_users"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
+dependencies = [
+ "getrandom 0.2.17",
+ "libredox",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -23295,6 +23403,7 @@ dependencies = [
  "daw-reaper",
  "daw-standalone",
  "daw-synchronization",
+ "dawfile-reaper",
  "dynamic-template",
  "eyre",
  "futures",
@@ -24523,7 +24632,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -24535,7 +24644,7 @@ version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f103c50866b8743da9429b8a581d81a27c2d3a9c4ac7df8f8571c1dd7896eda"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -26166,6 +26275,10 @@ dependencies = [
  "cooklang",
  "cycle",
  "dotenvy",
+ "email-config",
+ "email-imap",
+ "email-proto",
+ "email-secret",
  "exercises",
  "eyre",
  "finance",
@@ -26212,6 +26325,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vault",
+ "vault-entity",
  "vault-live",
  "vault-obsidian",
  "vault-proto",
@@ -26328,7 +26442,10 @@ dependencies = [
  "crdt",
  "ed25519-dalek 2.2.0",
  "email-config",
+ "email-imap",
+ "email-link",
  "email-maildir",
+ "email-mux",
  "email-product",
  "email-proto",
  "email-smtp",
@@ -26448,6 +26565,7 @@ dependencies = [
  "fts-ui",
  "futures-channel",
  "futures-util",
+ "serde",
  "task-plugin",
  "tracing",
  "uuid",
@@ -27681,7 +27799,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65ba1e5f6b9ef9fd87e21b9c6f351554dbd717960089168fcfdef854686961dc"
 dependencies = [
  "crossbeam-channel",
- "dirs",
+ "dirs 6.0.0",
  "libappindicator",
  "muda",
  "objc2 0.6.4",
@@ -28267,6 +28385,7 @@ dependencies = [
  "dioxus",
  "dioxus-icons",
  "dioxus-router",
+ "dirs 5.0.1",
  "editor",
  "editor-crdt",
  "email-ui",
@@ -31580,7 +31699,7 @@ dependencies = [
  "block2 0.6.2",
  "cookie",
  "crossbeam-channel",
- "dirs",
+ "dirs 6.0.0",
  "dom_query 0.27.0",
  "dpi",
  "dunce",

@@ -9,6 +9,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# `EmailLinks` runs on architect's tokio BLOCKING dispatcher — the
+# service methods are sync and touch sqlite.
+architect = { workspace = true, features = ["dispatch-tokio"] }
 email-proto = { workspace = true }
 email-store = { workspace = true }
 thiserror = { workspace = true }

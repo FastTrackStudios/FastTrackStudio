@@ -453,18 +453,23 @@ pub fn ConnectionBadge() -> Element {
     }
 }
 
-/// Live peers + derived agent/timer entries, deduped by name and
-/// sorted humans-first — the one roster derivation, shared by the
-/// sidebar roster, the mobile sheet, and the top-bar avatar group.
-/// A hook (owns a poll future + resource): call from component tops
-/// only.
-pub fn use_presence_entries() -> Vec<(String, PresenceEntry)> {
-    let presence = crdt::use_presence();
+/// The shared derived-presence poll, provided once near the app root.
+///
+/// Wraps the `Resource` so it can go in a context; consumers read it
+/// through [`use_presence_entries`] and never poll themselves.
+#[derive(Clone, Copy)]
+pub struct DerivedPresence(pub Resource<Vec<PresenceEntry>>);
+
+/// Start the ONE derived-presence poll: agent sessions + open timers for
+/// the selected orgs, every 60s and on org-selection change.
+///
+/// Call exactly once, at the app root. Every roster surface then shares
+/// this single fetch — see the note in [`use_presence_entries`] for what
+/// the per-consumer version cost.
+pub fn use_provide_derived_presence() {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
 
-    // Derived layer: poll agent sessions + open timers every 60s
-    // (and on org-selection change — the resource reads both signals).
     let mut tick = use_signal(|| 0u64);
     use_future(move || async move {
         loop {
@@ -477,6 +482,30 @@ pub fn use_presence_entries() -> Vec<(String, PresenceEntry)> {
         let slugs = selected_slugs(&selection.read(), &org_list.read());
         async move { fetch_derived_entries(&slugs).await }
     });
+    use_context_provider(|| DerivedPresence(derived));
+}
+
+/// Live peers + derived agent/timer entries, deduped by name and
+/// sorted humans-first — the one roster derivation, shared by the
+/// sidebar roster, the mobile sheet, and the top-bar avatar group.
+/// A hook: call from component tops only. Requires
+/// [`use_provide_derived_presence`] above it in the tree.
+pub fn use_presence_entries() -> Vec<(String, PresenceEntry)> {
+    let presence = crdt::use_presence();
+
+    // Derived rows come from ONE shared poll (see
+    // [`use_provide_derived_presence`]). This hook used to own the poll
+    // future and the resource itself, which meant every component that
+    // called it started its own: `PresenceRoster` and `PresenceAvatarBar`
+    // are both mounted on the desktop shell, so the app ran two identical
+    // 60-second polls, each fanning out across every selected org.
+    //
+    // Traces caught it — `TimerService/list_sessions` at 217 calls/hour
+    // and `SessionsRpc/list_sessions` at 170, against ~1/hour for every
+    // other read, arriving in simultaneous bursts a minute apart. The
+    // duplication also scaled with consumers, so a third caller would
+    // have made it worse silently.
+    let derived = use_context::<DerivedPresence>().0;
 
     // Live peers (reactive — `states()` re-renders on every presence
     // change), then merge derived rows de-duped by name. Render keys:
@@ -507,18 +536,20 @@ pub fn PresenceRoster() -> Element {
         SidebarGroup {
             SidebarGroupLabel {
                 span { class: "flex w-full items-center justify-between gap-2",
-                    span { "Online — {count}" }
+                    span { "data-testid": "presence-count", "Online — {count}" }
                     // Connection-state badge: is this roster live, or
                     // stale while the org socket reconnects?
                     ConnectionBadge {}
                 }
             }
             SidebarGroupContent {
-                if entries.is_empty() {
-                    div { class: "px-2 py-1 text-xs text-muted-foreground", "Nobody around right now" }
-                } else {
-                    for (row_key, entry) in entries {
-                        PresenceRow { key: "{row_key}", entry }
+                div { "data-testid": "presence-roster",
+                    if entries.is_empty() {
+                        div { class: "px-2 py-1 text-xs text-muted-foreground", "Nobody around right now" }
+                    } else {
+                        for (row_key, entry) in entries {
+                            PresenceRow { key: "{row_key}", entry }
+                        }
                     }
                 }
             }
@@ -547,6 +578,7 @@ pub fn PresenceAvatarBar() -> Element {
             on_open_change: move |o| open.set(o),
             DropdownTrigger {
                 button {
+                    "data-testid": "presence-trigger",
                     r#type: "button",
                     class: "flex h-7 items-center gap-1 rounded-full px-1.5 text-muted-foreground hover:bg-accent/50",
                     title: "Who's here",
@@ -575,16 +607,20 @@ pub fn PresenceAvatarBar() -> Element {
             }
             DropdownContent { side: "bottom", align: "end", width: "w-72",
                 div { class: "flex items-center justify-between px-2 pb-1 pt-0.5",
-                    span { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+                    span {
+                        "data-testid": "presence-count",
+                        class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
                         "Online — {count}"
                     }
                     ConnectionBadge {}
                 }
-                if entries.is_empty() {
-                    div { class: "px-2 py-1 text-xs text-muted-foreground", "Nobody around right now" }
-                } else {
-                    for (row_key, entry) in entries {
-                        PresenceRow { key: "{row_key}", entry }
+                div { "data-testid": "presence-roster",
+                    if entries.is_empty() {
+                        div { class: "px-2 py-1 text-xs text-muted-foreground", "Nobody around right now" }
+                    } else {
+                        for (row_key, entry) in entries {
+                            PresenceRow { key: "{row_key}", entry }
+                        }
                     }
                 }
             }
@@ -605,19 +641,33 @@ fn PresenceRow(entry: PresenceEntry) -> Element {
     // (agents, old peers) fall back to hashing the name.
     let avatar_email = entry.email.clone().unwrap_or_default();
     rsx! {
-        div { class: "flex items-center gap-2 rounded-md px-2 py-1",
+        // `data-testid` hooks: the multiplayer conformance suite reads
+        // the roster through these rather than through classes and
+        // DOM-walking. Its original selectors keyed on `div.rounded-md`
+        // + `span.font-medium` + the absolutely-positioned status dot,
+        // all of which are styling details — the presence redesign
+        // broke every one of them. Same convention dioxus-test's
+        // `by_testid` and Playwright's `getByTestId` both default to.
+        div { "data-testid": "presence-row", class: "flex items-center gap-2 rounded-md px-2 py-1",
             span { class: "relative shrink-0",
                 crate::auth::Avatar { name: entry.name.clone(), email: avatar_email, size: 22 }
                 span {
+                    "data-testid": "presence-status",
                     class: "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-card {dot}",
                     title: "{title}",
                 }
             }
             div { class: "flex min-w-0 flex-col",
                 div { class: "flex items-center gap-1.5",
-                    span { class: "truncate text-xs font-medium text-foreground", "{entry.name}" }
+                    span {
+                        "data-testid": "presence-name",
+                        class: "truncate text-xs font-medium text-foreground",
+                        "{entry.name}"
+                    }
                     if let Some(badge) = kind_badge {
-                        span { class: "rounded bg-muted px-1 text-[10px] uppercase tracking-wide text-muted-foreground",
+                        span {
+                            "data-testid": "presence-agent",
+                            class: "rounded bg-muted px-1 text-[10px] uppercase tracking-wide text-muted-foreground",
                             "{badge}"
                         }
                     }

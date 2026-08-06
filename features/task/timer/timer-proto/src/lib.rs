@@ -45,6 +45,7 @@
 
 pub mod client;
 pub mod error;
+pub mod owner;
 pub mod rate;
 pub mod service;
 pub mod session;
@@ -52,6 +53,7 @@ pub mod tag;
 
 pub use client::Client;
 pub use error::TimerError;
+pub use owner::local_owner_id;
 pub use rate::{OrgMemberRate, ProjectMemberRate};
 pub use service::{
     LogSessionRequest, RateResolution, RateSource, StartTimerRequest, TimerEvent, TimerService,

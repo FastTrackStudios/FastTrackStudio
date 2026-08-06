@@ -9,9 +9,28 @@
 //! So on wasm each `(service, org)` client is established **once** and
 //! cached for the page's lifetime, then reused for every request.
 //!
-//! On **native** there's no dropped-closure hazard, so the native build
-//! skips the cache and establishes per call (a native client cache is a
-//! possible follow-up if the desktop/SSR path turns hot).
+//! ## One socket per endpoint (2026-08-06)
+//!
+//! Production traces caught a single page load opening **72 sockets** to
+//! `/org/{slug}/vox`. Two independent causes, both fixed here:
+//!
+//! 1. **Native established per call.** It had no dropped-closure hazard,
+//!    so skipping the cache looked harmless — but "per call" means one
+//!    WebSocket per typed client. Native now shares the cache.
+//!
+//! 2. **The cache had a thundering-herd hole**, and this one hit *both*
+//!    targets. An entry can only be inserted after its dial completes, so
+//!    every caller arriving during that first dial also missed and dialed.
+//!    A page load fans out to dozens of services at once — precisely that
+//!    window. The extra roots were then discarded, so the cache looked
+//!    like it was working; the only symptoms were a slow load and dozens
+//!    of wasted handshakes. [`shared_caller_at`] now single-flights, so
+//!    concurrent callers await the same dial.
+//!
+//! Both targets now resolve an endpoint to ONE root connection and build
+//! typed clients as cheap views over its caller. The server's per-org
+//! `LayerRouter` was always able to dispatch every service on one
+//! connection; only the client was fanning out.
 //!
 //! Both targets share one transport — `vox_websocket::WsLink::connect`
 //! (web-sys `WebSocket` on wasm, `tokio-tungstenite` on native) plus
@@ -111,8 +130,7 @@ async fn dial_ws(url: &str) -> Result<vox_websocket::WsLink, String> {
         }
     }
 
-    let ws = web_sys::WebSocket::new(url)
-        .map_err(|e| format!("WebSocket::new `{url}`: {e:?}"))?;
+    let ws = web_sys::WebSocket::new(url).map_err(|e| format!("WebSocket::new `{url}`: {e:?}"))?;
     ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
     let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
@@ -190,7 +208,10 @@ impl vox_core::FromVoxLane for RootLane {
         caller: vox_core::Caller,
         connection: Option<vox_core::ConnectionHandle>,
     ) -> Self {
-        Self { caller, _connection: connection }
+        Self {
+            caller,
+            _connection: connection,
+        }
     }
 }
 
@@ -240,13 +261,161 @@ pub async fn establish_server<C>(base_override: Option<&str>) -> Result<C, Strin
 where
     C: vox_core::FromVoxLane + Clone + 'static,
 {
-    establish_at::<C>(&server_ws_url(base_override)?).await
+    let caller = shared_caller_at(&server_ws_url(base_override)?).await?;
+    Ok(C::from_vox_lane(caller, None))
+}
+
+/// The shared root connection for one endpoint URL — establish once,
+/// reuse for every service.
+///
+/// This is the single choke point that makes "one socket per endpoint"
+/// true. Keyed by the **full URL**, not a slug: the same slug on two
+/// servers (multi-server registry) must be two independent sockets, and
+/// switching the active server must not hand back the previous server's
+/// root.
+///
+/// The cache owns the [`RootLane`], which owns the
+/// [`vox_core::ConnectionHandle`] — that ownership is what holds the
+/// socket open, since typed clients built from the caller are views with
+/// no session handle of their own.
+///
+/// Entries are validated on access via `Caller::is_connected()` rather
+/// than keyed by the app `Connection`'s generation: this cache sits
+/// *below* that layer (multi-org fan-out reaches it for orgs the app
+/// connection isn't pointed at), so the root's own liveness is the only
+/// invariant that always holds. A dead root is evicted and re-established
+/// transparently.
+/// A dial in progress, shared by every caller that asked for the same
+/// URL while it was in flight.
+type SharedDial = futures_util::future::Shared<DialFuture>;
+#[cfg(target_arch = "wasm32")]
+type DialFuture = futures_util::future::LocalBoxFuture<'static, Result<vox_core::Caller, String>>;
+#[cfg(not(target_arch = "wasm32"))]
+type DialFuture = futures_util::future::BoxFuture<'static, Result<vox_core::Caller, String>>;
+
+async fn shared_caller_at(url: &str) -> Result<vox_core::Caller, String> {
+    if let Some(caller) = cached_live_caller(url) {
+        return Ok(caller);
+    }
+    // SINGLE-FLIGHT. The cache alone is not enough: it can only be
+    // populated *after* a dial completes, so every caller that arrives
+    // during the first dial also misses and dials. A page load fans out
+    // to dozens of services at once, which is exactly that window —
+    // measured at 72 concurrent dials to one endpoint. The losers were
+    // then thrown away, so the cache "worked" and the symptom was purely
+    // a slow load plus 71 wasted handshakes.
+    //
+    // So concurrent callers now await the SAME dial rather than starting
+    // their own.
+    let dial = with_inflight(|inflight| {
+        if let Some(dial) = inflight.get(url) {
+            return dial.clone();
+        }
+        let owned = url.to_owned();
+        let fut = async move {
+            let root = establish_at::<RootLane>(&owned).await?;
+            let caller = insert_root(&owned, root);
+            // Clear the in-flight slot so a later dial (after this root
+            // dies) starts fresh. Callers already awaiting this `Shared`
+            // still get its cached result.
+            with_inflight(|inflight| inflight.remove(&owned));
+            Ok(caller)
+        };
+        // `DialFuture` is already cfg'd (LocalBoxFuture on wasm, BoxFuture
+        // on native), so this one line covers both targets.
+        let dial: SharedDial = futures_util::FutureExt::shared(Box::pin(fut) as DialFuture);
+        inflight.insert(url.to_owned(), dial.clone());
+        dial
+    });
+    // Awaited with no lock held — the dial is a network round trip.
+    dial.await
+}
+
+/// Run `f` against the per-target in-flight dial map. Same locking
+/// discipline as [`with_roots`]: never held across an await.
+#[cfg(target_arch = "wasm32")]
+fn with_inflight<R>(f: impl FnOnce(&mut std::collections::HashMap<String, SharedDial>) -> R) -> R {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static INFLIGHT: RefCell<HashMap<String, SharedDial>> = RefCell::new(HashMap::new());
+    }
+    INFLIGHT.with(|m| f(&mut m.borrow_mut()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn with_inflight<R>(f: impl FnOnce(&mut std::collections::HashMap<String, SharedDial>) -> R) -> R {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static INFLIGHT: OnceLock<Mutex<HashMap<String, SharedDial>>> = OnceLock::new();
+    let m = INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = m.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut guard)
+}
+
+/// Look up a cached root, evicting it if the connection has died.
+fn cached_live_caller(url: &str) -> Option<vox_core::Caller> {
+    with_roots(|roots| match roots.get(url) {
+        Some(root) if root.caller.is_connected() => Some(root.caller.clone()),
+        Some(_) => {
+            tracing::warn!(url, "vox: cached root is dead; re-establishing");
+            roots.remove(url);
+            None
+        }
+        None => None,
+    })
+}
+
+/// Publish a freshly established root, resolving the dial race.
+///
+/// Two tasks can miss the cache and dial the same URL concurrently (the
+/// lock is deliberately not held across the dial — a network round trip
+/// under a global lock would serialize every org's first connect). The
+/// loser drops its socket rather than evicting the winner, so callers
+/// that already hold the winner's caller keep a live connection.
+fn insert_root(url: &str, root: RootLane) -> vox_core::Caller {
+    with_roots(|roots| match roots.get(url) {
+        Some(existing) if existing.caller.is_connected() => existing.caller.clone(),
+        _ => {
+            let caller = root.caller.clone();
+            roots.insert(url.to_owned(), root);
+            caller
+        }
+    })
+}
+
+/// Run `f` against the per-target root cache.
+///
+/// wasm is single-threaded, so a `thread_local` is the whole story.
+/// Native needs a process-global map because the desktop app establishes
+/// from whatever runtime thread happens to poll the future. The lock is
+/// never held across an await (see [`insert_root`]), so a plain `std`
+/// mutex is enough and this needs no async-lock dependency.
+#[cfg(target_arch = "wasm32")]
+fn with_roots<R>(f: impl FnOnce(&mut std::collections::HashMap<String, RootLane>) -> R) -> R {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static ROOTS: RefCell<HashMap<String, RootLane>> = RefCell::new(HashMap::new());
+    }
+    ROOTS.with(|roots| f(&mut roots.borrow_mut()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn with_roots<R>(f: impl FnOnce(&mut std::collections::HashMap<String, RootLane>) -> R) -> R {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static ROOTS: OnceLock<Mutex<HashMap<String, RootLane>>> = OnceLock::new();
+    let roots = ROOTS.get_or_init(|| Mutex::new(HashMap::new()));
+    // Poisoning only means some other caller panicked mid-map-edit; the
+    // map itself is still a valid cache, so recover rather than cascade.
+    let mut guard = roots.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut guard)
 }
 
 /// One shared [`vox_core::Caller`] per org — the handle every typed
-/// client is built from. On wasm the connection root (a liveness-only
-/// `NoopClient`) is cached per slug: one socket per org, no matter how
-/// many services a page touches. The server's per-org `LayerRouter`
+/// client is built from. One socket per org on both targets, no matter
+/// how many services a page touches: the server's per-org `LayerRouter`
 /// dispatches every service on that one connection.
 ///
 /// This also backs the app root's `Connection<Caller>`
@@ -254,73 +423,16 @@ where
 /// migrate to atom hooks build clients from the shared caller; legacy
 /// `feeds::*` fns ride the same socket through [`establish_for`].
 pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::cell::RefCell;
-        use std::collections::HashMap;
-
-        // The cached NoopClient is the connection's liveness anchor —
-        // dropping the last caller closes the socket, so the cache
-        // holds the root while it lives. Typed clients built from the
-        // caller are virtual views (no session handle).
-        thread_local! {
-            static ROOTS: RefCell<HashMap<String, RootLane>> =
-                RefCell::new(HashMap::new());
-        }
-        // Key by the full endpoint URL, not the bare slug: the same slug
-        // on two different servers (multi-server registry) must be two
-        // independent sockets, and switching the active server must not
-        // hand back the previous server's cached root.
-        let url = org_ws_url(slug)?;
-        // Validate on access: a dead root (server restart, socket drop)
-        // is evicted so the next lines re-establish instead of handing
-        // out a corpse forever. See the module docs ("Liveness") for why
-        // this is a per-access check rather than generation keying.
-        if let Some(caller) = ROOTS.with(|m| {
-            let mut m = m.borrow_mut();
-            match m.get(&url) {
-                Some(root) if root.caller.is_connected() => Some(root.caller.clone()),
-                Some(_) => {
-                    tracing::warn!(url, "vox: cached org root is dead; re-establishing");
-                    m.remove(&url);
-                    None
-                }
-                None => None,
-            }
-        }) {
-            return Ok(caller);
-        }
-        let root = establish_at::<RootLane>(&url).await?;
-        let caller = root.caller.clone();
-        ROOTS.with(|m| m.borrow_mut().insert(url, root));
-        Ok(caller)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        // Native has no cache (mirrors the old per-call behavior); the
-        // root is returned through the caller it carries — callers that
-        // need liveness across awaits should hold the typed client from
-        // `establish_for` instead.
-        let root = establish_at::<RootLane>(&org_ws_url(slug)?).await?;
-        Ok(root.caller.clone())
-    }
+    shared_caller_at(&org_ws_url(slug)?).await
 }
 
-/// Establish *any* service client against a specific org's vox endpoint.
-/// Wasm: a cheap typed view over the org's one cached connection
-/// ([`caller_for`]) — previously this cached a socket per
-/// `(service, org)`. Native: per-call establish, as before.
+/// Establish *any* service client against a specific org's vox endpoint:
+/// a cheap typed view over the org's ONE cached connection
+/// ([`caller_for`]). Identical on both targets.
 pub async fn establish_for<C>(slug: &str) -> Result<C, String>
 where
     C: vox_core::FromVoxLane + Clone + 'static,
 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let caller = caller_for(slug).await?;
-        Ok(C::from_vox_lane(caller, None))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        establish_at::<C>(&org_ws_url(slug)?).await
-    }
+    let caller = caller_for(slug).await?;
+    Ok(C::from_vox_lane(caller, None))
 }

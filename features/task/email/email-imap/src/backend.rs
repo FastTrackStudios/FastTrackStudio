@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use email_config::{BackendKind, FolderAliases, SmtpConfig, TlsMode};
 use email_proto::{
-    Account, Draft, EmailEvent, EmailSync, EmailSyncError, Envelope, FlagDelta, Folder, Message,
-    SeqRange,
+    Account, Draft, EmailEvent, EmailSync, EmailSyncError, Envelope, FlagDelta, Folder,
+    FolderRole, Message, SeqRange,
 };
 use futures::StreamExt;
 use tokio::sync::{Mutex, RwLock, broadcast};
@@ -48,6 +48,23 @@ pub struct Backend {
     /// oldest queued events and re-pulls on reconnect, which is
     /// what `EmailEvent::Resync` asks for anyway.
     changes: architect::PubSub<email_proto::EmailChange>,
+    /// `account → (Message-ID → (backend folder, uid))`, filled in as
+    /// envelopes are listed.
+    ///
+    /// The proto addresses messages by Message-ID; IMAP addresses them
+    /// by UID, so every read/flag/move otherwise costs a
+    /// `UID SEARCH HEADER Message-ID` per mailbox. Gmail does not index
+    /// arbitrary headers, and `[Gmail]/All Mail` is a superset of the
+    /// account — that search took **over a minute** on a real mailbox,
+    /// which is a hang as far as anyone clicking a message is
+    /// concerned.
+    ///
+    /// Listing a folder already returns UID and Message-ID together, so
+    /// the mapping is free at exactly the moment the UI learns a
+    /// message exists — and the UI always lists before it opens. Search
+    /// stays as the fallback for anything not listed this session.
+    /// (`email-store`'s sqlite index is the durable version of this.)
+    uid_index: Arc<RwLock<HashMap<String, HashMap<String, (String, u32)>>>>,
     /// Tokio runtime needed inside the sync `EmailSync` methods.
     /// We use `block_on` via `TokioBlockingDispatcher`; this
     /// handle gives us access to the same runtime the backend
@@ -104,9 +121,29 @@ impl Backend {
             accounts: Arc::new(accounts),
             channels: Arc::new(RwLock::new(HashMap::new())),
             changes: architect::PubSub::sliding(256),
+            uid_index: Arc::new(RwLock::new(HashMap::new())),
             runtime,
             locks: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+
+    /// Publish this backend's change events into `hub` instead of its
+    /// own.
+    ///
+    /// A server that serves several accounts across different backends
+    /// mounts ONE `EmailSync` service, so there must be ONE stream for
+    /// subscribers to attach to. `architect::PubSub` has no subscribe
+    /// side to bridge with, so the multiplexer hands its hub down to
+    /// each sub-backend at build time instead. Call before the backend
+    /// is cloned or used.
+    #[must_use]
+    pub fn with_changes_hub(
+        mut self,
+        hub: architect::PubSub<email_proto::EmailChange>,
+    ) -> Self {
+        self.changes = hub;
+        self
     }
 
     fn state(&self, account: &str) -> Result<&AccountState, EmailSyncError> {
@@ -306,6 +343,7 @@ impl Backend {
         };
 
         let mut envs = Vec::new();
+        let mut learned: Vec<(String, u32)> = Vec::new();
         let mut stream = session
             .uid_fetch(&seq, "(UID FLAGS RFC822.SIZE BODY.PEEK[HEADER])")
             .await
@@ -318,15 +356,118 @@ impl Backend {
             // IMAP UID isn't a Message-ID, but we use it as a
             // stable secondary key when the header lacks one.
             let uid_synth = fetch.uid.map(|u| format!("<uid-{u}@imap.local>"));
+            let uid = fetch.uid;
             match parse::envelope_from_bytes(&header, folder, flags, uid_synth, size) {
-                Ok(env) => envs.push(env),
+                Ok(env) => {
+                    if let Some(uid) = uid {
+                        learned.push((env.message_id.clone(), uid));
+                    }
+                    envs.push(env);
+                }
                 Err(err) => tracing::warn!(error = %err, "envelope parse failed"),
             }
         }
         drop(stream);
         let _ = session.logout().await;
+
+        // Record the UID mapping for everything just listed — one
+        // write, outside the fetch loop.
+        if !learned.is_empty() {
+            let mut idx = self.uid_index.write().await;
+            let per_account = idx.entry(state.account.id.0.clone()).or_default();
+            // Bounded: a long-lived server listing many folders would
+            // otherwise grow this without limit. Dropping it costs one
+            // slow search per message afterwards, never correctness.
+            if per_account.len() > 20_000 {
+                per_account.clear();
+            }
+            for (message_id, uid) in learned {
+                per_account.insert(message_id, (resolved.clone(), uid));
+            }
+        }
+
         envs.sort_by(|a, b| b.date_ms.cmp(&a.date_ms));
         Ok(envs)
+    }
+
+
+    /// `(backend folder, uid)` for a Message-ID we listed earlier.
+    ///
+    /// The fast path for every open / flag / move: the UI lists a
+    /// folder before it can click anything in it, so this hits.
+    async fn cached_uid(&self, account: &str, message_id: &str) -> Option<(String, u32)> {
+        self.uid_index
+            .read()
+            .await
+            .get(account)?
+            .get(message_id)
+            .cloned()
+    }
+
+    /// Order the mailboxes to scan when resolving a Message-ID.
+    ///
+    /// Ordering is the difference between "instant" and "a minute" on a
+    /// real Gmail account. Gmail exposes ~15 mailboxes, and
+    /// `[Gmail]/All Mail` is a *superset* of every other one — so a
+    /// naive LIST-order scan can burn a dozen SELECT+SEARCH round trips
+    /// before reaching the message, with the single most expensive
+    /// mailbox somewhere in the middle.
+    ///
+    /// Inbox first, because that is where a reader almost always is.
+    /// All Mail last: it matches essentially everything, which makes it
+    /// the correct fallback and the worst first guess. Non-selectable
+    /// container nodes (Gmail's bare `[Gmail]`) are dropped — SELECT on
+    /// them always fails.
+    fn search_order(folders: Vec<Folder>) -> Vec<Folder> {
+        fn rank(f: &Folder) -> u8 {
+            match f.role {
+                Some(FolderRole::Inbox) => 0,
+                // Superset mailbox — always matches, always slowest.
+                Some(FolderRole::All) => 3,
+                // Virtual views over other mailboxes; a hit here is a
+                // duplicate of one we will reach anyway.
+                Some(FolderRole::Flagged) => 2,
+                _ => 1,
+            }
+        }
+        let mut out: Vec<Folder> = folders
+            .into_iter()
+            .filter(|f| !f.name.eq_ignore_ascii_case("[Gmail]"))
+            .collect();
+        out.sort_by_key(rank);
+        out
+    }
+
+    /// Find `(alias folder id, backend folder name, uid)` for a
+    /// Message-ID, reusing ONE open session.
+    ///
+    /// The previous shape opened a fresh TLS connection and logged in
+    /// *per folder*, then logged out again — up to 15 full handshakes
+    /// for a single click on a Gmail message, which Gmail also
+    /// rate-limits. One session, N cheap SELECTs.
+    async fn locate_in_session(
+        session: &mut connect::ImapSession,
+        state: &AccountState,
+        folders: &[Folder],
+        message_id: &str,
+    ) -> Option<(String, String, u32)> {
+        let needle = format!(
+            "HEADER Message-ID \"{}\"",
+            message_id.trim_matches(|c| c == '<' || c == '>')
+        );
+        for folder in folders {
+            let backend_name = state.aliases.resolve(&folder.id).to_string();
+            if session.select(&backend_name).await.is_err() {
+                continue;
+            }
+            let Ok(uids) = session.uid_search(&needle).await else {
+                continue;
+            };
+            if let Some(uid) = uids.into_iter().next() {
+                return Some((folder.id.clone(), backend_name, uid));
+            }
+        }
+        None
     }
 
     async fn run_fetch_message(
@@ -334,92 +475,88 @@ impl Backend {
         state: &AccountState,
         message_id: &str,
     ) -> Result<Message, EmailSyncError> {
-        // The proto identifies messages by RFC2822 Message-ID;
-        // IMAP indexes by UID. Search per-mailbox until we
-        // find one — `email-store` will short-circuit this via
-        // its index later.
-        let folders = self.run_list_folders(state).await?;
-        for folder in folders {
-            let backend_name = state.aliases.resolve(&folder.id).to_string();
-            let lock = self.account_lock(&state.account.id.0).await;
-            let _g = lock.lock().await;
-            let mut session = self.open(state).await?;
-            if session.select(&backend_name).await.is_err() {
-                continue;
+        // The proto identifies messages by RFC2822 Message-ID; IMAP
+        // indexes by UID, so this has to search. One session, ordered
+        // folders — see `locate_in_session` / `search_order`.
+        // `email-store`'s index short-circuits it entirely later.
+        // Fast path: we almost certainly listed this message a moment
+        // ago, which taught us its folder and UID. Only fall back to
+        // the per-mailbox header search when we have not.
+        let cached = self.cached_uid(&state.account.id.0, message_id).await;
+
+        let folders = match &cached {
+            Some(_) => Vec::new(),
+            None => Self::search_order(self.run_list_folders(state).await?),
+        };
+        let lock = self.account_lock(&state.account.id.0).await;
+        let _g = lock.lock().await;
+        let mut session = self.open(state).await?;
+
+        let located = match cached {
+            Some((backend, uid)) => {
+                if session.select(&backend).await.is_ok() {
+                    Some((backend.clone(), backend, uid))
+                } else {
+                    None
+                }
             }
-            let needle = format!(
-                "HEADER Message-ID \"{}\"",
-                message_id.trim_matches(|c| c == '<' || c == '>')
-            );
-            let uids: Vec<u32> = if let Ok(u) = session.uid_search(&needle).await {
-                u.into_iter().collect()
-            } else {
-                let _ = session.logout().await;
-                continue;
-            };
-            if uids.is_empty() {
-                let _ = session.logout().await;
-                continue;
-            }
-            let uid = uids[0];
-            let (body, flags, size) = {
-                let mut stream = session
-                    .uid_fetch(uid.to_string(), "(UID FLAGS RFC822.SIZE BODY.PEEK[])")
-                    .await
-                    .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
-                let Some(item) = stream.next().await else {
-                    drop(stream);
-                    let _ = session.logout().await;
-                    continue;
-                };
-                let fetch = item.map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
-                let body = fetch.body().unwrap_or(&[]).to_vec();
-                let flags: Vec<String> = fetch.flags().map(|f| format!("{f:?}")).collect();
-                let size = u64::from(fetch.size.unwrap_or(0));
-                (body, flags, size)
-            };
+            None => Self::locate_in_session(&mut session, state, &folders, message_id).await,
+        };
+        let Some((alias_id, _backend, uid)) = located else {
             let _ = session.logout().await;
-            return parse::message_from_bytes(&body, &folder.id, flags, size);
-        }
-        Err(EmailSyncError::NotFound)
+            return Err(EmailSyncError::NotFound);
+        };
+
+        let fetched = {
+            let mut stream = session
+                .uid_fetch(uid.to_string(), "(UID FLAGS RFC822.SIZE BODY.PEEK[])")
+                .await
+                .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+            match stream.next().await {
+                Some(item) => {
+                    let fetch = item.map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+                    let body = fetch.body().unwrap_or(&[]).to_vec();
+                    let flags: Vec<String> = fetch.flags().map(|f| format!("{f:?}")).collect();
+                    let size = u64::from(fetch.size.unwrap_or(0));
+                    Some((body, flags, size))
+                }
+                None => None,
+            }
+        };
+        let _ = session.logout().await;
+
+        let Some((body, flags, size)) = fetched else {
+            return Err(EmailSyncError::NotFound);
+        };
+        parse::message_from_bytes(&body, &alias_id, flags, size)
     }
 
-    /// Locate `(folder, uid)` for one Message-ID across every
-    /// folder on the account. Returns the **backend** folder
-    /// name (already alias-resolved) so callers can re-use it
-    /// directly with `session.select`. O(folders) — the
-    /// `email-store` index avoids this in steady state.
+    /// Locate `(backend folder name, uid)` for one Message-ID.
+    ///
+    /// Returns the **backend** folder name (already alias-resolved) so
+    /// callers can hand it straight to `session.select`. Shares the
+    /// ordered single-session scan with `run_fetch_message` — this used
+    /// to open a connection per folder, which made every flag / move /
+    /// delete on a Gmail account as slow as a full mailbox walk.
     async fn locate_uid(
         &self,
         state: &AccountState,
         message_id: &str,
     ) -> Result<(String, u32), EmailSyncError> {
-        let folders = self.run_list_folders(state).await?;
-        for folder in folders {
-            let backend_name = state.aliases.resolve(&folder.id).to_string();
-            let lock = self.account_lock(&state.account.id.0).await;
-            let _g = lock.lock().await;
-            let mut session = self.open(state).await?;
-            if session.select(&backend_name).await.is_err() {
-                let _ = session.logout().await;
-                continue;
-            }
-            let needle = format!(
-                "HEADER Message-ID \"{}\"",
-                message_id.trim_matches(|c| c == '<' || c == '>')
-            );
-            let uids: Vec<u32> = if let Ok(u) = session.uid_search(&needle).await {
-                u.into_iter().collect()
-            } else {
-                let _ = session.logout().await;
-                continue;
-            };
-            let _ = session.logout().await;
-            if let Some(uid) = uids.first() {
-                return Ok((backend_name, *uid));
-            }
+        // Same fast path as `run_fetch_message` — see `cached_uid`.
+        if let Some((backend, uid)) = self.cached_uid(&state.account.id.0, message_id).await {
+            return Ok((backend, uid));
         }
-        Err(EmailSyncError::NotFound)
+        let folders = Self::search_order(self.run_list_folders(state).await?);
+        let lock = self.account_lock(&state.account.id.0).await;
+        let _g = lock.lock().await;
+        let mut session = self.open(state).await?;
+        let found = Self::locate_in_session(&mut session, state, &folders, message_id).await;
+        let _ = session.logout().await;
+        match found {
+            Some((_alias, backend, uid)) => Ok((backend, uid)),
+            None => Err(EmailSyncError::NotFound),
+        }
     }
 
     async fn run_set_flags(

@@ -43,21 +43,54 @@
 //! The server registers exactly one vault per org under the id
 //! `"default"`.
 //!
+//! ## Module layout
+//!
+//! This was one 1,567-line file. The page component is still the
+//! biggest piece — it owns the signal graph, so splitting it further
+//! means moving state, not just text — but everything that did NOT
+//! need the signals now lives beside it:
+//!
+//! - [`rpc`] — the `VaultSync` round-trips (folder index, links,
+//!   backlinks, move-to-folder, create). Transport, not UI.
+//! - [`tree`] — the virtual-folder node model ([`TreeNode`],
+//!   [`build_tree`]) and its recursive renderer.
+//! - [`tabs`] — document tabs and split panes ([`Pane`],
+//!   [`MAX_PANES`], the tab strip).
+//! - [`graph`] — pure builders for the Links tab's local graph and
+//!   verse references.
+//!
 //! [`folder_index`]: vault_proto::VaultSync::folder_index
 //! [`set_folder`]: vault_proto::VaultSync::set_folder
 //! [`PageMeta`]: vault_proto::PageMeta
+
+mod graph;
+mod rpc;
+mod tabs;
+mod tree;
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{ChevronRight, FileText, Folder};
+use fts_ui::lucide_dioxus::Folder;
 use fts_ui::prelude::*;
-use vault_proto::{PageMeta, TagCount};
-use view_knowledge_graph::{GraphEdge, GraphNode, KnowledgeGraphView, WikiGraph};
+use vault_proto::TagCount;
+use view_knowledge_graph::KnowledgeGraphView;
 
 use crate::pages::note_view::NoteView;
 use crate::shell::mobile::{BottomSheet, MobileActionBar};
+
+use graph::{build_local_graph, osis_to_ref};
+use tabs::{render_tab_bar, OpenTab, Pane, MAX_PANES};
+// `build_tree` / `basename_of` / `TreeNode` were free items on this
+// module before the split; other pages still import them by those paths.
+pub(crate) use tree::{basename_of, build_tree, TreeNode};
+use tree::render_node;
+// Re-exported: these were free functions on this module before the
+// split, and other pages (search, note_view, the mobile shell) import
+// them by their old paths.
+pub(crate) use rpc::{create_new_file, fetch_folder_index};
+use rpc::{fetch_backlinks, fetch_links, move_to_folder};
 use crate::vault_lookup;
 
 #[cfg(target_arch = "wasm32")]
@@ -70,25 +103,8 @@ pub(crate) struct FileMeta {
     pub(crate) sha256: String,
 }
 
-/// One open note in a pane's tab strip: its path + last-known sha
-/// (the `DocumentSession` conditional-write base).
-#[derive(Clone, PartialEq)]
-struct OpenTab {
-    path: String,
-    sha: String,
-}
 
-/// A document pane — an ordered set of open tabs and the active one.
-/// Each pane mounts exactly its active tab's [`NoteView`] (inactive
-/// tabs are unmounted; switching remounts a fresh session).
-#[derive(Clone, PartialEq)]
-struct Pane {
-    tabs: Vec<OpenTab>,
-    active: usize,
-}
 
-/// Hard cap on side-by-side panes — a single 2-way horizontal split.
-const MAX_PANES: usize = 2;
 
 /// The right sidebar's active tab. Properties (the focused note's
 /// frontmatter, edited live) and Links (backlinks + outgoing links +
@@ -100,13 +116,6 @@ enum RightTab {
     Share,
 }
 
-/// One node of the virtual-folder tree.
-#[derive(Clone, PartialEq)]
-pub(crate) struct TreeNode {
-    pub(crate) meta: PageMeta,
-    pub(crate) children: Vec<usize>,
-    pub(crate) is_folder: bool,
-}
 
 #[component]
 pub fn VaultView(
@@ -251,6 +260,13 @@ pub fn VaultView(
     // The focused note's live editor doc, published by its `NoteView`
     // and consumed by the right-sidebar Properties tab.
     use_context_provider(|| Signal::new(None::<crate::pages::note_properties::FocusedDoc>));
+    // …and the scope that owns those buffers. It must be THIS scope:
+    // the context signal above lives here, so anything reachable
+    // through it has to outlive the panes that publish into it. See
+    // `DocOwnerScope` for the cross-scope read this prevents.
+    use_context_provider(|| {
+        crate::document_session::DocOwnerScope(dioxus::core::current_scope_id())
+    });
     // Which right-sidebar tab is showing. Properties first — it's the
     // one used most while writing.
     let mut right_tab = use_signal(|| RightTab::Properties);
@@ -1026,248 +1042,9 @@ pub fn VaultView(
     }
 }
 
-/// One pane's tab strip: a button per open tab (active = primary
-/// underline; a dimmer underline marks the active tab of an
-/// *unfocused* pane), each with a close ✕, plus split / close-pane
-/// controls docked at the right edge.
-#[allow(clippy::too_many_arguments)]
-fn render_tab_bar(
-    pi: usize,
-    pane: &Pane,
-    n_panes: usize,
-    focused: usize,
-    focus_tab: Callback<(usize, usize)>,
-    close_tab: Callback<(usize, usize)>,
-    split: Callback<()>,
-    close_pane: Callback<usize>,
-) -> Element {
-    let is_focused_pane = focused == pi;
-    rsx! {
-        div { class: "flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-muted/20 px-1",
-            for (idx, tab) in pane.tabs.iter().cloned().enumerate() {
-                {
-                    let is_active = idx == pane.active;
-                    let title = basename_of(&tab.path).to_owned();
-                    let cls = if is_active && is_focused_pane {
-                        "flex items-center gap-1 border-b-2 border-primary px-2 py-1.5 text-xs font-medium text-foreground"
-                    } else if is_active {
-                        "flex items-center gap-1 border-b-2 border-border px-2 py-1.5 text-xs font-medium text-foreground"
-                    } else {
-                        "flex items-center gap-1 border-b-2 border-transparent px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-                    };
-                    rsx! {
-                        div { key: "{tab.path}", class: cls,
-                            button {
-                                class: "min-w-0 max-w-[12rem] truncate text-left",
-                                title: "{tab.path}",
-                                onclick: move |_| focus_tab.call((pi, idx)),
-                                "{title}"
-                            }
-                            button {
-                                class: "shrink-0 rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground",
-                                title: "Close tab",
-                                onclick: move |_| close_tab.call((pi, idx)),
-                                "×"
-                            }
-                        }
-                    }
-                }
-            }
-            div { class: "ml-auto flex shrink-0 items-center gap-0.5 pl-1",
-                if n_panes < MAX_PANES {
-                    button {
-                        class: "rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground",
-                        title: "Split right",
-                        onclick: move |_| split.call(()),
-                        "⇥"
-                    }
-                }
-                if n_panes > 1 {
-                    button {
-                        class: "rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground",
-                        title: "Close pane",
-                        onclick: move |_| close_pane.call(pi),
-                        "⊟"
-                    }
-                }
-            }
-        }
-    }
-}
 
-/// Render one tree node (and, when a folder is expanded, its
-/// children) recursively. Folders: chevron toggles `collapsed`,
-/// the name opens the folder note, "+" files a new note under
-/// it. Leaves: the name opens the note. Every row has a hover
-/// "move" affordance.
-#[allow(clippy::too_many_arguments)]
-fn render_node(
-    nodes: Rc<Vec<TreeNode>>,
-    idx: usize,
-    depth: usize,
-    mut collapsed: Signal<HashSet<String>>,
-    selected: Memo<Option<String>>,
-    on_open: Callback<FileMeta>,
-    mut move_target: Signal<Option<String>>,
-    mut create_parent: Signal<Option<String>>,
-) -> Element {
-    let node = nodes[idx].clone();
-    let key = node.meta.basename.to_lowercase();
-    let is_expanded = !collapsed.read().contains(&key);
-    let is_active = selected.read().as_deref() == Some(node.meta.path.as_str());
-    let indent = depth * 14 + 8;
 
-    let open_meta = FileMeta {
-        path: node.meta.path.clone(),
-        sha256: node.meta.sha256.clone(),
-    };
-    let move_path = node.meta.path.clone();
-    let create_base = node.meta.basename.clone();
-    let toggle_key = key.clone();
 
-    let row_cls = if is_active {
-        "group flex items-center gap-1 rounded pr-1 text-sm bg-accent text-accent-foreground"
-    } else {
-        "group flex items-center gap-1 rounded pr-1 text-sm hover:bg-accent/50"
-    };
-
-    rsx! {
-        div { key: "{node.meta.path}",
-            div { class: row_cls, style: "padding-left: {indent}px",
-                if node.is_folder {
-                    button {
-                        class: "flex size-5 shrink-0 items-center justify-center text-muted-foreground",
-                        onclick: move |_| {
-                            let mut c = collapsed.write();
-                            if !c.remove(&toggle_key) { c.insert(toggle_key.clone()); }
-                        },
-                        span {
-                            class: if is_expanded { "transition-transform rotate-90" } else { "transition-transform" },
-                            ChevronRight { size: 14 }
-                        }
-                    }
-                    span { class: "flex size-4 shrink-0 items-center justify-center text-muted-foreground",
-                        Folder { size: 14 }
-                    }
-                } else {
-                    span { class: "ml-5 flex size-4 shrink-0 items-center justify-center text-muted-foreground",
-                        FileText { size: 14 }
-                    }
-                }
-                button {
-                    class: "min-w-0 flex-1 truncate py-1 text-left",
-                    onclick: move |_| on_open.call(open_meta.clone()),
-                    "{node.meta.title}"
-                }
-                if node.is_folder {
-                    button {
-                        class: "hidden size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground group-hover:flex",
-                        title: "New note in this folder",
-                        onclick: move |_| create_parent.set(Some(create_base.clone())),
-                        "+"
-                    }
-                }
-                button {
-                    class: "hidden size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground group-hover:flex",
-                    title: "Move to folder",
-                    onclick: move |_| move_target.set(Some(move_path.clone())),
-                    "⋯"
-                }
-            }
-            if node.is_folder && is_expanded {
-                for &child in node.children.iter() {
-                    {render_node(nodes.clone(), child, depth + 1, collapsed, selected, on_open, move_target, create_parent)}
-                }
-            }
-        }
-    }
-}
-
-/// Build the virtual-folder tree from the flat page list.
-/// Parent = each page's `folder` (already a basename); roots are
-/// pages with no/unresolved parent. Cycles are broken (the node
-/// falls back to a root). Children sort folders-first, then by
-/// title.
-pub(crate) fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
-    let mut nodes: Vec<TreeNode> = pages
-        .iter()
-        .map(|m| TreeNode {
-            meta: m.clone(),
-            children: Vec::new(),
-            is_folder: false,
-        })
-        .collect();
-
-    // basename (lowercased) → first node with it.
-    let mut by_base: HashMap<String, usize> = HashMap::new();
-    for (i, n) in nodes.iter().enumerate() {
-        by_base.entry(n.meta.basename.to_lowercase()).or_insert(i);
-    }
-
-    // Resolve each node's parent index (None = root). Self-parent
-    // and unknown targets resolve to root.
-    let parent_of: Vec<Option<usize>> = (0..nodes.len())
-        .map(|i| {
-            let f = nodes[i].meta.folder.to_lowercase();
-            if f.is_empty() {
-                return None;
-            }
-            match by_base.get(&f) {
-                Some(&p) if p != i => Some(p),
-                _ => None,
-            }
-        })
-        .collect();
-
-    // A node is a tree child only if walking its ancestry reaches
-    // a root within N steps — otherwise it's in a cycle and we
-    // treat it as a root so the tree stays finite.
-    let max = nodes.len();
-    let resolves = |start: usize| -> bool {
-        let mut cur = start;
-        for _ in 0..=max {
-            match parent_of[cur] {
-                None => return true,
-                Some(p) => cur = p,
-            }
-        }
-        false
-    };
-
-    let mut roots = Vec::new();
-    for (i, parent) in parent_of.iter().enumerate() {
-        match parent {
-            Some(p) if resolves(i) => nodes[*p].children.push(i),
-            _ => roots.push(i),
-        }
-    }
-
-    for n in &mut nodes {
-        let t = n.meta.page_type.to_lowercase();
-        n.is_folder = !n.children.is_empty() || t == "folder" || t == "index";
-    }
-
-    // Sort key per node — captured up front so the child/root
-    // sorts borrow it (not `nodes`).
-    let sort_key: Vec<(bool, String)> = nodes
-        .iter()
-        .map(|n| (!n.is_folder, n.meta.title.to_lowercase()))
-        .collect();
-    roots.sort_by(|a, b| sort_key[*a].cmp(&sort_key[*b]));
-    for n in &mut nodes {
-        n.children.sort_by(|a, b| sort_key[*a].cmp(&sort_key[*b]));
-    }
-
-    (nodes, roots)
-}
-
-/// Filename without dirs/extension — display fallback for paths
-/// missing from the folder index. Also the note title shown +
-/// edited by the [`note_header`](crate::pages::note_header) H1.
-pub(crate) fn basename_of(path: &str) -> &str {
-    let file = path.rsplit('/').next().unwrap_or(path);
-    file.strip_suffix(".md").unwrap_or(file)
-}
 
 // ── shared frontmatter readers ───────────────────────────────
 
@@ -1294,212 +1071,12 @@ pub(crate) fn seed_note_bytes() -> Vec<u8> {
     format!("---\ncreated: {today}\ntags: []\naliases: []\n---\n\n").into_bytes()
 }
 
-/// OSIS verse id → a human reference the scripture service parses
-/// (`John.3.16` → `John 3:16`; a range keeps its start). Best-effort.
-fn osis_to_ref(osis: &str) -> String {
-    let first = osis.split('-').next().unwrap_or(osis);
-    let mut it = first.rsplitn(3, '.');
-    match (it.next(), it.next(), it.next()) {
-        (Some(v), Some(c), Some(b)) => format!("{b} {c}:{v}"),
-        _ => first.to_string(),
-    }
-}
 
-/// Frontmatter-derived page index for the folder tree.
-pub(crate) async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, String> {
-    let client = crate::vox_clients::vault_client(&slug).await?;
-    #[cfg(target_arch = "wasm32")]
-    {
-        let idx = client
-            .folder_index(VAULT_ID.to_owned())
-            .await
-            .map_err(|e| format!("folder_index: {e:?}"))?;
-        let mut pages: Vec<PageMeta> = idx
-            .pages
-            .into_iter()
-            .filter(|p| {
-                // Notes AND base views — a `.base` is a first-class
-                // vault citizen (plans/vault-views.md): it appears in
-                // the tree, deep-links, and renders its view in place.
-                std::path::Path::new(&p.path)
-                    .extension()
-                    .is_some_and(|ext| {
-                        ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("base")
-                    })
-            })
-            .collect();
-        pages.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
-        Ok(pages)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = client;
-        Err("native client not wired yet".to_owned())
-    }
-}
 
-/// The focused note + its 1-hop neighbourhood as a [`WikiGraph`], built
-/// client-side from what the right panel already fetched: backlink
-/// sources point AT `current`, resolved outgoing wikilinks point FROM
-/// it. Node ids are vault-relative paths, so a node click maps
-/// straight back onto the panel's `on_open` flow; labels come from the
-/// folder-index title lookup (basename fallback). Unresolved links are
-/// skipped — they have no note to open. Duplicate connections (a page
-/// that both links here and is linked from here) collapse to one edge.
-fn build_local_graph(
-    current: &str,
-    backlinks: &[String],
-    outlinks: &[vault_proto::GraphLink],
-    titles: &HashMap<String, (String, String)>,
-) -> WikiGraph {
-    // Edge list, deduped as unordered pairs (self-links dropped).
-    let mut seen: HashSet<(String, String)> = HashSet::new();
-    let mut edges: Vec<(String, String)> = Vec::new();
-    let mut push = |source: String, target: String| {
-        if source == target {
-            return;
-        }
-        let key = if source < target {
-            (source.clone(), target.clone())
-        } else {
-            (target.clone(), source.clone())
-        };
-        if seen.insert(key) {
-            edges.push((source, target));
-        }
-    };
-    for b in backlinks {
-        push(b.clone(), current.to_owned());
-    }
-    for l in outlinks {
-        if let Some(t) = &l.resolved {
-            push(current.to_owned(), t.clone());
-        }
-    }
 
-    // Node set = focal + everything an edge touches; link_count is
-    // the in-graph degree (sizes the focal node as the hub).
-    let mut degree: HashMap<&str, u32> = HashMap::new();
-    for (s, t) in &edges {
-        *degree.entry(s.as_str()).or_default() += 1;
-        *degree.entry(t.as_str()).or_default() += 1;
-    }
-    let mut paths: Vec<&str> = std::iter::once(current)
-        .chain(edges.iter().flat_map(|(s, t)| [s.as_str(), t.as_str()]))
-        .collect();
-    paths.sort_unstable();
-    paths.dedup();
-    let nodes = paths
-        .into_iter()
-        .map(|p| GraphNode {
-            id: p.to_owned(),
-            label: titles
-                .get(p)
-                .map(|(title, _)| title.clone())
-                .unwrap_or_else(|| basename_of(p).to_owned()),
-            kind: "other".to_owned(),
-            path: p.to_owned(),
-            link_count: degree.get(p).copied().unwrap_or(0),
-            community: 0,
-        })
-        .collect();
-    let edges = edges
-        .into_iter()
-        .map(|(s, t)| GraphEdge::wikilink(s, t, 1.0))
-        .collect();
-    WikiGraph {
-        nodes,
-        edges,
-        communities: Vec::new(),
-    }
-}
 
-/// Outgoing wikilinks of `path`, via the `VaultGraph` RPC.
-async fn fetch_links(slug: String, path: String) -> Result<Vec<vault_proto::GraphLink>, String> {
-    let client = crate::vox_clients::vault_graph_client(&slug).await?;
-    #[cfg(target_arch = "wasm32")]
-    {
-        client
-            .links(VAULT_ID.to_owned(), path)
-            .await
-            .map_err(|e| format!("links: {e:?}"))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (client, path);
-        Err("native client not wired yet".to_owned())
-    }
-}
 
-/// Pages linking to `path`, via the `VaultGraph` RPC.
-async fn fetch_backlinks(slug: String, path: String) -> Result<Vec<String>, String> {
-    let client = crate::vox_clients::vault_graph_client(&slug).await?;
-    #[cfg(target_arch = "wasm32")]
-    {
-        client
-            .backlinks(VAULT_ID.to_owned(), path)
-            .await
-            .map_err(|e| format!("backlinks: {e:?}"))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (client, path);
-        Err("native client not wired yet".to_owned())
-    }
-}
 
-/// Re-file a note: set its `folder` to `parent` (None = root)
-/// via the server-side frontmatter splice. `prev_sha` empty →
-/// unconditional. Returns the freshly committed sha.
-async fn move_to_folder(
-    slug: String,
-    path: String,
-    parent: Option<String>,
-    prev_sha: String,
-) -> Result<String, String> {
-    let client = crate::vox_clients::vault_client(&slug).await?;
-    #[cfg(target_arch = "wasm32")]
-    {
-        use vault_proto::IfMatch;
-        let if_match = if prev_sha.is_empty() {
-            IfMatch::Force
-        } else {
-            IfMatch::Sha(prev_sha)
-        };
-        let ack = client
-            .set_folder(VAULT_ID.to_owned(), path, parent, if_match)
-            .await
-            .map_err(|e| format!("set_folder: {e:?}"))?;
-        Ok(ack.sha256)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (client, path, parent, prev_sha);
-        Err("native client not wired yet".to_owned())
-    }
-}
-
-/// Create a new note (create-only), seeded with the starter
-/// frontmatter scaffold ([`seed_note_bytes`]) so the Properties
-/// panel opens with `created`/`tags`/`aliases` already present.
-/// Returns its sha.
-pub(crate) async fn create_new_file(slug: String, path: String) -> Result<String, String> {
-    let client = crate::vox_clients::vault_client(&slug).await?;
-    #[cfg(target_arch = "wasm32")]
-    {
-        use vault_proto::IfMatch;
-        let ack = client
-            .put_file(VAULT_ID.to_owned(), path, seed_note_bytes(), IfMatch::CreateOnly)
-            .await
-            .map_err(|e| format!("put_file: {e:?}"))?;
-        Ok(ack.sha256)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (client, path);
-        Err("native client not wired yet".to_owned())
-    }
-}
 
 #[cfg(test)]
 mod song_front_tests {

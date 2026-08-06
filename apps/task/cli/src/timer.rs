@@ -301,13 +301,12 @@ pub(crate) enum TimerTagCmd {
     },
 }
 
-/// Deterministic local-owner user id for an org. MUST stay identical to
-/// the web UI's `task_ui::chrome::owner_id` (`v5(org_id,
-/// "task-local-owner")`) so the CLI and the `/timer` page resolve the
-/// same user and therefore see the same sessions.
-pub(crate) fn timer_owner_id(org_id: uuid::Uuid) -> uuid::Uuid {
-    uuid::Uuid::new_v5(&org_id, b"task-local-owner")
-}
+/// Deterministic local-owner user id for an org, so the CLI and the
+/// `/timer` page resolve the same user and therefore see the same
+/// sessions. One definition, in `timer_proto::owner` — this used to be
+/// a hand-copied `new_v5` that only a doc comment kept in step with the
+/// web UI's and the watch bridge's copies.
+pub(crate) use timer_proto::local_owner_id as timer_owner_id;
 
 pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()> {
     use timer_proto::service::{LogSessionRequest, StartTimerRequest};
@@ -1221,4 +1220,93 @@ fn billed_cents(s: &timer_proto::WorkSession, elapsed: chrono::Duration) -> i64 
     // rate_cents is per hour; convert seconds → hours via i128 to dodge overflow.
     let cents = (secs as i128) * (s.rate_cents as i128) / 3600_i128;
     cents.try_into().unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The CLI, the `/timer` page and the watch bridge all resolve the
+    /// same user, or a session started on one surface is invisible on
+    /// the others. They now share one definition; this asserts the CLI
+    /// alias still points at it.
+    #[test]
+    fn timer_owner_id_matches_the_shared_definition() {
+        let org = uuid::Uuid::new_v4();
+        assert_eq!(timer_owner_id(org), timer_proto::local_owner_id(org));
+    }
+
+    #[test]
+    fn fmt_duration_drops_empty_leading_units() {
+        use chrono::Duration;
+        assert_eq!(fmt_duration(Duration::seconds(0)), "0s");
+        assert_eq!(fmt_duration(Duration::seconds(9)), "9s");
+        assert_eq!(fmt_duration(Duration::seconds(65)), "1m05s");
+        assert_eq!(fmt_duration(Duration::seconds(3600)), "1h00m00s");
+        assert_eq!(fmt_duration(Duration::seconds(3661)), "1h01m01s");
+        // A clock that ran backwards clamps rather than rendering
+        // a negative elapsed time.
+        assert_eq!(fmt_duration(Duration::seconds(-30)), "0s");
+    }
+
+    #[test]
+    fn fmt_money_keeps_the_sign_and_pads_cents() {
+        assert_eq!(fmt_money(0), "0.00");
+        assert_eq!(fmt_money(5), "0.05");
+        assert_eq!(fmt_money(100), "1.00");
+        assert_eq!(fmt_money(123_456), "1234.56");
+        // A credit must not lose its sign, and a sub-dollar credit
+        // must not render as a positive amount — the failure mode
+        // that `unsigned_abs` + an explicit sign prefix exists to
+        // prevent (`-1/100 == 0` in integer division).
+        assert_eq!(fmt_money(-5), "-0.05");
+        assert_eq!(fmt_money(-100), "-1.00");
+    }
+
+    /// A session carrying nothing but the hourly rate — the only
+    /// field `billed_cents` reads.
+    fn session_at(rate_cents: i64) -> timer_proto::WorkSession {
+        let now = chrono::Utc::now();
+        timer_proto::WorkSession {
+            id: uuid::Uuid::nil(),
+            org_id: uuid::Uuid::nil(),
+            user_id: uuid::Uuid::nil(),
+            project_id: None,
+            project_path: String::new(),
+            description: String::new(),
+            start_time: now,
+            end_time: None,
+            billable: true,
+            rate_cents,
+            currency: "USD".into(),
+            task_note_path: String::new(),
+            invoice_id: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn billed_cents_prorates_by_the_second() {
+        use chrono::Duration;
+        let s = session_at(10_000); // $100/hr
+        assert_eq!(billed_cents(&s, Duration::hours(1)), 10_000);
+        assert_eq!(billed_cents(&s, Duration::minutes(30)), 5_000);
+        assert_eq!(billed_cents(&s, Duration::minutes(6)), 1_000);
+        assert_eq!(billed_cents(&s, Duration::seconds(0)), 0);
+        // Partial cents truncate toward zero rather than rounding up,
+        // so we never over-bill.
+        assert_eq!(billed_cents(&s, Duration::seconds(1)), 2);
+        // Negative elapsed (clock skew) bills nothing.
+        assert_eq!(billed_cents(&s, Duration::seconds(-600)), 0);
+    }
+
+    #[test]
+    fn billed_cents_does_not_overflow_on_absurd_rates() {
+        use chrono::Duration;
+        let s = session_at(i64::MAX);
+        // The i128 intermediate is what keeps this from wrapping into
+        // a negative charge.
+        assert!(billed_cents(&s, Duration::hours(24)) > 0);
+    }
 }

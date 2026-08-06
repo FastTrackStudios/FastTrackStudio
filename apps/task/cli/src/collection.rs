@@ -999,3 +999,93 @@ fn copy_into(src: &Path, dest: &Path) -> eyre::Result<()> {
         .wrap_err_with(|| format!("copy {} → {}", src.display(), dest.display()))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_kind_is_case_insensitive_with_an_other_escape() {
+        assert!(matches!(parse_kind("library"), CollectionKind::Library));
+        assert!(matches!(parse_kind("Setlist"), CollectionKind::Setlist));
+        assert!(matches!(parse_kind("SHOW"), CollectionKind::Show));
+        assert!(matches!(parse_kind("playlist"), CollectionKind::Playlist));
+        // `other:` preserves the caller's casing for the free-text
+        // label; a bare unknown word is lowercased.
+        assert!(
+            matches!(parse_kind("other:Rehearsal Pool"), CollectionKind::Other(s) if s == "Rehearsal Pool")
+        );
+        assert!(matches!(parse_kind("Archive"), CollectionKind::Other(s) if s == "archive"));
+    }
+
+    #[test]
+    fn slug_folds_to_a_folder_safe_token() {
+        assert_eq!(slug("Great Are You Lord"), "great-are-you-lord");
+        assert_eq!(slug("  Trailing / Slashes  "), "trailing-slashes");
+        assert_eq!(slug("Don't Stop"), "don-t-stop");
+        assert_eq!(slug("A---B"), "a-b");
+        // Never yields an empty path segment.
+        assert_eq!(slug(""), "song");
+        assert_eq!(slug("!!!"), "song");
+    }
+
+    /// `slug` here is deliberately ASCII-only, unlike
+    /// `vault_entity::slugify`, which keeps non-ASCII alphanumerics
+    /// (`"Café" → "café"`). The two disagree only outside ASCII. This
+    /// pins the divergence rather than blessing it: these slugs are
+    /// baked into on-disk media paths, so unifying them is a migration,
+    /// not a refactor. See issue #68 (Phase 1 slugify consolidation).
+    #[test]
+    fn slug_is_ascii_only_and_diverges_from_vault_entity() {
+        assert_eq!(slug("Café Sessions"), "caf-sessions");
+        assert_eq!(vault_entity::slugify("Café Sessions", "song"), "café-sessions");
+        // Inside ASCII the two agree, which is why every existing path
+        // is unaffected.
+        for name in ["Great Are You Lord", "Don't Stop", "A---B"] {
+            assert_eq!(slug(name), vault_entity::slugify(name, "song"), "{name}");
+        }
+    }
+
+    #[test]
+    fn stem_group_for_matches_the_first_rule_not_the_best_one() {
+        assert_eq!(stem_group_for("01 Click.wav"), Some("Guide"));
+        assert_eq!(stem_group_for("Guide Vox.wav"), Some("Guide"));
+        assert_eq!(stem_group_for("Kick In.wav"), None);
+        assert_eq!(stem_group_for("Bass DI.wav"), Some("Bass"));
+        assert_eq!(stem_group_for("Drum OH L.wav"), Some("Drums"));
+        assert_eq!(stem_group_for("Percussion.wav"), Some("Drums"));
+        assert_eq!(stem_group_for("Rhodes.wav"), Some("Keys"));
+        assert_eq!(stem_group_for("Acoustic Gtr.wav"), Some("Guitars"));
+        assert_eq!(stem_group_for("BGV 1.wav"), Some("Vocals"));
+        assert_eq!(stem_group_for("Strings.wav"), Some("Orchestra"));
+        assert_eq!(stem_group_for("FX Riser.wav"), Some("FX"));
+        assert_eq!(stem_group_for("Untitled 3.wav"), None);
+
+        // Rules are checked in order, so a name matching two rules
+        // lands in the earlier one. `loop` beats `bass`, and `guide`
+        // beats `vocal` — both are intentional (a bass loop is a
+        // backing track, a guide vocal is a guide), but they are
+        // order-dependent and would silently change if the chain were
+        // reordered.
+        assert_eq!(stem_group_for("Bass Loop.wav"), Some("Tracks"));
+        assert_eq!(stem_group_for("Guide Vocal.wav"), Some("Guide"));
+    }
+
+    #[test]
+    fn absolutize_blob_url_only_prefixes_relative_urls() {
+        assert_eq!(
+            absolutize_blob_url("/blob/abc123", "http://localhost:8080"),
+            "http://localhost:8080/blob/abc123"
+        );
+        // An already-absolute URL must survive untouched, or the blob
+        // becomes unreachable under a double prefix.
+        assert_eq!(
+            absolutize_blob_url("https://cdn.example/blob/abc", "http://localhost:8080"),
+            "https://cdn.example/blob/abc"
+        );
+        assert_eq!(
+            absolutize_blob_url("http://other/blob/abc", "http://localhost:8080"),
+            "http://other/blob/abc"
+        );
+    }
+}

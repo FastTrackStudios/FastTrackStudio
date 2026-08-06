@@ -8,7 +8,9 @@ license.workspace = true
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 ui.workspace = true
-task-telemetry.workspace = true
+# `otel` so shipped clients export traces/logs/metrics through the
+# server's /otlp proxy — inert unless the build bakes TASK_OTLP_ENDPOINT.
+task-telemetry = { workspace = true, features = ["otel"] }
 
 [features]
 default = ["desktop"]

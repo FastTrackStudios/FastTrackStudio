@@ -24,13 +24,12 @@ pub mod attachments;
 pub mod capability;
 #[cfg(feature = "plugin-forge")]
 pub mod connections;
-#[cfg(feature = "plugin-forge")]
-pub mod forge_sync;
 pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
 pub mod media;
 pub mod notifier;
+pub mod otlp;
 pub mod permits;
 pub mod presence;
 pub mod server_mgmt;
@@ -275,7 +274,7 @@ pub struct OrgAppState {
     /// for the `EmailSync` RPC surface (accounts / folders /
     /// envelopes).
     #[cfg(feature = "plugin-email")]
-    pub email: email_maildir::Backend,
+    pub email: email_mux::Backend,
     /// Email product layer — the staged-send outbox
     /// (`EmailProduct`: submit / approve / cancel, human-in-the-
     /// loop gate) over the same accounts. Shares the `email`
@@ -284,6 +283,12 @@ pub struct OrgAppState {
     /// `EmailSync::send`.
     #[cfg(feature = "plugin-email")]
     pub email_product: email_product::ProductBackend,
+
+    /// Messages as linkable objects — "every email on this project".
+    /// One sqlite table per org, keyed on Message-ID so a link
+    /// survives archiving, moving and re-syncing.
+    #[cfg(feature = "plugin-email")]
+    pub email_links: email_link::LinkBackend,
     /// Forge backend (Forgejo) serving `RepoCatalog` +
     /// `IssueTracker` + `ReviewSurface`. Built from
     /// `TASK_FORGEJO_BASE_URL` + `TASK_FORGEJO_TOKEN`; when either
@@ -526,11 +531,6 @@ impl AppState {
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
             snapshot_status: Arc::new(std::sync::RwLock::new(snapshot::SnapshotStatus::default())),
         };
-        // Background forge-sync: pull codeberg/Forgejo issue changes
-        // back into linked tasks on an interval (outbound push is
-        // handled inline by the `ForgeSyncTaskService` decorator).
-        #[cfg(feature = "plugin-forge")]
-        forge_sync::spawn_poll_loop(state.clone());
         // Per-org notifier: subscribes to the org's event hubs
         // in-process and materializes notifications by rule
         // (see `notifier`'s module docs for the catalog).
@@ -946,7 +946,15 @@ pub(crate) async fn build_org_state(
         let mail_root = std::env::var("TASK_SERVER_MAIL_ROOT")
             .map_or_else(|_| vault_root.join("Mail"), PathBuf::from);
         #[cfg(feature = "plugin-email")]
-        let mail_accounts = discover_mail_accounts(&mail_root);
+        let (mail_accounts, mail_configs) = discover_mail_accounts(&mail_root);
+        // Every account gets a product store, remote ones included.
+        //
+        // The store is a sqlite file in the account's directory — which
+        // exists for an IMAP account too, since that is where its
+        // `account.json` lives. It backs the triage pass, the
+        // derivation cache, and the alert-once notification state, so
+        // excluding remote accounts here would mean a Gmail mailbox
+        // silently never raises a new-mail notification.
         #[cfg(feature = "plugin-email")]
         let product_accounts: Vec<email_product::ProductAccount> = mail_accounts
             .iter()
@@ -955,9 +963,57 @@ pub(crate) async fn build_org_state(
                 root: e.root.clone(),
                 address: e.account.address.clone(),
             })
+            .chain(mail_configs.iter().filter_map(|c| {
+                matches!(c.backend, email_config::BackendKind::Maildir { .. })
+                    .then(|| None)
+                    .unwrap_or_else(|| {
+                        Some(email_product::ProductAccount {
+                            id: c.id.0.clone(),
+                            root: mail_root.join(&c.id.0),
+                            address: c.address.clone(),
+                        })
+                    })
+            }))
+            .collect();
+        // One `EmailSync` service, several backends behind it: local
+        // Maildir accounts plus any remote IMAP accounts (Gmail &c)
+        // declared by an `account.json`. The mux routes by account id
+        // and gives both sub-backends one shared change hub, so
+        // subscribers still see a single stream.
+        // Every account's on-disk directory, for the mux's sqlite
+        // index. Local accounts keep it beside their maildir; remote
+        // ones beside their `account.json`.
+        #[cfg(feature = "plugin-email")]
+        let account_dirs: std::collections::HashMap<String, PathBuf> = mail_accounts
+            .iter()
+            .map(|e| (e.account.id.0.clone(), e.root.clone()))
+            .chain(
+                mail_configs
+                    .iter()
+                    .map(|c| (c.id.0.clone(), mail_root.join(&c.id.0))),
+            )
             .collect();
         #[cfg(feature = "plugin-email")]
-        let email = email_maildir::Backend::with_configured_accounts(mail_accounts);
+        let email = email_mux::Backend::build(mail_accounts, mail_configs, account_dirs);
+
+        // Push delivery for remote accounts: one IDLE loop per IMAP
+        // account's INBOX, publishing into the shared hub. Failures
+        // inside the loop are its own problem (it reconnects with
+        // backoff) — startup does not depend on the server being
+        // reachable, so a wrong password degrades to "that account
+        // lists nothing" rather than blocking boot.
+        #[cfg(feature = "plugin-email")]
+        if let Some(imap) = email.imap() {
+            for account in email.imap_account_ids() {
+                let imap = imap.clone();
+                let acct = account.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = imap.start_idle(&acct, "INBOX").await {
+                        tracing::warn!(account = %acct, ?err, "imap: IDLE watcher not started");
+                    }
+                });
+            }
+        }
 
         // Known-sender scoring rides the org's contacts when that
         // plugin is compiled in; without it every sender is scored
@@ -986,6 +1042,12 @@ pub(crate) async fn build_org_state(
         .map_err(|e| eyre::eyre!("email product stores: {e}"))?;
         #[cfg(feature = "plugin-email")]
         let _email_poller = email_product.spawn_poller(std::time::Duration::from_secs(30));
+
+        // Link store lives beside the org's other databases, not under
+        // a mailbox: links are org-scoped and outlive any one account.
+        #[cfg(feature = "plugin-email")]
+        let email_links = email_link::LinkBackend::open(org_root.path())
+            .map_err(|e| eyre::eyre!("email link store: {e}"))?;
 
         // Forge backend — Forgejo, the org's primary forge. Base
         // URL + token come from the same env vars the CLI's forge
@@ -1250,7 +1312,7 @@ pub(crate) async fn build_org_state(
             sqlite_conns.push(store.conn().clone());
         }
 
-        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins));
+        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins, org_root.slug()));
         // Coverage + dry-run, once per org at boot: how many mounted
         // services carry a permit table, which do not, and what a
         // signed-in member would be denied if enforcement were on. The
@@ -1333,6 +1395,8 @@ pub(crate) async fn build_org_state(
             email,
             #[cfg(feature = "plugin-email")]
             email_product,
+            #[cfg(feature = "plugin-email")]
+            email_links,
             #[cfg(feature = "plugin-forge")]
             forge,
             #[cfg(feature = "plugin-forge")]
@@ -1398,11 +1462,25 @@ impl email_product::ContactLookup for NoContactLookup {
 }
 
 #[cfg(feature = "plugin-email")]
-fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::AccountEntry> {
+/// Scan the org's mail root: one directory per account, each
+/// optionally carrying an `account.json` ([`email_config::AccountConfig`]).
+///
+/// Returns both views the multiplexer needs — the maildir entries for
+/// local accounts, and every parsed config, which is what decides
+/// whether an account is local or remote IMAP. An account directory
+/// with no config is a plain Maildir, which keeps the zero-config
+/// fixture mailbox working.
+fn discover_mail_accounts(
+    mail_root: &std::path::Path,
+) -> (
+    Vec<email_maildir::AccountEntry>,
+    Vec<email_config::AccountConfig>,
+) {
     let Ok(entries) = std::fs::read_dir(mail_root) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut accounts = Vec::new();
+    let mut configs = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
@@ -1423,6 +1501,8 @@ fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::Acc
 
         match email_config::AccountConfig::load_json(&path.join("account.json")) {
             Ok(Some(cfg)) => {
+                let is_remote = !matches!(cfg.backend, email_config::BackendKind::Maildir { .. });
+                configs.push(cfg.clone());
                 // Keep the directory name as the account id (the
                 // maildir root is keyed by it); take identity +
                 // aliases + submit from the config.
@@ -1438,6 +1518,11 @@ fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::Acc
                         smtp.clone(),
                     )));
                 }
+                // A remote account has no local maildir to serve
+                // from — routing sends its calls to IMAP instead.
+                if is_remote {
+                    continue;
+                }
             }
             Ok(None) => {}
             Err(err) => {
@@ -1452,7 +1537,7 @@ fn discover_mail_accounts(mail_root: &std::path::Path) -> Vec<email_maildir::Acc
             submit,
         });
     }
-    accounts
+    (accounts, configs)
 }
 
 /// Dev default — replace via config in a later phase. Length-checked
@@ -1776,6 +1861,13 @@ pub fn router(state: AppState) -> Router {
         .merge(server_mgmt)
         .merge(watch_bridge::watch_router())
         .merge(blob_router);
+    // Authenticated OTLP ingest, only when an upstream collector is
+    // configured — see `otlp`. Clients export through here rather than to
+    // a public collector endpoint.
+    let router = match otlp::otlp_router() {
+        Some(r) => router.merge(r),
+        None => router,
+    };
     #[cfg(feature = "plugin-forge")]
     let router = router.merge(webhook_routes);
     router.layer(cors_layer()).with_state(state)
@@ -2128,9 +2220,16 @@ pub fn org_permission_engine() -> Arc<dyn architect_permissions::PermissionEngin
 fn build_org_permissions_gate(
     auth: &AuthState,
     plugins: &task_plugin::PluginSet,
+    slug: &str,
 ) -> architect::permissions_gate::PermissionsGate {
     use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
-    let identity = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
+    // Wrapped so every RPC's wide event carries WHY the principal came out
+    // the way it did — "no token presented" vs "token rejected" are the
+    // same `Principal::Anonymous` without it (see `AuditedIdentityResolver`).
+    let identity = permits::AuditedIdentityResolver::new(
+        architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone()),
+        slug,
+    );
     let enforce = enforce_permissions();
     let audit = permits::GateAudit::new(enforce, permission_deny_ledger(), DEFAULT_ORG_ROLE);
     let gate = PermissionsGate::new(org_permission_engine(), Arc::new(identity))
@@ -2315,7 +2414,8 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 scheduling_proto::service::day_plans::serve(org.scheduling.clone()),
             )
             .with(
-                scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
+                scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(
+                ),
                 scheduling_proto::service::calendar_events::serve(org.scheduling.clone()),
             )
             // Scheduling — booking half (Cal.com-style): event types,
@@ -2502,22 +2602,13 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             workstream::workstream_service_descriptor(),
             workstream::serve_workstream_service(org.workstreams.clone()),
         )
-        .with(task::task_service_descriptor(), {
-            // With the forge plugin compiled in, TaskService is wrapped
-            // in the forge-sync decorator (outbound issue push on task
-            // writes); without it the raw backend serves directly.
-            #[cfg(feature = "plugin-forge")]
-            let svc = task::serve_task_service(forge_sync::ForgeSyncTaskService::new(
-                org.tasks.clone(),
-                org.forge.clone(),
-                org.forge_agent.clone(),
-                org.slug.clone(),
-                org.issue_links_path.clone(),
-            ));
-            #[cfg(not(feature = "plugin-forge"))]
-            let svc = task::serve_task_service(org.tasks.clone());
-            svc
-        })
+        .with(
+            task::task_service_descriptor(),
+            // The raw backend serves directly. There used to be a
+            // forge-sync decorator here mirroring task writes into
+            // Forgejo issues; it went with `forge_sync` (2026-08-06).
+            task::serve_task_service(org.tasks.clone()),
+        )
         // Live task changes — the `#[subscribe]` stream sibling of
         // `TaskService`. The hub lives on the raw `TaskBackend`, so
         // every write path publishes into it: vox calls through the
@@ -2642,6 +2733,11 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 email_proto::product_descriptor(),
                 email_proto::product_serve(org.email_product.clone()),
+            )
+            // Message↔entity links — "every email on this project".
+            .with(
+                email_proto::links_descriptor(),
+                email_proto::links_serve(org.email_links.clone()),
             )
             // Live mailbox changes — `EmailSync`'s `#[subscribe]`
             // stream sibling, served from the backend's hub.

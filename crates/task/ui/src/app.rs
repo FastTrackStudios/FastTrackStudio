@@ -199,6 +199,12 @@ pub fn App() -> Element {
     // on boot, mirror picker changes back (localStorage + server).
     crate::theming::use_theme_prefs_sync();
 
+    // The ONE derived-presence poll (agent sessions + open timers).
+    // Every roster surface shares it; when each consumer owned its own,
+    // the two mounted on the desktop shell ran duplicate 60s polls and
+    // list_sessions accounted for ~390 of the ~400 reads per hour.
+    crate::presence::use_provide_derived_presence();
+
     // ── Note-widget registry ──────────────────────────────────
     // The ONE site where widget provider crates are named. Everything
     // else in the shell (note_view, collab decorations, link clicks)

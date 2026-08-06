@@ -915,6 +915,7 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
                 DropdownTrigger { class: if rail { "" } else { "w-full" },
                     if rail {
                         button {
+                            "data-testid": "account-switcher",
                             r#type: "button",
                             class: "flex h-8 w-8 items-center justify-center rounded-lg hover:bg-accent/50",
                             title: "Account & status — {name}",
@@ -927,6 +928,7 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
                         }
                     } else {
                         button {
+                            "data-testid": "account-switcher",
                             r#type: "button",
                             class: "flex w-full items-center gap-2 rounded-xl border border-border bg-card px-2 py-1.5 text-left hover:bg-accent",
                             title: "Account & status",
@@ -1029,7 +1031,24 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
                 }
             }
             if let Some(msg) = error.read().as_ref() {
-                div { class: "px-1 text-[11px] text-destructive", "{msg}" }
+                // This sits in the 48px icon rail, and the message is far
+                // wider ("sign in as <email> to continue" measures ~150px).
+                // Rendered raw it centred to x = (48 - 150) / 2 = -51 and
+                // hung off the LEFT EDGE OF THE VIEWPORT — the user saw an
+                // unreadable red sliver in the corner with no way to act on
+                // it, while the app sat on "Signing in…" forever.
+                //
+                // So: fit the rail, keep the full text in the tooltip, and
+                // make it do the thing it's asking for. `LoginForm` lives
+                // inside this dialog, which is what the release-build
+                // sign-in path assumes is "already on screen" — it isn't
+                // until something opens it.
+                button {
+                    class: "mx-auto flex max-w-full items-center justify-center truncate rounded px-1 text-[11px] text-destructive hover:bg-destructive/10",
+                    title: "{msg}",
+                    onclick: move |_| servers_open.set(true),
+                    "Sign in"
+                }
             }
 
             // Servers + sign-in modal — the desktop surface for the

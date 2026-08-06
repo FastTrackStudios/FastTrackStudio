@@ -14,7 +14,10 @@ pub struct MessageId(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
 pub struct ThreadId(pub String);
 
-#[derive(Debug, Clone, Facet)]
+// serde alongside Facet: the offline read cache stores fetched
+// messages as JSON on the client, and Facet is the wire codec, not a
+// persistence format.
+#[derive(Debug, Clone, Facet, serde::Serialize, serde::Deserialize)]
 pub struct Message {
     pub envelope: Envelope,
     pub headers_raw: String,

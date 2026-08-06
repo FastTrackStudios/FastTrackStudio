@@ -29,6 +29,8 @@ pub enum NotifyKind {
     ForgeIssue = 6,
     /// Forge pull-request activity (opened / reviewed).
     ForgePullRequest = 7,
+    /// New mail landed in a watched mailbox.
+    EmailReceived = 9,
     /// Anything else — kept so old clients render unknown future
     /// rules as a generic row instead of failing to decode… which
     /// they cannot do across a facet enum, so this is really the
@@ -50,6 +52,7 @@ impl NotifyKind {
             Self::BookingCancelled => "booking-cancelled",
             Self::ForgeIssue => "forge-issue",
             Self::ForgePullRequest => "forge-pull-request",
+            Self::EmailReceived => "email-received",
             Self::Other => "other",
         }
     }
@@ -67,6 +70,7 @@ impl NotifyKind {
             "booking-cancelled" => Self::BookingCancelled,
             "forge-issue" => Self::ForgeIssue,
             "forge-pull-request" => Self::ForgePullRequest,
+            "email-received" => Self::EmailReceived,
             _ => Self::Other,
         }
     }

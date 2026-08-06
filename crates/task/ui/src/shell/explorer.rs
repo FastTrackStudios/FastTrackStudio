@@ -507,6 +507,14 @@ fn page_row(page: &vault_proto::PageMeta, depth: usize, selected: String) -> Ele
     rsx! {
         button {
             key: "{page.path}",
+            // Test hooks: the multiplayer suite used to find note rows
+            // with `aside button` + text, which silently matched the
+            // MOBILE sidebar's hidden copy (this explorer renders no
+            // <aside>) and waited forever on an invisible element.
+            // Select by path, not by display title — two notes in
+            // different folders can share a title.
+            "data-testid": "vault-note",
+            "data-path": "{page.path}",
             r#type: "button",
             class: "{row_cls}",
             style: "padding-left: {indent + 6}px",
@@ -631,6 +639,11 @@ fn wiki_page_row(page: &wiki_proto::pages::PageInfo, depth: usize, selected: Str
     rsx! {
         button {
             key: "{page.path}",
+            // Wiki pages are a distinct row kind from vault notes
+            // (different route, different tree) — distinct testid, so a
+            // test can't accidentally match one for the other.
+            "data-testid": "wiki-page",
+            "data-path": "{page.path}",
             r#type: "button",
             class: "{row_cls}",
             style: "padding-left: {indent + 6}px",
