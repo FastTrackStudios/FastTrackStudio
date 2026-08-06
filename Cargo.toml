@@ -241,6 +241,8 @@ members = [
     "features/fx/level/level-dsp",
     "features/fx/modulation/modulation",
     "features/fx/modulation/chorus-dsp",
+    "features/fx/modulation/modulation-profiles",
+    "features/fx/modulation/modulation-ui",
     "features/fx/multiband",
     "features/fx/modulation/pattern-ui",
     "features/fx/modulation/trem-dsp",
@@ -627,6 +629,8 @@ delay-dsp = { path = "features/fx/delay/delay-dsp" }
 delay-profiles = { path = "features/fx/delay/delay-profiles" }
 delay-ui = { path = "features/fx/delay/delay-ui" }
 chorus-dsp = { path = "features/fx/modulation/chorus-dsp" }
+modulation-profiles = { path = "features/fx/modulation/modulation-profiles" }
+modulation-ui = { path = "features/fx/modulation/modulation-ui" }
 multiband-dsp = { path = "features/fx/multiband" }
 pattern-ui = { path = "features/fx/modulation/pattern-ui" }
 trem-dsp = { path = "features/fx/modulation/trem-dsp" }

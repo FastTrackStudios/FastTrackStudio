@@ -10031,6 +10031,8 @@ dependencies = [
  "fts-launcher",
  "fts-ui",
  "keyflow-orchestra",
+ "midi-tools-daw",
+ "midi-tools-ui",
  "reaper-config",
  "reaper-high",
  "reaper-input",
@@ -16724,9 +16726,36 @@ dependencies = [
 name = "modulation-plugin"
 version = "0.1.0"
 dependencies = [
+ "atomic_float",
+ "audiocore-core",
  "audiocore-dsp",
  "modulation",
+ "modulation-profiles",
+ "modulation-ui",
  "nice-plug",
+]
+
+[[package]]
+name = "modulation-profiles"
+version = "0.1.0"
+dependencies = [
+ "modulation",
+]
+
+[[package]]
+name = "modulation-ui"
+version = "0.1.0"
+dependencies = [
+ "atomic_float",
+ "dioxus",
+ "dioxus-test",
+ "fts-ui",
+ "fts-ui-audio",
+ "modulation-profiles",
+ "nice-plug",
+ "nice-plug-dioxus",
+ "parking_lot",
+ "tokio",
 ]
 
 [[package]]
