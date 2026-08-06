@@ -8782,6 +8782,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "expression-editor-daw"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "expression-editor-core",
+]
+
+[[package]]
 name = "expression-editor-ui"
 version = "0.1.0"
 dependencies = [
