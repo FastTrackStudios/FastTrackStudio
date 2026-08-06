@@ -12,9 +12,9 @@
 //! 4 of the current scale, as a seventh, at octave 3" into note numbers a
 //! DAW can take.
 
-use keyflow::chord::Chord;
-use keyflow::key::Key;
-use keyflow::key::scale::harmonization::{HarmonizationDepth, harmonize_scale};
+use crate::chord::Chord;
+use crate::key::Key;
+use crate::key::scale::harmonization::{HarmonizationDepth, harmonize_scale};
 
 /// How many notes to stack on each scale degree.
 ///
@@ -138,7 +138,7 @@ fn root_midi(key: &Key, octave: i32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use keyflow::primitives::MusicalNote;
+    use crate::primitives::MusicalNote;
 
     fn c_major() -> Key {
         Key::major(MusicalNote::from_string("C").expect("C is a note"))
