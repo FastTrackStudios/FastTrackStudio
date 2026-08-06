@@ -8790,6 +8790,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "expression-editor-reaper"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-test-macro",
+ "dioxus",
+ "expression-editor-core",
+ "expression-editor-daw",
+ "expression-editor-ui",
+ "eyre",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "expression-editor-ui"
 version = "0.1.0"
 dependencies = [

@@ -232,6 +232,7 @@ members = [
     #    shared by the MPE editor and the audio pitch editor
     "features/expression-editor/expression-editor-core",
     "features/expression-editor/expression-editor-daw",
+    "features/expression-editor/expression-editor-reaper",
     "features/expression-editor/expression-editor-ui",
     "features/fx/level/level",
     "features/fx/level/level-dsp",
@@ -610,6 +611,7 @@ world-sys = { path = "libs/vendor/world" }
 tune-dsp = { path = "features/fx/tune/tune-dsp" }
 expression-editor-core = { path = "features/expression-editor/expression-editor-core" }
 expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
+expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
 expression-editor-ui = { path = "features/expression-editor/expression-editor-ui" }
 level = { path = "features/fx/level/level" }
 level-dsp = { path = "features/fx/level/level-dsp" }
