@@ -125,6 +125,89 @@ pub(crate) enum EmailCmd {
         /// Account id.
         id: String,
     },
+    /// Attach a message to a project / task / note, so "every email on
+    /// this project" is answerable.
+    Link {
+        /// RFC 2822 Message-ID, with or without angle brackets.
+        message_id: String,
+        /// Link to a project by id.
+        #[arg(long, group = "target")]
+        project: Option<String>,
+        /// Link to a task by id.
+        #[arg(long, group = "target")]
+        task: Option<String>,
+        /// Link to a note by vault path.
+        #[arg(long, group = "target")]
+        note: Option<String>,
+        /// Any other entity kind, as `kind:id`.
+        #[arg(long, group = "target")]
+        entity: Option<String>,
+        /// Who is making the link — `user` (default), `rule`, or an
+        /// agent name. Recorded so a bulk auto-link can be audited or
+        /// undone without touching manual ones.
+        #[arg(long, default_value = "user")]
+        by: String,
+    },
+    /// Remove a link. Same target flags as `link`.
+    Unlink {
+        message_id: String,
+        #[arg(long, group = "target")]
+        project: Option<String>,
+        #[arg(long, group = "target")]
+        task: Option<String>,
+        #[arg(long, group = "target")]
+        note: Option<String>,
+        #[arg(long, group = "target")]
+        entity: Option<String>,
+    },
+    /// List links — either everything a message is attached to, or
+    /// every message attached to a target.
+    Links {
+        /// Show what this message is linked to.
+        #[arg(long, group = "target")]
+        message: Option<String>,
+        /// Show every message linked to this project.
+        #[arg(long, group = "target")]
+        project: Option<String>,
+        #[arg(long, group = "target")]
+        task: Option<String>,
+        #[arg(long, group = "target")]
+        note: Option<String>,
+        #[arg(long, group = "target")]
+        entity: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Resolve the `--project` / `--task` / `--note` / `--entity` flag set
+/// into one target. Exactly one is required; clap's group enforces at
+/// most one, and this rejects none.
+fn target_from(
+    project: Option<String>,
+    task: Option<String>,
+    note: Option<String>,
+    entity: Option<String>,
+) -> eyre::Result<email_proto::LinkTarget> {
+    if let Some(id) = project {
+        return Ok(email_proto::LinkTarget { kind: "project".into(), id });
+    }
+    if let Some(id) = task {
+        return Ok(email_proto::LinkTarget { kind: "task".into(), id });
+    }
+    if let Some(id) = note {
+        return Ok(email_proto::LinkTarget { kind: "note".into(), id });
+    }
+    if let Some(raw) = entity {
+        let (kind, id) = raw
+            .split_once(':')
+            .ok_or_else(|| eyre::eyre!("--entity wants `kind:id`, got {raw:?}"))?;
+        if kind.is_empty() || id.is_empty() {
+            eyre::bail!("--entity wants a non-empty kind and id");
+        }
+        return Ok(email_proto::LinkTarget { kind: kind.into(), id: id.into() });
+    }
+    eyre::bail!("pass one of --project / --task / --note / --entity")
 }
 
 /// How to resolve the account password. Exactly one source is
@@ -313,6 +396,67 @@ pub(crate) async fn run_email(cmd: EmailCmd, org_override: Option<&str>) -> eyre
         }
         EmailCmd::Remove { id, purge_maildir } => remove(&root, &id, purge_maildir),
         EmailCmd::Test { id } => test(&root, &id).await,
+        EmailCmd::Link { message_id, project, task, note, entity, by } => {
+            let target = target_from(project, task, note, entity)?;
+            let client = crate::establish_client::<email_proto::EmailLinksClient>(None, &slug).await?;
+            let link = client
+                .link(message_id, target, by)
+                .await
+                .map_err(|e| eyre::eyre!("link: {e:?}"))?;
+            println!("linked {} → {}:{}", link.message_id, link.target.kind, link.target.id);
+            Ok(())
+        }
+        EmailCmd::Unlink { message_id, project, task, note, entity } => {
+            let target = target_from(project, task, note, entity)?;
+            let client = crate::establish_client::<email_proto::EmailLinksClient>(None, &slug).await?;
+            client
+                .unlink(message_id.clone(), target.clone())
+                .await
+                .map_err(|e| eyre::eyre!("unlink: {e:?}"))?;
+            println!("unlinked {message_id} from {}:{}", target.kind, target.id);
+            Ok(())
+        }
+        EmailCmd::Links { message, project, task, note, entity, json } => {
+            let client = crate::establish_client::<email_proto::EmailLinksClient>(None, &slug).await?;
+            let links = match message {
+                Some(id) => client
+                    .links_for_message(id)
+                    .await
+                    .map_err(|e| eyre::eyre!("links: {e:?}"))?,
+                None => {
+                    let target = target_from(project, task, note, entity)?;
+                    client
+                        .links_for_target(target)
+                        .await
+                        .map_err(|e| eyre::eyre!("links: {e:?}"))?
+                }
+            };
+            if json {
+                let rows: Vec<serde_json::Value> = links
+                    .iter()
+                    .map(|l| {
+                        serde_json::json!({
+                            "message_id": l.message_id,
+                            "kind": l.target.kind,
+                            "id": l.target.id,
+                            "linked_by": l.linked_by,
+                            "linked_at_ms": l.linked_at_ms,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else if links.is_empty() {
+                println!("no links");
+            } else {
+                for l in links {
+                    println!(
+                        "{:40} {}:{}  (by {})",
+                        l.message_id, l.target.kind, l.target.id, l.linked_by
+                    );
+                }
+            }
+            Ok(())
+        }
     }
 }
 

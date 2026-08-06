@@ -84,7 +84,7 @@ pub use product::{
 // Same aliasing for the link service: `email_proto::links_descriptor()`
 // / `links_serve(backend)` at the mount site.
 pub use link::{
-    EmailLinks, LinkTarget, MessageLink,
+    EmailLinks, EmailLinksClient, LinkTarget, MessageLink,
     email_links_rpc_service_descriptor as links_descriptor, layer as links_layer,
     serve as links_serve,
 };
