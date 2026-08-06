@@ -3381,6 +3381,8 @@ dependencies = [
  "chord-tool",
  "daw",
  "daw-proto",
+ "eyre",
+ "keyflow",
  "tracing",
 ]
 
