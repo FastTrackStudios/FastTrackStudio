@@ -9,17 +9,27 @@
 //! So on wasm each `(service, org)` client is established **once** and
 //! cached for the page's lifetime, then reused for every request.
 //!
-//! **Native shares the same cache** (2026-08-06). It used to establish
-//! per call — no dropped-closure hazard, so it looked harmless — but
-//! "per call" means one WebSocket per typed client, and a single desktop
-//! page load touches dozens of services. Production traces caught it:
-//! one load opened **72 sockets** to `/org/{slug}/vox` where the browser
-//! opens one, which is both a slow load (concurrent-connection limits)
-//! and 72 handshakes of server work per page.
+//! ## One socket per endpoint (2026-08-06)
 //!
-//! Both targets now resolve an endpoint to ONE cached root connection and
-//! build typed clients as cheap views over its caller. The server's
-//! per-org `LayerRouter` was always able to dispatch every service on one
+//! Production traces caught a single page load opening **72 sockets** to
+//! `/org/{slug}/vox`. Two independent causes, both fixed here:
+//!
+//! 1. **Native established per call.** It had no dropped-closure hazard,
+//!    so skipping the cache looked harmless — but "per call" means one
+//!    WebSocket per typed client. Native now shares the cache.
+//!
+//! 2. **The cache had a thundering-herd hole**, and this one hit *both*
+//!    targets. An entry can only be inserted after its dial completes, so
+//!    every caller arriving during that first dial also missed and dialed.
+//!    A page load fans out to dozens of services at once — precisely that
+//!    window. The extra roots were then discarded, so the cache looked
+//!    like it was working; the only symptoms were a slow load and dozens
+//!    of wasted handshakes. [`shared_caller_at`] now single-flights, so
+//!    concurrent callers await the same dial.
+//!
+//! Both targets now resolve an endpoint to ONE root connection and build
+//! typed clients as cheap views over its caller. The server's per-org
+//! `LayerRouter` was always able to dispatch every service on one
 //! connection; only the client was fanning out.
 //!
 //! Both targets share one transport — `vox_websocket::WsLink::connect`
@@ -275,12 +285,72 @@ where
 /// connection isn't pointed at), so the root's own liveness is the only
 /// invariant that always holds. A dead root is evicted and re-established
 /// transparently.
+/// A dial in progress, shared by every caller that asked for the same
+/// URL while it was in flight.
+type SharedDial = futures_util::future::Shared<DialFuture>;
+#[cfg(target_arch = "wasm32")]
+type DialFuture = futures_util::future::LocalBoxFuture<'static, Result<vox_core::Caller, String>>;
+#[cfg(not(target_arch = "wasm32"))]
+type DialFuture = futures_util::future::BoxFuture<'static, Result<vox_core::Caller, String>>;
+
 async fn shared_caller_at(url: &str) -> Result<vox_core::Caller, String> {
     if let Some(caller) = cached_live_caller(url) {
         return Ok(caller);
     }
-    let root = establish_at::<RootLane>(url).await?;
-    Ok(insert_root(url, root))
+    // SINGLE-FLIGHT. The cache alone is not enough: it can only be
+    // populated *after* a dial completes, so every caller that arrives
+    // during the first dial also misses and dials. A page load fans out
+    // to dozens of services at once, which is exactly that window —
+    // measured at 72 concurrent dials to one endpoint. The losers were
+    // then thrown away, so the cache "worked" and the symptom was purely
+    // a slow load plus 71 wasted handshakes.
+    //
+    // So concurrent callers now await the SAME dial rather than starting
+    // their own.
+    let dial = with_inflight(|inflight| {
+        if let Some(dial) = inflight.get(url) {
+            return dial.clone();
+        }
+        let owned = url.to_owned();
+        let fut = async move {
+            let root = establish_at::<RootLane>(&owned).await?;
+            let caller = insert_root(&owned, root);
+            // Clear the in-flight slot so a later dial (after this root
+            // dies) starts fresh. Callers already awaiting this `Shared`
+            // still get its cached result.
+            with_inflight(|inflight| inflight.remove(&owned));
+            Ok(caller)
+        };
+        // `DialFuture` is already cfg'd (LocalBoxFuture on wasm, BoxFuture
+        // on native), so this one line covers both targets.
+        let dial: SharedDial = futures_util::FutureExt::shared(Box::pin(fut) as DialFuture);
+        inflight.insert(url.to_owned(), dial.clone());
+        dial
+    });
+    // Awaited with no lock held — the dial is a network round trip.
+    dial.await
+}
+
+/// Run `f` against the per-target in-flight dial map. Same locking
+/// discipline as [`with_roots`]: never held across an await.
+#[cfg(target_arch = "wasm32")]
+fn with_inflight<R>(f: impl FnOnce(&mut std::collections::HashMap<String, SharedDial>) -> R) -> R {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static INFLIGHT: RefCell<HashMap<String, SharedDial>> = RefCell::new(HashMap::new());
+    }
+    INFLIGHT.with(|m| f(&mut m.borrow_mut()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn with_inflight<R>(f: impl FnOnce(&mut std::collections::HashMap<String, SharedDial>) -> R) -> R {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static INFLIGHT: OnceLock<Mutex<HashMap<String, SharedDial>>> = OnceLock::new();
+    let m = INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = m.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut guard)
 }
 
 /// Look up a cached root, evicting it if the connection has died.
