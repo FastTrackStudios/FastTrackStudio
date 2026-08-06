@@ -57,6 +57,28 @@ Because a click is just a drag that never moved, both Ctrl chords insert on rele
 - `mouse:<C-A-> ldrag` — erase notes. Ctrl still means "the note tool"; adding Alt turns the pencil around, so you rub notes out by dragging across them.
 - `mouse:<A-> ldrag` — scrub-preview the MIDI under the pointer. Drag across a passage to hear it at the speed you move, which is how you find the wrong note in a chord without soloing anything.
 
+## On a note itself
+
+Everything above is the empty piano roll. Put the pointer *on* a note and the same modifiers mean something else — and clicking is a different verb from dragging.
+
+### Clicking a note
+
+- `mouse: lclick` — select it.
+- `mouse:<C-> lclick` — toggle its selection, so you can pick a chord apart one note at a time.
+- `mouse:<A-> lclick` — select it and move the edit cursor there.
+- `mouse:<S-A-> lclick` — add every note in that note's measure to the selection. `mouse:<S-C-A-> lclick` does the same.
+
+### Dragging a note
+
+- `mouse: ldrag` `snap:grid` — move it.
+- `mouse:<S-> ldrag` `snap:off` — move it off the grid, for anything played rather than programmed.
+- `mouse:<C-> ldrag` `snap:grid` — copy it. Ctrl-drag duplicates here the way it does everywhere else.
+- `mouse:<S-C-> ldrag` `snap:grid` — move on one axis only: the drag commits to horizontal or vertical and stays there, so nudging a note in time can't transpose it by accident.
+- `mouse:<A-> ldrag` — edit its velocity. No snapping applies; velocity isn't on the grid.
+- `mouse:<S-C-A-> ldrag` `snap:off` — arpeggiate: stretch the selected notes' positions into a ramp, ignoring snap.
+
+Shift+Alt is a click verb on a note, not a drag one — the drag slot is left unset on purpose so a single Shift+Alt press can't mean two things depending on whether your hand twitched.
+
 ## Editing notes that already exist
 
 Once notes are on the grid, the keyboard is faster than the mouse.
@@ -101,6 +123,17 @@ These gestures are not REAPER defaults — they come from the fasttrackstudio mo
 | MIDI piano roll drag | Alt | Scrub preview MIDI |
 | MIDI piano roll drag | Shift+Alt | Paint a straight line of notes |
 | MIDI piano roll drag | Ctrl+Alt | Erase notes |
+| MIDI note click | *(none)* | Select note |
+| MIDI note click | Ctrl | Toggle note selection |
+| MIDI note click | Alt | Select note and move edit cursor |
+| MIDI note click | Shift+Alt | Add all notes in measure to selection |
+| MIDI note click | Ctrl+Alt+Shift | Add all notes in measure to selection |
+| MIDI note drag | *(none)* | Move note |
+| MIDI note drag | Shift | Move note ignoring snap |
+| MIDI note drag | Ctrl | Copy note |
+| MIDI note drag | Ctrl+Shift | Move note on one axis only |
+| MIDI note drag | Alt | Edit note velocity |
+| MIDI note drag | Ctrl+Alt+Shift | Stretch note positions ignoring snap (arpeggiate) |
 
 Every behavior REAPER offers has a snapping twin ("… ignoring snap"). FastTrackStudio picks the snapping variant everywhere by default — the grid is the thing you change, not the gesture. See [[Input System|the input layer]] for how profiles and overlays compose.
 
