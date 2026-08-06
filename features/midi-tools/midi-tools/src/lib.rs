@@ -33,6 +33,7 @@
 //! than as new crates — an arpeggiator, a note splitter, a chopper are
 //! all "notes in, notes out".
 
+pub mod shape;
 pub mod sink;
 pub mod arp;
 pub mod velocity;
