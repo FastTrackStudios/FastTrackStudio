@@ -299,13 +299,24 @@ settings (
     // MM_CTX_MIDI_PIANOROLL
     {ctx MM_CTX_MIDI_PIANOROLL, mods "", behavior "7 m", desc "Marquee select notes"}
     {ctx MM_CTX_MIDI_PIANOROLL, mods "<S->", behavior "9 m", desc "Marquee add to note selection"}
-    {ctx MM_CTX_MIDI_PIANOROLL, mods "<C->", behavior "12 m", desc "Insert note, drag to move"}
-    {ctx MM_CTX_MIDI_PIANOROLL, mods "<S-C->", behavior "1 m", desc "Insert note, drag to extend or change pitch"}
+    // Ctrl draws. Ctrl+drag places a note and keeps dragging it (length
+    // right, pitch up/down); Ctrl+Shift+drag is the length-only variant,
+    // so a run of same-pitch notes doesn't slip a semitone mid-drag.
+    // Both snap to the grid. See docs/guides/reaper/midi-editing.md.
+    {ctx MM_CTX_MIDI_PIANOROLL, mods "<C->", behavior "1 m", desc "Insert note, drag to extend or change pitch"}
+    {ctx MM_CTX_MIDI_PIANOROLL, mods "<S-C->", behavior "14 m", desc "Insert note, drag to extend"}
+    // Alt is the preview/destructive half: Alt alone scrubs, Ctrl+Alt erases,
+    // Shift+Alt paints a straight line (one drag = a run of notes).
+    {ctx MM_CTX_MIDI_PIANOROLL, mods "<A->", behavior "16 m", desc "Scrub preview MIDI"}
+    {ctx MM_CTX_MIDI_PIANOROLL, mods "<S-A->", behavior "23 m", desc "Paint a straight line of notes"}
+    {ctx MM_CTX_MIDI_PIANOROLL, mods "<C-A->", behavior "3 m", desc "Erase notes"}
 
     // MM_CTX_MIDI_PIANOROLL_CLK
     {ctx MM_CTX_MIDI_PIANOROLL_CLK, mods "<S->", behavior "1 m", desc "Deselect all notes and move edit cursor"}
+    // A click is a drag that never moved — both Ctrl chords must insert,
+    // or letting go without moving would deselect instead of placing.
     {ctx MM_CTX_MIDI_PIANOROLL_CLK, mods "<C->", behavior "4 m", desc "Insert note"}
-    {ctx MM_CTX_MIDI_PIANOROLL_CLK, mods "<S-C->", behavior "1 m", desc "Deselect all notes and move edit cursor"}
+    {ctx MM_CTX_MIDI_PIANOROLL_CLK, mods "<S-C->", behavior "4 m", desc "Insert note"}
     {ctx MM_CTX_MIDI_PIANOROLL_CLK, mods "<C-A->", behavior "1 m", desc "Deselect all notes and move edit cursor"}
 
     // MM_CTX_MIDI_PIANOROLL_DBLCLK

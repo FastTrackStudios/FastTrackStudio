@@ -20,19 +20,20 @@ Drive REAPER the FastTrackStudio way — a modal, keyboard-first input layer ove
 5. [[navigation|Navigation]] — moving the edit cursor and track selection, vim-style.
 6. [[Tracks]] — inserting tracks, the `n` track-manager menu, and the `<S-n>` create-track family.
 7. [[editing|Editing]] — split, delete, smart-duplicate, glue, and the undo stack.
+8. [[midi-editing|MIDI Editing]] — drawing notes with the Ctrl mouse modifiers, and the grid-unit note verbs.
 
 ## Arranging & tracking
 
-8. [[markers-regions|Markers & regions]] — drop song-section regions and jump between them by name.
-9. [[Recording]] — how to track: arm, monitor, pre-roll, and the take-ranking pad.
-10. [[comping-takes|Comping & takes]] — fixed-lane comping, take switching, and imploding takes.
-11. [[project-organization|Project Organization]] — self-naming tracks, buses, and section structure.
+9. [[markers-regions|Markers & regions]] — drop song-section regions and jump between them by name.
+10. [[Recording]] — how to track: arm, monitor, pre-roll, and the take-ranking pad.
+11. [[comping-takes|Comping & takes]] — fixed-lane comping, take switching, and imploding takes.
+12. [[project-organization|Project Organization]] — self-naming tracks, buses, and section structure.
 
 ## Shaping the session
 
-12. [[zoom-views|Zoom & views]] — the mixer, FX browser, window sets, and wheel zoom.
-13. [[mixing|Mixing]] — Mix mode and the mixing surface.
-14. [[modes|Modes]] — the ten workflow states, and what each re-tools the keyboard for.
+13. [[zoom-views|Zoom & views]] — the mixer, FX browser, window sets, and wheel zoom.
+14. [[mixing|Mixing]] — Mix mode and the mixing surface.
+15. [[modes|Modes]] — the ten workflow states, and what each re-tools the keyboard for.
 
 ## Help & walkthroughs
 

@@ -243,6 +243,68 @@ fn kbd_chord_labels(token: &str) -> Vec<String> {
     parts
 }
 
+/// Mouse-gesture caps for a `mouse:` code span — the pointer counterpart
+/// to `kbd:`. `spec` is an optional modifier chord followed by a button
+/// token: `mouse:<S-C-> ldrag` → `Ctrl + Shift + Left-drag`. The
+/// modifier chord reuses the `kbd:` grammar (`<C->`, `<S-C-A->`), so a
+/// mouse-modifier row copied out of a `mouse-profile.styx` `mods` field
+/// pastes straight into a note.
+///
+/// Returns `None` for an unknown button token so the caller falls back
+/// to plain inline-code styling rather than inventing a cap.
+fn mouse_widget_html(spec: &str) -> Option<String> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return None;
+    }
+    // Leading `<...>` chord is the modifiers; the rest is the button.
+    let (mods, button) = match spec.strip_prefix('<').and_then(|r| r.split_once('>')) {
+        Some((chord, rest)) => (kbd_chord_labels(&format!("<{chord}>")), rest.trim()),
+        None => (Vec::new(), spec),
+    };
+    let button_label = match button.to_ascii_lowercase().as_str() {
+        "lclick" | "click" => "Left-click",
+        "ldrag" | "drag" => "Left-drag",
+        "ldblclick" | "dblclick" => "Left-double-click",
+        "rclick" => "Right-click",
+        "rdrag" => "Right-drag",
+        "mclick" => "Middle-click",
+        "mdrag" => "Middle-drag",
+        "wheel" => "Wheel",
+        _ => return None,
+    };
+
+    let mut html = String::from(r#"<span class="md-kbd md-kbd-mouse">"#);
+    for m in &mods {
+        html.push_str(&format!(
+            r#"<kbd class="md-kbd-key">{}</kbd><span class="md-kbd-plus">+</span>"#,
+            escape_html(m)
+        ));
+    }
+    html.push_str(&format!(
+        r#"<kbd class="md-kbd-key md-kbd-btn">{button_label}</kbd></span>"#
+    ));
+    Some(html)
+}
+
+/// Snap chip for a `snap:` code span — says whether a gesture lands on
+/// the grid or ignores snapping. `snap:grid` (magnet, "Grid") and
+/// `snap:off` (crossed magnet, "No snap") are the two states; the
+/// magnet glyph is inline SVG on `currentColor` so it inherits the
+/// chip's theme colour.
+fn snap_widget_html(spec: &str) -> Option<String> {
+    // Magnet: a horseshoe with the two pole tips filled.
+    const MAGNET: &str = r##"<svg class="md-snap-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10V6a4 4 0 0 1 8 0v4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M2.9 9.5h2.2v3.2H2.9zM10.9 9.5h2.2v3.2h-2.2z" fill="currentColor"/></svg>"##;
+    let (state, label, title) = match spec.trim().to_ascii_lowercase().as_str() {
+        "grid" | "on" | "yes" => ("on", "Grid", "Snaps to the grid — the result depends on the current grid setting"),
+        "off" | "none" | "no" => ("off", "No snap", "Ignores snapping — lands wherever the pointer is"),
+        _ => return None,
+    };
+    Some(format!(
+        r#"<span class="md-snap md-snap-{state}" title="{title}">{MAGNET}<span class="md-snap-label">{label}</span></span>"#
+    ))
+}
+
 #[must_use]
 pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
     live_preview_with_lookups(state, None, None)
@@ -477,24 +539,32 @@ pub fn live_preview_with_lookups(
                 }
                 continue;
             }
-            // `kbd:` inline shortcuts — code spans with a `kbd:` prefix
-            // render as key caps. Two forms: literal `kbd:<C-s>` (keys
-            // as written) and action-ref `kbd:@40044` (whatever keys the
-            // host's [`KbdLookup`] says are currently bound). Caret on
-            // the span shows the raw source for editing, like links.
+            // Inline input widgets — code spans with a recognised
+            // prefix render as caps/chips instead of plain code:
+            //   `kbd:<C-s>` / `kbd:@40044` — key caps, literal or the
+            //     keys the host's [`KbdLookup`] currently binds;
+            //   `mouse:<C-> ldrag`        — pointer-gesture caps;
+            //   `snap:grid` / `snap:off`  — does-it-snap chip.
+            // Caret on the span shows the raw source for editing, like
+            // links; an unparseable spec falls through to inline code.
             if span.class == "md-code" {
                 let body = &text[span.body.clone()];
-                if let Some(spec) = body.strip_prefix("kbd:") {
+                let widget = if let Some(spec) = body.strip_prefix("kbd:") {
+                    Some(kbd_widget_html(spec, kbd))
+                } else if let Some(spec) = body.strip_prefix("mouse:") {
+                    Some(mouse_widget_html(spec))
+                } else {
+                    body.strip_prefix("snap:").map(snap_widget_html)
+                };
+                if let Some(html) = widget {
                     if !cursor_touches(primary, span.outer.clone()) {
-                        if let Some(html) = kbd_widget_html(spec, kbd) {
+                        if let Some(html) = html {
                             out.push(Decoration::replace(span.outer.clone()));
                             out.push(Decoration::widget(span.outer.start, html));
                             out.push(Decoration::atomic(span.outer.clone()));
                             continue;
                         }
                     }
-                    // Caret inside (or empty spec): fall through to the
-                    // normal inline-code styling with raw source.
                 }
             }
             let href = match span.class {
@@ -3854,6 +3924,60 @@ mod tests {
             widgets.iter().any(|h| h.contains("md-kbd-unbound") && h.contains("@99999")),
             "unresolved ref renders the unbound cap"
         );
+    }
+
+    /// Collect the widget HTML emitted for `src`, filtered to widgets
+    /// whose markup contains `needle`.
+    fn widgets_containing(src: &str, needle: &str) -> Vec<String> {
+        let s = state(src, 0);
+        live_preview(&s)
+            .iter()
+            .filter_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html } if html.contains(needle) => {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mouse_spec_renders_modifier_and_button_caps() {
+        // Modifiers reuse the `kbd:` chord grammar; the button gets its
+        // own accented cap.
+        let w = widgets_containing("draw with `mouse:<S-C-> ldrag` here", "md-kbd-mouse");
+        assert_eq!(w.len(), 1);
+        let html = &w[0];
+        assert!(html.contains("Ctrl") && html.contains("Shift"), "modifiers as caps: {html}");
+        assert!(
+            html.contains(r#"md-kbd-btn">Left-drag"#),
+            "button cap is distinct: {html}"
+        );
+
+        // Bare button, no modifiers.
+        let w = widgets_containing("just `mouse:ldrag`", "md-kbd-mouse");
+        assert_eq!(w.len(), 1);
+        assert!(!w[0].contains("md-kbd-plus"), "no dangling + without modifiers");
+    }
+
+    #[test]
+    fn unknown_mouse_button_falls_back_to_inline_code() {
+        // An unparseable spec must not invent a cap — it stays plain
+        // inline code so the note still reads.
+        assert!(widgets_containing("`mouse:<C-> wiggle`", "md-kbd-mouse").is_empty());
+    }
+
+    #[test]
+    fn snap_spec_renders_on_and_off_chips() {
+        let on = widgets_containing("lands on `snap:grid`", "md-snap");
+        assert_eq!(on.len(), 1);
+        assert!(on[0].contains("md-snap-on") && on[0].contains("Grid"));
+
+        let off = widgets_containing("lands `snap:off` wherever", "md-snap");
+        assert_eq!(off.len(), 1);
+        assert!(off[0].contains("md-snap-off") && off[0].contains("No snap"));
+
+        assert!(widgets_containing("`snap:maybe`", "md-snap").is_empty());
     }
 
     #[test]

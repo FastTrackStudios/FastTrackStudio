@@ -1569,6 +1569,66 @@
     opacity: 0.75;
 }
 
+/* `mouse:` gesture caps — same cap shell as `kbd:`, with the BUTTON cap
+   tinted so a pointer gesture reads apart from a keyboard chord at a
+   glance in a page that mixes both. */
+.editor-root .md-kbd-btn {
+    font-family: inherit;
+    font-size: 0.75em;
+    letter-spacing: 0.01em;
+    background: color-mix(in srgb, var(--ed-accent, currentColor) 12%, var(--ed-bg-elev));
+    border-color: color-mix(in srgb, var(--ed-accent, currentColor) 35%, var(--ed-border));
+}
+
+/* ── `snap:` chips ───────────────────────────────────────────────
+   Does this gesture land on the grid? A magnet chip rides beside the
+   gesture it qualifies. `on` = snaps (accented), `off` = ignores snap
+   (dimmed, magnet struck through). */
+.editor-root .md-snap {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    vertical-align: baseline;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 0.72em;
+    line-height: 1.6;
+    white-space: nowrap;
+    border: 1px solid var(--ed-border);
+    background: var(--ed-bg-elev);
+}
+.editor-root .md-snap-icon {
+    width: 0.95em;
+    height: 0.95em;
+    flex: none;
+}
+.editor-root .md-snap-on {
+    color: var(--ed-accent, var(--ed-text));
+    border-color: color-mix(in srgb, var(--ed-accent, currentColor) 40%, var(--ed-border));
+    background: color-mix(in srgb, var(--ed-accent, currentColor) 10%, var(--ed-bg-elev));
+}
+.editor-root .md-snap-off {
+    color: var(--ed-text-dim, var(--ed-text));
+    border-style: dashed;
+    opacity: 0.85;
+}
+/* Struck-through magnet for the no-snap state — drawn with a rotated
+   pseudo-element so it needs no second SVG. */
+.editor-root .md-snap-off .md-snap-icon {
+    position: relative;
+}
+.editor-root .md-snap-off .md-snap-label::before {
+    content: "";
+    position: absolute;
+    width: 1.05em;
+    height: 1px;
+    margin-left: -1.15em;
+    margin-top: 0.55em;
+    background: currentColor;
+    transform: rotate(-45deg);
+    transform-origin: center;
+}
+
 /* ── Song strip (standalone [[Song]] wikilink → playable row) ───────── */
 /* Streaming-player track row: [# / play] [art] [title / artist] [badge] [time].
    Borderless, hover-highlighted — the run of rows reads as one track list. */
