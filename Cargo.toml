@@ -748,6 +748,8 @@ clack-extensions = { git = "https://github.com/prokopyl/clack", features = [
     "raw-window-handle_06",
     "audio-ports",
     "note-ports",
+    # Piano-roll key labels (FTS Guide names its click/count/section keys).
+    "note-name",
     "params",
     "state",
     "latency",
