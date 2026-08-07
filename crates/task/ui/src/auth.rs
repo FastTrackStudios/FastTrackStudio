@@ -209,6 +209,36 @@ struct AuthState {
     home_locker: Signal<Option<HomeLocker>>,
 }
 
+/// Publish the resolved session token as the vox dial identity, and tear
+/// down connections established under the previous one.
+///
+/// This is the piece that was missing: the token was stored (localStorage
+/// + the registry entry) and passed as an ARGUMENT to the handful of auth
+/// methods that take one, but nothing ever attached it to the vox
+/// transport — so every other RPC arrived at the server as
+/// `principal=anonymous`, and the permission gate computed the right
+/// answer (`would_deny`) on all of them and threw it away.
+///
+/// A connection presents its identity ONCE, at the WebSocket upgrade, so
+/// publishing the token is only half the job: sockets already open from
+/// before sign-in stay anonymous forever. `set_session_token` reports
+/// whether the value actually changed, and on a change every cached
+/// connection is dropped so the next call re-dials as the new identity.
+/// The app root's supervised `Connection` re-establishes on its own (its
+/// connect closure re-runs, and `caller_for` finds no cached root).
+///
+/// Guest is NOT excluded here, unlike [`sync_active_server_entry`]: Guest
+/// is a real seeded account holding a real session token, and a debug
+/// build boots straight into it. Presenting that token is what it is — a
+/// validated session — and withholding it would make every dev boot
+/// anonymous, i.e. denied the moment enforcement goes on.
+fn publish_session_token(account: Option<&ActiveAccount>) {
+    let token = account.map(|a| a.token.clone());
+    if crate::vox_session::set_session_token(token) {
+        crate::vox_clients::drop_cached_connections();
+    }
+}
+
 /// Mirror a freshly-resolved session into the active server's registry
 /// entry: on real sign-in the entry gains `session_token` / `my_user_id`
 /// / `my_email`; a Guest/anonymous session (or sign-out) clears them.
@@ -365,6 +395,9 @@ async fn run_switch(mut st: AuthState, email: &str) {
         Ok(account) => {
             save_active_email(&account.email);
             sync_active_server_entry(st.registry, Some(&account));
+            // Before any further RPC: the locker/link calls below should
+            // already ride the new identity.
+            publish_session_token(Some(&account));
             // Multi-server sync: pull this server's locker (if it hosts
             // one, it becomes the anchor), then push it up to whatever
             // anchor stands. Both borrow `&account` before the move.
@@ -430,6 +463,7 @@ async fn run_credential_sign_in(
         Ok(account) => {
             save_active_email(&account.email);
             sync_active_server_entry(st.registry, Some(&account));
+            publish_session_token(Some(&account));
             // Same multi-server sync as run_switch (borrow before move).
             pull_locker(st, &account).await;
             push_link(st, &account).await;
@@ -450,6 +484,11 @@ async fn run_sign_out(mut st: AuthState) {
     clear_cached_token(&account.email);
     clear_active_email();
     sync_active_server_entry(st.registry, None);
+    // Drop the authenticated sockets NOW, before the revoke round trip —
+    // `sign_out` passes the token as an argument, so it doesn't need the
+    // connection to carry the identity, and re-dialing anonymously for it
+    // is the correct end state anyway.
+    publish_session_token(None);
     st.active.set(None);
     let slug = home_slug(&st.orgs.peek());
     if !slug.is_empty() {

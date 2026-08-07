@@ -12,7 +12,9 @@
 //! [`establish_for`] rather than growing this list — that's what keeps
 //! their protos out of the shell's graph.
 
-pub use task_ui_core::vox_clients::{RootLane, caller_for, establish_for, establish_server};
+pub use task_ui_core::vox_clients::{
+    RootLane, caller_for, drop_cached_connections, establish_for, establish_server,
+};
 
 /// An org's `TaskServiceClient` — a view over the org's shared caller.
 pub async fn task_client(slug: &str) -> Result<task_proto::TaskServiceClient, String> {

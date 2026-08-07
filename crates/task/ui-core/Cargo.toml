@@ -33,6 +33,10 @@ futures-channel.workspace = true
 futures-util.workspace = true
 
 wasm-bindgen.workspace = true
+# `js_sys::Array` — the WebSocket subprotocol list, which is how the
+# session token reaches the server on a browser handshake (a browser can
+# set no headers, and the token must not ride the URL).
+js-sys.workspace = true
 web-sys = { workspace = true, features = [
     "Window",
     "Location",
@@ -40,6 +44,21 @@ web-sys = { workspace = true, features = [
     "BinaryType",
     "Event",
     "CloseEvent",
+] }
+
+# Native dial (`dial_ws_native`). `WsLink::connect` takes only a URL, and
+# native clients need to present `Authorization: Bearer` on the upgrade,
+# so we build the stream ourselves and hand it to the public
+# `WsLink::new`. Same trick as `ui` and the CLI: vox-websocket never
+# enables tokio-tungstenite's TLS features itself, so these feature flags
+# unify TLS into the SHARED tokio-tungstenite instance and keep `wss://`
+# working.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["net"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = [
+    "connect",
+    "handshake",
+    "rustls-tls-webpki-roots",
 ] }
 
 [lints]

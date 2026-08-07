@@ -54,9 +54,35 @@
 
 use crate::vox_session::vox_url;
 
-/// Establish a client of type `C` against `url` — no caching. Shared by
-/// every public helper; cross-target.
-async fn establish_at<C>(url: &str) -> Result<C, String>
+/// The subprotocol every dial offers and the server selects. Offering any
+/// subprotocol makes the server's echo mandatory, so this is what lets the
+/// bearer subprotocol below be added without breaking the handshake.
+///
+/// Mirrors `task_server::VOX_SUBPROTOCOL` — duplicated rather than
+/// imported because the web client must not depend on the server crate.
+#[cfg(any(target_arch = "wasm32", test))]
+const VOX_SUBPROTOCOL: &str = "vox.v1";
+
+/// Prefix of the subprotocol carrying the session token
+/// (`task_server::VOX_BEARER_SUBPROTOCOL_PREFIX`).
+#[cfg(any(target_arch = "wasm32", test))]
+const VOX_BEARER_SUBPROTOCOL_PREFIX: &str = "vox.bearer.";
+
+/// Establish a client of type `C` against `url`, presenting `bearer` at
+/// the handshake — no caching. Shared by every public helper; cross-target.
+///
+/// ## Why the identity rides the handshake
+///
+/// vox middleware is per *typed client*, keyed to a service descriptor
+/// (`Caller::call` skips middleware entirely when no service is attached,
+/// and generated clients attach their own descriptor inside
+/// `from_vox_lane`), so there is no per-call choke point here to hang a
+/// token on — every one of the ~117 client constructions would have to
+/// remember, and a forgotten one fails OPEN and silently. One connection
+/// per endpoint is now genuinely true (see the module docs), so the token
+/// is presented ONCE, at establish, and the server applies it to every
+/// call on that connection.
+async fn establish_at<C>(url: &str, bearer: Option<&str>) -> Result<C, String>
 where
     C: vox_core::FromVoxLane + 'static,
 {
@@ -65,15 +91,84 @@ where
         return Err("no vox URL configured (set TASK_VOX_URL[_WEB])".to_owned());
     }
     #[cfg(target_arch = "wasm32")]
-    let link = dial_ws(url).await?;
+    let link = dial_ws(url, bearer).await?;
     #[cfg(not(target_arch = "wasm32"))]
-    let link = vox_websocket::WsLink::connect(url)
-        .await
-        .map_err(|e| format!("ws connect `{url}`: {e:?}"))?;
+    let link = dial_ws_native(url, bearer).await?;
     initiator_on(link)
         .establish::<C>()
         .await
         .map_err(|e| format!("establish `{url}`: {e:?}"))
+}
+
+/// The subprotocol list a dial offers: always [`VOX_SUBPROTOCOL`], plus
+/// `vox.bearer.<token>` when signed in.
+///
+/// The token deliberately does NOT ride a URL query parameter — those land
+/// in every proxy and access log on the path. Session tokens are
+/// base64url-no-pad, whose alphabet is a subset of the RFC 7230 token
+/// charset a subprotocol value must use, so no extra encoding is needed;
+/// a token containing anything else is dropped rather than sent as a
+/// malformed header that would fail the whole handshake.
+///
+/// Browser-only: native presents the identity as an `Authorization`
+/// header instead (see [`dial_ws_native`] for why symmetry is a trap).
+/// `cfg(test)` keeps it compiled for the unit tests, which run natively.
+#[cfg(any(target_arch = "wasm32", test))]
+fn subprotocols(bearer: Option<&str>) -> Vec<String> {
+    let mut protos = vec![VOX_SUBPROTOCOL.to_owned()];
+    if let Some(token) = bearer.filter(|t| {
+        !t.is_empty()
+            && t.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    }) {
+        protos.push(format!("{VOX_BEARER_SUBPROTOCOL_PREFIX}{token}"));
+    }
+    protos
+}
+
+/// Native dial. Unlike a browser, a native client controls its handshake
+/// request, so the token goes in a plain `Authorization: Bearer` header —
+/// the same channel the HTTP surface (`/blobs`, `/media`, the watch
+/// bridge) already accepts.
+///
+/// This replaces `WsLink::connect`, which takes only a URL. It builds the
+/// same `tokio_tungstenite` stream and hands it to the public
+/// `WsLink::new`.
+///
+/// ## Why native offers NO subprotocol
+///
+/// Symmetry with the browser dial would be nice, and costs an outage.
+/// tungstenite is stricter than RFC 6455 here: the spec lets a server that
+/// selects no subprotocol simply omit the response header (§4.2.2, and
+/// browsers accept that), but tungstenite treats "I offered, you didn't
+/// echo" as a **handshake failure**
+/// (`SubProtocolError::NoSubProtocol`). So a native client offering
+/// `vox.bearer.…` cannot talk to any peer that doesn't echo it — an older
+/// task-server, or an ingress/proxy that drops the header. The
+/// `Authorization` header needs no negotiation and has none of that
+/// coupling, so native uses it alone.
+#[cfg(not(target_arch = "wasm32"))]
+async fn dial_ws_native(
+    url: &str,
+    bearer: Option<&str>,
+) -> Result<
+    vox_websocket::WsLink<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    String,
+> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    let mut request = url
+        .into_client_request()
+        .map_err(|e| format!("ws request `{url}`: {e:?}"))?;
+    if let Some(token) = bearer.filter(|t| !t.is_empty()) {
+        if let Ok(value) = format!("Bearer {token}").parse() {
+            request.headers_mut().insert("authorization", value);
+        }
+    }
+    let (stream, _response) = tokio_tungstenite::connect_async(request)
+        .await
+        .map_err(|e| format!("ws connect `{url}`: {e:?}"))?;
+    Ok(vox_websocket::WsLink::new(stream))
 }
 
 /// Cancel-safe browser WebSocket dial (wasm replacement for
@@ -97,7 +192,7 @@ where
 /// open socket to `WsLink::new`, which installs the steady-state
 /// handlers it owns.
 #[cfg(target_arch = "wasm32")]
-async fn dial_ws(url: &str) -> Result<vox_websocket::WsLink, String> {
+async fn dial_ws(url: &str, bearer: Option<&str>) -> Result<vox_websocket::WsLink, String> {
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -130,7 +225,15 @@ async fn dial_ws(url: &str) -> Result<vox_websocket::WsLink, String> {
         }
     }
 
-    let ws = web_sys::WebSocket::new(url).map_err(|e| format!("WebSocket::new `{url}`: {e:?}"))?;
+    // The browser's ONE lever on a WebSocket handshake: a browser cannot
+    // set request headers, and the token must not ride the URL, so the
+    // subprotocol list is where identity goes (see `subprotocols`).
+    let protocols = js_sys::Array::new();
+    for proto in subprotocols(bearer) {
+        protocols.push(&wasm_bindgen::JsValue::from_str(&proto));
+    }
+    let ws = web_sys::WebSocket::new_with_str_sequence(url, &protocols)
+        .map_err(|e| format!("WebSocket::new `{url}`: {e:?}"))?;
     ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
     let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
@@ -265,6 +368,21 @@ where
     Ok(C::from_vox_lane(caller, None))
 }
 
+/// Drop every cached connection, closing its socket.
+///
+/// A connection presents its identity ONCE, at establish, so a socket
+/// opened while signed out stays anonymous for its whole life no matter
+/// what the token holder says later. Signing in or out therefore has to
+/// tear the old sockets down; the next call re-dials under the new
+/// identity. `crate::vox_session::set_session_token` reports whether the
+/// token actually changed, which is the trigger.
+pub fn drop_cached_connections() {
+    // In-flight dials first: a dial that completes after this would
+    // otherwise publish a root established under the OLD identity.
+    with_inflight(std::collections::HashMap::clear);
+    with_roots(std::collections::HashMap::clear);
+}
+
 /// The shared root connection for one endpoint URL — establish once,
 /// reuse for every service.
 ///
@@ -285,8 +403,18 @@ where
 /// connection isn't pointed at), so the root's own liveness is the only
 /// invariant that always holds. A dead root is evicted and re-established
 /// transparently.
+/// What a cached connection is keyed by: the endpoint URL **and the
+/// identity it was established under**.
+///
+/// The URL alone is not enough. A connection presents its bearer once, at
+/// the WebSocket upgrade, so an anonymous root and a signed-in root to the
+/// same endpoint are different connections that must never be swapped for
+/// each other — handing a cached anonymous root to a signed-in caller is
+/// exactly the silent-fail-open this whole change exists to remove.
+type RootKey = (String, Option<String>);
+
 /// A dial in progress, shared by every caller that asked for the same
-/// URL while it was in flight.
+/// URL + identity while it was in flight.
 type SharedDial = futures_util::future::Shared<DialFuture>;
 #[cfg(target_arch = "wasm32")]
 type DialFuture = futures_util::future::LocalBoxFuture<'static, Result<vox_core::Caller, String>>;
@@ -294,7 +422,16 @@ type DialFuture = futures_util::future::LocalBoxFuture<'static, Result<vox_core:
 type DialFuture = futures_util::future::BoxFuture<'static, Result<vox_core::Caller, String>>;
 
 async fn shared_caller_at(url: &str) -> Result<vox_core::Caller, String> {
-    if let Some(caller) = cached_live_caller(url) {
+    // Identity is part of the cache key, not just the dial: a root
+    // established anonymously can never become authenticated (the server
+    // read the bearer once, at upgrade), so handing it to a signed-in
+    // caller would silently keep them anonymous. `drop_cached_connections`
+    // clears the old identity's roots on sign-in/out; this keying is the
+    // belt to that braces, covering the window where a dial started before
+    // the token landed.
+    let bearer = crate::vox_session::bearer();
+    let key = (url.to_owned(), bearer.clone());
+    if let Some(caller) = cached_live_caller(&key) {
         return Ok(caller);
     }
     // SINGLE-FLIGHT. The cache alone is not enough: it can only be
@@ -308,12 +445,12 @@ async fn shared_caller_at(url: &str) -> Result<vox_core::Caller, String> {
     // So concurrent callers now await the SAME dial rather than starting
     // their own.
     let dial = with_inflight(|inflight| {
-        if let Some(dial) = inflight.get(url) {
+        if let Some(dial) = inflight.get(&key) {
             return dial.clone();
         }
-        let owned = url.to_owned();
+        let owned = key.clone();
         let fut = async move {
-            let root = establish_at::<RootLane>(&owned).await?;
+            let root = establish_at::<RootLane>(&owned.0, owned.1.as_deref()).await?;
             let caller = insert_root(&owned, root);
             // Clear the in-flight slot so a later dial (after this root
             // dies) starts fresh. Callers already awaiting this `Shared`
@@ -324,7 +461,7 @@ async fn shared_caller_at(url: &str) -> Result<vox_core::Caller, String> {
         // `DialFuture` is already cfg'd (LocalBoxFuture on wasm, BoxFuture
         // on native), so this one line covers both targets.
         let dial: SharedDial = futures_util::FutureExt::shared(Box::pin(fut) as DialFuture);
-        inflight.insert(url.to_owned(), dial.clone());
+        inflight.insert(key.clone(), dial.clone());
         dial
     });
     // Awaited with no lock held — the dial is a network round trip.
@@ -334,32 +471,32 @@ async fn shared_caller_at(url: &str) -> Result<vox_core::Caller, String> {
 /// Run `f` against the per-target in-flight dial map. Same locking
 /// discipline as [`with_roots`]: never held across an await.
 #[cfg(target_arch = "wasm32")]
-fn with_inflight<R>(f: impl FnOnce(&mut std::collections::HashMap<String, SharedDial>) -> R) -> R {
+fn with_inflight<R>(f: impl FnOnce(&mut std::collections::HashMap<RootKey, SharedDial>) -> R) -> R {
     use std::cell::RefCell;
     use std::collections::HashMap;
     thread_local! {
-        static INFLIGHT: RefCell<HashMap<String, SharedDial>> = RefCell::new(HashMap::new());
+        static INFLIGHT: RefCell<HashMap<RootKey, SharedDial>> = RefCell::new(HashMap::new());
     }
     INFLIGHT.with(|m| f(&mut m.borrow_mut()))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn with_inflight<R>(f: impl FnOnce(&mut std::collections::HashMap<String, SharedDial>) -> R) -> R {
+fn with_inflight<R>(f: impl FnOnce(&mut std::collections::HashMap<RootKey, SharedDial>) -> R) -> R {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
-    static INFLIGHT: OnceLock<Mutex<HashMap<String, SharedDial>>> = OnceLock::new();
+    static INFLIGHT: OnceLock<Mutex<HashMap<RootKey, SharedDial>>> = OnceLock::new();
     let m = INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = m.lock().unwrap_or_else(|e| e.into_inner());
     f(&mut guard)
 }
 
 /// Look up a cached root, evicting it if the connection has died.
-fn cached_live_caller(url: &str) -> Option<vox_core::Caller> {
-    with_roots(|roots| match roots.get(url) {
+fn cached_live_caller(key: &RootKey) -> Option<vox_core::Caller> {
+    with_roots(|roots| match roots.get(key) {
         Some(root) if root.caller.is_connected() => Some(root.caller.clone()),
         Some(_) => {
-            tracing::warn!(url, "vox: cached root is dead; re-establishing");
-            roots.remove(url);
+            tracing::warn!(url = key.0, "vox: cached root is dead; re-establishing");
+            roots.remove(key);
             None
         }
         None => None,
@@ -373,12 +510,12 @@ fn cached_live_caller(url: &str) -> Option<vox_core::Caller> {
 /// under a global lock would serialize every org's first connect). The
 /// loser drops its socket rather than evicting the winner, so callers
 /// that already hold the winner's caller keep a live connection.
-fn insert_root(url: &str, root: RootLane) -> vox_core::Caller {
-    with_roots(|roots| match roots.get(url) {
+fn insert_root(key: &RootKey, root: RootLane) -> vox_core::Caller {
+    with_roots(|roots| match roots.get(key) {
         Some(existing) if existing.caller.is_connected() => existing.caller.clone(),
         _ => {
             let caller = root.caller.clone();
-            roots.insert(url.to_owned(), root);
+            roots.insert(key.clone(), root);
             caller
         }
     })
@@ -392,20 +529,20 @@ fn insert_root(url: &str, root: RootLane) -> vox_core::Caller {
 /// never held across an await (see [`insert_root`]), so a plain `std`
 /// mutex is enough and this needs no async-lock dependency.
 #[cfg(target_arch = "wasm32")]
-fn with_roots<R>(f: impl FnOnce(&mut std::collections::HashMap<String, RootLane>) -> R) -> R {
+fn with_roots<R>(f: impl FnOnce(&mut std::collections::HashMap<RootKey, RootLane>) -> R) -> R {
     use std::cell::RefCell;
     use std::collections::HashMap;
     thread_local! {
-        static ROOTS: RefCell<HashMap<String, RootLane>> = RefCell::new(HashMap::new());
+        static ROOTS: RefCell<HashMap<RootKey, RootLane>> = RefCell::new(HashMap::new());
     }
     ROOTS.with(|roots| f(&mut roots.borrow_mut()))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn with_roots<R>(f: impl FnOnce(&mut std::collections::HashMap<String, RootLane>) -> R) -> R {
+fn with_roots<R>(f: impl FnOnce(&mut std::collections::HashMap<RootKey, RootLane>) -> R) -> R {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
-    static ROOTS: OnceLock<Mutex<HashMap<String, RootLane>>> = OnceLock::new();
+    static ROOTS: OnceLock<Mutex<HashMap<RootKey, RootLane>>> = OnceLock::new();
     let roots = ROOTS.get_or_init(|| Mutex::new(HashMap::new()));
     // Poisoning only means some other caller panicked mid-map-edit; the
     // map itself is still a valid cache, so recover rather than cascade.
@@ -435,4 +572,40 @@ where
 {
     let caller = caller_for(slug).await?;
     Ok(C::from_vox_lane(caller, None))
+}
+
+#[cfg(test)]
+mod subprotocol_tests {
+    use super::{VOX_SUBPROTOCOL, subprotocols};
+
+    #[test]
+    fn anonymous_offers_only_the_plain_protocol() {
+        assert_eq!(subprotocols(None), vec![VOX_SUBPROTOCOL.to_owned()]);
+        assert_eq!(subprotocols(Some("")), vec![VOX_SUBPROTOCOL.to_owned()]);
+    }
+
+    #[test]
+    fn signed_in_appends_the_bearer_protocol() {
+        // A real session token's shape: base64url, no padding.
+        assert_eq!(
+            subprotocols(Some("Zm9v-ba_r9")),
+            vec!["vox.v1".to_owned(), "vox.bearer.Zm9v-ba_r9".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_token_outside_the_subprotocol_charset_is_dropped() {
+        // Not a silent downgrade for real tokens — `generate_token`
+        // produces base64url-no-pad, which always passes. This guards
+        // the case where something else ends up in the holder: sending
+        // it raw would produce a malformed header and fail the ENTIRE
+        // handshake, so the page would go dark rather than degrade.
+        for bad in ["has space", "has,comma", "base64+pad=", "quote\"d"] {
+            assert_eq!(
+                subprotocols(Some(bad)),
+                vec![VOX_SUBPROTOCOL.to_owned()],
+                "{bad:?} should not be offered as a subprotocol"
+            );
+        }
+    }
 }

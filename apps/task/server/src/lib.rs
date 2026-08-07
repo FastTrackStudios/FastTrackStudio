@@ -2058,6 +2058,7 @@ async fn per_org_api_handler(
 async fn per_org_vox_handler(
     State(state): State<AppState>,
     axum::extract::Path(slug): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
     let Some(org) = state.org(&slug) else {
@@ -2066,7 +2067,7 @@ async fn per_org_vox_handler(
             format!("org `{slug}` not hosted"),
         ));
     };
-    serve_org_vox(org, state.write_gate.clone(), ws)
+    serve_org_vox(org, state.write_gate.clone(), ws, &headers)
 }
 
 /// `/server/vox` — server-management WebSocket. Hosts the
@@ -2085,7 +2086,12 @@ async fn server_vox_handler(
     // snapshot verbs themselves pass the entry gate before closing
     // it — no self-deadlock.
     let router = crate::snapshot::GatedRouter::new(router, gate);
-    ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
+    // The `/server/vox` services take the session token as an explicit
+    // ARGUMENT (the identity locker validates it itself), so there is no
+    // gate to feed here — but the subprotocol must still be echoed, or a
+    // browser that offered one gets no connection at all.
+    ws.protocols([VOX_SUBPROTOCOL])
+        .on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
         .into_response()
 }
 
@@ -2137,6 +2143,7 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
 /// happen post-boot but is a sane fallback).
 async fn legacy_vox_handler(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
     let Some(org) = state
@@ -2150,7 +2157,7 @@ async fn legacy_vox_handler(
             "no org hosted on this server",
         ));
     };
-    serve_org_vox(org, state.write_gate.clone(), ws)
+    serve_org_vox(org, state.write_gate.clone(), ws, &headers)
 }
 
 /// Build the per-org [`LayerRouter`]: every service this org hosts,
@@ -2850,21 +2857,152 @@ async fn share_landing_handler(
     }
 }
 
+/// The WebSocket subprotocol every Task client offers, and the one the
+/// server selects. A client that offers subprotocols gets no connection at
+/// all unless the server echoes one back, so this is what makes the
+/// bearer subprotocol below safe to add.
+pub const VOX_SUBPROTOCOL: &str = "vox.v1";
+
+/// Prefix of the subprotocol carrying the caller's session token:
+/// `vox.bearer.<token>`.
+///
+/// Session tokens are base64url-no-pad (`generate_token`), whose alphabet
+/// is a subset of the RFC 7230 token charset a subprotocol value must use
+/// — so the token needs no further encoding.
+pub const VOX_BEARER_SUBPROTOCOL_PREFIX: &str = "vox.bearer.";
+
+/// The identity presented at WebSocket **upgrade**, applied to every call
+/// on the resulting connection (see
+/// [`architect::permissions_gate::PermissionsGate::wrap_shared_with_bearer`]).
+///
+/// Two channels, because the two client families can do different things:
+///
+/// - `Authorization: Bearer <token>` — native clients (desktop, CLI, iOS,
+///   the watch bridge) control their handshake request directly.
+/// - `Sec-WebSocket-Protocol: vox.v1, vox.bearer.<token>` — browsers
+///   cannot set arbitrary WebSocket headers, and the token must NOT ride
+///   a URL query parameter (it would land in every proxy + access log
+///   along the path). The subprotocol list is the one client-controlled
+///   field on a browser handshake.
+fn upgrade_bearer(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(token) = crate::watch_bridge::bearer(headers) {
+        return Some(token);
+    }
+    headers
+        .get_all(axum::http::header::SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .filter_map(|p| p.trim().strip_prefix(VOX_BEARER_SUBPROTOCOL_PREFIX))
+        .map(str::to_owned)
+        .find(|t| !t.is_empty())
+}
+
 fn serve_org_vox(
     org: OrgAppState,
     gate: snapshot::WriteGate,
     ws: WebSocketUpgrade,
+    headers: &axum::http::HeaderMap,
 ) -> axum::response::Response {
+    let bearer = upgrade_bearer(headers);
     // Every request parks at the snapshot write gate on dispatch
     // entry — see `snapshot::GatedRouter`. Free when no snapshot is
     // running.
     let router = snapshot::GatedRouter::new(org_layer_router(&org), gate);
     // Outermost: the permission gate (deny before snapshot-parking or
-    // dispatch). One shared gate per org, wrapped per connection.
-    let router =
-        architect::permissions_gate::PermissionsGate::wrap_shared(org.permissions.clone(), router);
-    ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
+    // dispatch). One shared gate per org, wrapped per connection — which
+    // is why the connection's bearer can be baked in here.
+    let router = architect::permissions_gate::PermissionsGate::wrap_shared_with_bearer(
+        org.permissions.clone(),
+        router,
+        bearer,
+    );
+    ws.protocols([VOX_SUBPROTOCOL])
+        .on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
         .into_response()
+}
+
+#[cfg(test)]
+mod upgrade_bearer_tests {
+    use axum::http::{HeaderMap, HeaderValue};
+
+    use super::upgrade_bearer;
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(*k, HeaderValue::from_str(v).unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn no_identity_presented() {
+        assert_eq!(upgrade_bearer(&HeaderMap::new()), None);
+        // Offering the plain subprotocol is not an identity.
+        assert_eq!(
+            upgrade_bearer(&headers(&[("sec-websocket-protocol", "vox.v1")])),
+            None
+        );
+    }
+
+    #[test]
+    fn native_authorization_header() {
+        assert_eq!(
+            upgrade_bearer(&headers(&[("authorization", "Bearer abc123")])),
+            Some("abc123".to_owned())
+        );
+    }
+
+    #[test]
+    fn browser_subprotocol() {
+        // How a browser actually sends it: one header, comma-separated,
+        // with the spaces the client library inserts.
+        assert_eq!(
+            upgrade_bearer(&headers(&[(
+                "sec-websocket-protocol",
+                "vox.v1, vox.bearer.tok-en_9"
+            )])),
+            Some("tok-en_9".to_owned())
+        );
+    }
+
+    #[test]
+    fn subprotocol_split_across_headers() {
+        // Equally legal per RFC 9110 §5.3, and what some proxies produce.
+        assert_eq!(
+            upgrade_bearer(&headers(&[
+                ("sec-websocket-protocol", "vox.v1"),
+                ("sec-websocket-protocol", "vox.bearer.xyz"),
+            ])),
+            Some("xyz".to_owned())
+        );
+    }
+
+    #[test]
+    fn header_wins_over_subprotocol() {
+        assert_eq!(
+            upgrade_bearer(&headers(&[
+                ("authorization", "Bearer from-header"),
+                ("sec-websocket-protocol", "vox.v1, vox.bearer.from-proto"),
+            ])),
+            Some("from-header".to_owned())
+        );
+    }
+
+    #[test]
+    fn empty_token_is_not_an_identity() {
+        // An empty bearer must read as "anonymous", not as a token that
+        // will resolve to nothing and muddy `auth.outcome`.
+        assert_eq!(
+            upgrade_bearer(&headers(&[("sec-websocket-protocol", "vox.v1, vox.bearer.")])),
+            None
+        );
+        assert_eq!(
+            upgrade_bearer(&headers(&[("authorization", "Bearer ")])),
+            None
+        );
+    }
 }
 
 #[cfg(test)]
