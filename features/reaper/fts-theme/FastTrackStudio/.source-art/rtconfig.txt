@@ -301,8 +301,8 @@ endmacro
 
 macro initTrackGlobals
     set width_visible trackpanmode<4 [0] trackpanmode==6 [2] [1]  ; can be ==3 instead of <4 if width desired for 3.x
-    set gl_pan_color                width_visible{0}!=2 [8 8 11 120] [32 32 42]
-    set gl_width_color              width_visible{0}==1 [240 249 255 210] [42 42 54]
+    set gl_pan_color                width_visible{0}!=2 [0 0 0 120] [84 63 63]
+    set gl_width_color              width_visible{0}==1 [255 255 255 210] [63 84 63]
     set gl_fader_swap               width_visible{0}==2 [0] [1]
 
     set hide_inputFX			    400 	; height below which input effects is hidden.
@@ -312,8 +312,8 @@ macro initTrackGlobals
     set hide_volume_label           250 	; height below which volume label is hidden.
 
     set track_color [trackcolor_r trackcolor_g trackcolor_b] 
-    set bright_text_color   + ?track_selected [202 208 224] [169 175 193] ?trackcolor_valid [10 10 13] [0]
-    set dark_text_color     [12 12 16]
+    set bright_text_color   + ?track_selected [220 220 220] [200 200 200] ?trackcolor_valid [10 10 10] [0]
+    set dark_text_color     [23 23 23]
 
     ; Colored text settings
 
@@ -337,20 +337,20 @@ macro initTrackGlobals
     set tinted_text_color * . luma_factor_diff>0 max_luma_factor target_luma_factor
 
     set push_sat * / * luma_factor_diff tinted_text_luma 255 tinted_text_push_sat
-    set tinted_text_color luma_factor_diff>0 + * . - 1 push_sat  * [240 249 255] push_sat
+    set tinted_text_color luma_factor_diff>0 + * . - 1 push_sat  * [255 255 255] push_sat
 
     set tint_label_text !trackcolor_valid 0 ?tint_folder_label folderstate==1 1 0 ?tint_label 1 0
-    set label_text_color ?tint_label_text tinted_text_color ?track_selected [217 225 236] [198 204 221]
+    set label_text_color ?tint_label_text tinted_text_color ?track_selected [235 235 235] [217 217 217]
 
-    set mcp_bg_color            theme_version>1 [0 0 0 0 27 27 35] [0 0 0 0 20 20 27]
-    set meter_bg_color          theme_version>2 [0 0 0 0 19 19 25] [0 0 0 0 16 16 21]
-    set track_default_bg_color  [0 0 0 0 80 86 104]
+    set mcp_bg_color            theme_version>1 [0 0 0 0 61 61 61] [0 0 0 0 51 51 51]
+    set meter_bg_color          theme_version>2 [0 0 0 0 46 46 46] [0 0 0 0 38 38 38]
+    set track_default_bg_color  [0 0 0 0 130 130 130]
     set track_bg_color          [0 0 0 0 trackcolor_r trackcolor_g trackcolor_b]
 
     set accent_color            theme_accent==1 [70 185 254] \
                                 theme_accent==2 [62 225 189] \
                                 theme_accent==3 [180 153 255]
-    set brighter_accent_color + * accent_color 0.92 * [240 249 255] 0.08
+    set brighter_accent_color + * accent_color 0.92 * [255 255 255] 0.08
 endmacro
 
 #>---------------------------- TRACK CONTROL PANELS -----------------------------------
@@ -808,7 +808,7 @@ macro drawTcp scale
 
     set tcp.custom.bg.color + * track_default_bg_color - 1 tint_strength * track_bg_color tint_strength 
     set tcp.custom.bg.color * . - 1 dim_strength
-    set tcp.custom.bg.color + * . - 1 sel_strength  * [0 0 0 0 240 249 255] sel_strength
+    set tcp.custom.bg.color + * . - 1 sel_strength  * [0 0 0 0 255 255 255] sel_strength
 
     set trackidx_offs * scale [-18 0 18]
     set tcp.custom.bg_hl1 + + * [1 1 1 0] tcp.custom.bg * lscale [0 0 0 1] trackidx_offs
@@ -834,7 +834,7 @@ macro drawTcp scale
     set meter_sec ?supercollapsed [0]
 
     custom tcp.custom.div_b
-    set tcp.custom.div_b.color [0 0 0 0 14 14 18]
+    set tcp.custom.div_b.color [0 0 0 0 30 30 30]
     set tcp.custom.div_b   + - [0 h w lscale] lscale@y * [1 0 -1] this_tcp_indent
 
     custom tcp.custom.div_r
@@ -928,7 +928,7 @@ macro drawTcp scale
     set tcp.custom.trackidx_bg tcp_idx_dim_strength>=tcp_dim_strength + * lscale 1@w
     set tcp.custom.trackidx_bg.color + * track_default_bg_color - 1 trackidx_tint_strength * track_bg_color trackidx_tint_strength
     set tcp.custom.trackidx_bg.color * . - 1 / tcp_idx_dim_strength 100
-    set tcp.custom.trackidx_bg.color + * . - 1 trackidx_sel_strength  * [0 0 0 0 240 249 255] trackidx_sel_strength
+    set tcp.custom.trackidx_bg.color + * . - 1 trackidx_sel_strength  * [0 0 0 0 255 255 255] trackidx_sel_strength
 
     set trackidx_bg_color [tcp.custom.trackidx_bg.color{4} tcp.custom.trackidx_bg.color{5} tcp.custom.trackidx_bg.color{6}]
     get_luma trackidx_bg_luma trackidx_bg_color
@@ -987,7 +987,7 @@ macro drawTcp scale
 	set tcp.fxin 								!input_group{2} [0] + [input_group input_group] + * scale [0 0 29] [0 0 0 element_h{0}]
 	set tcp.recinput							!input_group{2} [0] - + + [tcp.fxin tcp.fxin] [tcp.fxin{2} 0 input_group] [0 0 0 element_h{0}] [0 0 tcp.fxin{2}]
 	set tcp.recinput							scale==1.5 + 0.5@x
-		set tcp.recinput.color           		?track_selected [240 249 255] [207 214 228]
+		set tcp.recinput.color           		?track_selected [255 255 255] [225 225 225]
 		set tcp.recinput.font					main_font
 		set tcp.recinput.margin        			* [scale scale scale scale 1] [0 0 20 0 0.5]
 		set tcp.recinput.margin        			+ main_font_voffs@y
@@ -1013,7 +1013,7 @@ macro drawTcp scale
 		set tcp.width.color            			gl_width_color
 	set volume_fader_w							* 21 scale
 	set tcp.volume.fadermode         			tcp.volume{w}>volume_fader_w{0} [0] [1]
-		set tcp.volume.color           			[8 8 11]
+		set tcp.volume.color           			[0 0 0]
 	set hideValues								?hide_values{0} 1 .
 	set values_sec								hideValues{0}==1 [0] + [main_sec main_sec_last{0} any_row_r{0}] * scale [0 0 0 9] ; FTC MOD
 	set tcp.volume.label						!values_sec{0} [0] + + * scale [1 -2 42 2] [values_sec values_sec 0 values_sec] [tcp_padding]
@@ -1682,7 +1682,7 @@ macro drawTcpSeparator scale
     set tcp.label               [0 0 w h]
     set tcp.label.font          header_font
     set tcp.label.margin        + * scale [6 4 6 4] [0 0 0 0 0.5]
-    set tcp.label.color         ?track_selected [207 214 228] [152 160 178] 
+    set tcp.label.color         ?track_selected [225 225 225] [190 190 190] 
     set tcp.label.color         ?trackcolor_valid [trackcolor_r trackcolor_g trackcolor_b] 
 endmacro
 
@@ -1773,7 +1773,7 @@ macro drawMasterTcp scale
 	set master.tcp.volume						?mainCollapse{0} [0] + vol_sec * scale + [0 0 -2 -2] ?meter_flip{0} [1 0 -1 0] [1 0 -1 -3]
 		set volume_fader_w						* 21 scale
 		set master.tcp.volume.fadermode         master.tcp.volume{w}>volume_fader_w{0} [0] [1]
-		set master.tcp.volume.color           	[8 8 11]
+		set master.tcp.volume.color           	[0 0 0]
 	set master.tcp.fx 							!master_fx_group{2} [0] + * scale [0 0 20] [master_fx_group master_fx_group 0 element_h{0}]
 	set master.tcp.fxbyp 						!master_fx_group{2} [0] + + * scale [0 0 16] [master.tcp.fx master.tcp.fx 0 element_h{0}] [master.tcp.fx{2}]
 	set master.tcp.pan 							!master_pan_group{2} [0 0 0 0] width_visible{0}==2 \
@@ -1787,7 +1787,7 @@ macro drawMasterTcp scale
 		set master.tcp.width.fadermode        	gl_fader_swap
 		set master.tcp.width.color            	gl_pan_color
 	set hideValues								?mainCollapse{0} 1 ?hide_values{0} 1 . .	
-	set master_mcp_text_color							?track_selected [111 119 138] [67 71 88]
+	set master_mcp_text_color							?track_selected [160 160 160] [115 115 115]
 	set master.tcp.volume.label					hideValues{0}==1 [0] + + * scale + [-1 0 100 4] * + main_font 10 [0 -1 0 1] [main_sec main_sec{3}] - [tcp_padding] [0 tcp_padding]
 		set master.tcp.volume.label.color     	master_mcp_text_color
 		set master.tcp.volume.label.font		main_font
@@ -2004,7 +2004,7 @@ macro drawEnvcp scale
                                                     * scale [-1 0 2 0] \
                                                     envcp.bypass{w}>0 envcp.bypass{w}@w 0
 
-	set envcp.label.color      					?env_selected [172 179 196] [143 151 170]
+	set envcp.label.color      					?env_selected [202 202 202] [184 184 184]
 		set envcp.label.font					main_font
 		set envcp.label.margin     				* scale [4 0 4 0 0]
 		set envcp.label.margin					+ main_font_voffs@y
@@ -2153,7 +2153,7 @@ macro drawMcp scale
 
     set mcp.custom.bg.color + * track_default_bg_color - 1 tint_strength * track_bg_color tint_strength 
     set mcp.custom.bg.color * . - 1 dim_strength
-    set mcp.custom.bg.color + * . - 1 sel_strength  * [0 0 0 0 240 249 255] sel_strength
+    set mcp.custom.bg.color + * . - 1 sel_strength  * [0 0 0 0 255 255 255] sel_strength
 
     set hl_color [0 0 0 0 255 255 255 22]
     set mcp.custom.bg_hl_t + * [1 1 1 0] mcp.custom.bg * lscale [0 0 0 1]
@@ -2290,7 +2290,7 @@ macro drawMcp scale
     set mcp.width.label trackpanmode==6 + * scale 2@y
 
     set mcp.recinput                         	h<hide_input_s [0] + [in_sec in_sec nchan_offs{0}] * scale ?narrowMode width_visible{0}==1 [0] [6 0 43 16] [6 0 75 16]
-	  set mcp.recinput.color                 	?track_selected [207 214 228] [169 175 193]
+	  set mcp.recinput.color                 	?track_selected [225 225 225] [200 200 200]
 	  set mcp.recinput.font						main_font
 	  set mcp.recinput.margin                	+ * scale [4 0 15 0 0] scale>1 [0 0.5] [0]
 	  set mcp.recinput.margin             	    + main_font_voffs@y
@@ -2321,7 +2321,7 @@ macro drawMcp scale
       set mcp.volume                         	?narrowMode + - + [stretch_sec stretch_sec] [nchan_offs_half stretch_sec{3}] * scale [-4 21] * scale [0 0 21 21] \
 													- + * [1 1 scale 1] [mcp.meter stretch_sec 21 stretch_sec] [mcp.meter{2} mcp.volume.label{3}] [-2 0 0 mcp.volume.label{3}]
 	  set mcp.volume.fadermode 					!narrowMode -1 .
-	  set mcp.volume.label.color                mcp.volume.label{h}>2 theme_version>1 [169 175 193] [55 58 73] theme_version>1 [55 58 73] [meter_bg_color{4} meter_bg_color{5} meter_bg_color{6}]
+	  set mcp.volume.label.color                mcp.volume.label{h}>2 theme_version>1 [200 200 200] [100 100 100] theme_version>1 [100 100 100] [meter_bg_color{4} meter_bg_color{5} meter_bg_color{6}]
 	  set mcp.volume.label.font					main_font
 	  set mcp.volume.label.margin            	* [scale scale scale scale 1] ?narrowMode [0 80 0 0 0.5] [0 4 0 0 0.5]
 	  set mcp.volume.label.margin          	    + main_font_voffs@y
@@ -2357,7 +2357,7 @@ macro drawMcp scale
 
 	set mcp.trackidx                         	idx_sec
 	  set mcp.trackidx.margin 				    + [0 0 0 0 0.5] folderstate==1 * scale ?narrowMode [4] [8] 0
-	  set mcp.trackidx.color					?track_selected [13 13 16] .
+	  set mcp.trackidx.color					?track_selected [24 24 24] .
 	  set mcp.trackidx.font                  	main_font
 
     ; v7 adjustable track idx background color
@@ -2371,7 +2371,7 @@ macro drawMcp scale
     set mcp.custom.trackidx_bg + idx_sec * lscale [1 0 -1 0]
     set mcp.custom.trackidx_bg.color + * track_default_bg_color - 1 trackidx_tint_strength * track_bg_color trackidx_tint_strength
     set mcp.custom.trackidx_bg.color * . - 1 / mcp_idx_dim_strength 100
-    set mcp.custom.trackidx_bg.color + * . - 1 trackidx_sel_strength  * [0 0 0 0 240 249 255] trackidx_sel_strength
+    set mcp.custom.trackidx_bg.color + * . - 1 trackidx_sel_strength  * [0 0 0 0 255 255 255] trackidx_sel_strength
 
     set mcp.custom.trackidx_bg_hl_t + * [1 1 1 0] mcp.custom.trackidx_bg * lscale [0 0 0 1]
     set mcp.custom.trackidx_bg_hl_t gapmode==1 folderstate<1 + + * [1 0 -1] gap_size_s * lscale [-1 0 1]
@@ -2964,7 +2964,7 @@ macro drawMcpSeparator scale
     set mcp.label               [0 0 w h]
     set mcp.label.font          header_font
     set mcp.label.margin        + * scale [4 6 4 6] [0 0 0 0 0.5]
-    set mcp.label.color         ?track_selected [207 214 228] [152 160 178]
+    set mcp.label.color         ?track_selected [225 225 225] [190 190 190]
     set mcp.label.color         ?trackcolor_valid [trackcolor_r trackcolor_g trackcolor_b] 
     set mcp.extmixer.mode       [1]
     set mcp.extmixer.position   [0]
@@ -3018,7 +3018,7 @@ macro drawMasterMcp scale
       set master.mcp.pan.fadermode              	gl_fader_swap
 	  set master.mcp.pan.color                  	gl_pan_color
 	  set master.mcp.pan.label                  	h<hide_pan_labels_sm{x} [0] + [0 master.mcp.pan] * scale width_visible{0}!=0 width_visible{0}==2 [24 -11 35 9] [7 25 35 10] [24 25 35 10]
-	  set master.mcp.pan.label.color				theme_version>1 [202 208 224] [89 96 114]
+	  set master.mcp.pan.label.color				theme_version>1 [220 220 220] [140 140 140]
 	  set master.mcp.pan.label.font					main_font
 	  set master.mcp.pan.label.margin           	+ + * scale [-8 -8 -8 -8] 0.5@ls main_font_voffs@y
 	set master.mcp.width  							+ [0 pan_sec] * scale h<hide_pan_sm{0} [0]  	width_visible{0}==2 	h<hide_pan_labels_sm{0} [7 13 67 9] [7 23 67 9] \
@@ -3026,7 +3026,7 @@ macro drawMasterMcp scale
 	  set master.mcp.width.fadermode            	gl_fader_swap
 	  set master.mcp.width.color                	gl_width_color
 	  set master.mcp.width.label                	h<hide_pan_labels_sm{x} [0] + [0 master.mcp.width] * scale width_visible{0}!=0 width_visible{0}==2 [24 11 35 9] [42 25 35 10] [0]
-	  set master.mcp.width.label.color				[89 96 114]
+	  set master.mcp.width.label.color				[140 140 140]
 	  set master.mcp.width.label.font				main_font
 	  set master.mcp.width.label.margin         	master.mcp.pan.label.margin
 
@@ -3048,7 +3048,7 @@ macro drawMasterMcp scale
 	set master.mcp.mono                             + [0 pan_sec] * scale h<hide_pan_labels_sm{0} h<hide_pan_sm{0} [0] [93 4 25 22] [93 8 25 33]
 	set master.mcp.volume.label                     + [0 stretch_sec] * scale [0 0 91 23]
 	  set master.mcp.volume                         - + + * scale [69 0 21] [0 stretch_sec 0 stretch_sec] [0 master.mcp.volume.label{3}] [0 0 0 master.mcp.volume.label{3}]
-	  set master.mcp.volume.label.color             master.mcp.volume.label{h}>2 theme_version>1 accent_color [55 58 73] [meter_bg_color{4} meter_bg_color{5} meter_bg_color{6}]
+	  set master.mcp.volume.label.color             master.mcp.volume.label{h}>2 theme_version>1 accent_color [100 100 100] [meter_bg_color{4} meter_bg_color{5} meter_bg_color{6}]
 	  set master.mcp.volume.label.font				main_font
 	  set master.mcp.volume.label.margin            + [0 0 0 0 0.5] * scale [0 4]
 	  set master.mcp.volume.label.margin           	+ main_font_voffs@y
@@ -3064,7 +3064,7 @@ macro drawMasterMcp scale
 	  set master.mcp.meter.scale.color.unlit.bottom theme_version>1 [255 255 255 140 0 0 0 0] [255 255 255 120 0 0 0 0]
 	  set master.mcp.meter.scale.color.unlit.top    theme_version>1 [255 255 255 180 0 0 0 0] [255 255 255 120 0 0 0 0]
     set master.mcp.label                            bot_sec
-	  set master.mcp.label.color                    [143 151 170]
+	  set master.mcp.label.color                    [184 184 184]
 	  set master.mcp.label.font						header_font
 	  set master.mcp.label.margin                   + * scale [20 0] [0 0 0 0 0.5]
 	  set master.mcp.label.margin					+ 0.5@y ; FTC MOD
@@ -3092,7 +3092,7 @@ macro drawMasterMcp scale
     custom master.mcp.custom.bg
     set master.mcp.custom.bg                        + + fx_sec pan_sec{h}@h lscale@x
     set master.mcp.custom.bg                        ?sidebarMode [. . . h]
-    set master.mcp.custom.bg.color                  + mcp_bg_color ?track_selected [0 0 0 0 10 10 13] [0]
+    set master.mcp.custom.bg.color                  + mcp_bg_color ?track_selected [0 0 0 0 13 13 13] [0]
     ; *** end of mod ***    
 
     ; FTC MOD extmixer offset
@@ -3204,7 +3204,7 @@ endmacro
 macro drawTransport scale
     set status_min	 			138		; the size below which status readout looks weird
     set selection_min 			242		; the size below which selection readout looks weird
-    set text_color             	[165 172 190]	; the color of the text
+    set text_color             	[194 198 206]	; the color of the text
 
 	set trans.size             	* scale [100 100]
 
@@ -3351,7 +3351,7 @@ macro drawTransport scale
     set trans.rate.margin + * scale [2000] main_font_voffs@y
 
     set trans.rate.fader.fadermode	?trans_rate_mode{0} 1 0
-    set trans.rate.fader.color 	[240 249 255 100]
+    set trans.rate.fader.color 	[255 255 255 100]
     front trans.rate.fader
 
     custom trans.custom.rate_bg  '' 0 '' 'custom_transport_edit_bg'
