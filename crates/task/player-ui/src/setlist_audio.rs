@@ -308,7 +308,11 @@ mod imp {
                             (
                                 s.name.clone(),
                                 stem_take_guid(i, j),
-                                format!("/org/{org}/media/songs/{slug}/{}", s.file),
+                                format!(
+                                    "/org/{org}/media/songs/{slug}/{}{}",
+                                    s.file,
+                                    crate::media_grant::cached_suffix(org, slug)
+                                ),
                             )
                         })
                         .collect(),

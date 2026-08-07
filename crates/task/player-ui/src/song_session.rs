@@ -469,8 +469,11 @@ pub(crate) mod imp {
     /// audio stems). The "drop a song folder and it plays" path.
     pub(crate) async fn fetch_kf_manifest(org: &str, slug: &str) -> Result<Manifest, String> {
         let base = format!("/org/{org}/media/songs/{slug}");
+        // One signed grant covers this song's whole folder; it is a query
+        // suffix, so it appends to the FULL url, never to `base`.
+        let tok = crate::media_grant::suffix(org, slug).await;
         // song.md → the default arrangement's folder.
-        let song_md = fetch_text(&format!("{base}/song.md"))
+        let song_md = fetch_text(&format!("{base}/song.md{tok}"))
             .await
             .map_err(|e| format!("no song.md for `{slug}`: {e}"))?;
         let idx: SongIndexLite = parse_fm(&song_md, "song.md")?;
@@ -482,7 +485,7 @@ pub(crate) mod imp {
             .map(|a| a.dir.clone())
             .ok_or_else(|| format!("`{slug}`: no arrangements"))?;
         // arrangement.md → chartRef + attachmentRefs.
-        let arr_md = fetch_text(&format!("{base}/arrangements/{dir}/arrangement.md"))
+        let arr_md = fetch_text(&format!("{base}/arrangements/{dir}/arrangement.md{tok}"))
             .await
             .map_err(|e| format!("`{slug}` arrangement `{dir}`: {e}"))?;
         let arr: ArrangementLite = parse_fm(&arr_md, "arrangement.md")?;
@@ -508,7 +511,7 @@ pub(crate) mod imp {
         let mut chart_title = None;
         let mut chart_end = 0.0f64;
         if let Some(cp) = chart_path {
-            if let Ok(chart_text) = fetch_text(&format!("{base}/{cp}")).await {
+            if let Ok(chart_text) = fetch_text(&format!("{base}/{cp}{tok}")).await {
                 if let Ok(layout) = session::setlist::chart_import::chart_to_layout(&chart_text) {
                     sections = layout
                         .sections
@@ -551,7 +554,11 @@ pub(crate) mod imp {
         match fetch_kf_manifest(org, slug).await {
             Ok(m) => Ok(m),
             Err(_) => {
-                fetch_manifest(&format!("/org/{org}/media/songs/{slug}/manifest.json")).await
+                let tok = crate::media_grant::suffix(org, slug).await;
+                fetch_manifest(&format!(
+                    "/org/{org}/media/songs/{slug}/manifest.json{tok}"
+                ))
+                .await
             }
         }
     }
@@ -972,8 +979,9 @@ pub(crate) mod imp {
             let org = org_p.clone();
             async move {
                 let base = format!("/org/{org}/media/songs/{slug}");
-                fetch_text(&format!("{base}/song.md")).await.is_ok()
-                    || fetch_text(&format!("{base}/manifest.json")).await.is_ok()
+                let tok = crate::media_grant::suffix(&org, &slug).await;
+                fetch_text(&format!("{base}/song.md{tok}")).await.is_ok()
+                    || fetch_text(&format!("{base}/manifest.json{tok}")).await.is_ok()
             }
         }));
 
@@ -1041,12 +1049,18 @@ pub(crate) mod imp {
                 // not yet migrated, so migrated songs can drop it entirely
                 // (#57 manifest retirement). A frontmatter `stems:` block (blob
                 // resolver) is the last resort. Refs #56/#57/#59.
-                let manifest_url = format!("/org/{org}/media/songs/{slug}/manifest.json");
+                // Every stem URL below carries this song's grant.
+                let tok = crate::media_grant::suffix(&org, &slug).await;
+                let manifest_url =
+                    format!("/org/{org}/media/songs/{slug}/manifest.json{tok}");
                 let url_sources = |m: &Manifest| -> Vec<StemSource> {
                     m.stems
                         .iter()
                         .map(|s| {
-                            StemSource::Url(format!("/org/{org}/media/songs/{slug}/{}", s.file))
+                            StemSource::Url(format!(
+                                "/org/{org}/media/songs/{slug}/{}{tok}",
+                                s.file
+                            ))
                         })
                         .collect()
                 };
@@ -1082,7 +1096,10 @@ pub(crate) mod imp {
             let slug = slug_c.clone();
             let org = org_c.clone();
             async move {
-                if let Ok(txt) = fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf")).await {
+                let tok = crate::media_grant::suffix(&org, &slug).await;
+                if let Ok(txt) =
+                    fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf{tok}")).await
+                {
                     chart_src.set(txt);
                 }
             }
