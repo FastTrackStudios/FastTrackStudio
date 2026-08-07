@@ -6231,6 +6231,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-theme"
+version = "0.1.0"
+dependencies = [
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+]
+
+[[package]]
 name = "daw-theme-reaper"
 version = "0.1.0"
 dependencies = [
@@ -10470,6 +10478,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "daw-theme",
  "image",
  "palette",
  "serde",
