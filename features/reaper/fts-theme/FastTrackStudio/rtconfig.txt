@@ -5,9 +5,8 @@
 ;   Hernandez and FeedTheCat (Ilias-Timon Poulakis) — reapertips.com —
 ;   which is itself based on REAPER's Default_v6.0 theme.
 ;
-;   Licensing: see ../README.md. This fork is internal to FastTrackStudio
-;   and must not be redistributed without permission from the Reapertips
-;   authors.
+;   The Reapertips theme is free and offered as a starting point for
+;   other themes. Keep this credit intact.
 
 #>----------------------------------- GLOBALS -----------------------------------------
 

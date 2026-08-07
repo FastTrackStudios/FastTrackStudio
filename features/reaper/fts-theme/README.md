@@ -16,18 +16,17 @@ features/reaper/fts-theme/
     chordbox.ini  gridbox.ini     REAPER 7 chord/grid box styling
 ```
 
-## Provenance and licensing
+## Provenance and attribution
 
 This is a fork of the **Reapertips Theme v1.93 (Dark)** by Alejandro
 Hernandez and FeedTheCat (Ilias-Timon Poulakis) — <https://reapertips.com>
 — which is itself derived from REAPER's stock `Default_6.0` theme.
 
-The Reapertips theme is a **commercial product** and ships no license
-file. Treat this directory as an internal fork: fine to use and modify
-for our own rigs, **not** fine to publish or bundle into an FTS release
-until we either get written permission from the Reapertips authors or
-replace the borrowed artwork. `just reaper theme-pack` exists for local
-distribution to our own machines, not for shipping.
+The Reapertips theme is free and offered as a starting point for other
+themes, so forking it here is exactly its intended use. Keep the
+attribution: credit Alejandro Hernandez and FeedTheCat as the base this
+theme grew from, in the `rtconfig.txt` header and anywhere we ship or
+document the theme.
 
 ## Dev loop
 
