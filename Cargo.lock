@@ -6239,6 +6239,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-theme-art"
+version = "0.1.0"
+dependencies = [
+ "daw-theme",
+ "dioxus",
+ "dioxus-ssr",
+ "image",
+ "resvg 0.45.1",
+]
+
+[[package]]
 name = "daw-theme-reaper"
 version = "0.1.0"
 dependencies = [
@@ -10481,6 +10492,8 @@ dependencies = [
  "clap",
  "daw",
  "daw-theme",
+ "daw-theme-art",
+ "dioxus",
  "image",
  "palette",
  "serde",
