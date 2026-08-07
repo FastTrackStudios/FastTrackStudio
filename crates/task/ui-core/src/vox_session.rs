@@ -28,6 +28,49 @@ pub struct ActiveServer {
 
 static ACTIVE: LazyLock<RwLock<Option<ActiveServer>>> = LazyLock::new(|| RwLock::new(None));
 
+/// The session token for the DEFAULT (same-origin / env) server — the one
+/// [`vox_url`] resolves when no registry entry is selected, which is the
+/// deployed case (`task.starcommand.live` serves the app and vox from one
+/// origin, and nothing is "selected").
+///
+/// Multi-server tokens live on the registry entry and reach us through
+/// [`ActiveServer::token`]; this holder is what the *unselected* default
+/// server has instead. [`bearer`] picks between them.
+static SESSION_TOKEN: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
+
+/// Publish (or clear) the default server's session token. Called by the
+/// auth root whenever the active account resolves or is signed out.
+///
+/// Returns `true` when the token actually CHANGED — the caller uses that
+/// to tear down connections established under the previous identity
+/// ([`crate::vox_clients::drop_cached_connections`]); a socket presents
+/// its identity once, at establish, so an already-open anonymous socket
+/// stays anonymous no matter what this holder says afterwards.
+pub fn set_session_token(token: Option<String>) -> bool {
+    let token = token.filter(|t| !t.trim().is_empty());
+    match SESSION_TOKEN.write() {
+        Ok(mut w) if *w != token => {
+            *w = token;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The bearer to present when dialing vox.
+///
+/// A user-selected server carries its OWN token on the registry entry, and
+/// only that one: falling back to the default server's token there would
+/// present one server's credential to another. With nothing selected
+/// (the same-origin default) the holder above is the identity.
+#[must_use]
+pub fn bearer() -> Option<String> {
+    if let Some(server) = active_server() {
+        return server.token.filter(|t| !t.trim().is_empty());
+    }
+    SESSION_TOKEN.read().ok().and_then(|r| r.clone())
+}
+
 /// Set (or clear) the active server. Called from the app root whenever
 /// the active registry entry changes.
 pub fn set_active_server(server: Option<ActiveServer>) {

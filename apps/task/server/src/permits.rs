@@ -142,6 +142,12 @@ const MEDIA: ServicePermits = ServicePermits {
     methods: &[
         MethodPermit::new("stat", Action::READ, "media/{content_hash}"),
         MethodPermit::new("read", Action::READ, "media/{content_hash}").audited(),
+        // Minting a signed URL for the filesystem media route. THIS call
+        // is the authorization point for `/org/{slug}/media/…` — the HTTP
+        // route only verifies the signature — so it is audited even on
+        // allow: a grant is bulk content leaving the server, and knowing
+        // who minted one is the whole audit trail for that path.
+        MethodPermit::new("media_grant", Action::DOWNLOAD, "media/**").audited(),
     ],
 };
 
