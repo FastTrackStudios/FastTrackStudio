@@ -1096,46 +1096,50 @@ fn session_bearer_for(url: &str) -> Option<String> {
 /// `vox::connect_lane` takes only a URL, and vox middleware is per typed
 /// client (keyed to a service descriptor) rather than per connection — so
 /// there is no choke point on the call path to hang a token on. The
-/// identity therefore rides the WebSocket upgrade, exactly as the web
-/// client does it (`task_ui_core::vox_clients`), and the server applies it
-/// to every call on the connection. Without this the CLI reaches the
-/// permission gate as `principal=anonymous` on every RPC — fine while the
-/// gate is observe-only, refused the moment `TASK_ENFORCE_PERMISSIONS=1`.
+/// identity therefore rides the WebSocket upgrade, as the web client does
+/// it (`task_ui_core::vox_clients`), and the server applies it to every
+/// call on the connection. Without this the CLI reaches the permission
+/// gate as `principal=anonymous` on every RPC — fine while the gate is
+/// observe-only, refused the moment `TASK_ENFORCE_PERMISSIONS=1`.
+///
+/// The token goes in `Authorization`, NOT the `vox.bearer.…` subprotocol
+/// the browser uses: tungstenite fails the handshake outright when it
+/// offers a subprotocol the peer doesn't echo, which would make the CLI
+/// unable to reach an older server or anything behind a proxy that drops
+/// the header. See `dial_ws_native` in task-ui-core.
 async fn dial_authenticated<C>(url: &str) -> Result<C, vox_core::ConnectionError>
 where
     C: vox_core::FromVoxLane,
 {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
-    let bearer = session_bearer_for(url);
-    // A tokenless dial is left on the stock path — identical behaviour to
+    // A tokenless dial stays on the stock path — identical behaviour to
     // before, including its error shapes.
-    let Some(token) = bearer else {
+    let Some(token) = session_bearer_for(url) else {
         return vox::connect_lane(url).establish().await;
     };
-    let connect = async {
+    let request = async {
         let mut request = url.into_client_request().ok()?;
-        let headers = request.headers_mut();
-        // Native clients own their handshake, so the plain header is
-        // enough; the subprotocol is offered too so both client families
-        // negotiate identically (and so the server's echo is exercised).
-        headers.insert("authorization", format!("Bearer {token}").parse().ok()?);
-        headers.insert(
-            "sec-websocket-protocol",
-            format!("vox.v1, vox.bearer.{token}").parse().ok()?,
-        );
-        tokio_tungstenite::connect_async(request).await.ok()
+        request
+            .headers_mut()
+            .insert("authorization", format!("Bearer {token}").parse().ok()?);
+        Some(request)
     }
     .await;
-    match connect {
-        Some((stream, _response)) => {
+    // An unrepresentable URL or header is not an auth problem; let the
+    // stock path produce its usual error for it.
+    let Some(request) = request else {
+        return vox::connect_lane(url).establish().await;
+    };
+    match tokio_tungstenite::connect_async(request).await {
+        Ok((stream, _response)) => {
             vox_core::initiator_on(vox_websocket::WsLink::new(stream))
                 .establish::<C>()
                 .await
         }
-        // Fall back rather than fail: a proxy that mangles the upgrade
-        // must not make the CLI unusable while the gate is observe-only.
-        None => vox::connect_lane(url).establish().await,
+        // Report through the stock path so the caller's `connect_error`
+        // hint (and the embedded-server fallback above it) still applies.
+        Err(_) => vox::connect_lane(url).establish().await,
     }
 }
 

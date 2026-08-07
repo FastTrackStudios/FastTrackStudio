@@ -59,8 +59,11 @@ async fn boot() -> eyre::Result<(String, AuthState, tempfile::TempDir)> {
 
 /// How a client presents itself at the handshake.
 enum Present {
-    /// Nothing — today's every-client behaviour, and what an anonymous
-    /// visitor will always be.
+    /// No subprotocol at all — every client built before this change
+    /// (the deployed web bundle, iOS, the watch bridge). Deploy safety
+    /// depends on these still connecting.
+    Legacy,
+    /// The plain subprotocol and no token: a current client, signed out.
     Anonymous,
     /// `Sec-WebSocket-Protocol: vox.v1, vox.bearer.<token>` — the browser
     /// channel (the only client-controlled field on a browser handshake).
@@ -77,6 +80,7 @@ async fn establish(url: &str, how: Present) -> eyre::Result<VaultSyncClient> {
     let mut request = url.into_client_request()?;
     let headers = request.headers_mut();
     match how {
+        Present::Legacy => {}
         Present::Anonymous => {
             headers.insert("sec-websocket-protocol", "vox.v1".parse()?);
         }
@@ -187,6 +191,20 @@ async fn upgrade_identity_reaches_the_gate() -> eyre::Result<()> {
     //       "No token" and "token rejected" both resolve to
     //       `Principal::Anonymous` — the distinction lives in the
     //       `auth.outcome` wide field, not in the principal.
+    // ── 4. A client from before this change must still connect. It
+    //       offers no subprotocol, so the server must not echo one:
+    //       tungstenite fails the handshake on an unrequested echo
+    //       (`ServerSentSubProtocolNoneRequested`), which is what a
+    //       rollout to the deployed iOS / watch / web clients would hit.
+    let legacy = establish(&url, Present::Legacy)
+        .await
+        .map_err(|e| eyre::eyre!("a pre-change client can no longer connect: {e:?}"))?;
+    legacy
+        .manifest("default".to_string())
+        .await
+        .map_err(|e| eyre::eyre!("legacy client: manifest failed: {e:?}"))?;
+    expected += PER_DENIED_CALL; // still anonymous, so still a would-deny
+
     let bogus = establish(&url, Present::Subprotocol("not-a-real-token".into())).await?;
     bogus
         .manifest("default".to_string())

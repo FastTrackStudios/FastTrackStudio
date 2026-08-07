@@ -60,10 +60,12 @@ use crate::vox_session::vox_url;
 ///
 /// Mirrors `task_server::VOX_SUBPROTOCOL` — duplicated rather than
 /// imported because the web client must not depend on the server crate.
+#[cfg(any(target_arch = "wasm32", test))]
 const VOX_SUBPROTOCOL: &str = "vox.v1";
 
 /// Prefix of the subprotocol carrying the session token
 /// (`task_server::VOX_BEARER_SUBPROTOCOL_PREFIX`).
+#[cfg(any(target_arch = "wasm32", test))]
 const VOX_BEARER_SUBPROTOCOL_PREFIX: &str = "vox.bearer.";
 
 /// Establish a client of type `C` against `url`, presenting `bearer` at
@@ -107,6 +109,11 @@ where
 /// charset a subprotocol value must use, so no extra encoding is needed;
 /// a token containing anything else is dropped rather than sent as a
 /// malformed header that would fail the whole handshake.
+///
+/// Browser-only: native presents the identity as an `Authorization`
+/// header instead (see [`dial_ws_native`] for why symmetry is a trap).
+/// `cfg(test)` keeps it compiled for the unit tests, which run natively.
+#[cfg(any(target_arch = "wasm32", test))]
 fn subprotocols(bearer: Option<&str>) -> Vec<String> {
     let mut protos = vec![VOX_SUBPROTOCOL.to_owned()];
     if let Some(token) = bearer.filter(|t| {
@@ -122,12 +129,24 @@ fn subprotocols(bearer: Option<&str>) -> Vec<String> {
 /// Native dial. Unlike a browser, a native client controls its handshake
 /// request, so the token goes in a plain `Authorization: Bearer` header —
 /// the same channel the HTTP surface (`/blobs`, `/media`, the watch
-/// bridge) already accepts. The subprotocol is still offered so both
-/// targets negotiate identically.
+/// bridge) already accepts.
 ///
 /// This replaces `WsLink::connect`, which takes only a URL. It builds the
 /// same `tokio_tungstenite` stream and hands it to the public
 /// `WsLink::new`.
+///
+/// ## Why native offers NO subprotocol
+///
+/// Symmetry with the browser dial would be nice, and costs an outage.
+/// tungstenite is stricter than RFC 6455 here: the spec lets a server that
+/// selects no subprotocol simply omit the response header (§4.2.2, and
+/// browsers accept that), but tungstenite treats "I offered, you didn't
+/// echo" as a **handshake failure**
+/// (`SubProtocolError::NoSubProtocol`). So a native client offering
+/// `vox.bearer.…` cannot talk to any peer that doesn't echo it — an older
+/// task-server, or an ingress/proxy that drops the header. The
+/// `Authorization` header needs no negotiation and has none of that
+/// coupling, so native uses it alone.
 #[cfg(not(target_arch = "wasm32"))]
 async fn dial_ws_native(
     url: &str,
@@ -141,17 +160,9 @@ async fn dial_ws_native(
     let mut request = url
         .into_client_request()
         .map_err(|e| format!("ws request `{url}`: {e:?}"))?;
-    let headers = request.headers_mut();
-    headers.insert(
-        "sec-websocket-protocol",
-        subprotocols(bearer)
-            .join(", ")
-            .parse()
-            .map_err(|e| format!("ws subprotocols: {e:?}"))?,
-    );
     if let Some(token) = bearer.filter(|t| !t.is_empty()) {
         if let Ok(value) = format!("Bearer {token}").parse() {
-            headers.insert("authorization", value);
+            request.headers_mut().insert("authorization", value);
         }
     }
     let (stream, _response) = tokio_tungstenite::connect_async(request)
