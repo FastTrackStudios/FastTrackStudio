@@ -167,6 +167,25 @@ theme-uninstall:
           "{{reaper_home}}/ColorThemes/{{theme_name}}.ReaperTheme"
     @echo "Removed {{theme_name}} from {{reaper_home}}/ColorThemes"
 
+# Screenshot a real REAPER wearing the theme (private Xvfb, no plugin scan)
+#
+# Needs Xvfb/imagemagick/xdotool, and openbox for a faithful layout:
+#   nix develop .#reaper-test -c just reaper theme-shot
+theme-shot out="target/theme-shots/theme.png" *args:
+    cargo run -q -p fts-themer --bin fts-themer -- \
+        --theme "{{theme_dir}}" shot --out "{{out}}" {{args}}
+
+# Same, but against your real ~/fts-dev profile (ini restored afterwards)
+theme-shot-profile out="target/theme-shots/profile.png":
+    cargo run -q -p fts-themer --bin fts-themer -- \
+        --theme "{{theme_dir}}" shot --out "{{out}}" \
+        --profile "{{reaper_home}}"
+
+# Serve the theme editor GUI (colours, live preview, accent generation)
+theme-edit:
+    cd "{{justfile_directory()}}/features/reaper/fts-themer-ui" && \
+        dx serve --platform web --hot-patch false
+
 # Pack the theme into dist/<name>.ReaperThemeZip for distribution
 theme-pack:
     #!/usr/bin/env bash

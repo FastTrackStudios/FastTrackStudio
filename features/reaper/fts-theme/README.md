@@ -34,7 +34,18 @@ document the theme.
 just reaper theme-install     # symlink into $REAPER_HOME/ColorThemes
 just reaper theme-uninstall
 just reaper theme-pack        # dist/FastTrackStudio.ReaperThemeZip
+
+just reaper theme-edit        # the editor GUI (colours + live preview)
+just reaper theme-shot        # screenshot a real REAPER wearing the theme
 ```
+
+The tooling lives in [`../fts-themer`](../fts-themer) (core + `fts-themer`
+CLI) and [`../fts-themer-ui`](../fts-themer-ui) (the browser editor). The GUI
+previews colour changes instantly against a vector-rendered arrange/mixer;
+`theme-shot` is the ground truth — a real REAPER on a private X display with
+real tracks and a real mixer, captured to a PNG. Run the shot inside
+`nix develop .#reaper-test` so a window manager is available; without one the
+capture still works but window layout isn't faithful.
 
 `theme-install` symlinks the *unpacked* folder — REAPER loads a theme
 from `ColorThemes/<name>/` + `ColorThemes/<name>.ReaperTheme` exactly
