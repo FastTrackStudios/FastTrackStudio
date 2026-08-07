@@ -106,3 +106,36 @@ daw-test *args:
 daw-test-watch *args:
     FTS_REAPER_EXECUTABLE="{{_wrapper}}" \
     cargo run -p daw-reaper-xtask -- --gui --keep-open {{args}}
+
+# Install the midi-tools toolbar icons and put their buttons on a toolbar.
+#
+# Two steps that look like one but aren't: `fts-icons --install` writes the
+# PNG strips into the resource dir, and `daw toolbar-add` puts the buttons
+# on a toolbar. Installing an icon does not create a button, and adding a
+# button does not create an icon.
+#
+# The button half talks to a RUNNING REAPER over the extension's RPC, so
+# start REAPER (with the extension loaded) first. The icon half works
+# either way.
+#
+#   just reaper midi-tools-toolbar
+#   just reaper midi-tools-toolbar "midi toolbar 1"
+midi-tools-toolbar target="floating toolbar 1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    echo "-- icons --"
+    cargo run -q -p fts-icons --bin fts-icons -- \
+        build features/reaper/fts-icons/examples/midi-tools.toml --install
+    echo "-- buttons -> {{target}} --"
+    # --workflow midi-tools tags both, so `remove_workflow_buttons` undoes
+    # the pair in one go. add_button is idempotent, so re-running this is a
+    # refresh rather than a duplicate.
+    cargo run -q -p daw --features cli --bin daw -- \
+        toolbar-add _FTS_MIDI_VELOCITY "Velocity" \
+        --target "{{target}}" --workflow midi-tools --icon fts_midi_velocity.png
+    cargo run -q -p daw --features cli --bin daw -- \
+        toolbar-add _FTS_MIDI_ARP "Arp" \
+        --target "{{target}}" --workflow midi-tools --icon fts_midi_arp.png
+    cargo run -q -p daw --features cli --bin daw -- \
+        toolbar-live --target "{{target}}"

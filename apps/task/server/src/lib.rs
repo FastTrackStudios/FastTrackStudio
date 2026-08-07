@@ -24,13 +24,12 @@ pub mod attachments;
 pub mod capability;
 #[cfg(feature = "plugin-forge")]
 pub mod connections;
-#[cfg(feature = "plugin-forge")]
-pub mod forge_sync;
 pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
 pub mod media;
 pub mod notifier;
+pub mod otlp;
 pub mod permits;
 pub mod presence;
 pub mod server_mgmt;
@@ -532,11 +531,6 @@ impl AppState {
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
             snapshot_status: Arc::new(std::sync::RwLock::new(snapshot::SnapshotStatus::default())),
         };
-        // Background forge-sync: pull codeberg/Forgejo issue changes
-        // back into linked tasks on an interval (outbound push is
-        // handled inline by the `ForgeSyncTaskService` decorator).
-        #[cfg(feature = "plugin-forge")]
-        forge_sync::spawn_poll_loop(state.clone());
         // Per-org notifier: subscribes to the org's event hubs
         // in-process and materializes notifications by rule
         // (see `notifier`'s module docs for the catalog).
@@ -1318,7 +1312,7 @@ pub(crate) async fn build_org_state(
             sqlite_conns.push(store.conn().clone());
         }
 
-        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins));
+        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins, org_root.slug()));
         // Coverage + dry-run, once per org at boot: how many mounted
         // services carry a permit table, which do not, and what a
         // signed-in member would be denied if enforcement were on. The
@@ -1867,6 +1861,13 @@ pub fn router(state: AppState) -> Router {
         .merge(server_mgmt)
         .merge(watch_bridge::watch_router())
         .merge(blob_router);
+    // Authenticated OTLP ingest, only when an upstream collector is
+    // configured — see `otlp`. Clients export through here rather than to
+    // a public collector endpoint.
+    let router = match otlp::otlp_router() {
+        Some(r) => router.merge(r),
+        None => router,
+    };
     #[cfg(feature = "plugin-forge")]
     let router = router.merge(webhook_routes);
     router.layer(cors_layer()).with_state(state)
@@ -2219,9 +2220,16 @@ pub fn org_permission_engine() -> Arc<dyn architect_permissions::PermissionEngin
 fn build_org_permissions_gate(
     auth: &AuthState,
     plugins: &task_plugin::PluginSet,
+    slug: &str,
 ) -> architect::permissions_gate::PermissionsGate {
     use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
-    let identity = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
+    // Wrapped so every RPC's wide event carries WHY the principal came out
+    // the way it did — "no token presented" vs "token rejected" are the
+    // same `Principal::Anonymous` without it (see `AuditedIdentityResolver`).
+    let identity = permits::AuditedIdentityResolver::new(
+        architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone()),
+        slug,
+    );
     let enforce = enforce_permissions();
     let audit = permits::GateAudit::new(enforce, permission_deny_ledger(), DEFAULT_ORG_ROLE);
     let gate = PermissionsGate::new(org_permission_engine(), Arc::new(identity))
@@ -2406,7 +2414,8 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 scheduling_proto::service::day_plans::serve(org.scheduling.clone()),
             )
             .with(
-                scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
+                scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(
+                ),
                 scheduling_proto::service::calendar_events::serve(org.scheduling.clone()),
             )
             // Scheduling — booking half (Cal.com-style): event types,
@@ -2593,22 +2602,13 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             workstream::workstream_service_descriptor(),
             workstream::serve_workstream_service(org.workstreams.clone()),
         )
-        .with(task::task_service_descriptor(), {
-            // With the forge plugin compiled in, TaskService is wrapped
-            // in the forge-sync decorator (outbound issue push on task
-            // writes); without it the raw backend serves directly.
-            #[cfg(feature = "plugin-forge")]
-            let svc = task::serve_task_service(forge_sync::ForgeSyncTaskService::new(
-                org.tasks.clone(),
-                org.forge.clone(),
-                org.forge_agent.clone(),
-                org.slug.clone(),
-                org.issue_links_path.clone(),
-            ));
-            #[cfg(not(feature = "plugin-forge"))]
-            let svc = task::serve_task_service(org.tasks.clone());
-            svc
-        })
+        .with(
+            task::task_service_descriptor(),
+            // The raw backend serves directly. There used to be a
+            // forge-sync decorator here mirroring task writes into
+            // Forgejo issues; it went with `forge_sync` (2026-08-06).
+            task::serve_task_service(org.tasks.clone()),
+        )
         // Live task changes — the `#[subscribe]` stream sibling of
         // `TaskService`. The hub lives on the raw `TaskBackend`, so
         // every write path publishes into it: vox calls through the
