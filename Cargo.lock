@@ -10296,6 +10296,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-themer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "daw-theme-reaper",
+ "image",
+ "palette",
+ "serde",
+]
+
+[[package]]
 name = "fts-themes"
 version = "0.1.0"
 dependencies = [
