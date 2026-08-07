@@ -117,13 +117,28 @@ pub fn VelocityPanel() -> Element {
         }
     };
 
-    let apply = {
+    // Live: every parameter change writes straight through to the take.
+    //
+    // `use_effect` re-runs whenever the session it reads changes, and
+    // `commit` doesn't mutate the session, so there's no feedback loop.
+    // This is safe to do on every change specifically because
+    // `Session::edits()` is a diff against the baseline — a slider at
+    // neutral writes nothing, and a drag only rewrites the notes whose
+    // velocity actually moved.
+    {
         let sink = sink.clone();
-        move |_| match sink.0.commit(&session.read()) {
-            Ok(n) => status.set(format!("applied to {n} notes")),
-            Err(e) => status.set(e),
-        }
-    };
+        use_effect(move || {
+            let session = session.read();
+            if session.is_empty() {
+                return;
+            }
+            match sink.0.commit(&session) {
+                Ok(0) => status.set(format!("{} notes", session.baseline().len())),
+                Ok(n) => status.set(format!("live · {n} notes changed")),
+                Err(e) => status.set(e),
+            }
+        });
+    }
 
     let revert = {
         let sink = sink.clone();
@@ -343,13 +358,16 @@ pub fn VelocityPanel() -> Element {
             // ── Commit bar ────────────────────────────────────────
             div {
                 style: "display:flex; align-items:center; gap:8px; margin-top:auto; padding-top:8px; border-top:1px solid var(--border, #2c2c2c);",
+                // No Apply: edits land as you make them. Revert is the
+                // counterpart — it restores the baseline the session was
+                // opened on, which is the only thing "undo" can mean for
+                // a tool whose controls are parameters rather than steps.
                 button {
                     style: "{BUTTON} background:var(--primary, #d2691e); color:var(--primary-foreground, #fff); border-color:transparent;",
-                    "data-testid": "apply",
-                    onclick: apply,
-                    "Apply"
+                    "data-testid": "revert",
+                    onclick: revert,
+                    "Revert"
                 }
-                button { "data-testid": "revert", style: "{BUTTON}", onclick: revert, "Revert" }
                 button { style: "{BUTTON}", onclick: reopen, "Reload" }
                 div {
                     "data-testid": "status",

@@ -77,6 +77,16 @@ pub fn ArpPanel() -> Element {
         }
     };
 
+    // The arp stays explicit rather than live, unlike the velocity panel.
+    //
+    // Velocity editing is in-place and idempotent: committing twice with
+    // the same parameters writes the same velocities. Arpeggiating is
+    // generative and destructive — it DELETES the source chord and
+    // replaces it with a stream of new notes. Doing that on every slider
+    // frame would consume its own output, and after the first commit
+    // there is no chord left to re-arpeggiate.
+    //
+    // The piano-roll preview is the live part; the write is the button.
     let apply = {
         let sink = sink.clone();
         move |_| {

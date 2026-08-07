@@ -52,19 +52,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // by the wrapper script inheriting it.
     let runner_headless = if virtual_mode { true } else { headless };
 
-    let runner = TestRunner::new(&resources_dir)
+    let mut runner = TestRunner::new(&resources_dir)
         .with_extension_log(format!(
             "{home}/.local/state/fasttrackstudio/reaper-fts-extensions.log"
         ))
         .with_headless(runner_headless);
 
-    let packages = vec![TestPackage {
-        package: "fts-extensions".into(),
-        features: vec![],
-        test_threads: 1,
-        default_skips: vec![],
-        test_binary: Some("extension_loads".into()),
-    }];
+    // `--virtual` brings up our own Xvfb + window manager. It used to
+    // depend on an `fts-test` launcher that is not installed
+    // everywhere, and silently fell back to headless when missing —
+    // which meant GUI tests appeared to run and could never pass.
+    if virtual_mode {
+        runner = runner.with_virtual_display()?;
+    }
+
+    let packages = vec![
+        TestPackage {
+            package: "fts-extensions".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![],
+            test_binary: Some("extension_loads".into()),
+        },
+        // The expression editor's REAPER-only coverage: panel docking,
+        // finding REAPER's selection, and writes reaching a real take.
+        // Its logic is tested against the standalone backend instead.
+        TestPackage {
+            package: "fts-extensions".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![],
+            test_binary: Some("expression_editor".into()),
+        },
+        // The midi-tools panels driven through DockHost — the only tests
+        // that exercise the real Blitz renderer and the real event path.
+        // Separate binary, so it needs its own entry: `test_binary` is a
+        // single name, not a filter.
+        TestPackage {
+            package: "fts-extensions".into(),
+            features: vec![],
+            test_threads: 1,
+            // Skipped by default because this rig shares its REAPER
+            // profile (~/fts-dev) with the interactive dev instance: if
+            // one is open, the spawned REAPER contends with it and these
+            // fail on socket discovery rather than on anything they
+            // assert. The DockHost bug that used to block them is fixed
+            // (the layer is mounted now) — run them against a clean rig:
+            //
+            //     just reaper integration-test panel_
+            default_skips: vec![
+                "panel_toggles_via_its_action".into(),
+                "panel_actually_renders_in_reaper".into(),
+                "panel_click_shapes_the_take".into(),
+            ],
+            test_binary: Some("midi_tools_panel".into()),
+        },
+    ];
 
     // fts-extensions is built with `host-hooks` (default feature): it embeds
     // the daw socket host itself. Do NOT install daw-bridge alongside it —
@@ -89,7 +132,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     install_configs(&repo_root, &resources_dir)?;
 
     runner.build_test_packages(&repo_root, &packages)?;
+    // REAPER restores whatever dialogs were open when its config was
+    // last saved — usually the Actions list — and they cover the
+    // arrange view and any panel under test. Close them before the run.
+    let shots_dir = repo_root.join("target/reaper-shots");
+    // The recorder sweeps stray dialogs itself for the first few
+    // seconds — REAPER restores them after it starts, so closing once
+    // before the run is too early to catch anything.
+    let recording = runner
+        .virtual_display()
+        .map(|vd| vd.record(&shots_dir, std::time::Duration::from_millis(500)));
+
     let tests_passed = runner.run_reaper_tests(&packages, filter.as_deref())?;
+
+    if let Some(rec) = recording {
+        let kept = rec.finish(&shots_dir);
+        println!("  Screenshots: {kept} frames in {}", shots_dir.display());
+    }
 
     if tests_passed {
         println!("\n  All tests passed!");

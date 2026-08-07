@@ -20,7 +20,7 @@
 //! So: hand-rolled again, keeping the primitive's two good ideas and
 //! avoiding its fatal one.
 //!
-//! - **Async handler, not `spawn`.** `onpointerdown: move |e| async move
+//! - **Async handler, not `spawn`.** `onmousedown: move |e| async move
 //!   { … }` is awaited by dioxus *after* event dispatch releases the
 //!   document, so measuring inside it is safe. This is the whole
 //!   difference between working and panicking, and it's why the bar
@@ -113,18 +113,18 @@ pub fn Slider(
                 measure().await;
             },
             onresize: move |_| async move { measure().await },
-            onpointerdown: move |e| async move {
+            onmousedown: move |e| async move {
                 // Async, not `spawn`: this runs after event dispatch has
                 // released the document borrow. See the module docs.
                 measure().await;
                 emit(e.data().client_coordinates().x);
             },
-            onpointermove: move |e| {
+            onmousemove: move |e| {
                 if granular().is_some() {
                     emit(e.data().client_coordinates().x);
                 }
             },
-            onpointerup: move |_| granular.set(None),
+            onmouseup: move |_| granular.set(None),
 
             div { style: "position:absolute; left:0; right:0; height:{TRACK_H}px; border-radius:3px; background:var(--muted, #2a2a2a);" }
             div { style: "position:absolute; left:0; width:{position}%; height:{TRACK_H}px; border-radius:3px; background:var(--primary, #d2691e);" }
@@ -188,7 +188,7 @@ pub fn RangeSlider(
                 measure().await;
             },
             onresize: move |_| async move { measure().await },
-            onpointerdown: move |e| async move {
+            onmousedown: move |e| async move {
                 measure().await;
                 let (x, w) = rect();
                 let f = fraction(x, w, e.data().client_coordinates().x);
@@ -196,12 +196,12 @@ pub fn RangeSlider(
                 held.set(Some(low_thumb));
                 apply(e.data().client_coordinates().x, low_thumb);
             },
-            onpointermove: move |e| {
+            onmousemove: move |e| {
                 if let Some(low_thumb) = held() {
                     apply(e.data().client_coordinates().x, low_thumb);
                 }
             },
-            onpointerup: move |_| held.set(None),
+            onmouseup: move |_| held.set(None),
 
             div { style: "position:absolute; left:0; right:0; height:{TRACK_H}px; border-radius:3px; background:var(--muted, #2a2a2a);" }
             div {
@@ -275,7 +275,7 @@ pub fn BarEditor(
                 measure().await;
             },
             onresize: move |_| async move { measure().await },
-            onpointerdown: move |e| async move {
+            onmousedown: move |e| async move {
                 dragging.set(true);
                 // Re-measure before acting on the very first coordinate,
                 // so a gesture can never be applied against a stale box.
@@ -285,7 +285,7 @@ pub fn BarEditor(
                     on_change.call((i, v));
                 }
             },
-            onpointermove: move |e| {
+            onmousemove: move |e| {
                 if dragging() {
                     let c = e.data().client_coordinates();
                     if let Some((i, v)) = hit(c.x, c.y) {
@@ -293,7 +293,7 @@ pub fn BarEditor(
                     }
                 }
             },
-            onpointerup: move |_| dragging.set(false),
+            onmouseup: move |_| dragging.set(false),
             // Deliberately no `onpointerleave` handler: cancelling the
             // drag on leave means a fast stroke that strays a pixel above
             // the box drops the rest of the gesture, which is most of what
