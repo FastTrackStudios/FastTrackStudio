@@ -42,6 +42,27 @@ pub struct MediaChunk {
     pub bytes: Vec<u8>,
 }
 
+/// A short-lived signed grant for the filesystem media route
+/// (`GET /org/{slug}/media/{path}?token=…`).
+///
+/// Why this exists alongside the content-addressed reads above: colocated
+/// song media is served straight off disk by path, and the consumers are
+/// browser `<audio>`/`<img>` elements, which cannot set an
+/// `Authorization` header and cannot await an RPC inside `set_src`. So
+/// the caller mints one grant over vox — where the permission gate can
+/// see it — and appends the opaque token to the URLs it builds.
+///
+/// The grant covers a path PREFIX, because a song loads as a directory
+/// (manifest + chart + N stems); one grant per song load rather than one
+/// RPC per file.
+#[derive(Debug, Clone, Facet)]
+pub struct MediaGrant {
+    /// Opaque signed token — append as `?token=`.
+    pub token: String,
+    /// Unix seconds after which the token stops verifying.
+    pub expires_unix: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Error)]
 #[repr(u8)]
 pub enum MediaError {
@@ -65,6 +86,10 @@ unsafe impl vox_types::Reborrow for MediaChunk {
 unsafe impl vox_types::Reborrow for MediaError {
     type Ref<'a> = MediaError;
 }
+#[cfg(feature = "vox")]
+unsafe impl vox_types::Reborrow for MediaGrant {
+    type Ref<'a> = MediaGrant;
+}
 
 /// Content-addressed media reads over vox. Mounted per org next to
 /// `AttachmentService`; hashes are the same blob-store namespace.
@@ -86,4 +111,14 @@ pub trait MediaService {
         len: u64,
         tx: vox::Tx<MediaChunk>,
     ) -> Result<(), MediaError>;
+
+    /// Mint a [`MediaGrant`] covering `prefix` under this org's
+    /// filesystem media route.
+    ///
+    /// This call is the authorization point: it rides the per-org vox
+    /// lane, so the permission gate decides whether the caller may have
+    /// a grant at all. The HTTP route then only has to verify the
+    /// signature — no session lookup on a hot media path, and no way for
+    /// an unauthenticated caller to obtain a token in the first place.
+    async fn media_grant(&self, prefix: String) -> Result<MediaGrant, MediaError>;
 }

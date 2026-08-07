@@ -25,6 +25,9 @@ use crate::capability::{CapabilityError, ServerKeypair};
 pub enum BlobTokenPurpose {
     Upload,
     Download,
+    /// Read under a colocated-media path PREFIX
+    /// (`/org/{slug}/media/{path}`). See [`BlobToken::media`].
+    Media,
 }
 
 impl BlobTokenPurpose {
@@ -32,12 +35,14 @@ impl BlobTokenPurpose {
         match self {
             Self::Upload => "up",
             Self::Download => "dn",
+            Self::Media => "md",
         }
     }
     fn parse(s: &str) -> Option<Self> {
         match s {
             "up" => Some(Self::Upload),
             "dn" => Some(Self::Download),
+            "md" => Some(Self::Media),
             _ => None,
         }
     }
@@ -67,6 +72,45 @@ impl BlobToken {
             expires_unix,
             subject: content_hash.into(),
         }
+    }
+
+    /// A **prefix** grant over `/org/{slug}/media/…`.
+    ///
+    /// Prefix rather than one-file, because the player loads a song as a
+    /// directory: manifest, chart, and N stems all under
+    /// `songs/<song>/`. Minting per file would be an RPC per stem on
+    /// every load, and would have to happen inside `<audio>.set_src`,
+    /// which is synchronous. One short-lived token per song load covers
+    /// the set.
+    ///
+    /// The subject binds the ORG as well as the path — `{slug}/{prefix}`
+    /// — so a token minted for one org can never read another's files.
+    /// Slugs contain no `/`, so the join is unambiguous.
+    pub fn media(slug: &str, prefix: &str, expires_unix: i64) -> Self {
+        Self {
+            purpose: BlobTokenPurpose::Media,
+            expires_unix,
+            subject: format!("{slug}/{}", prefix.trim_start_matches('/')),
+        }
+    }
+
+    /// Does this token authorize reading `rel` in org `slug`?
+    ///
+    /// Compares the FULL canonical subject rather than parsing it apart,
+    /// so a `/` inside a path can never be mistaken for the org
+    /// separator. Prefix match is on a path-segment boundary: a grant
+    /// for `songs/hymn` must not unlock `songs/hymn-outtakes`.
+    #[must_use]
+    pub fn allows_media(&self, slug: &str, rel: &str) -> bool {
+        if !matches!(self.purpose, BlobTokenPurpose::Media) {
+            return false;
+        }
+        let requested = format!("{slug}/{}", rel.trim_start_matches('/'));
+        let granted = self.subject.trim_end_matches('/');
+        requested == granted
+            || requested
+                .strip_prefix(granted)
+                .is_some_and(|rest| rest.starts_with('/'))
     }
 
     #[must_use]
@@ -230,6 +274,62 @@ mod tests {
         assert!(matches!(
             BlobToken::verify(&bad, &kp, 0),
             Err(CapabilityError::BadSignature)
+        ));
+    }
+
+    // ── media prefix grants ──────────────────────────────────────────
+
+    #[test]
+    fn media_grant_covers_its_prefix() {
+        let tok = BlobToken::media("codywright", "songs/hymn", future());
+        assert!(tok.allows_media("codywright", "songs/hymn/manifest.json"));
+        assert!(tok.allows_media("codywright", "songs/hymn/stems/bass.ogg"));
+        // The prefix itself (the directory listing) is in scope too.
+        assert!(tok.allows_media("codywright", "songs/hymn"));
+    }
+
+    #[test]
+    fn media_grant_does_not_leak_across_orgs() {
+        // THE property: the subject binds the org, so a token minted for
+        // one org can never read another's files even at the same path.
+        let tok = BlobToken::media("codywright", "songs/hymn", future());
+        assert!(!tok.allows_media("tombrooksmusic", "songs/hymn/manifest.json"));
+    }
+
+    #[test]
+    fn media_prefix_matches_on_a_segment_boundary() {
+        // A grant for `songs/hymn` must not unlock `songs/hymn-outtakes`
+        // — the classic string-prefix bug in a path grant.
+        let tok = BlobToken::media("codywright", "songs/hymn", future());
+        assert!(!tok.allows_media("codywright", "songs/hymn-outtakes/master.wav"));
+        assert!(!tok.allows_media("codywright", "songs/hymnal/secret.wav"));
+    }
+
+    #[test]
+    fn media_grant_does_not_escape_upward() {
+        let tok = BlobToken::media("codywright", "songs/hymn", future());
+        assert!(!tok.allows_media("codywright", "songs"));
+        assert!(!tok.allows_media("codywright", "other/file.wav"));
+    }
+
+    #[test]
+    fn a_download_token_is_not_a_media_token() {
+        // Purpose confusion: a blob-download grant must not become a
+        // filesystem read grant just because the subject string lines up.
+        let tok = BlobToken::download("codywright/songs/hymn", future());
+        assert!(!tok.allows_media("codywright", "songs/hymn/manifest.json"));
+    }
+
+    #[test]
+    fn media_token_round_trips_and_expires() {
+        let kp = ServerKeypair::generate_ephemeral();
+        let tok = BlobToken::media("codywright", "songs/hymn", future());
+        let s = tok.issue(&kp);
+        let back = BlobToken::verify(&s, &kp, 0).expect("verify");
+        assert!(back.allows_media("codywright", "songs/hymn/x.ogg"));
+        assert!(matches!(
+            BlobToken::verify(&s, &kp, future() + 1),
+            Err(CapabilityError::Expired)
         ));
     }
 }
