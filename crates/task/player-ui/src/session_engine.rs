@@ -304,10 +304,15 @@ async fn build_setlist(org: String, slugs: Vec<String>, key: String) -> eyre::Re
     let mut song_guids: Vec<String> = Vec::with_capacity(slugs.len());
     for (i, slug) in slugs.iter().enumerate() {
         // Fetch this song's manifest (+ optional chart) from `/media`.
-        let manifest = media::fetch_manifest(&format!("/org/{org}/media/songs/{slug}/manifest.json"))
+        let tok = crate::media_grant::suffix(&org, slug).await;
+        let manifest = media::fetch_manifest(&format!(
+            "/org/{org}/media/songs/{slug}/manifest.json{tok}"
+        ))
             .await
             .map_err(|e| eyre::eyre!("fetch manifest for {slug}: {e}"))?;
-        let chart = media::fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf"))
+        let chart = media::fetch_text(&format!(
+            "/org/{org}/media/songs/{slug}/chart.kf{tok}"
+        ))
             .await
             .ok()
             .filter(|t| !t.is_empty());

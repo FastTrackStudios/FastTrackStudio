@@ -1676,6 +1676,101 @@ async fn media_dir_listing(dir: &std::path::Path) -> axum::response::Response {
         .into_response()
 }
 
+/// Query string of [`per_org_media_handler`] — the signed media token.
+#[derive(serde::Deserialize, Default)]
+pub struct MediaQuery {
+    /// [`BlobToken::media`], base64url. Absent for an anonymous read.
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+/// Is the media route enforcing? **Off unless `TASK_ENFORCE_MEDIA_TOKEN`
+/// is exactly `1`** — the deliberate operator action, matching
+/// [`enforce_permissions`].
+#[must_use]
+pub fn enforce_media_token() -> bool {
+    std::env::var("TASK_ENFORCE_MEDIA_TOKEN").is_ok_and(|v| v == "1")
+}
+
+/// Decide whether a media read is allowed. `None` = proceed;
+/// `Some(response)` = refuse with it.
+///
+/// Always evaluates and always records, so the observe phase answers
+/// "would enforcing break anyone?" from the traces. Only the final
+/// refusal is conditional on [`enforce_media_token`].
+async fn authorize_media(
+    state: &AppState,
+    slug: &str,
+    rel: &str,
+    token: Option<&str>,
+    headers: &axum::http::HeaderMap,
+) -> Option<axum::response::Response> {
+    use task_telemetry::wide;
+
+    wide::set("org.slug", slug.to_owned());
+    wide::set("media.path", rel.to_owned());
+
+    // 1. Signed prefix token — the browser channel (an <audio> tag can
+    //    set no headers, so the grant has to live in the URL).
+    if let Some(token) = token.filter(|t| !t.is_empty()) {
+        let now = chrono::Utc::now().timestamp();
+        match crate::attachments::signed_url::BlobToken::verify(token, &state.keypair, now) {
+            Ok(tok) if tok.allows_media(slug, rel) => {
+                wide::set("media.authorized", true);
+                wide::set("media.auth_via", "signed-token");
+                return None;
+            }
+            Ok(_) => {
+                wide::set("media.authorized", false);
+                wide::set("media.auth_via", "token-wrong-scope");
+            }
+            Err(e) => {
+                wide::set("media.authorized", false);
+                wide::set("media.auth_via", "token-invalid");
+                wide::set_display("media.token_error", &format!("{e:?}"));
+            }
+        }
+    } else if let Some(bearer) = crate::watch_bridge::bearer(headers) {
+        // 2. Session bearer — native clients own their requests and
+        //    shouldn't need a mint round trip for every file.
+        let ok = match state.org(slug) {
+            Some(org) => org
+                .auth
+                .auth
+                .current_session(architect_auth::CurrentSession { token: bearer })
+                .await
+                .is_ok(),
+            None => false,
+        };
+        wide::set("media.authorized", ok);
+        wide::set("media.auth_via", if ok { "bearer" } else { "bearer-invalid" });
+        if ok {
+            return None;
+        }
+    } else {
+        wide::set("media.authorized", false);
+        wide::set("media.auth_via", "absent");
+    }
+
+    if enforce_media_token() {
+        wide::set("media.mode", "enforcing");
+        Some(axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::UNAUTHORIZED,
+            "media requires a signed token or session bearer",
+        )))
+    } else {
+        // Observe-only: the refusal that did not happen.
+        wide::set("media.mode", "observe-only");
+        tracing::warn!(
+            target: "task_server::media",
+            org = slug,
+            path = rel,
+            "media: WOULD DENY (served anyway — TASK_ENFORCE_MEDIA_TOKEN is off)",
+        );
+        None
+    }
+}
+
 /// Filesystem-first song media: `GET /org/{slug}/media/<path>` serves
 /// `<data_root>/orgs/{slug}/resources/<path>` straight off disk — no
 /// ingest, no content-addressing, drop-a-file-and-it-serves (fits network
@@ -1688,15 +1783,37 @@ async fn media_dir_listing(dir: &std::path::Path) -> axum::response::Response {
 /// without it Chrome's `<audio>` loader stalls at `readyState 0` on Ogg
 /// (which needs a seek to the tail to read its duration), so stems never
 /// actually play. The reference stem player streams these directly.
+///
+/// ## Authorization
+///
+/// This route served the org's whole `resources/` tree — files AND
+/// directory listings — to anyone, and it is NOT a vox path, so
+/// `TASK_ENFORCE_PERMISSIONS` does not reach it (verified open on
+/// production 2026-08-07). A caller now presents either a signed
+/// `?token=` ([`BlobToken::media`], minted over vox by a caller the
+/// permission gate already allowed) or an `Authorization: Bearer`
+/// session token — the latter for native clients, which can set headers
+/// and shouldn't need a mint round trip.
+///
+/// Gated by `TASK_ENFORCE_MEDIA_TOKEN` and OFF by default, deliberately
+/// mirroring `TASK_ENFORCE_PERMISSIONS`: shipping the check hot would
+/// black out every `<audio>`/`<img>` on the deployed bundle the moment
+/// it rolled. The wide fields (`media.authorized`, `media.auth_via`)
+/// make the observe phase queryable, so the flip is evidence-driven
+/// rather than hopeful — the same ordering the vox work followed.
 async fn per_org_media_handler(
     State(state): State<AppState>,
     axum::extract::Path((slug, rel)): axum::extract::Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<MediaQuery>,
     headers: axum::http::HeaderMap,
 ) -> axum::response::Response {
     use axum::http::{StatusCode, header};
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     if rel.split('/').any(|s| s == ".." || s.is_empty()) {
         return StatusCode::NOT_FOUND.into_response();
+    }
+    if let Some(refusal) = authorize_media(&state, &slug, &rel, q.token.as_deref(), &headers).await {
+        return refusal;
     }
     let file = state
         .data_root
@@ -2303,6 +2420,11 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             media_proto::media_service_service_descriptor(),
             media_proto::MediaServiceDispatcher::new(crate::media::MediaServiceImpl::new(
                 org.attachments.clone(),
+                org.slug.clone(),
+                // Same process-wide keypair the media route verifies
+                // with (`AppState::keypair`, threaded through
+                // `build_org_state`) — sign and verify cannot drift.
+                org.attachments.keypair.clone(),
             )),
         )
         // Vault file replication (manifest / get / put / delete).
