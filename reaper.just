@@ -181,6 +181,16 @@ theme-shot-profile out="target/theme-shots/profile.png":
         --theme "{{theme_dir}}" shot --out "{{out}}" \
         --profile "{{reaper_home}}"
 
+# Photograph every themed surface side by side (REAPER + expression editor)
+#
+# Judging colours one surface at a time hides cross-surface problems, so
+# this shoots both and composites a contact sheet. Needs a window manager
+# for the REAPER half to be faithful:
+#
+#   nix develop .#reaper-test -c just reaper theme-contact
+theme-contact out="":
+    "{{justfile_directory()}}/features/reaper/fts-themer/scripts/theme-contact.sh" {{out}}
+
 # Serve the theme editor GUI (colours, live preview, accent generation)
 theme-edit:
     cd "{{justfile_directory()}}/features/reaper/fts-themer-ui" && \
