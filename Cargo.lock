@@ -8949,6 +8949,8 @@ dependencies = [
 name = "expression-editor-audio"
 version = "0.1.0"
 dependencies = [
+ "daw",
+ "expression-editor-audio",
  "expression-editor-core",
  "tune-dsp",
 ]
