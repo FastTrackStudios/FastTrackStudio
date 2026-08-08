@@ -213,8 +213,8 @@ struct AuthState {
 /// down connections established under the previous one.
 ///
 /// This is the piece that was missing: the token was stored (localStorage
-/// + the registry entry) and passed as an ARGUMENT to the handful of auth
-/// methods that take one, but nothing ever attached it to the vox
+/// and the registry entry) and passed as an ARGUMENT to the handful of
+/// auth methods that take one, but nothing ever attached it to the vox
 /// transport — so every other RPC arrived at the server as
 /// `principal=anonymous`, and the permission gate computed the right
 /// answer (`would_deny`) on all of them and threw it away.
