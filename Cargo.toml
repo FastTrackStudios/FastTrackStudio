@@ -243,6 +243,7 @@ members = [
     "features/fx/tune/tune-dsp",
     # ── features/expression-editor — the note+curve editing surface,
     #    shared by the MPE editor and the audio pitch editor
+    "features/expression-editor/expression-editor-audio",
     "features/expression-editor/expression-editor-core",
     "features/expression-editor/expression-editor-daw",
     "features/expression-editor/expression-editor-reaper",
@@ -630,6 +631,7 @@ pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
 tune = { path = "features/fx/tune/tune" }
 world-sys = { path = "libs/vendor/world" }
 tune-dsp = { path = "features/fx/tune/tune-dsp" }
+expression-editor-audio = { path = "features/expression-editor/expression-editor-audio" }
 expression-editor-core = { path = "features/expression-editor/expression-editor-core" }
 expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
 expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }

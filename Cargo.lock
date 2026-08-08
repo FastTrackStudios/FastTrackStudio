@@ -8946,6 +8946,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "expression-editor-audio"
+version = "0.1.0"
+dependencies = [
+ "expression-editor-core",
+ "tune-dsp",
+]
+
+[[package]]
 name = "expression-editor-core"
 version = "0.1.0"
 dependencies = [
