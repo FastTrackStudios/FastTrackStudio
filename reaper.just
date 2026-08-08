@@ -181,6 +181,26 @@ theme-shot-profile out="target/theme-shots/profile.png":
         --theme "{{theme_dir}}" shot --out "{{out}}" \
         --profile "{{reaper_home}}"
 
+# Restyle the theme's ARTWORK onto the palette (toolbar, mixer, TCP chrome)
+#
+# The palette can't reach PNGs. This pushes every neutral pixel through a
+# luminance ramp built from the theme. The first run snapshots pristine art
+# into .source-art/ and every later run maps from that, so re-running after
+# a palette change is reproducible rather than cumulative.
+theme-restyle *args:
+    cargo run -q -p fts-themer --bin fts-themer -- \
+        --theme "{{theme_dir}}" restyle {{args}}
+
+# Photograph every themed surface side by side (REAPER + expression editor)
+#
+# Judging colours one surface at a time hides cross-surface problems, so
+# this shoots both and composites a contact sheet. Needs a window manager
+# for the REAPER half to be faithful:
+#
+#   nix develop .#reaper-test -c just reaper theme-contact
+theme-contact out="":
+    "{{justfile_directory()}}/features/reaper/fts-themer/scripts/theme-contact.sh" {{out}}
+
 # Serve the theme editor GUI (colours, live preview, accent generation)
 theme-edit:
     cd "{{justfile_directory()}}/features/reaper/fts-themer-ui" && \

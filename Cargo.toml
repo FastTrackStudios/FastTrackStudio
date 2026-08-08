@@ -140,6 +140,8 @@ members = [
     "features/standalone/daw-standalone",
     "features/surfaces/daw-csi",
     "features/daw-ui/daw-ui",
+    "features/daw-ui/daw-theme",
+    "features/daw-ui/daw-theme-art",
     "features/daw-ui/daw-theme-reaper",
     # ── crates/session — session domain core (wave 3) ─────────────────
     "crates/session/session",
@@ -495,6 +497,8 @@ fts-extensions-actions = { path = "apps/extensions/reaper-fts-extensions/actions
 daw-standalone = { path = "features/standalone/daw-standalone" }
 daw-csi = { path = "features/surfaces/daw-csi" }
 daw-ui = { path = "features/daw-ui/daw-ui", default-features = false }
+daw-theme = { path = "features/daw-ui/daw-theme" }
+daw-theme-art = { path = "features/daw-ui/daw-theme-art", default-features = false }
 daw-theme-reaper = { path = "features/daw-ui/daw-theme-reaper" }
 
 # ── session domain (wave 3) ───────────────────────────────────────────
