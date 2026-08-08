@@ -211,6 +211,12 @@ struct AuthState {
     /// by [`pull_locker`] when a signed-into server turns out to host a
     /// locker; read by [`push_link`] to decide where to push new links.
     home_locker: Signal<Option<HomeLocker>>,
+    /// Mirror of the active session token, provided at the app root
+    /// BEFORE org discovery. Writing it re-runs discovery so the org list
+    /// gets re-tagged with membership (#109 criterion 6) — the boot fetch
+    /// is necessarily anonymous, since sign-in needs the home slug that
+    /// discovery resolves.
+    session_token: Signal<Option<String>>,
 }
 
 /// Publish the resolved session token as the vox dial identity, and tear
@@ -236,10 +242,16 @@ struct AuthState {
 /// build boots straight into it. Presenting that token is what it is — a
 /// validated session — and withholding it would make every dev boot
 /// anonymous, i.e. denied the moment enforcement goes on.
-fn publish_session_token(account: Option<&ActiveAccount>) {
+fn publish_session_token(mut st: AuthState, account: Option<&ActiveAccount>) {
     let token = account.map(|a| a.token.clone());
-    if crate::vox_session::set_session_token(token) {
+    if crate::vox_session::set_session_token(token.clone()) {
         crate::vox_clients::drop_cached_connections();
+    }
+    // Reactive mirror: re-runs org discovery so the well-known doc is
+    // re-fetched WITH the token and the org list gets its membership
+    // tags. Guarded so an unchanged token can't loop the resource.
+    if *st.session_token.peek() != token {
+        st.session_token.set(token);
     }
 }
 
@@ -401,7 +413,7 @@ async fn run_switch(mut st: AuthState, email: &str) {
             sync_active_server_entry(st.registry, Some(&account));
             // Before any further RPC: the locker/link calls below should
             // already ride the new identity.
-            publish_session_token(Some(&account));
+            publish_session_token(st, Some(&account));
             // Multi-server sync: pull this server's locker (if it hosts
             // one, it becomes the anchor), then push it up to whatever
             // anchor stands. Both borrow `&account` before the move.
@@ -467,7 +479,7 @@ async fn run_credential_sign_in(
         Ok(account) => {
             save_active_email(&account.email);
             sync_active_server_entry(st.registry, Some(&account));
-            publish_session_token(Some(&account));
+            publish_session_token(st, Some(&account));
             // Same multi-server sync as run_switch (borrow before move).
             pull_locker(st, &account).await;
             push_link(st, &account).await;
@@ -492,7 +504,7 @@ async fn run_sign_out(mut st: AuthState) {
     // `sign_out` passes the token as an argument, so it doesn't need the
     // connection to carry the identity, and re-dialing anonymously for it
     // is the correct end state anyway.
-    publish_session_token(None);
+    publish_session_token(st, None);
     st.active.set(None);
     let slug = home_slug(&st.orgs.peek());
     if !slug.is_empty() {
@@ -521,6 +533,8 @@ pub fn provide_auth() -> AuthCtx {
     let error = use_signal(|| None::<String>);
     let busy = use_signal(|| false);
     let home_locker = use_signal(|| None::<HomeLocker>);
+    // Provided by the app root ahead of discovery (see `app.rs`).
+    let session_token = use_context::<Signal<Option<String>>>();
     // Set once boot restore has run (or decided there is nothing to
     // restore) — see `AuthCtx::booted`.
     let mut booted = use_signal(|| false);
@@ -531,6 +545,7 @@ pub fn provide_auth() -> AuthCtx {
         orgs,
         registry,
         home_locker,
+        session_token,
     };
 
     // The auth service: one sequential consumer for every auth action
