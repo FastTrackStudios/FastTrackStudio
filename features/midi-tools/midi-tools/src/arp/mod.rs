@@ -201,7 +201,9 @@ impl Arp {
         while at < chord.end_ppq {
             let step = self.step_at(i);
             let rate = step.rate_ppq;
-            if !(rate > 0.0) {
+            // NaN included deliberately: a NaN rate must break, and
+            // `rate <= 0.0` is false for NaN.
+            if rate.is_nan() || rate <= 0.0 {
                 break;
             }
 
@@ -210,7 +212,7 @@ impl Arp {
             let remaining = chord.end_ppq - at;
             let span = rate.min(remaining);
 
-            let note = pool[cursor.next()];
+            let note = pool[cursor.next_index()];
             let pitch = (i16::from(note.pitch) + i16::from(step.octave) * 12)
                 .clamp(0, i16::from(MAX_VELOCITY)) as u8;
             let velocity = step

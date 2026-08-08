@@ -143,7 +143,7 @@ pub fn EmailView() -> Element {
     });
 
     // Outbox entries for the selected account, newest first.
-    let mut outbox = use_resource(move || async move {
+    let outbox = use_resource(move || async move {
         match (slug(), selected_account()) {
             (Some(s), Some(acct)) => fetch_email_outbox(&s, &acct).await,
             _ => Ok(Vec::new()),
@@ -154,7 +154,7 @@ pub fn EmailView() -> Element {
     // envelopes. Reads the envelopes resource, so it re-fetches
     // whenever the list does; `DerivationsUpdated` restarts it
     // directly.
-    let mut derivs = use_resource(move || async move {
+    let derivs = use_resource(move || async move {
         let ids: Vec<String> = match &*envelopes.read() {
             Some(Ok(list)) => list.iter().map(|e| e.message_id.clone()).collect(),
             _ => Vec::new(),
@@ -765,7 +765,7 @@ fn ComposeForm(
                     size: ButtonSize::Small,
                     disabled: busy(),
                     on_click: {
-                        let mut submit = submit.clone();
+                        let submit = submit.clone();
                         move |_| submit(false)
                     },
                     "Stage for approval"
@@ -774,7 +774,7 @@ fn ComposeForm(
                     size: ButtonSize::Small,
                     disabled: busy(),
                     on_click: {
-                        let mut submit = submit.clone();
+                        let submit = submit.clone();
                         move |_| submit(true)
                     },
                     "Send"
@@ -876,7 +876,7 @@ fn OutboxRow(
                     size: ButtonSize::Small,
                     disabled: busy(),
                     on_click: {
-                        let mut act = act.clone();
+                        let act = act.clone();
                         move |_| act(true)
                     },
                     if status == OutboxStatus::Failed { "Retry" } else { "Approve" }
@@ -888,7 +888,7 @@ fn OutboxRow(
                     size: ButtonSize::Small,
                     disabled: busy(),
                     on_click: {
-                        let mut act = act.clone();
+                        let act = act.clone();
                         move |_| act(false)
                     },
                     "Cancel"

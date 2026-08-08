@@ -24,7 +24,7 @@ use crate::slug;
 /// this trait are both foreign to the slice and a direct impl would
 /// trip the orphan rule.
 ///
-/// ```ignore
+/// ```text
 /// pub struct BodyMetrics;
 ///
 /// impl VaultEntity for BodyMetrics {
