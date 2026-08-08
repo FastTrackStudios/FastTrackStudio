@@ -246,7 +246,13 @@ pub fn App() -> Element {
         style { dangerous_inner_html: MOBILE_BASELINE_CSS }
         ThemeProvider { state: theme_state,
             div { class: "min-h-screen bg-background text-foreground",
-                Router::<Route> {}
+                // Unauthenticated visitors land on sign-in rather than on
+                // a shell full of empty panels (#109 criterion 5). The
+                // gate is presentation only — the server is what actually
+                // refuses data.
+                crate::auth::SignInGate {
+                    Router::<Route> {}
+                }
             }
         }
     }

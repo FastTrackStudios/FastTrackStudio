@@ -137,6 +137,10 @@ pub struct AuthCtx {
     pub error: Signal<Option<String>>,
     /// True while a switch/sign-in is in flight.
     pub busy: Signal<bool>,
+    /// Has boot restore finished? Distinguishes "no account" from "we
+    /// haven't looked yet" — without it [`SignInGate`] flashes the login
+    /// screen on every load before the cached token validates.
+    pub booted: Signal<bool>,
     /// The root auth service (see [`provide_auth`]).
     actions: Coroutine<AuthAction>,
 }
@@ -517,6 +521,9 @@ pub fn provide_auth() -> AuthCtx {
     let error = use_signal(|| None::<String>);
     let busy = use_signal(|| false);
     let home_locker = use_signal(|| None::<HomeLocker>);
+    // Set once boot restore has run (or decided there is nothing to
+    // restore) — see `AuthCtx::booted`.
+    let mut booted = use_signal(|| false);
     let st = AuthState {
         active,
         error,
@@ -558,6 +565,7 @@ pub fn provide_auth() -> AuthCtx {
         active,
         error,
         busy,
+        booted,
         actions,
     };
     use_context_provider(|| active);
@@ -566,7 +574,6 @@ pub fn provide_auth() -> AuthCtx {
     // Boot restore: wait for org discovery (home slug resolves), then
     // validate the persisted account — or auto sign-in as Guest when
     // nothing is stored. Runs exactly once.
-    let mut booted = use_signal(|| false);
     use_effect(move || {
         let slug = home_slug(&orgs.read());
         if slug.is_empty() || *booted.peek() {
@@ -577,13 +584,89 @@ pub fn provide_auth() -> AuthCtx {
         // build. With nothing stored, only a debug build can auto-land
         // on Guest — that needs a compiled-in password. Release shows
         // `LoginForm` instead of failing a sign-in nobody asked for.
+        //
+        // `busy` is raised HERE, synchronously, not left to the
+        // coroutine. `switch_account` only queues the action, so between
+        // this effect and the coroutine picking it up there is a tick
+        // where `booted` is true, `active` is None and `busy` is false —
+        // which `SignInGate` would read as "signed out" and flash the
+        // login screen over a session that is about to restore.
+        let mut busy = busy;
         match load_active_email() {
-            Some(email) => ctx.switch_account(email),
-            None if cfg!(debug_assertions) => ctx.switch_account(GUEST_EMAIL.to_owned()),
+            Some(email) => {
+                busy.set(true);
+                ctx.switch_account(email);
+            }
+            None if cfg!(debug_assertions) => {
+                busy.set(true);
+                ctx.switch_account(GUEST_EMAIL.to_owned());
+            }
+            // Nothing stored and no compiled-in password: genuinely
+            // signed out, and the gate should say so immediately.
             None => {}
         }
     });
     ctx
+}
+
+/// Gate the app on a signed-in session (issue #109 criterion 5).
+///
+/// **This is presentation, not security.** The server still answers
+/// anyone who opens a websocket to it directly; what actually refuses
+/// data is the permission gate on the org lane
+/// (`TASK_ENFORCE_PERMISSIONS`). This exists so an unauthenticated
+/// visitor lands on sign-in instead of on a shell that renders empty
+/// panels and a wall of failed requests.
+///
+/// Three states, and the middle one is the whole reason this isn't a
+/// one-line `if`:
+/// - a session → the app;
+/// - restoring (boot hasn't resolved, or a sign-in is in flight) → a
+///   neutral placeholder, NOT the login form, so a returning user with a
+///   valid cached token never sees a sign-in screen flash;
+/// - resolved with no session → sign in.
+#[component]
+pub fn SignInGate(children: Element) -> Element {
+    let ctx = use_context::<AuthCtx>();
+    let active = ctx.active;
+    let booted = ctx.booted;
+    let busy = ctx.busy;
+
+    if active.read().is_some() {
+        return rsx! { {children} };
+    }
+    if !booted() || busy() {
+        return rsx! {
+            div { class: "flex min-h-screen items-center justify-center text-sm text-muted-foreground",
+                "Restoring your session…"
+            }
+        };
+    }
+    rsx! {
+        div { class: "flex min-h-screen items-center justify-center p-6",
+            div { class: "flex w-full max-w-sm flex-col gap-4",
+                div { class: "flex flex-col gap-1",
+                    h1 { class: "text-lg font-semibold", "Sign in to Task" }
+                    p { class: "text-sm text-muted-foreground",
+                        "This server's data is private to its members."
+                    }
+                }
+                LoginForm {}
+                // Without this a user pointed at the wrong server is
+                // stuck: they cannot sign in, and the switcher that would
+                // let them change servers lives inside the app they can't
+                // reach.
+                details { class: "text-sm",
+                    summary { class: "cursor-pointer text-muted-foreground",
+                        "Connect to a different server"
+                    }
+                    div { class: "pt-2",
+                        crate::server_registry::ServersPanel {}
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Token-cache-first session resolution against the home org.

@@ -23,7 +23,11 @@ pub fn OrgSwitcher(#[props(default = false)] compact: bool) -> Element {
     let mut open = use_signal(|| false);
     let mut theme_open = use_signal(|| false);
 
-    let list = org_list();
+    // Only orgs this session actually belongs to — the switcher must not
+    // offer (or let "All" span) orgs the server would refuse anyway
+    // (#109 criterion 6). Signed out, this is the full hosted list, which
+    // is what the sign-in path needs.
+    let list = crate::orgs::my_orgs(&org_list());
     let current = selection();
     let trigger_label = current.label(&list);
 
@@ -176,7 +180,11 @@ pub fn RailOrgButton() -> Element {
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let mut open = use_signal(|| false);
 
-    let list = org_list();
+    // Only orgs this session actually belongs to — the switcher must not
+    // offer (or let "All" span) orgs the server would refuse anyway
+    // (#109 criterion 6). Signed out, this is the full hosted list, which
+    // is what the sign-in path needs.
+    let list = crate::orgs::my_orgs(&org_list());
     let current = selection();
     let trigger_label = current.label(&list);
     // Initials chip: "All" for the aggregate view, the org name's
