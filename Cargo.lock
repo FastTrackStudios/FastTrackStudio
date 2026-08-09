@@ -8977,6 +8977,7 @@ dependencies = [
  "daw",
  "daw-test-macro",
  "dioxus",
+ "expression-editor-audio",
  "expression-editor-core",
  "expression-editor-daw",
  "expression-editor-ui",
