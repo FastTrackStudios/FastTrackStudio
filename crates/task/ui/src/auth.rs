@@ -403,6 +403,13 @@ async fn run_switch(mut st: AuthState, email: &str) {
     if slug.is_empty() {
         st.error
             .set(Some("org discovery hasn't resolved yet".to_owned()));
+        // MUST clear `busy`. Boot restore raises it synchronously before
+        // queueing this action (so `SignInGate` doesn't flash the login
+        // form over a session that's about to restore), which means this
+        // early return owns it too — leaving it set strands the app on
+        // "Restoring your session…" forever, with no way to sign in and
+        // no way to reach the server picker.
+        st.busy.set(false);
         return;
     }
     st.busy.set(true);
@@ -440,6 +447,7 @@ async fn run_credential_sign_in(
     if slug.is_empty() {
         st.error
             .set(Some("org discovery hasn't resolved yet".to_owned()));
+        st.busy.set(false);
         return;
     }
     st.busy.set(true);
@@ -651,9 +659,32 @@ pub fn SignInGate(children: Element) -> Element {
         return rsx! { {children} };
     }
     if !booted() || busy() {
+        // NEVER a dead end. This branch also covers "org discovery hasn't
+        // resolved" — a failed or slow well-known fetch, or a server that
+        // isn't answering — and a bug that stranded `busy` once made it
+        // permanent: the app sat on this message with no way to sign in
+        // and no way to reach the server picker, because both live behind
+        // it. So the waiting state carries its own escape hatch, and
+        // surfaces WHY discovery hasn't resolved when it knows.
+        let discovery = use_context::<crate::orgs::DiscoveryError>();
+        let err = discovery.0.read().clone();
         return rsx! {
-            div { class: "flex min-h-screen items-center justify-center text-sm text-muted-foreground",
-                "Restoring your session…"
+            div { class: "flex min-h-screen items-center justify-center p-6",
+                div { class: "flex w-full max-w-sm flex-col items-center gap-3",
+                    p { class: "text-sm text-muted-foreground", "Restoring your session…" }
+                    if let Some(msg) = err {
+                        p { class: "text-center text-xs text-destructive", "{msg}" }
+                    }
+                    details { class: "w-full text-sm",
+                        summary { class: "cursor-pointer text-center text-muted-foreground",
+                            "Taking too long?"
+                        }
+                        div { class: "flex flex-col gap-4 pt-3",
+                            LoginForm {}
+                            crate::server_registry::ServersPanel {}
+                        }
+                    }
+                }
             }
         };
     }
