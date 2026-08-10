@@ -810,6 +810,23 @@ pub struct WorkflowAttrs {
         rename = "verifyCommand"
     )]
     pub verify_command: Option<String>,
+
+    /// Capabilities a runner must have to take this ticket, in the
+    /// closed vocabulary `records` / `shell` / `build` /
+    /// `repo:<owner>/<name>`. Set during triage.
+    ///
+    /// Empty means any runner will do. A ticket that needs a
+    /// compile declares `build`, which is what keeps it off a
+    /// machine that only reads records.
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    pub capabilities: StringList,
+
+    /// Model this ticket should be worked with, when it matters.
+    /// `None` = the runner's default. Set during triage, so a
+    /// cheap mechanical ticket and a hard design ticket in one
+    /// workstream can land on different models.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<String>,
 }
 
 #[cfg(test)]

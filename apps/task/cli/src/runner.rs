@@ -81,6 +81,39 @@ pub enum RunnerCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// What this runner may take right now — the queue as the
+    /// runner sees it, filtered by capability, scope and free slots.
+    ///
+    /// `--why` also prints, for each ticket it cannot take, the
+    /// reason — which is how you answer "why is my runner idle?".
+    Takeable {
+        /// Runner id. Defaults to this machine's hostname.
+        #[arg(long)]
+        id: Option<String>,
+        /// How many tickets this runner already holds.
+        #[arg(long, default_value_t = 0)]
+        in_flight: u32,
+        /// Also explain every refusal.
+        #[arg(long)]
+        why: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Agent-ready tickets nothing in the fleet can take.
+    ///
+    /// A ticket no live runner satisfies must be reported, not left
+    /// sitting in the queue looking available. Malformed tickets —
+    /// a capability nobody could ever offer because it is a typo —
+    /// are listed separately, because the fix is editing the ticket
+    /// rather than adding a machine.
+    Unroutable {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 /// This machine's name, used as the default runner id.
@@ -221,6 +254,158 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
             c.remove_backend(id.clone()).await?;
             println!("removed {id}");
         }
+
+        RunnerCmd::Takeable {
+            id,
+            in_flight,
+            why,
+            org,
+            server,
+        } => {
+            let id = id.unwrap_or_else(hostname);
+            let (slug, url) = ctx(org, server)?;
+            let backends: BackendsClient = establish_for_url(&url).await?;
+            let me = backends
+                .list_backends()
+                .await?
+                .into_iter()
+                .find(|b| b.id == id)
+                .ok_or_else(|| eyre::eyre!("runner `{id}` is not registered"))?;
+
+            let tickets = agent_ready_tickets(&url).await?;
+            let refs = ticket_refs(&tickets, &slug);
+
+            let takeable = agent_proto::routing::takeable(&me.runner, &refs, in_flight);
+            if takeable.is_empty() {
+                println!("(nothing takeable)");
+            }
+            for tid in &takeable {
+                if let Some(t) = tickets.iter().find(|t| t.id == *tid) {
+                    println!("{}  {}", crate::shared::short_uuid(&t.id), t.title);
+                }
+            }
+
+            if why {
+                for r in agent_proto::routing::refusals(&me.runner, &refs, in_flight) {
+                    if let Some(t) = tickets.iter().find(|t| t.id == r.ticket) {
+                        println!(
+                            "skip {}  {}  — {}",
+                            crate::shared::short_uuid(&t.id),
+                            t.title,
+                            r.reason
+                        );
+                    }
+                }
+            }
+        }
+
+        RunnerCmd::Unroutable { org, server } => {
+            let (slug, url) = ctx(org, server)?;
+            let backends: BackendsClient = establish_for_url(&url).await?;
+
+            // Live runners only: a registration nobody is behind
+            // must not make a ticket look routable.
+            let mut live = Vec::new();
+            for b in backends.list_backends().await? {
+                if backends.backend_health(b.id.clone()).await?.reachable {
+                    live.push(b.runner);
+                }
+            }
+
+            let tickets = agent_ready_tickets(&url).await?;
+            let refs = ticket_refs(&tickets, &slug);
+
+            let stuck = agent_proto::routing::unroutable(&refs, &live);
+            let bad = agent_proto::routing::malformed(&refs);
+
+            if stuck.is_empty() && bad.is_empty() {
+                println!("(everything agent-ready can be taken by some runner)");
+            }
+            for (tid, reason) in stuck {
+                if let Some(t) = tickets.iter().find(|t| t.id == tid) {
+                    println!(
+                        "unroutable  {}  {}  — {reason}",
+                        crate::shared::short_uuid(&t.id),
+                        t.title
+                    );
+                }
+            }
+            for (tid, reason) in bad {
+                if let Some(t) = tickets.iter().find(|t| t.id == tid) {
+                    println!(
+                        "malformed   {}  {}  — {reason}",
+                        crate::shared::short_uuid(&t.id),
+                        t.title
+                    );
+                }
+            }
+        }
     }
     Ok(())
+}
+
+fn ctx(org: Option<String>, server: Option<String>) -> eyre::Result<(String, String)> {
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    Ok((slug, url))
+}
+
+/// Open, unblocked, unclaimed tickets tagged `ready-for-agent`.
+///
+/// The same frontier `issue ready` computes, narrowed to the agent
+/// lane: a human-only ticket is not a routing failure.
+async fn agent_ready_tickets(url: &str) -> eyre::Result<Vec<task::TaskInfo>> {
+    let client = crate::task_cmd::connect_task_client(url).await?;
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+
+    let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+        rows.iter().map(|t| (t.id, t)).collect();
+
+    let done = |t: &task::TaskInfo| {
+        matches!(
+            task::Status::from_str(&t.status),
+            Some(task::Status::Done | task::Status::Cancelled)
+        )
+    };
+
+    Ok(rows
+        .iter()
+        .filter(|t| !done(t))
+        .filter(|t| task::has_triage_label(t, task::TriageLabel::ReadyForAgent))
+        .filter(|t| {
+            // Unclaimed.
+            t.workflow
+                .as_ref()
+                .is_none_or(|w| w.assignees.0.is_empty())
+        })
+        .filter(|t| {
+            // Every blocker closed.
+            let blockers = t.workflow.as_ref().map_or(&[][..], |w| &w.blockers.0[..]);
+            blockers
+                .iter()
+                .all(|b| by_id.get(b).is_some_and(|b| done(b)))
+        })
+        .cloned()
+        .collect())
+}
+
+fn ticket_refs<'a>(
+    tickets: &'a [task::TaskInfo],
+    org: &'a str,
+) -> Vec<agent_proto::routing::TicketRef<'a>> {
+    tickets
+        .iter()
+        .map(|t| agent_proto::routing::TicketRef {
+            id: t.id,
+            capabilities: t
+                .workflow
+                .as_ref()
+                .map_or(&[][..], |w| &w.capabilities.0[..]),
+            org,
+            project: t.project_id,
+        })
+        .collect()
 }

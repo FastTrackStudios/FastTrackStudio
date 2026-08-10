@@ -164,6 +164,8 @@ mod tests {
             workstream: Some(workstream),
             parent: None,
             verify_command: None,
+            capabilities: crate::model::StringList::default(),
+            model: None,
             estimate: Some(Estimate::M),
             assignees: AgentRefList(vec![
                 AgentRef::human("cody"),

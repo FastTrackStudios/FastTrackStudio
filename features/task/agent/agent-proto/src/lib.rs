@@ -81,6 +81,7 @@ pub mod profile;
 pub mod project;
 pub mod question;
 pub mod reasoning;
+pub mod routing;
 pub mod runner;
 pub mod service;
 pub mod session;
@@ -89,6 +90,7 @@ pub mod tool;
 
 pub use error::AgentError;
 pub use event::{AgentEvent, AgentEventEnvelope};
+pub use routing::{Refusal, TicketRef, malformed, requirements, takeable, unroutable};
 pub use runner::{
     Capability, CapabilityError, RunnerProfile, RunnerScope, TicketRequirements, Unroutable,
     parse_capabilities, unsatisfiable_capability,
