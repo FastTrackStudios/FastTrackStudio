@@ -6352,6 +6352,7 @@ dependencies = [
  "dawfile-reaper",
  "facet 0.50.0-rc.5",
  "facet-styx 5.0.0-rc.5",
+ "loro",
  "sha2 0.10.9",
  "styx-format 5.0.0-rc.5",
  "thiserror 2.0.18",
