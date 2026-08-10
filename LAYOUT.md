@@ -24,7 +24,7 @@ consumed as `x.workspace = true`.
 |---|---|
 | features/audio/* | daw/features/audio/* (daw-audio-graph, daw-audio-io, daw-midi-io, daw-allocator, fts-audio-proto, audio-controls) |
 | features/sync/* | daw/features/sync/* (daw-synchronization, daw-link, daw-network, daw-audio-sync) |
-| features/dawfile/* | daw/features/backends/{protools,ableton,logic,aaf,dawproject}/dawfile-* + reaper/dawfile-reaper |
+| features/dawfile/* | daw/features/backends/{protools,ableton,logic,aaf,dawproject}/dawfile-* + reaper/dawfile-reaper; plus dawfile-standalone, the native `.daw` format (new, #156) |
 | features/reaper/* | daw/features/backends/reaper/* (daw-reaper, daw-bridge, daw-extension-runtime, daw-reaper-dioxus*, daw-reaper-embed, reaper-launcher) + daw/crates/reaper-config + signal/features/reaper/* + input_actions/crates/actions-reaper |
 | features/standalone/ | daw/features/standalone/daw-standalone |
 | features/surfaces/ | daw/features/surfaces/daw-csi |

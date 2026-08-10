@@ -114,6 +114,7 @@ members = [
     "features/dawfile/dawfile-logic",
     "features/dawfile/dawfile-protools",
     "features/dawfile/dawfile-reaper",
+    "features/dawfile/dawfile-standalone",
     # ── features/reaper ───────────────────────────────────────────────
     "features/reaper/daw-reaper",
     "features/reaper/daw-bridge",
@@ -470,6 +471,7 @@ dawfile-dawproject = { path = "features/dawfile/dawfile-dawproject" }
 dawfile-logic = { path = "features/dawfile/dawfile-logic" }
 dawfile-protools = { path = "features/dawfile/dawfile-protools" }
 dawfile-reaper = { path = "features/dawfile/dawfile-reaper" }
+dawfile-standalone = { path = "features/dawfile/dawfile-standalone" }
 # default = all-formats; the daw facade opts into formats individually,
 # so the root entry keeps defaults OFF and consumers that want every
 # importer set `default-features = true`.
@@ -662,6 +664,10 @@ facet = { version = "0.50.0-rc.5", features = ["reflect", "chrono", "uuid"] }
 facet-json = { version = "0.50.0-rc.5" }
 facet-postcard = { version = "0.50.0-rc.5" }
 facet-styx = { version = "5.0.0-rc.5" }
+# facet-styx's formatter, needed directly by anyone who has to set
+# `omit_none` (the `.daw` writer). Routed to libs/vendor/styx-format by the
+# [patch.crates-io] table below.
+styx-format = { version = "5.0.0-rc.5" }
 facet-toml = { version = "0.50.0-rc.5" }
 # figue pairs with facet-styx 5.0 (reaper-input keybind config parsing).
 figue = { version = "5.0.0-rc.5" }
