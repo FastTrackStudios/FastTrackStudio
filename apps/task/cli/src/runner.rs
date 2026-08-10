@@ -511,6 +511,13 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
                     eprintln!("heartbeat failed: {e:?}");
                 }
 
+                // Supervise before taking anything new: a stuck
+                // run holding a claim would otherwise make its
+                // ticket invisible forever.
+                if let Err(e) = supervise(&job).await {
+                    eprintln!("supervision failed: {e}");
+                }
+
                 match work_one(&job, None, worked).await {
                     Ok(Outcome::Worked) => worked += 1,
                     Ok(Outcome::Idle) => {}
@@ -831,6 +838,80 @@ async fn mark_needs_review(
         .update(t)
         .await
         .map_err(|e| eyre::eyre!("mark needs-review: {e:?}"))?;
+    Ok(())
+}
+
+/// Restart stuck runs, and hand over the ones out of restarts.
+///
+/// The supervisor's only recovery power is restart — it never
+/// answers a question and never declares work done. See
+/// `agent_proto::supervisor`.
+async fn supervise(job: &Job) -> eyre::Result<()> {
+    use agent_proto::supervisor::{MAX_RESTARTS, NO_PROGRESS_AFTER, Recovery, decide, is_supervisable};
+
+    let runs: RunsClient = establish_for_url(&job.url).await?;
+
+    // Fold lapsed heartbeats into `stale` first, so the policy sees
+    // current liveness rather than yesterday's.
+    runs.sweep_stale_runs().await?;
+
+    let mine = runs
+        .list_runs(agent_proto::run::RunFilter {
+            runner: job.runner.clone(),
+            ..Default::default()
+        })
+        .await?;
+
+    let now = chrono::Utc::now();
+    for run in mine.iter().filter(|r| is_supervisable(r.status)) {
+        let attempts =
+            u32::try_from(mine.iter().filter(|r| r.ticket == run.ticket).count()).unwrap_or(u32::MAX);
+
+        match decide(run, now, NO_PROGRESS_AFTER, attempts, MAX_RESTARTS) {
+            Recovery::Leave => {}
+            Recovery::Restart => {
+                end_stuck_run(&runs, run.id).await?;
+                let client = crate::task_cmd::connect_task_client(&job.url).await?;
+                if let Ok(t) = client.get(run.ticket).await {
+                    release_claim(&client, &t).await?;
+                }
+                println!(
+                    "restarting {} — no progress",
+                    crate::shared::short_uuid(&run.ticket)
+                );
+            }
+            Recovery::Escalate => {
+                end_stuck_run(&runs, run.id).await?;
+                let question = agent_proto::question::Question {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    header: "Stuck".into(),
+                    text: agent_proto::supervisor::escalation_text(attempts),
+                    options: vec![],
+                    multi_select: false,
+                };
+                block_on_question(&job.url, run.ticket, Some(run.id), vec![question]).await?;
+                println!(
+                    "escalating {} — out of restarts",
+                    crate::shared::short_uuid(&run.ticket)
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Close out a run the supervisor is giving up on.
+///
+/// `worktree_kept` is true because a stuck run's worktree is exactly
+/// what someone will want to look at.
+async fn end_stuck_run(runs: &RunsClient, run: uuid::Uuid) -> eyre::Result<()> {
+    runs.finish_run(agent_proto::run::FinishRun {
+        run,
+        passed: false,
+        exit_code: None,
+        worktree_kept: true,
+    })
+    .await?;
     Ok(())
 }
 
