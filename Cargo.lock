@@ -5978,6 +5978,7 @@ dependencies = [
 name = "daw-extension-runtime"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "crossbeam-channel",
  "daw-control",
  "daw-module",
@@ -6231,6 +6232,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-theme"
+version = "0.1.0"
+dependencies = [
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+]
+
+[[package]]
+name = "daw-theme-art"
+version = "0.1.0"
+dependencies = [
+ "daw-theme",
+ "dioxus",
+ "dioxus-ssr",
+ "image",
+ "resvg 0.45.1",
+]
+
+[[package]]
 name = "daw-theme-reaper"
 version = "0.1.0"
 dependencies = [
@@ -6242,13 +6262,18 @@ dependencies = [
 name = "daw-ui"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "daw-control",
  "daw-module",
  "daw-proto",
  "daw-reaper-dioxus",
+ "daw-theme",
+ "daw-theme-art",
  "daw-theme-reaper",
  "dioxus",
  "dioxus-native",
+ "dioxus-ssr",
+ "dioxus-test",
  "dock-dioxus",
  "dock-proto",
  "eyre",
@@ -8960,6 +8985,7 @@ dependencies = [
 name = "expression-editor-ui"
 version = "0.1.0"
 dependencies = [
+ "daw-theme",
  "dioxus",
  "dioxus-ssr",
  "dioxus-test",
@@ -10470,6 +10496,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "daw",
+ "daw-theme",
+ "daw-theme-art",
+ "dioxus",
  "image",
  "palette",
  "serde",
