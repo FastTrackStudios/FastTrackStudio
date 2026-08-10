@@ -113,23 +113,52 @@ pub fn App() -> Element {
     // a member of exactly ONE org — without these, the switcher can
     // only ever show that one, whatever the well-known doc lists.
     let links_res = use_resource(move || {
-        let _session = session_token();
+        let session = session_token();
         async move {
+            // INSTRUMENTED at every stage. The first cut swallowed all
+            // three failure modes into one silent `Err`, and the server
+            // logs showed the browser never issuing a `list_links` call
+            // at all — so "which stage" is the whole question.
+            tracing::info!(
+                has_session = session.is_some(),
+                has_bearer = task_ui_core::vox_session::bearer().is_some(),
+                "locker: resolving links"
+            );
             let client: identity_proto::IdentityServiceClient =
-                task_ui_core::vox_clients::establish_server(None).await?;
-            let token =
-                task_ui_core::vox_session::bearer().ok_or_else(|| "not signed in".to_string())?;
-            client
-                .list_links(token)
-                .await
-                .map_err(|e| format!("list links: {e:?}"))
+                match task_ui_core::vox_clients::establish_server(None).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "locker: establish /server/vox FAILED");
+                        return Err(e);
+                    }
+                };
+            let Some(token) = task_ui_core::vox_session::bearer() else {
+                tracing::warn!("locker: no bearer at call time — skipping list_links");
+                return Err("not signed in".to_string());
+            };
+            match client.list_links(token).await {
+                Ok(links) => {
+                    tracing::info!(count = links.len(), "locker: list_links OK");
+                    Ok(links)
+                }
+                Err(e) => {
+                    tracing::warn!(error = ?e, "locker: list_links FAILED");
+                    Err(format!("list links: {e:?}"))
+                }
+            }
         }
     });
     use_effect(move || {
         // A server with no identity locker (not a home server) answers
         // an error here; that is a normal deployment, not a fault, so
-        // it stays quiet and the ambient token keeps being used.
+        // the ambient token keeps being used — but it is LOGGED, not
+        // swallowed. Silently ignoring the error arm is what hid this
+        // failure through three wrong fixes.
+        if let Some(Err(e)) = &*links_res.read_unchecked() {
+            tracing::warn!(error = %e, "locker: no linked orgs (switcher stays single-org)");
+        }
         if let Some(Ok(links)) = &*links_res.read_unchecked() {
+            tracing::info!(links = links.len(), "locker: applying linked orgs");
             let map: std::collections::HashMap<String, String> = links
                 .iter()
                 .filter_map(|l| l.token.clone().map(|t| (l.remote_slug.clone(), t)))
