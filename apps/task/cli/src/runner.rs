@@ -180,6 +180,20 @@ pub enum RunnerCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Everything blocking a human, in one place.
+    ///
+    /// Three panels: questions awaiting an answer, runs executing
+    /// now, and branches awaiting review. Scoped to a project with
+    /// `--project`, or the whole fleet without it.
+    Surface {
+        /// Project id, name, path or prefix. Omit for every project.
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     /// Watch a run live — snapshot, then fold the event stream.
     ///
     /// A viewer arriving mid-run sees the recent output tail rather
@@ -580,6 +594,103 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
                         break;
                     }
                 }
+            }
+        }
+
+        RunnerCmd::Surface {
+            project,
+            org,
+            server,
+        } => {
+            let (_slug, url) = ctx(org, server)?;
+            let client = crate::task_cmd::connect_task_client(&url).await?;
+
+            let scope = match &project {
+                None => None,
+                Some(p) => {
+                    let pc = crate::project::connect_project_client(&url).await?;
+                    Some(
+                        crate::json_out::resolve_project_flexible(&pc, p)
+                            .await?
+                            .id,
+                    )
+                }
+            };
+            let in_scope = |t: &task::TaskInfo| scope.is_none_or(|s| t.project_id == Some(s));
+
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+
+            // 1. Questions — the only panel where something is
+            //    waiting on *you* specifically.
+            let qc: QuestionsClient = establish_for_url(&url).await?;
+            let pending = qc.unresolved_questions().await?;
+            println!("── questions awaiting you ──");
+            let mut shown = 0;
+            for req in &pending {
+                let Some(ticket) = qc.question_ticket(req.id.clone()).await? else {
+                    continue;
+                };
+                let Some(t) = all.iter().find(|t| t.id == ticket) else {
+                    continue;
+                };
+                if !in_scope(t) {
+                    continue;
+                }
+                shown += 1;
+                println!("  {}  {}", &req.id[..8.min(req.id.len())], t.title);
+                for q in &req.questions {
+                    println!("      {}", q.text);
+                }
+            }
+            if shown == 0 {
+                println!("  (nothing)");
+            }
+
+            // 2. Running now.
+            let runs: RunsClient = establish_for_url(&url).await?;
+            let live = runs
+                .list_runs(agent_proto::run::RunFilter {
+                    status: Some(agent_proto::run::RunStatus::InProgress),
+                    ..Default::default()
+                })
+                .await?;
+            println!("── running now ──");
+            let mut any = false;
+            for r in &live {
+                let Some(t) = all.iter().find(|t| t.id == r.ticket) else {
+                    continue;
+                };
+                if !in_scope(t) {
+                    continue;
+                }
+                any = true;
+                println!(
+                    "  {}  {}  on {}",
+                    crate::shared::short_uuid(&r.id),
+                    t.title,
+                    r.runner
+                );
+            }
+            if !any {
+                println!("  (nothing)");
+            }
+
+            // 3. Awaiting review — green branches.
+            println!("── awaiting review ──");
+            let review: Vec<&task::TaskInfo> = all
+                .iter()
+                .filter(|t| task::has_triage_label(t, task::TriageLabel::NeedsReview))
+                .filter(|t| in_scope(t))
+                .collect();
+            if review.is_empty() {
+                println!("  (nothing)");
+            }
+            for t in review {
+                let branch = agent_worktree::branch_for(&crate::shared::short_uuid(&t.id));
+                println!("  {}  {}  {branch}", crate::shared::short_uuid(&t.id), t.title);
             }
         }
 
