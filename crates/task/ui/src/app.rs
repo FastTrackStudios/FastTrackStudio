@@ -135,18 +135,34 @@ pub fn App() -> Element {
                 .filter_map(|l| l.token.clone().map(|t| (l.remote_slug.clone(), t)))
                 .collect();
             let slugs: Vec<String> = map.keys().cloned().collect();
-            if task_ui_core::vox_session::set_linked_tokens(map) {
-                // A socket presents its identity once, at establish, so
-                // connections opened under the old (single-token) view
-                // have to go before the new credentials can be used.
-                task_ui_core::vox_clients::drop_cached_connections();
-            }
+            // Membership FIRST, and it must not sit downstream of the
+            // connection teardown below — see why that ordering matters.
+            //
             // Membership has to land ON the org list, not in a global:
             // `org_list` is the Signal every consumer reads, so patching
             // it here is what actually re-renders the switcher. A static
             // holder would be invisible to Dioxus — the list would stay
             // stale until something unrelated happened to re-render.
             mark_linked_orgs(org_list, &slugs);
+            if task_ui_core::vox_session::set_linked_tokens(map) {
+                // A socket presents its identity once, at establish, so
+                // connections opened under the old (single-token) view
+                // have to go before the new credentials can be used.
+                //
+                // DEFERRED, and that is load-bearing. This effect runs
+                // synchronously inside the WebSocket message callback
+                // that delivered `list_links` — tearing the cache down
+                // there drops the very socket whose callback is on the
+                // stack, and wasm-bindgen throws "closure invoked
+                // recursively or after being dropped". That exception
+                // aborted the rest of this effect, which is why the
+                // switcher stayed at one org even once membership was
+                // computed correctly. Spawning defers the teardown past
+                // the callback's return.
+                spawn(async move {
+                    task_ui_core::vox_clients::drop_cached_connections();
+                });
+            }
         }
     });
 
