@@ -8952,6 +8952,7 @@ dependencies = [
  "daw",
  "expression-editor-audio",
  "expression-editor-core",
+ "expression-editor-tools",
  "realfft",
  "tune-dsp",
 ]
@@ -8985,6 +8986,15 @@ dependencies = [
  "eyre",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "expression-editor-tools"
+version = "0.1.0"
+dependencies = [
+ "expression-editor-core",
+ "expression-editor-tools",
+ "tune-dsp",
 ]
 
 [[package]]
