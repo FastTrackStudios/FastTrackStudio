@@ -202,6 +202,32 @@ pub enum RunnerCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Work a whole workstream: its tickets in dependency order,
+    /// each on its own branch, merged into one workstream branch.
+    ///
+    /// The manager is itself a run, so it is as observable and as
+    /// killable as the attempts it spawns. Its children carry
+    /// `parent`, which is what makes the tree queryable.
+    ///
+    /// One reviewable branch comes out, not one per ticket.
+    Workstream {
+        /// Workstream id (or a unique prefix).
+        workstream: String,
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        repo: std::path::PathBuf,
+        #[arg(long)]
+        worktree_root: std::path::PathBuf,
+        #[arg(long, default_value = "main")]
+        base: String,
+        #[arg(long)]
+        agent_cmd: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     /// Raise a question against a ticket and block it on a human.
     ///
     /// This is the interface an agent calls when it needs a decision.
@@ -595,6 +621,31 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
             }
         }
 
+        RunnerCmd::Workstream {
+            workstream,
+            id,
+            repo,
+            worktree_root,
+            base,
+            agent_cmd,
+            org,
+            server,
+        } => {
+            let id = id.unwrap_or_else(hostname);
+            let (slug, url) = ctx(org, server)?;
+            let job = Job {
+                runner: id.clone(),
+                slug,
+                url: url.clone(),
+                repo: repo.clone(),
+                worktree_root: worktree_root.clone(),
+                base: base.clone(),
+                agent_cmd,
+                dry_run: false,
+            };
+            run_workstream(&job, &workstream).await?;
+        }
+
         RunnerCmd::Ask {
             ticket,
             text,
@@ -838,6 +889,126 @@ async fn mark_needs_review(
         .update(t)
         .await
         .map_err(|e| eyre::eyre!("mark needs-review: {e:?}"))?;
+    Ok(())
+}
+
+/// Work every ticket in a workstream, merging each green branch into
+/// one workstream branch.
+///
+/// Tickets are taken in dependency order — a ticket whose blockers
+/// are still open is skipped this pass rather than failed, because
+/// its turn simply has not come.
+///
+/// A ticket branch that will not merge stops the manager. Resolving
+/// a conflict is a judgement about intent, and inventing one is how
+/// you get a green branch nobody meant.
+async fn run_workstream(job: &Job, workstream: &str) -> eyre::Result<()> {
+    let ws_client: ::workstream::WorkstreamServiceClient = establish_for_url(&job.url).await?;
+    let all = ws_client
+        .list(None)
+        .await
+        .map_err(|e| eyre::eyre!("list workstreams: {e:?}"))?;
+    let ws = all
+        .iter()
+        .find(|w| {
+            w.id.to_string().starts_with(workstream.trim())
+                || w.title.eq_ignore_ascii_case(workstream.trim())
+        })
+        .ok_or_else(|| eyre::eyre!("no workstream matching `{workstream}`"))?;
+
+    let short_ws = crate::shared::short_uuid(&ws.id);
+    println!("workstream {short_ws}  {}", ws.title);
+
+    // The manager is a run. Its worktree is the integration branch
+    // every ticket merges into.
+    let ws_wt = agent_worktree::create(
+        &job.repo,
+        &job.worktree_root,
+        &format!("ws-{short_ws}"),
+        &job.base,
+    )?;
+    println!("branch     {}", ws_wt.branch);
+
+    let runs: RunsClient = establish_for_url(&job.url).await?;
+    let manager = runs
+        .start_run(agent_proto::run::StartRun {
+            ticket: ws.id,
+            runner: job.runner.clone(),
+            parent: None,
+            branch: ws_wt.branch.clone(),
+            worktree_path: ws_wt.path.display().to_string(),
+            session_path: String::new(),
+        })
+        .await?;
+    println!("manager    {}", crate::shared::short_uuid(&manager.id));
+
+    let client = crate::task_cmd::connect_task_client(&job.url).await?;
+    let mut merged = 0_u32;
+    let mut skipped = Vec::new();
+
+    loop {
+        let tickets = agent_ready_tickets(&job.url).await?;
+        let mine: Vec<task::TaskInfo> = tickets
+            .into_iter()
+            .filter(|t| t.workflow.as_ref().and_then(|w| w.workstream) == Some(ws.id))
+            .filter(|t| !skipped.contains(&t.id))
+            .collect();
+
+        let Some(ticket) = mine.into_iter().next() else {
+            break;
+        };
+        let short = crate::shared::short_uuid(&ticket.id);
+
+        match work_one(job, Some(&ticket.id.to_string()), 0).await {
+            Ok(Outcome::Worked) => {}
+            Ok(Outcome::Idle) => {
+                skipped.push(ticket.id);
+                continue;
+            }
+            Err(e) => {
+                eprintln!("{short} failed: {e}");
+                skipped.push(ticket.id);
+                continue;
+            }
+        }
+
+        // Only a green ticket earns a merge.
+        let fresh = client
+            .get(ticket.id)
+            .await
+            .map_err(|e| eyre::eyre!("re-read ticket: {e:?}"))?;
+        if !task::has_triage_label(&fresh, task::TriageLabel::NeedsReview) {
+            println!("{short} did not go green — not merging");
+            skipped.push(ticket.id);
+            continue;
+        }
+
+        let branch = agent_worktree::branch_for(&short);
+        agent_worktree::merge_into(&ws_wt, &branch).map_err(|e| {
+            eyre::eyre!(
+                "{branch} will not merge into {}: {e}. \
+                 Resolve it by hand — guessing at intent is how you get \
+                 a green branch nobody meant.",
+                ws_wt.branch
+            )
+        })?;
+        merged += 1;
+        println!("merged {branch} → {}", ws_wt.branch);
+        skipped.push(ticket.id);
+    }
+
+    runs.finish_run(agent_proto::run::FinishRun {
+        run: manager.id,
+        passed: merged > 0,
+        exit_code: None,
+        worktree_kept: true,
+    })
+    .await?;
+
+    println!("{merged} ticket(s) merged into {}", ws_wt.branch);
+    if merged == 0 {
+        println!("(nothing was takeable — blockers open, or nothing agent-ready)");
+    }
     Ok(())
 }
 
