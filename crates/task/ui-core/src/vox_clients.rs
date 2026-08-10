@@ -422,6 +422,13 @@ type DialFuture = futures_util::future::LocalBoxFuture<'static, Result<vox_core:
 type DialFuture = futures_util::future::BoxFuture<'static, Result<vox_core::Caller, String>>;
 
 async fn shared_caller_at(url: &str) -> Result<vox_core::Caller, String> {
+    shared_caller_with(url, crate::vox_session::bearer()).await
+}
+
+/// [`shared_caller_at`] with the identity chosen by the caller — the
+/// per-org path, where the credential depends on WHICH org is being
+/// dialled rather than on one ambient session.
+async fn shared_caller_with(url: &str, bearer: Option<String>) -> Result<vox_core::Caller, String> {
     // Identity is part of the cache key, not just the dial: a root
     // established anonymously can never become authenticated (the server
     // read the bearer once, at upgrade), so handing it to a signed-in
@@ -429,7 +436,10 @@ async fn shared_caller_at(url: &str) -> Result<vox_core::Caller, String> {
     // clears the old identity's roots on sign-in/out; this keying is the
     // belt to that braces, covering the window where a dial started before
     // the token landed.
-    let bearer = crate::vox_session::bearer();
+    //
+    // Keying on the bearer is also what makes per-org tokens safe here:
+    // two orgs with different credentials get two cache entries, never
+    // one socket serving both.
     let key = (url.to_owned(), bearer.clone());
     if let Some(caller) = cached_live_caller(&key) {
         return Ok(caller);
@@ -560,7 +570,11 @@ fn with_roots<R>(f: impl FnOnce(&mut std::collections::HashMap<RootKey, RootLane
 /// migrate to atom hooks build clients from the shared caller; legacy
 /// `feeds::*` fns ride the same socket through [`establish_for`].
 pub async fn caller_for(slug: &str) -> Result<vox_core::Caller, String> {
-    shared_caller_at(&org_ws_url(slug)?).await
+    // Per-org credential: auth stores are per-org, so the ambient token
+    // is only valid for the org that issued it. `bearer_for` falls back
+    // to the ambient one when the locker has no link for this slug.
+    let bearer = crate::vox_session::bearer_for(slug);
+    shared_caller_with(&org_ws_url(slug)?, bearer).await
 }
 
 /// Establish *any* service client against a specific org's vox endpoint:

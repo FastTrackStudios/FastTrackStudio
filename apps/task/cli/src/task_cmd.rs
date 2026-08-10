@@ -281,6 +281,31 @@ pub(crate) enum TaskCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Move a task to ANOTHER ORG, preserving its id, history and
+    /// tracked time.
+    ///
+    /// Org-scoped references cannot survive the trip and are dropped:
+    /// `projectId`, `milestoneId`, `workflow.parent` and
+    /// `workflow.workstream` are ids in the SOURCE org's vault and name
+    /// nothing in the target. Carrying them over would leave a task
+    /// that looks filed but resolves to a ghost — strictly worse than
+    /// arriving unfiled, which at least surfaces in triage.
+    ///
+    /// Creates in the target first, deletes from the source second: a
+    /// failure in between leaves a duplicate you can see, never a task
+    /// that exists nowhere.
+    MoveOrg {
+        target: String,
+        /// Slug of the org to move into. You must be a member of it.
+        #[arg(long)]
+        to_org: String,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     /// Move backing markdown file. `id` preserved.
     Rename {
         target: String,
@@ -878,6 +903,93 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 crate::json_out::print_json(&renamed)?;
             } else {
                 println!("renamed → {}", renamed.path);
+            }
+        }
+        TaskCmd::MoveOrg {
+            target,
+            to_org,
+            yes,
+            org,
+            server,
+        } => {
+            let from_slug = resolve_active_org(org.clone())?;
+            if from_slug == to_org {
+                return Err(eyre::eyre!(
+                    "`{to_org}` is already this task's org — nothing to move"
+                ));
+            }
+            let from_url = resolve_org_vox_url(server.clone(), &from_slug);
+            let from = connect_task_client(&from_url).await?;
+            let mut t = resolve_task_target(&from, &target).await?;
+
+            // Everything org-scoped goes; see the verb's doc comment.
+            let dropped: Vec<&str> = [
+                t.project_id.is_some().then_some("project"),
+                t.milestone_id.is_some().then_some("milestone"),
+                t.workflow
+                    .as_ref()
+                    .and_then(|w| w.parent)
+                    .is_some()
+                    .then_some("parent"),
+                t.workflow
+                    .as_ref()
+                    .and_then(|w| w.workstream)
+                    .is_some()
+                    .then_some("workstream"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+
+            if !yes {
+                println!("move `{}` ({})", t.title, t.path);
+                println!("  from org: {from_slug}");
+                println!("  to   org: {to_org}");
+                if !dropped.is_empty() {
+                    println!(
+                        "  dropping (source-org ids, meaningless in `{to_org}`): {}",
+                        dropped.join(", ")
+                    );
+                }
+                if !confirm("proceed?")? {
+                    println!("aborted");
+                    return Ok(());
+                }
+            }
+
+            t.project_id = None;
+            t.milestone_id = None;
+            t.projects = Default::default();
+            if let Some(w) = t.workflow.as_mut() {
+                w.parent = None;
+                w.workstream = None;
+            }
+
+            let to_url = resolve_org_vox_url(server, &to_org);
+            let to = connect_task_client(&to_url).await?;
+            // Create first. If this fails the source is untouched.
+            let created = to
+                .create(t.clone())
+                .await
+                .map_err(|e| eyre::eyre!("create in `{to_org}`: {e:?}"))?;
+            // Then remove the original. A failure here is visible as a
+            // duplicate rather than a loss, so say exactly that.
+            if let Err(e) = from.delete(t.id).await {
+                println!("created {} in `{to_org}`", created.path);
+                return Err(eyre::eyre!(
+                    "moved into `{to_org}` but could NOT delete the original in \
+                     `{from_slug}`: {e:?}\nthe task now exists in BOTH orgs — delete \
+                     it from `{from_slug}` by hand: task --org {from_slug} task delete {}",
+                    t.id
+                ));
+            }
+            println!("moved {} → `{to_org}` ({})", t.title, created.path);
+            println!("  id {} preserved", created.id);
+            if !dropped.is_empty() {
+                println!(
+                    "  dropped {}: re-file it there with `task --org {to_org} task set-project …`",
+                    dropped.join(", ")
+                );
             }
         }
         TaskCmd::Delete {

@@ -1080,14 +1080,36 @@ fn origin(u: &str) -> &str {
 
 /// The stored session token to present when dialing `url`, if any.
 ///
-/// Scoped to the target: the active entry's token is only offered when the
-/// entry names the SAME server (scheme + authority), so pointing the CLI
-/// at another host with `--server` never hands that host the credential
-/// for the one we're signed into.
+/// Scoped to the target twice over:
+///
+/// - **by server** — a token is only offered to the same scheme+authority
+///   that issued it, so pointing the CLI at another host with `--server`
+///   never hands that host the credential for the one we're signed into;
+/// - **by org** — auth stores are per-org, so a token from `codywright`
+///   is not a credential in `cbu`; it resolves to `anonymous` there. The
+///   entry whose slug matches the URL's `/org/<slug>/vox` wins, and only
+///   if none matches do we fall back to the active entry.
+///
+/// Without the org half, `task --org cbu …` would present whichever
+/// session happened to be active — right host, wrong org, refused — and
+/// the refusal reads identically to being signed out.
 fn session_bearer_for(url: &str) -> Option<String> {
     let session = crate::session_store::load().ok().flatten()?;
+    let same_server = |e: &crate::session_store::ServerEntry| {
+        origin(&e.url) == origin(url) && !e.token.is_empty()
+    };
+    if let Some(slug) = url
+        .rsplit_once("/org/")
+        .and_then(|(_, rest)| rest.strip_suffix("/vox"))
+        && let Some(entry) = session
+            .servers
+            .values()
+            .find(|e| e.slug == slug && same_server(e))
+    {
+        return Some(entry.token.clone());
+    }
     let entry = session.active_server()?;
-    (origin(&entry.url) == origin(url) && !entry.token.is_empty()).then(|| entry.token.clone())
+    same_server(entry).then(|| entry.token.clone())
 }
 
 /// Dial `url` and establish `C`, presenting the stored session identity on

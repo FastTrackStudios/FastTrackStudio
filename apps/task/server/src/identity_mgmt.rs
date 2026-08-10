@@ -115,7 +115,131 @@ fn record_to_view(rec: LinkRecord) -> LinkView {
     }
 }
 
+/// Does this link point at an org THIS server hosts?
+///
+/// The locker keys links by `(remote_url, remote_slug)`, and the
+/// production shape is several orgs on one host — so most links are
+/// local and pushable in-process. A link to another server needs the
+/// federation assertion before we can act on it, and is reported
+/// `pending` rather than skipped.
+fn local_slug_for(state: &AppState, link: &LinkRecord) -> Option<String> {
+    state
+        .org(&link.remote_slug)
+        .is_some()
+        .then(|| link.remote_slug.clone())
+}
+
+impl IdentityServiceImpl {
+    /// The home org's own auth user — the authoritative profile.
+    fn home_profile(
+        &self,
+        session_token: &str,
+    ) -> Result<identity_proto::ProfileView, IdentityServiceError> {
+        let home_slug = self
+            .state
+            .home_slug()
+            .ok_or_else(|| IdentityServiceError::Unauthorized("server has no home org".into()))?;
+        let home = self.state.org(&home_slug).ok_or_else(|| {
+            IdentityServiceError::Unauthorized(format!("home org `{home_slug}` not live"))
+        })?;
+        let token = session_token.to_owned();
+        let bundle = tokio::runtime::Handle::current()
+            .block_on(async move {
+                home.auth
+                    .auth
+                    .current_session(architect_auth::commands::CurrentSession { token })
+                    .await
+            })
+            .map_err(|e| IdentityServiceError::Unauthorized(format!("invalid session: {e}")))?;
+        Ok(identity_proto::ProfileView {
+            user_id: bundle.user.id,
+            email: bundle.user.email,
+            name: bundle.user.name,
+            image: bundle.user.image,
+        })
+    }
+}
+
 impl IdentityService for IdentityServiceImpl {
+    fn get_profile(
+        &self,
+        session_token: String,
+    ) -> Result<identity_proto::ProfileView, IdentityServiceError> {
+        self.home_profile(&session_token)
+    }
+
+    fn sync_profile(
+        &self,
+        req: identity_proto::SyncProfileRequest,
+    ) -> Result<identity_proto::ProfileSyncReport, IdentityServiceError> {
+        let (store, home_user_id) = self.resolve(&req.session_token)?;
+
+        // 1. Write the canonical copy first. If this fails nothing has
+        //    been fanned out, so the caches stay consistent with home.
+        if req.name.is_some() || req.image.is_some() {
+            let home_slug = self.state.home_slug().ok_or_else(|| {
+                IdentityServiceError::Unauthorized("server has no home org".into())
+            })?;
+            let home = self.state.org(&home_slug).ok_or_else(|| {
+                IdentityServiceError::Unauthorized(format!("home org `{home_slug}` not live"))
+            })?;
+            let input = architect_auth::UpdateProfile {
+                session_token: req.session_token.clone(),
+                name: req.name.clone(),
+                image: req.image.clone(),
+            };
+            tokio::runtime::Handle::current()
+                .block_on(async move { home.auth.auth.update_profile(input).await })
+                .map_err(|e| {
+                    IdentityServiceError::Internal(format!("update the home profile: {e}"))
+                })?;
+        }
+
+        let profile = self.home_profile(&req.session_token)?;
+
+        // 2. Fan out to the caches. Each link carries its own session
+        //    token for its org, so the push is that account updating
+        //    its own profile — no impersonation, no elevated path.
+        let links = tokio::runtime::Handle::current()
+            .block_on(async move { store.list_links(home_user_id).await })
+            .map_err(|e| IdentityServiceError::Internal(format!("list links: {e}")))?;
+        let (mut updated, mut pending, mut failed) = (Vec::new(), Vec::new(), Vec::new());
+        for link in links {
+            let Some(slug) = local_slug_for(&self.state, &link) else {
+                pending.push(link.remote_slug.clone());
+                continue;
+            };
+            let Some(token) = link.token.clone() else {
+                failed.push(format!("{slug}: no stored token — re-run `task auth link`"));
+                continue;
+            };
+            let Some(org) = self.state.org(&slug) else {
+                pending.push(slug);
+                continue;
+            };
+            // Mirror the whole profile, including clears: the cache
+            // must converge on home, not drift toward it.
+            let input = architect_auth::UpdateProfile {
+                session_token: token,
+                name: Some(profile.name.clone().unwrap_or_default()),
+                image: Some(profile.image.clone().unwrap_or_default()),
+            };
+            match tokio::runtime::Handle::current()
+                .block_on(async move { org.auth.auth.update_profile(input).await })
+            {
+                Ok(_) => updated.push(slug),
+                Err(e) => failed.push(format!("{slug}: {e}")),
+            }
+        }
+
+        Ok(identity_proto::ProfileSyncReport {
+            profile,
+            updated,
+            pending,
+            failed,
+        })
+    }
+
     fn list_links(&self, session_token: String) -> Result<Vec<LinkView>, IdentityServiceError> {
         let (store, home_user_id) = self.resolve(&session_token)?;
         let rows = tokio::runtime::Handle::current()

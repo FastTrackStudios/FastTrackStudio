@@ -484,6 +484,20 @@ impl CliSession {
         self.servers.get(&self.active)
     }
 
+    /// The **home** entry — the identity anchor, and the only server
+    /// that holds this account's identity locker. Distinct from
+    /// [`Self::active_server`]: you can be working in a linked org
+    /// while home stays where your links live.
+    #[must_use]
+    pub fn home_entry(&self) -> Option<&ServerEntry> {
+        self.servers
+            .get(&self.home)
+            // A session predating `home` (or one whose home entry was
+            // removed) still has an active server; treating that as
+            // home beats refusing to work at all.
+            .or_else(|| self.active_server())
+    }
+
     /// The active entry's org slug. Falls back to the raw key for
     /// stale sessions (pre-server-aware keys WERE slugs).
     #[must_use]

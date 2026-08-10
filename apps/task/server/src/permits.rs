@@ -168,6 +168,12 @@ const AUTH: ServicePermits = ServicePermits {
         // identifier, needs a session regardless, and is worth an audit
         // line even on allow.
         MethodPermit::new("change_email", Action::WRITE, "auth/self").audited(),
+        // Display name / avatar. Same self-service tier — the session
+        // names the account, so there is no target to widen. Not
+        // audited: unlike a credential or login identifier, changing
+        // your display name is not a security event, and the identity
+        // fan-out writes it once per linked org.
+        MethodPermit::new("update_profile", Action::WRITE, "auth/self"),
     ],
 };
 
