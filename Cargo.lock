@@ -8975,6 +8975,7 @@ dependencies = [
 name = "expression-editor-core"
 version = "0.1.0"
 dependencies = [
+ "facet 0.50.0-rc.5",
  "keyflow-proto",
 ]
 
@@ -8994,6 +8995,8 @@ version = "0.1.0"
 dependencies = [
  "daw",
  "expression-editor-core",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
 ]
 
 [[package]]
