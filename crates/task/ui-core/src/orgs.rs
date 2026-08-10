@@ -75,9 +75,16 @@ pub struct OrgMeta {
 ///   empty span rather than a fan-out that the permission gate will
 ///   refuse call by call — an empty state is a better answer than a wall
 ///   of errors, and it is the truthful one.
+/// Note on where linked orgs enter this: NOT here. The app root folds
+/// the identity locker's answer into each `OrgMeta::member` as the org
+/// list resolves, because `org_list` is the Signal every consumer
+/// reads. Consulting a global from inside this function instead looked
+/// simpler and was wrong — Dioxus cannot see a static change, so the
+/// switcher kept rendering a stale single org until something unrelated
+/// forced a re-render. Keep this a pure function of its argument.
 #[must_use]
 pub fn my_orgs(orgs: &[OrgMeta]) -> Vec<OrgMeta> {
-    my_orgs_with_links(orgs, &crate::vox_session::linked_slugs())
+    my_orgs_with_links(orgs, &[])
 }
 
 /// [`my_orgs`], plus the orgs the identity locker holds a credential
