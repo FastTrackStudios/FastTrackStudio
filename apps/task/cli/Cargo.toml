@@ -106,6 +106,7 @@ intake = { workspace = true, features = ["vox"], optional = true }
 # via agent-codex (vendored CodexMonitor control plane).
 agent-codex.workspace = true
 agent-proto.workspace = true
+agent-worktree.workspace = true
 # `task-cli wiki ingest` — agent-driven two-step CoT ingest
 # of source files into `<vault>/Wiki/`.
 agent-wiki = { workspace = true, optional = true }

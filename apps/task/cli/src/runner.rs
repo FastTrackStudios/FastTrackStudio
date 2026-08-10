@@ -101,6 +101,50 @@ pub enum RunnerCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Take one ticket and work it: claim, cut a worktree and
+    /// branch, run the agent, run the verify command, commit, and
+    /// hand back.
+    ///
+    /// Exit zero on the verify command moves the ticket to
+    /// `needs-review` with its branch. Anything else leaves the
+    /// ticket unclaimed for another attempt, with the worktree still
+    /// on disk so the failure can be inspected.
+    ///
+    /// Nothing is pushed and no mainline is touched — the branch is
+    /// the handback.
+    Work {
+        /// Runner id. Defaults to this machine's hostname.
+        #[arg(long)]
+        id: Option<String>,
+        /// Repository to cut worktrees from.
+        #[arg(long)]
+        repo: std::path::PathBuf,
+        /// Where this runner puts worktrees. The runner chooses;
+        /// the server only learns the path afterwards.
+        #[arg(long)]
+        worktree_root: std::path::PathBuf,
+        /// Branch to cut from.
+        #[arg(long, default_value = "main")]
+        base: String,
+        /// Command that runs the agent inside the worktree. It is
+        /// given the ticket prompt on stdin and `TASK_TICKET_ID` /
+        /// `TASK_TICKET_TITLE` in the environment. Omit to do
+        /// everything except the agent — useful for checking the
+        /// plumbing without spending tokens.
+        #[arg(long)]
+        agent_cmd: Option<String>,
+        /// Work a specific ticket instead of the first takeable one.
+        #[arg(long)]
+        ticket: Option<String>,
+        /// Go through the motions without claiming, committing or
+        /// relabelling. Prints what it would do.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     /// Agent-ready tickets nothing in the fleet can take.
     ///
     /// A ticket no live runner satisfies must be reported, not left
@@ -299,6 +343,128 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
             }
         }
 
+        RunnerCmd::Work {
+            id,
+            repo,
+            worktree_root,
+            base,
+            agent_cmd,
+            ticket,
+            dry_run,
+            org,
+            server,
+        } => {
+            let id = id.unwrap_or_else(hostname);
+            let (slug, url) = ctx(org, server)?;
+            let backends: BackendsClient = establish_for_url(&url).await?;
+            let me = backends
+                .list_backends()
+                .await?
+                .into_iter()
+                .find(|b| b.id == id)
+                .ok_or_else(|| eyre::eyre!("runner `{id}` is not registered"))?;
+
+            let tickets = agent_ready_tickets(&url).await?;
+            let chosen = match &ticket {
+                Some(want) => tickets
+                    .iter()
+                    .find(|t| t.id.to_string().starts_with(want.trim()))
+                    .cloned()
+                    .ok_or_else(|| eyre::eyre!("`{want}` is not an agent-ready ticket"))?,
+                None => {
+                    let refs = ticket_refs(&tickets, &slug);
+                    let takeable = agent_proto::routing::takeable(&me.runner, &refs, 0);
+                    let Some(first) = takeable.first() else {
+                        println!("(nothing takeable)");
+                        return Ok(());
+                    };
+                    tickets
+                        .iter()
+                        .find(|t| t.id == *first)
+                        .cloned()
+                        .ok_or_else(|| eyre::eyre!("ticket vanished mid-selection"))?
+                }
+            };
+
+            let short = crate::shared::short_uuid(&chosen.id);
+            println!("ticket {short}  {}", chosen.title);
+
+            // Resolve the verdict command before doing any work: a
+            // ticket nobody can check is not worth a worktree.
+            let projects = match connect_project_client_for(&url).await {
+                Ok(list) => list,
+                Err(_) => Vec::new(),
+            };
+            let verify_cmd = project::verify::resolve(
+                chosen
+                    .workflow
+                    .as_ref()
+                    .and_then(|w| w.verify_command.as_deref()),
+                chosen.project_id,
+                &projects,
+            )
+            .ok_or_else(|| {
+                eyre::eyre!("ticket {short} resolves to no verify command; refusing to work it")
+            })?;
+            println!("verify {verify_cmd}");
+
+            if dry_run {
+                println!("(dry run — not claiming, not working)");
+                return Ok(());
+            }
+
+            // Claim before touching the disk, so a losing racer
+            // never creates a worktree.
+            let client = crate::task_cmd::connect_task_client(&url).await?;
+            let agent_ref = crate::issue::parse_agent_ref(&format!("agent:{id}"))?;
+            let claim = crate::issue::try_claim(&client, &chosen.id, &agent_ref, false).await?;
+            if !matches!(
+                claim,
+                crate::issue::ClaimOutcome::Won | crate::issue::ClaimOutcome::AlreadyMine
+            ) {
+                println!("lost the claim on {short} — another runner has it");
+                return Ok(());
+            }
+            println!("claimed {short} as {id}");
+
+            let wt = agent_worktree::create(&repo, &worktree_root, &short, &base)?;
+            println!("worktree {}", wt.path.display());
+            println!("branch   {}", wt.branch);
+
+            if let Some(cmd) = &agent_cmd {
+                let prompt = format!("{}\n\n{}", chosen.title, chosen.details);
+                let status = run_agent(cmd, &wt.path, &chosen.id.to_string(), &chosen.title, &prompt)?;
+                println!("agent exited {status}");
+            } else {
+                println!("(no --agent-cmd; skipping the agent)");
+            }
+
+            let verdict = agent_worktree::verify(&wt, &verify_cmd)?;
+            println!(
+                "verdict  {} ({:?})",
+                if verdict.passed { "pass" } else { "FAIL" },
+                verdict.code
+            );
+
+            if !verdict.passed {
+                // Leave the worktree for inspection and release the
+                // claim so another attempt can happen.
+                println!("{}", verdict.tail.trim_end());
+                release_claim(&client, &chosen).await?;
+                println!("released {short}; worktree kept at {}", wt.path.display());
+                return Ok(());
+            }
+
+            let sha = agent_worktree::commit_all(&wt, &format!("agent: {}", chosen.title))?;
+            match &sha {
+                Some(sha) => println!("commit   {sha}"),
+                None => println!("commit   (nothing to commit)"),
+            }
+
+            mark_needs_review(&client, &chosen).await?;
+            println!("{short} → needs-review on {}", wt.branch);
+        }
+
         RunnerCmd::Unroutable { org, server } => {
             let (slug, url) = ctx(org, server)?;
             let backends: BackendsClient = establish_for_url(&url).await?;
@@ -342,6 +508,78 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Run the agent inside the worktree, handing it the ticket.
+fn run_agent(
+    cmd: &str,
+    cwd: &std::path::Path,
+    ticket_id: &str,
+    title: &str,
+    prompt: &str,
+) -> eyre::Result<String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(cwd)
+        .env("TASK_TICKET_ID", ticket_id)
+        .env("TASK_TICKET_TITLE", title)
+        .stdin(Stdio::piped())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(prompt.as_bytes())?;
+    }
+    let status = child.wait()?;
+    Ok(status
+        .code()
+        .map_or_else(|| "signal".to_string(), |c| c.to_string()))
+}
+
+/// Drop our claim so the ticket can be attempted again.
+async fn release_claim(
+    client: &task::TaskServiceClient,
+    ticket: &task::TaskInfo,
+) -> eyre::Result<()> {
+    let mut t = ticket.clone();
+    if let Some(w) = t.workflow.as_mut() {
+        w.assignees.0.clear();
+    }
+    client
+        .update(t)
+        .await
+        .map_err(|e| eyre::eyre!("release claim: {e:?}"))?;
+    Ok(())
+}
+
+/// Move a green ticket to `needs-review`, dropping `ready-for-agent`
+/// so it stops appearing in the runner queue.
+async fn mark_needs_review(
+    client: &task::TaskServiceClient,
+    ticket: &task::TaskInfo,
+) -> eyre::Result<()> {
+    let mut t = ticket.clone();
+    t.tags
+        .0
+        .retain(|tag| task::TriageLabel::parse(tag) != Some(task::TriageLabel::ReadyForAgent));
+    if !task::has_triage_label(&t, task::TriageLabel::NeedsReview) {
+        t.tags.0.push(task::TriageLabel::NeedsReview.as_str().into());
+    }
+    client
+        .update(t)
+        .await
+        .map_err(|e| eyre::eyre!("mark needs-review: {e:?}"))?;
+    Ok(())
+}
+
+/// The org's projects, for resolving a ticket's verify command.
+async fn connect_project_client_for(url: &str) -> eyre::Result<Vec<project::ProjectInfo>> {
+    let pc = crate::project::connect_project_client(url).await?;
+    pc.list()
+        .await
+        .map_err(|e| eyre::eyre!("list projects: {e:?}"))
 }
 
 fn ctx(org: Option<String>, server: Option<String>) -> eyre::Result<(String, String)> {
