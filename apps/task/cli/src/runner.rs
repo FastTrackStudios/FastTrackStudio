@@ -11,6 +11,7 @@
 use agent_proto::backend::{AgentBackend, BackendKind};
 use agent_proto::runner::{RunnerProfile, RunnerScope, parse_capabilities};
 use agent_proto::service::backends::BackendsClient;
+use agent_proto::service::questions::QuestionsClient;
 use agent_proto::service::runs::RunsClient;
 use chrono::Utc;
 use clap::Subcommand;
@@ -196,6 +197,56 @@ pub enum RunnerCmd {
         /// First move lapsed in-progress runs to `stale`.
         #[arg(long)]
         sweep: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Raise a question against a ticket and block it on a human.
+    ///
+    /// This is the interface an agent calls when it needs a decision.
+    /// How a given agent decides to call it — a sentinel file, a
+    /// stdout tag, a wrapper script — is deliberately left open.
+    Ask {
+        /// Ticket to block.
+        ticket: String,
+        /// The question text.
+        text: String,
+        /// Repeatable option label.
+        #[arg(long = "option", value_name = "LABEL")]
+        options: Vec<String>,
+        /// Short chip-style header.
+        #[arg(long, default_value = "Decision")]
+        header: String,
+        /// The run raising it, if any.
+        #[arg(long)]
+        run: Option<uuid::Uuid>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// The grill queue — questions agents are waiting on you for.
+    Questions {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Answer a question, unblocking its ticket.
+    ///
+    /// Clears `needs-input` and restores `ready-for-agent`, so a
+    /// runner takes the ticket up again. The run that raised the
+    /// question is recorded on it, so the answer can resume that
+    /// session rather than starting cold.
+    Answer {
+        /// Question request id (or a unique prefix).
+        request: String,
+        /// The chosen option label, or free text.
+        answer: String,
+        /// Optional note passed along with the choice.
+        #[arg(long)]
+        notes: Option<String>,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -537,6 +588,120 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
             }
         }
 
+        RunnerCmd::Ask {
+            ticket,
+            text,
+            options,
+            header,
+            run,
+            org,
+            server,
+        } => {
+            let (_slug, url) = ctx(org, server)?;
+            let client = crate::task_cmd::connect_task_client(&url).await?;
+            let id = crate::issue::resolve_issue_id(&client, &ticket).await?.id;
+
+            let question = agent_proto::question::Question {
+                id: uuid::Uuid::new_v4().to_string(),
+                header,
+                text,
+                options: options
+                    .into_iter()
+                    .map(|label| agent_proto::question::QuestionOption {
+                        label,
+                        description: String::new(),
+                        preview: String::new(),
+                    })
+                    .collect(),
+                multi_select: false,
+            };
+            block_on_question(&url, id, run, vec![question]).await?;
+            println!(
+                "{} → needs-input (asked)",
+                crate::shared::short_uuid(&id)
+            );
+        }
+
+        RunnerCmd::Questions { org, server } => {
+            let (_slug, url) = ctx(org, server)?;
+            let qc: QuestionsClient = establish_for_url(&url).await?;
+            let pending = qc.unresolved_questions().await?;
+            if pending.is_empty() {
+                println!("(nothing waiting on you)");
+                return Ok(());
+            }
+            let client = crate::task_cmd::connect_task_client(&url).await?;
+            for req in pending {
+                let ticket = qc.question_ticket(req.id.clone()).await?;
+                let title = match ticket {
+                    Some(t) => client
+                        .get(t)
+                        .await
+                        .map(|x| x.title)
+                        .unwrap_or_else(|_| "(unknown ticket)".into()),
+                    None => "(no ticket)".into(),
+                };
+                println!("{}  {title}", &req.id[..8.min(req.id.len())]);
+                for q in &req.questions {
+                    println!("  [{}] {}", q.header, q.text);
+                    for o in &q.options {
+                        println!("      - {}  {}", o.label, o.description);
+                    }
+                }
+            }
+        }
+
+        RunnerCmd::Answer {
+            request,
+            answer,
+            notes,
+            org,
+            server,
+        } => {
+            let (_slug, url) = ctx(org, server)?;
+            let qc: QuestionsClient = establish_for_url(&url).await?;
+
+            let pending = qc.unresolved_questions().await?;
+            let req = pending
+                .iter()
+                .find(|q| q.id.starts_with(request.trim()))
+                .ok_or_else(|| eyre::eyre!("no unresolved question matching `{request}`"))?;
+            let first = req
+                .questions
+                .first()
+                .ok_or_else(|| eyre::eyre!("question {} carries no questions", req.id))?;
+
+            let resolved = qc
+                .answer_question(
+                    req.id.clone(),
+                    vec![agent_proto::question::QuestionAnswer {
+                        question_id: first.id.clone(),
+                        selected: vec![answer.clone()],
+                        notes: notes.unwrap_or_default(),
+                    }],
+                )
+                .await?;
+            println!("answered {}", &resolved.id[..8.min(resolved.id.len())]);
+
+            // Unblock the ticket: an answered question must put the
+            // work back in the runner queue, or answering achieves
+            // nothing.
+            if let Some(ticket) = qc.question_ticket(resolved.id.clone()).await? {
+                let client = crate::task_cmd::connect_task_client(&url).await?;
+                let still_open = qc.questions_for_ticket(ticket).await?;
+                if still_open.is_empty() {
+                    mark_ready_again(&client, ticket).await?;
+                    println!("{} → ready-for-agent", crate::shared::short_uuid(&ticket));
+                } else {
+                    println!(
+                        "{} still has {} unanswered question(s)",
+                        crate::shared::short_uuid(&ticket),
+                        still_open.len()
+                    );
+                }
+            }
+        }
+
         RunnerCmd::Unroutable { org, server } => {
             let (slug, url) = ctx(org, server)?;
             let backends: BackendsClient = establish_for_url(&url).await?;
@@ -666,6 +831,67 @@ async fn mark_needs_review(
         .update(t)
         .await
         .map_err(|e| eyre::eyre!("mark needs-review: {e:?}"))?;
+    Ok(())
+}
+
+/// Move a ticket off `needs-input` and back into the runner queue.
+///
+/// Only called once every question on it is answered — a ticket with
+/// one answer and one outstanding question is still blocked.
+async fn mark_ready_again(
+    client: &task::TaskServiceClient,
+    ticket: uuid::Uuid,
+) -> eyre::Result<()> {
+    let mut t = client
+        .get(ticket)
+        .await
+        .map_err(|e| eyre::eyre!("read ticket: {e:?}"))?;
+    t.tags
+        .0
+        .retain(|tag| task::TriageLabel::parse(tag) != Some(task::TriageLabel::NeedsInput));
+    if !task::has_triage_label(&t, task::TriageLabel::ReadyForAgent) {
+        t.tags
+            .0
+            .push(task::TriageLabel::ReadyForAgent.as_str().into());
+    }
+    client
+        .update(t)
+        .await
+        .map_err(|e| eyre::eyre!("unblock ticket: {e:?}"))?;
+    Ok(())
+}
+
+/// Put a ticket on the grill queue: record the question and flip it
+/// to `needs-input` so it leaves the runner queue.
+pub(crate) async fn block_on_question(
+    url: &str,
+    ticket: uuid::Uuid,
+    run: Option<uuid::Uuid>,
+    questions: Vec<agent_proto::question::Question>,
+) -> eyre::Result<()> {
+    let qc: QuestionsClient = establish_for_url(url).await?;
+    qc.ask_question(agent_proto::question::AskQuestion {
+        ticket,
+        run,
+        questions,
+    })
+    .await?;
+
+    let client = crate::task_cmd::connect_task_client(url).await?;
+    let mut t = client
+        .get(ticket)
+        .await
+        .map_err(|e| eyre::eyre!("read ticket: {e:?}"))?;
+    t.tags
+        .0
+        .retain(|tag| task::TriageLabel::parse(tag) != Some(task::TriageLabel::ReadyForAgent));
+    if !task::has_triage_label(&t, task::TriageLabel::NeedsInput) {
+        t.tags.0.push(task::TriageLabel::NeedsInput.as_str().into());
+    }
+    client
+        .update(t)
+        .await
+        .map_err(|e| eyre::eyre!("block ticket: {e:?}"))?;
     Ok(())
 }
 

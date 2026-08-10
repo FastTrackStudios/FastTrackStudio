@@ -11,8 +11,9 @@
 
 use chrono::{DateTime, Utc};
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct QuestionRequest {
     pub id: String,
@@ -27,7 +28,7 @@ pub struct QuestionRequest {
     pub resolved_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Question {
     pub id: String,
@@ -40,7 +41,7 @@ pub struct Question {
     pub multi_select: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct QuestionOption {
     pub label: String,
@@ -51,7 +52,23 @@ pub struct QuestionOption {
     pub preview: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+/// A runner asking on a ticket's behalf.
+///
+/// The agent-lane counterpart to the session-scoped flow: a question
+/// here belongs to a **ticket**, because that is what gets
+/// `needs-input` and what a human answers. `run` ties it back to the
+/// attempt that raised it, so answering can resume the right session.
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+#[repr(C)]
+pub struct AskQuestion {
+    pub ticket: uuid::Uuid,
+    /// The run that raised it. `None` when asked outside a run.
+    pub run: Option<uuid::Uuid>,
+    /// One or more questions, resolved together.
+    pub questions: Vec<Question>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct QuestionAnswer {
     /// Matches `Question.id`.

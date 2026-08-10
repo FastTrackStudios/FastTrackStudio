@@ -206,6 +206,8 @@ pub struct OrgAppState {
     pub agent_runners: agent_runners::Store,
     /// Run records — every attempt at every ticket.
     pub agent_runs: agent_runners::RunStore,
+    /// The grill queue — questions agents are waiting on.
+    pub agent_questions: agent_runners::QuestionStore,
     /// Codex agent backend — in-process session registry + turn
     /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
     /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
@@ -791,6 +793,8 @@ pub(crate) async fn build_org_state(
             .await?;
         #[cfg(feature = "plugin-agent")]
         let agent_runs = agent_runners::RunStore::new(agent_runners_conn.clone());
+        #[cfg(feature = "plugin-agent")]
+        let agent_questions = agent_runners::QuestionStore::new(agent_runners_conn.clone());
         #[cfg(feature = "plugin-agent")]
         let agent_runners = agent_runners::Store::new(agent_runners_conn);
 
@@ -1400,6 +1404,8 @@ pub(crate) async fn build_org_state(
             agent_runners,
             #[cfg(feature = "plugin-agent")]
             agent_runs,
+            #[cfg(feature = "plugin-agent")]
+            agent_questions,
             #[cfg(feature = "plugin-agent")]
             agent_codex,
             #[cfg(feature = "plugin-agent")]
@@ -2584,6 +2590,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 agent_proto::service::runs::runs_rpc_service_descriptor(),
                 agent_proto::service::runs::serve(org.agent_runs.clone()),
+            )
+            // The grill queue — questions agents are blocked on, and
+            // the answers that unblock them.
+            .with(
+                agent_proto::service::questions::questions_rpc_service_descriptor(),
+                agent_proto::service::questions::serve(org.agent_questions.clone()),
             );
     }
 

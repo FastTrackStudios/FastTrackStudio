@@ -291,6 +291,16 @@ table!(AGENT_RUNS, "agent-runs", "agent/runs/**", [
     wr "archive_run", wr "sweep_stale_runs",
 ]);
 
+// The grill queue. Asking is a runner write; answering is the human
+// half of a human-in-the-loop decision, so both are member writes
+// rather than admin.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_QUESTIONS, "agent-questions", "agent/questions/**", [
+    rd "unresolved_questions", rd "questions_for_ticket",
+    rd "list_pending_questions", rd "question_ticket",
+    wr "ask_question", wr "answer_question",
+]);
+
 #[cfg(feature = "plugin-agent")]
 table!(AGENT_BACKENDS, "agent-backends", "agent/runners/**", [
     rd "list_backends", rd "backend_health", rd "backends_by_kind",
@@ -717,6 +727,11 @@ pub fn mounts() -> Vec<Mount> {
             "agent",
             agent_proto::service::runs::runs_rpc_service_descriptor(),
             AGENT_RUNS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::questions::questions_rpc_service_descriptor(),
+            AGENT_QUESTIONS,
         ),
     ]);
     v.extend([
