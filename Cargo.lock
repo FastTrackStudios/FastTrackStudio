@@ -6346,6 +6346,7 @@ name = "dawfile-standalone"
 version = "0.1.0"
 dependencies = [
  "daw-proto",
+ "dawfile-dawproject",
  "dawfile-reaper",
  "facet 0.50.0-rc.5",
  "facet-styx 5.0.0-rc.5",
