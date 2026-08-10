@@ -208,6 +208,22 @@ pub struct ProjectInfo {
     )]
     pub agent_profile: String,
 
+    /// Shell command whose **exit code is the verdict** on whether
+    /// an agent's work on this project is done — `cargo check -p x`,
+    /// `pnpm test`. Empty = inherit from the parent project; see
+    /// [`crate::verify::resolve`].
+    ///
+    /// This exists so most tickets carry no verify command of their
+    /// own. A ticket may still override it, and a ticket that
+    /// resolves to nothing cannot be marked ready for an agent —
+    /// otherwise "done" is an opinion rather than a fact.
+    #[serde(
+        skip_serializing_if = "String::is_empty",
+        default,
+        rename = "verifyCommand"
+    )]
+    pub verify_command: String,
+
     // ── UI ──────────────────────────────────────────────────
     /// Hex `#RRGGBB`. Empty = UI auto-picks from title hash.
     /// Used by the kanban + timer reports for column / pill

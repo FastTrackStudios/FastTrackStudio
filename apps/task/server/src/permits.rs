@@ -272,6 +272,31 @@ table!(AGENT_ROUTINES, "agent-routines", "agent/routines/**", [
     wa "run_routine", wa "delete_routine",
 ]);
 
+// The runner registry. Reads are ordinary — anyone who can see the
+// org can see which machines serve it. Registering and deregistering
+// are administrative: a runner declares what it may execute, so being
+// able to write here is being able to grant yourself the right to run
+// code for this org.
+//
+// `heartbeat_backend` is a write rather than a read because it is the
+// liveness signal routing depends on — a caller who could forge it
+// could keep a dead machine in the routing pool.
+// Run records. Reads are ordinary; writes are the runner reporting
+// its own progress, which is a member action, not an admin one — a
+// runner that cannot say what it did is useless.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUNS, "agent-runs", "agent/runs/**", [
+    rd "get_run", rd "list_runs",
+    wr "start_run", wr "beat_run", wr "finish_run",
+    wr "archive_run", wr "sweep_stale_runs",
+]);
+
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_BACKENDS, "agent-backends", "agent/runners/**", [
+    rd "list_backends", rd "backend_health", rd "backends_by_kind",
+    wr "heartbeat_backend", wa "upsert_backend", wa "remove_backend",
+]);
+
 // ── Work lane (projects / goals / milestones / workstreams / tasks) ──────
 
 table!(PROJECT, "project", "projects/**", [
@@ -682,6 +707,16 @@ pub fn mounts() -> Vec<Mount> {
             "agent",
             agent_proto::service::routines::routines_rpc_service_descriptor(),
             AGENT_ROUTINES,
+        ),
+        m(
+            "agent",
+            agent_proto::service::backends::backends_rpc_service_descriptor(),
+            AGENT_BACKENDS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::runs::runs_rpc_service_descriptor(),
+            AGENT_RUNS,
         ),
     ]);
     v.extend([

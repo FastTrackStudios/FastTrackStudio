@@ -499,7 +499,7 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 // `--relevant` keeps, so the two flags partition the
                 // open set between them.
                 .filter(|t| {
-                    !untriaged || (task::status_is_open(&t.status) && task::needs_triage(t))
+                    !untriaged || (task::status_is_open(&t.status) && task::is_unfiled(t))
                 })
                 .collect();
             // Same business logic the web store applies — one

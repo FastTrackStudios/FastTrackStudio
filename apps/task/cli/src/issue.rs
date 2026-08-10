@@ -276,6 +276,24 @@ pub(crate) enum IssueCmd {
         /// Repeatable tag.
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
+
+        /// Verify command for this ticket — the shell command whose
+        /// exit code decides whether an agent's work is done.
+        /// Omit to inherit the project's `verifyCommand`. A ticket
+        /// that resolves to none cannot be tagged `ready-for-agent`.
+        #[arg(long = "verify", value_name = "COMMAND")]
+        verify: Option<String>,
+
+        /// Repeatable capability a runner must have to take this
+        /// ticket: `records`, `shell`, `build`, `repo:<owner>/<name>`.
+        /// Set during triage; empty means any runner will do.
+        #[arg(long = "cap", value_name = "CAPABILITY")]
+        caps: Vec<String>,
+
+        /// Model this ticket should be worked with. Omit for the
+        /// runner's default.
+        #[arg(long = "model", value_name = "MODEL")]
+        model: Option<String>,
         /// Body (markdown). Pass `-` for stdin, or a file path.
         #[arg(long)]
         body: Option<String>,
@@ -789,6 +807,42 @@ fn apply_workflow_patch(
 /// Resolve an optional `--project` filter (uuid, id prefix, path,
 /// or name) into the project id, dialing the project service only
 /// when the flag is present.
+/// Refuse `ready-for-agent` on a ticket that resolves to no verify
+/// command.
+///
+/// The resolution walks the ticket's own override, then the owning
+/// project and its ancestors — so most tickets satisfy the gate
+/// through their project's default and pass no flag at all.
+///
+/// Only dials the project service when the tag is actually present,
+/// so ordinary `issue create` calls pay nothing for this.
+async fn gate_agent_ready(
+    url: &str,
+    tags: &[String],
+    verify: Option<&str>,
+    project: Option<uuid::Uuid>,
+) -> eyre::Result<()> {
+    let wants_agent = tags
+        .iter()
+        .any(|t| task::TriageLabel::parse(t) == Some(task::TriageLabel::ReadyForAgent));
+    if !wants_agent {
+        return Ok(());
+    }
+
+    let projects = match connect_project_client(url).await {
+        Ok(pc) => pc.list().await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let resolved = project::verify::resolve(verify, project, &projects);
+
+    task::agent_lane::check_agent_ready(resolved.as_deref()).map_err(|e| {
+        eyre::eyre!(
+            "refusing `{}`: {e}",
+            task::TriageLabel::ReadyForAgent.as_str()
+        )
+    })
+}
+
 async fn resolve_project_filter(
     url: &str,
     project: Option<String>,
@@ -1465,6 +1519,9 @@ pub(crate) async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             assignees,
             blockers,
             tags,
+            verify,
+            caps,
+            model,
             body,
             json,
         } => {
@@ -1495,10 +1552,24 @@ pub(crate) async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .iter()
                 .map(|s| parse_agent_ref(s))
                 .collect::<eyre::Result<_>>()?;
+            // The agent-ready gate: a ticket tagged `ready-for-agent`
+            // must resolve to a verify command, or nobody can tell
+            // when an agent is done with it. Checked before the
+            // create call so a refused ticket never lands.
+            gate_agent_ready(&url, &tags, verify.as_deref(), project).await?;
+
+            // A capability token that is not in the closed
+            // vocabulary is a bad ticket, so reject it here rather
+            // than writing work that can never route.
+            agent_proto::runner::parse_capabilities(&caps)?;
+
             let any_workflow = cycle.is_some()
                 || parent.is_some()
                 || workstream.is_some()
                 || estimate.is_some()
+                || verify.is_some()
+                || model.is_some()
+                || !caps.is_empty()
                 || !assignee_refs.is_empty()
                 || !blockers.is_empty();
             let workflow = if any_workflow {
@@ -1511,6 +1582,9 @@ pub(crate) async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     parent,
                     workstream,
                     estimate,
+                    verify_command: verify,
+                    capabilities: task::model::StringList(caps),
+                    model,
                     assignees: task::model::AgentRefList(assignee_refs),
                     blockers: task::model::UuidList(blockers),
                     ..Default::default()

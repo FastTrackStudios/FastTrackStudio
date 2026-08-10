@@ -30,6 +30,7 @@ pub mod projects;
 pub mod questions;
 pub mod reasoning;
 pub mod routines;
+pub mod runs;
 pub mod sessions;
 pub mod subscriptions;
 pub mod tasks;

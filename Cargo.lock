@@ -273,6 +273,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-runners"
+version = "0.1.0"
+dependencies = [
+ "agent-proto",
+ "agent-tasks",
+ "async-trait",
+ "chrono",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "agent-tasks"
 version = "0.1.0"
 dependencies = [
@@ -305,6 +323,15 @@ dependencies = [
  "walkdir",
  "wiki-live",
  "wiki-proto",
+]
+
+[[package]]
+name = "agent-worktree"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -26484,6 +26511,7 @@ dependencies = [
  "agent-inbox",
  "agent-proto",
  "agent-wiki",
+ "agent-worktree",
  "architect",
  "architect-auth",
  "attachments-proto",
@@ -26647,6 +26675,7 @@ dependencies = [
  "agent-dispatch",
  "agent-hermes",
  "agent-proto",
+ "agent-runners",
  "agent-tasks",
  "architect",
  "architect-auth",

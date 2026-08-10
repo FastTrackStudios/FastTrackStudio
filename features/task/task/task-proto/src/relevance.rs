@@ -160,7 +160,7 @@ pub fn filter_relevant(tasks: &mut Vec<TaskInfo>, ctx: &RelevanceContext) {
 pub fn partition_triage(tasks: &mut Vec<TaskInfo>) -> Vec<TaskInfo> {
     let mut triage: Vec<TaskInfo> = Vec::new();
     tasks.retain(|t| {
-        if status_is_open(&t.status) && crate::filing::needs_triage(t) {
+        if status_is_open(&t.status) && crate::filing::is_unfiled(t) {
             triage.push(t.clone());
             false
         } else {

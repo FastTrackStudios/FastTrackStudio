@@ -68,6 +68,13 @@ pub(crate) enum ProjectCmd {
         /// Comma-separated tag list.
         #[arg(long, value_delimiter = ',')]
         tags: Vec<String>,
+        /// Default verify command for this project's tickets — the
+        /// shell command whose exit code decides whether an agent's
+        /// work is done. Subprojects inherit it; a ticket may
+        /// override it. Without one, no ticket here can be tagged
+        /// `ready-for-agent`.
+        #[arg(long = "verify", value_name = "COMMAND")]
+        verify: Option<String>,
         /// Body / details (markdown). Reads stdin when `-`.
         #[arg(long)]
         details: Option<String>,
@@ -312,6 +319,7 @@ pub(crate) async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             priority,
             project_type,
             tags,
+            verify,
             details,
             org,
             server,
@@ -346,6 +354,7 @@ pub(crate) async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 default_rate_cents: 0,
                 estimated_seconds: 0,
                 agent_profile: String::new(),
+                verify_command: verify.unwrap_or_default(),
                 color: String::new(),
                 image: String::new(),
                 archived: false,

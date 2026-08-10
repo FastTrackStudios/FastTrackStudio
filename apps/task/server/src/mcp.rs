@@ -1463,7 +1463,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                 })
                 .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
             let mut unfiled: Vec<&task::TaskInfo> =
-                rows.iter().filter(|t| task::needs_triage(t)).collect();
+                rows.iter().filter(|t| task::is_unfiled(t)).collect();
             // Oldest capture first: the thing that's been sitting
             // longest is the thing most worth naming.
             unfiled.sort_by(|a, b| {
@@ -1898,6 +1898,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                 default_rate_cents: 0,
                 estimated_seconds: 0,
                 agent_profile: String::new(),
+                verify_command: arg_str(args, "verify_command").unwrap_or_default(),
                 color: String::new(),
                 image: String::new(),
                 archived: false,
