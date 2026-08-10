@@ -43,6 +43,7 @@ pub mod model;
 pub mod relations;
 pub mod relevance;
 pub mod service;
+pub mod wayfinder;
 
 pub use agent_lane::{
     TriageLabel, has_triage_label, is_untriaged, triage_label, triage_labels,
@@ -61,6 +62,7 @@ pub use relevance::{
 pub use service::{
     TaskError, TaskEvent, TaskListFilter, TaskReverseRelations, TaskService, TaskServiceRpc,
 };
+pub use wayfinder::{MapBody, Section, map_body};
 // Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
 // so UI consumers don't need their own workflows-proto dep.
 pub use workflows_proto;
