@@ -13,7 +13,7 @@ use std::sync::Mutex;
 
 use daw::service::{Items, Midi, MidiNoteCreate, MidiTakeLocation, ProjectContext};
 use daw::service::item::ItemRef;
-use midi_tools::velocity::{Note, Session, VelocityEdit};
+use expression_editor_tools::velocity::{Note, Session, VelocityEdit};
 
 /// What velocity editing needs from a backend.
 pub trait VelocityDaw: Items + Midi + Send + Sync + 'static {}
@@ -183,7 +183,7 @@ impl<D: VelocityDaw> DawVelocitySink<D> {
 /// The inherent methods above carry the docs and are what a Rust caller
 /// wants; this is the object-safe view the UI holds in a
 /// `Arc<dyn VelocitySink>`.
-impl<D: VelocityDaw> midi_tools::VelocitySink for DawVelocitySink<D> {
+impl<D: VelocityDaw> expression_editor_tools::VelocitySink for DawVelocitySink<D> {
     fn open(&self) -> Result<Session, String> {
         DawVelocitySink::open(self)
     }
@@ -205,7 +205,7 @@ impl<D: VelocityDaw> midi_tools::VelocitySink for DawVelocitySink<D> {
 // Arpeggiator
 // ─────────────────────────────────────────────────────────────────────
 
-use midi_tools::arp::{ArpSession, DEFAULT_GAP_PPQ, TimedNote, group_chords};
+use expression_editor_tools::arp::{ArpSession, DEFAULT_GAP_PPQ, TimedNote, group_chords};
 
 /// What arpeggiating needs from a backend.
 ///
@@ -323,7 +323,7 @@ impl<D: ArpDaw> DawArpSink<D> {
     }
 }
 
-impl<D: ArpDaw> midi_tools::ArpSink for DawArpSink<D> {
+impl<D: ArpDaw> expression_editor_tools::ArpSink for DawArpSink<D> {
     fn open(&self) -> Result<ArpSession, String> {
         DawArpSink::open(self)
     }

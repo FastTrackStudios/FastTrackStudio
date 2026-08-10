@@ -31,10 +31,10 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
-use midi_tools::velocity::{
+use expression_editor_tools::velocity::{
     CurvePreset, MAX_VELOCITY, MIN_VELOCITY, Pivot, Range, Session,
 };
-use midi_tools::{DemoSink, VelocitySink};
+use expression_editor_tools::{DemoSink, VelocitySink};
 
 use crate::curve_editor::CurveEditor;
 use crate::drag::{BarEditor, RangeSlider, Slider};

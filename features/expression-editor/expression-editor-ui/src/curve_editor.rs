@@ -17,7 +17,7 @@
 //! rather than continuous.
 
 use dioxus::prelude::*;
-use midi_tools::velocity::{Curve, MAX_VELOCITY, Note, Point};
+use expression_editor_tools::velocity::{Curve, MAX_VELOCITY, Note, Point};
 
 /// Height of the editor box in pixels.
 const HEIGHT: f64 = 132.0;
@@ -70,9 +70,13 @@ pub fn CurveEditor(
     };
 
     let measure = move || async move {
-        let el = mounted();
-        if let Some(el) = el
-            && let Ok(r) = el.get_client_rect().await
+        // Folded into one Option rather than a let-chain: this crate is
+        // edition 2021, pinned to match the nice-plug plugin stack.
+        let r = match mounted() {
+            Some(el) => el.get_client_rect().await.ok(),
+            None => None,
+        };
+        if let Some(r) = r
         {
             rect.set((r.origin.x, r.origin.y, r.size.width, r.size.height));
         }
