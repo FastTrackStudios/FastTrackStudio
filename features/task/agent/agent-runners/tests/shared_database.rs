@@ -65,27 +65,59 @@ async fn re_running_the_migrator_is_idempotent() {
     assert_eq!(store.list_backends().await.unwrap().len(), 1);
 }
 
-/// The hazard itself, pinned so the behaviour is documented rather
-/// than rediscovered: run the queue's migrator first and the
-/// registry's second over one database, and the registry's table is
-/// never created — **and no error is raised**. That silence is what
-/// makes this worth a test.
+/// Two migrators must not share a database — pinned so the reason is
+/// documented rather than rediscovered.
 ///
-/// If a future SeaORM starts erroring here instead, this test fails
-/// and the comment above the server wiring can be relaxed.
+/// SeaORM keeps one `seaql_migrations` table per database, and a
+/// migrator refuses to run against applied migrations it does not
+/// own. Sharing a file therefore breaks at boot.
+///
+/// **The trap that cost an afternoon:** `#[derive(DeriveMigrationName)]`
+/// names a migration after the *file* it lives in, not the module. In
+/// a file called `migrations.rs` every migration is therefore named
+/// `migrations` — so two crates' migrations collide on one name, and
+/// two migrations in one crate collide with each other. Both
+/// migrators here declare their names explicitly for that reason;
+/// the error text below still shows the old derived name arriving
+/// from `agent-tasks`, which has not been converted.
 #[tokio::test]
-async fn two_migrators_over_one_database_silently_skip_the_second() {
+async fn two_migrators_over_one_database_refuse_to_run() {
     let conn = Database::connect("sqlite::memory:").await.unwrap();
 
     agent_tasks::Migrator::up(&conn, None).await.unwrap();
     let second = agent_runners::Migrator::up(&conn, None).await;
 
+    let err = second.expect_err("sharing a database must not quietly succeed");
     assert!(
-        second.is_ok(),
-        "the failure mode is silence, not an error: {second:?}"
+        err.to_string().contains("has been applied"),
+        "expected a complaint about foreign applied migrations, got: {err}"
     );
     assert!(
         !has_table(&conn, "agent_backends").await,
-        "if this now passes, SeaORM changed and the registry could share a file again"
+        "nothing of ours should have been created"
+    );
+}
+
+/// Every migration in one migrator gets its own name.
+///
+/// Directly guards the collision above: two migrations sharing a
+/// name fail with a UNIQUE violation on `seaql_migrations.version`,
+/// which is what happens if someone adds a third migration with
+/// `DeriveMigrationName` in this file.
+#[tokio::test]
+async fn each_migration_has_a_distinct_name() {
+    let migrations = agent_runners::Migrator::migrations();
+    let names: Vec<&str> = migrations.iter().map(|m| m.name()).collect();
+    let mut unique = names.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        names.len(),
+        unique.len(),
+        "duplicate migration names: {names:?}"
+    );
+    assert!(
+        !names.contains(&"migrations"),
+        "`migrations` is the file-derived name — declare names explicitly: {names:?}"
     );
 }

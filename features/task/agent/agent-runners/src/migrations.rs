@@ -12,15 +12,23 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20260810_000001_create_agent_backends::Migration)]
+        vec![
+            Box::new(m20260810_000001_create_agent_backends::Migration),
+            Box::new(m20260810_000002_create_agent_runs::Migration),
+        ]
     }
 }
 
 mod m20260810_000001_create_agent_backends {
     use sea_orm_migration::prelude::*;
 
-    #[derive(DeriveMigrationName)]
     pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260810_000001_create_agent_backends"
+        }
+    }
 
     #[derive(DeriveIden)]
     enum AgentBackends {
@@ -70,6 +78,92 @@ mod m20260810_000001_create_agent_backends {
                         .if_exists()
                         .to_owned(),
                 )
+                .await
+        }
+    }
+}
+
+mod m20260810_000002_create_agent_runs {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260810_000002_create_agent_runs"
+        }
+    }
+
+    #[derive(DeriveIden)]
+    enum AgentRuns {
+        Table,
+        Id,
+        Ticket,
+        Runner,
+        Parent,
+        Branch,
+        WorktreePath,
+        SessionPath,
+        Status,
+        ExitCode,
+        StartedAt,
+        HeartbeatAt,
+        FinishedAt,
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .create_table(
+                    Table::create()
+                        .table(AgentRuns::Table)
+                        .if_not_exists()
+                        .col(
+                            ColumnDef::new(AgentRuns::Id)
+                                .string()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .col(ColumnDef::new(AgentRuns::Ticket).string().not_null())
+                        .col(ColumnDef::new(AgentRuns::Runner).string().not_null())
+                        .col(ColumnDef::new(AgentRuns::Parent).string().not_null())
+                        .col(ColumnDef::new(AgentRuns::Branch).string().not_null())
+                        .col(ColumnDef::new(AgentRuns::WorktreePath).text().not_null())
+                        .col(ColumnDef::new(AgentRuns::SessionPath).text().not_null())
+                        .col(ColumnDef::new(AgentRuns::Status).string().not_null())
+                        .col(ColumnDef::new(AgentRuns::ExitCode).string().not_null())
+                        .col(ColumnDef::new(AgentRuns::StartedAt).string().not_null())
+                        .col(ColumnDef::new(AgentRuns::HeartbeatAt).string().not_null())
+                        .col(ColumnDef::new(AgentRuns::FinishedAt).string().not_null())
+                        .to_owned(),
+                )
+                .await?;
+
+            // The hot reads: a ticket's attempt history, what a
+            // runner is doing, and the stale sweep.
+            for (name, col) in [
+                ("idx_agent_runs_ticket", AgentRuns::Ticket),
+                ("idx_agent_runs_runner", AgentRuns::Runner),
+                ("idx_agent_runs_status", AgentRuns::Status),
+            ] {
+                manager
+                    .create_index(
+                        Index::create()
+                            .if_not_exists()
+                            .name(name)
+                            .table(AgentRuns::Table)
+                            .col(col)
+                            .to_owned(),
+                    )
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .drop_table(Table::drop().table(AgentRuns::Table).if_exists().to_owned())
                 .await
         }
     }

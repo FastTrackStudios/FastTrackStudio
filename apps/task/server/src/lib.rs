@@ -204,6 +204,8 @@ pub struct OrgAppState {
     /// The runner registry — who can execute agent work, what they
     /// can do, and whether they are still alive.
     pub agent_runners: agent_runners::Store,
+    /// Run records — every attempt at every ticket.
+    pub agent_runs: agent_runners::RunStore,
     /// Codex agent backend — in-process session registry + turn
     /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
     /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
@@ -787,6 +789,8 @@ pub(crate) async fn build_org_state(
                 Box::pin(async move { agent_runners::Migrator::up(&db, None).await.map(|()| db) })
             })
             .await?;
+        #[cfg(feature = "plugin-agent")]
+        let agent_runs = agent_runners::RunStore::new(agent_runners_conn.clone());
         #[cfg(feature = "plugin-agent")]
         let agent_runners = agent_runners::Store::new(agent_runners_conn);
 
@@ -1394,6 +1398,8 @@ pub(crate) async fn build_org_state(
             agent_tasks,
             #[cfg(feature = "plugin-agent")]
             agent_runners,
+            #[cfg(feature = "plugin-agent")]
+            agent_runs,
             #[cfg(feature = "plugin-agent")]
             agent_codex,
             #[cfg(feature = "plugin-agent")]
@@ -2572,6 +2578,12 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 agent_proto::service::backends::backends_rpc_service_descriptor(),
                 agent_proto::service::backends::serve(org.agent_runners.clone()),
+            )
+            // Run records — every attempt at every ticket, so retry
+            // history and leftover worktrees are both answerable.
+            .with(
+                agent_proto::service::runs::runs_rpc_service_descriptor(),
+                agent_proto::service::runs::serve(org.agent_runs.clone()),
             );
     }
 

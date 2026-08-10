@@ -11,6 +11,7 @@
 use agent_proto::backend::{AgentBackend, BackendKind};
 use agent_proto::runner::{RunnerProfile, RunnerScope, parse_capabilities};
 use agent_proto::service::backends::BackendsClient;
+use agent_proto::service::runs::RunsClient;
 use chrono::Utc;
 use clap::Subcommand;
 
@@ -172,6 +173,29 @@ pub enum RunnerCmd {
         /// Stop after this many tickets. `0` = run until stopped.
         #[arg(long, default_value_t = 0)]
         max_tickets: u32,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Attempt history — every run, or one ticket's.
+    ///
+    /// "This has died three times on the same verify command" is the
+    /// most useful thing this system can tell you, and it is only
+    /// answerable because failed attempts are kept.
+    Runs {
+        /// Only this ticket's attempts.
+        #[arg(long)]
+        ticket: Option<String>,
+        /// Only this runner's.
+        #[arg(long)]
+        runner: Option<String>,
+        /// Cap the list.
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        /// First move lapsed in-progress runs to `stale`.
+        #[arg(long)]
+        sweep: bool,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -461,6 +485,58 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
             }
         }
 
+        RunnerCmd::Runs {
+            ticket,
+            runner,
+            limit,
+            sweep,
+            org,
+            server,
+        } => {
+            let (_slug, url) = ctx(org, server)?;
+            let runs: RunsClient = establish_for_url(&url).await?;
+
+            if sweep {
+                let n = runs.sweep_stale_runs().await?;
+                println!("swept {n} run(s) to stale");
+            }
+
+            let ticket_id = match &ticket {
+                None => None,
+                Some(t) => {
+                    let client = crate::task_cmd::connect_task_client(&url).await?;
+                    Some(crate::issue::resolve_issue_id(&client, t).await?.id)
+                }
+            };
+
+            let list = runs
+                .list_runs(agent_proto::run::RunFilter {
+                    ticket: ticket_id,
+                    runner: runner.unwrap_or_default(),
+                    parent: None,
+                    status: None,
+                    limit,
+                })
+                .await?;
+
+            if list.is_empty() {
+                println!("(no runs)");
+                return Ok(());
+            }
+            for r in list {
+                let code = r
+                    .exit_code
+                    .map_or_else(|| "-".to_string(), |c| c.to_string());
+                println!(
+                    "{:<13} {}  ticket {}  exit {code:<4} {}",
+                    r.status.as_str(),
+                    crate::shared::short_uuid(&r.id),
+                    crate::shared::short_uuid(&r.ticket),
+                    r.branch
+                );
+            }
+        }
+
         RunnerCmd::Unroutable { org, server } => {
             let (slug, url) = ctx(org, server)?;
             let backends: BackendsClient = establish_for_url(&url).await?;
@@ -539,7 +615,13 @@ async fn release_claim(
     client: &task::TaskServiceClient,
     ticket: &task::TaskInfo,
 ) -> eyre::Result<()> {
-    let mut t = ticket.clone();
+    // Re-fetch rather than reusing the copy read before the claim:
+    // that one predates the assignee we are trying to remove, and
+    // writing it back is a no-op the caller cannot see.
+    let mut t = client
+        .get(ticket.id)
+        .await
+        .map_err(|e| eyre::eyre!("re-read ticket: {e:?}"))?;
     if let Some(w) = t.workflow.as_mut() {
         w.assignees.0.clear();
     }
@@ -547,6 +629,23 @@ async fn release_claim(
         .update(t)
         .await
         .map_err(|e| eyre::eyre!("release claim: {e:?}"))?;
+
+    // Verify: a claim that silently fails to release turns one bad
+    // ticket into a runner that can never take it again.
+    let after = client
+        .get(ticket.id)
+        .await
+        .map_err(|e| eyre::eyre!("verify release: {e:?}"))?;
+    let still_held = after
+        .workflow
+        .as_ref()
+        .is_some_and(|w| !w.assignees.0.is_empty());
+    if still_held {
+        return Err(eyre::eyre!(
+            "claim on {} did not release — it would never be retried",
+            crate::shared::short_uuid(&ticket.id)
+        ));
+    }
     Ok(())
 }
 
@@ -682,6 +781,21 @@ async fn work_one(
     println!("worktree {}", wt.path.display());
     println!("branch   {}", wt.branch);
 
+    // Report the attempt now that the paths exist. The server learns
+    // them here, after the fact — it never handed them to us.
+    let runs: RunsClient = establish_for_url(&job.url).await?;
+    let run = runs
+        .start_run(agent_proto::run::StartRun {
+            ticket: chosen.id,
+            runner: job.runner.clone(),
+            parent: None,
+            branch: wt.branch.clone(),
+            worktree_path: wt.path.display().to_string(),
+            session_path: String::new(),
+        })
+        .await?;
+    println!("run      {}", crate::shared::short_uuid(&run.id));
+
     if let Some(cmd) = &job.agent_cmd {
         let prompt = format!("{}\n\n{}", chosen.title, chosen.details);
         let status = run_agent(cmd, &wt.path, &chosen.id.to_string(), &chosen.title, &prompt)?;
@@ -699,8 +813,16 @@ async fn work_one(
 
     if !verdict.passed {
         // Leave the worktree for inspection and release the claim so
-        // another attempt can happen.
+        // another attempt can happen. `worktree_kept` is what makes
+        // the run `needs-cleanup` rather than merely `failed`.
         println!("{}", verdict.tail.trim_end());
+        runs.finish_run(agent_proto::run::FinishRun {
+            run: run.id,
+            passed: false,
+            exit_code: verdict.code,
+            worktree_kept: true,
+        })
+        .await?;
         release_claim(&client, &chosen).await?;
         println!("released {short}; worktree kept at {}", wt.path.display());
         return Ok(Outcome::Worked);
@@ -711,6 +833,14 @@ async fn work_one(
         Some(sha) => println!("commit   {sha}"),
         None => println!("commit   (nothing to commit)"),
     }
+
+    runs.finish_run(agent_proto::run::FinishRun {
+        run: run.id,
+        passed: true,
+        exit_code: verdict.code,
+        worktree_kept: true,
+    })
+    .await?;
 
     mark_needs_review(&client, &chosen).await?;
     println!("{short} → needs-review on {}", wt.branch);

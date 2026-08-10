@@ -281,6 +281,16 @@ table!(AGENT_ROUTINES, "agent-routines", "agent/routines/**", [
 // `heartbeat_backend` is a write rather than a read because it is the
 // liveness signal routing depends on — a caller who could forge it
 // could keep a dead machine in the routing pool.
+// Run records. Reads are ordinary; writes are the runner reporting
+// its own progress, which is a member action, not an admin one — a
+// runner that cannot say what it did is useless.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUNS, "agent-runs", "agent/runs/**", [
+    rd "get_run", rd "list_runs",
+    wr "start_run", wr "beat_run", wr "finish_run",
+    wr "archive_run", wr "sweep_stale_runs",
+]);
+
 #[cfg(feature = "plugin-agent")]
 table!(AGENT_BACKENDS, "agent-backends", "agent/runners/**", [
     rd "list_backends", rd "backend_health", rd "backends_by_kind",
@@ -702,6 +712,11 @@ pub fn mounts() -> Vec<Mount> {
             "agent",
             agent_proto::service::backends::backends_rpc_service_descriptor(),
             AGENT_BACKENDS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::runs::runs_rpc_service_descriptor(),
+            AGENT_RUNS,
         ),
     ]);
     v.extend([

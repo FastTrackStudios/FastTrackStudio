@@ -82,6 +82,7 @@ pub mod project;
 pub mod question;
 pub mod reasoning;
 pub mod routing;
+pub mod run;
 pub mod runner;
 pub mod service;
 pub mod session;
@@ -90,6 +91,7 @@ pub mod tool;
 
 pub use error::AgentError;
 pub use event::{AgentEvent, AgentEventEnvelope};
+pub use run::{FinishRun, Run, RunFilter, RunStatus, StartRun};
 pub use routing::{Refusal, TicketRef, malformed, requirements, takeable, unroutable};
 pub use runner::{
     Capability, CapabilityError, RunnerProfile, RunnerScope, TicketRequirements, Unroutable,
