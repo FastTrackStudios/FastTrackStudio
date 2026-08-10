@@ -101,10 +101,18 @@ pub fn is_filed(t: &TaskInfo) -> bool {
     anchor(t).is_some() || !t.contexts.is_empty()
 }
 
-/// The inverse of [`is_filed`], named for what the caller does with
-/// it: route the task to triage instead of the working list.
+/// The inverse of [`is_filed`], named for the condition rather than
+/// for one caller's reaction to it.
+///
+/// Deliberately *not* called `needs_triage`: the agent lane has a
+/// separate, explicit notion of triage — see
+/// [`crate::agent_lane`], where "untriaged" means an issue carries
+/// none of the four triage labels. That is a statement about whether
+/// an agent has evaluated the request. This one is a statement about
+/// whether the task hangs off anything. Two different questions; one
+/// word between them was unresolvable in the interface.
 #[must_use]
-pub fn needs_triage(t: &TaskInfo) -> bool {
+pub fn is_unfiled(t: &TaskInfo) -> bool {
     !is_filed(t)
 }
 
@@ -118,10 +126,10 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_title_needs_triage() {
+    fn a_bare_title_is_unfiled() {
         let t = bare("Telemetry + Observability: Sentry");
         assert_eq!(anchor(&t), None);
-        assert!(needs_triage(&t));
+        assert!(is_unfiled(&t));
     }
 
     #[test]
@@ -166,7 +174,7 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(anchor(&t), Some(Anchor::Workstream(ws)));
-        assert!(!needs_triage(&t));
+        assert!(!is_unfiled(&t));
     }
 
     #[test]

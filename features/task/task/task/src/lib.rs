@@ -53,7 +53,13 @@ pub mod service;
 
 /// Filing — what a task belongs to (see [`task_proto::filing`]).
 pub use task_proto::filing;
-pub use task_proto::filing::{Anchor, anchor, is_filed, needs_triage};
+pub use task_proto::filing::{Anchor, anchor, is_filed, is_unfiled};
+
+/// The agent lane's triage vocabulary (see [`task_proto::agent_lane`]).
+pub use task_proto::agent_lane;
+pub use task_proto::agent_lane::{
+    TriageLabel, has_triage_label, is_untriaged, triage_label, triage_labels,
+};
 
 // FS-dependent modules (vault::Vault, std::fs walks).
 pub mod backend;

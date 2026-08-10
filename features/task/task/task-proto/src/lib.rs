@@ -36,6 +36,7 @@
 //! disk-backed `TaskBackend`. Same split as `milestone` /
 //! `milestone-proto`.
 
+pub mod agent_lane;
 pub mod capture;
 pub mod filing;
 pub mod model;
@@ -43,8 +44,11 @@ pub mod relations;
 pub mod relevance;
 pub mod service;
 
+pub use agent_lane::{
+    TriageLabel, has_triage_label, is_untriaged, triage_label, triage_labels,
+};
 pub use capture::{capture, infer_project_id};
-pub use filing::{Anchor, anchor, is_filed, needs_triage};
+pub use filing::{Anchor, anchor, is_filed, is_unfiled};
 pub use model::{
     Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry, close_open_time_entries,
     is_due_on_or_before, status_is_open, status_is_terminal, track_status_transition,
