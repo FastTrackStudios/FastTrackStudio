@@ -35,12 +35,15 @@ pub async fn dispatch() -> eyre::Result<bool> {
     match args.get(1).map(String::as_str) {
         Some("migrate-email") => migrate_email(&args[2..]).await.map(|()| true),
         Some("email-history") => email_history(&args[2..]).await.map(|()| true),
+        Some("set-password") => set_password(&args[2..]).await.map(|()| true),
         other => {
             eprintln!(
                 "usage:\n  \
                  task-server admin migrate-email --org <slug> --from <email> --to <email> \\\n    \
                  [--reason <text>] [--dry-run]\n  \
-                 task-server admin email-history --org <slug> --email <address>\n"
+                 task-server admin email-history --org <slug> --email <address>\n  \
+                 task-server admin set-password --org <slug> --email <address>\n    \
+                 (reads the new password from STDIN)\n"
             );
             bail!("unknown admin subcommand: {}", other.unwrap_or("(none)"));
         }
@@ -127,6 +130,51 @@ async fn migrate_email(args: &[String]) -> eyre::Result<()> {
     if moved.id != user.id {
         bail!("user id changed — this should be impossible; investigate before continuing");
     }
+    Ok(())
+}
+
+/// Set an account's password without knowing the old one.
+///
+/// The operator counterpart to `AuthService::change_password`, which is
+/// self-service and requires the current password. This one exists for
+/// the case that flow cannot serve: the owner cannot sign in, so there
+/// is no session and no known credential.
+///
+/// The new password is read from STDIN, never from an argument.
+/// Arguments are visible to every user on the box via `ps` for the life
+/// of the process, and land in shell history; stdin does neither. That
+/// also means whoever runs this supplies the secret directly — it is not
+/// something the command can be handed by a third party.
+async fn set_password(args: &[String]) -> eyre::Result<()> {
+    use std::io::Read as _;
+
+    let (Some(slug), Some(email)) = (flag(args, "--org"), flag(args, "--email")) else {
+        bail!("--org and --email are required");
+    };
+    let mut new_password = String::new();
+    std::io::stdin()
+        .read_to_string(&mut new_password)
+        .wrap_err("read the new password from stdin")?;
+    let new_password = new_password.trim_end_matches(['\n', '\r']).to_owned();
+    if new_password.is_empty() {
+        bail!("no password on stdin — pipe it in, e.g. `kubectl exec -i … -- task-server admin set-password …`");
+    }
+
+    let auth = open_org_auth(&slug).await?;
+    let user = auth
+        .auth
+        .find_user_by_email(&email)
+        .await
+        .map_err(|e| eyre::eyre!("look up `{email}`: {e:?}"))?
+        .ok_or_else(|| eyre::eyre!("no account with email `{email}` in org `{slug}`"))?;
+
+    auth.auth
+        .set_user_password_local_trusted(user.id, &new_password)
+        .await
+        .map_err(|e| eyre::eyre!("set password for `{email}` in `{slug}`: {e:?}"))?;
+
+    println!("{slug}: password set for {} ({email})", user.id);
+    println!("  existing sessions are NOT revoked — sign out elsewhere if that matters");
     Ok(())
 }
 

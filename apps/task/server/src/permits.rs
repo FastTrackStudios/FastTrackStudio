@@ -159,6 +159,11 @@ const AUTH: ServicePermits = ServicePermits {
         // Reading the trail exposes former addresses of real people;
         // members only, and audited so the read itself is on the record.
         MethodPermit::new("list_email_history", Action::READ, "auth/migrate").audited(),
+        // Self-service, but NOT public: you need a session to change your
+        // own password, so gating costs nothing and keeps the anonymous
+        // surface as small as the sign-in path requires. Audited — a
+        // credential change is worth a line even when allowed.
+        MethodPermit::new("change_password", Action::WRITE, "auth/self").audited(),
     ],
 };
 

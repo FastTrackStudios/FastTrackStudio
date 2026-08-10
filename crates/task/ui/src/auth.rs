@@ -917,6 +917,101 @@ pub fn LoginForm() -> Element {
     }
 }
 
+/// Change your own password.
+///
+/// Self-service: the server takes the CURRENT password as well as the
+/// session, so a stolen session alone can't take an account over, and
+/// knowing the password alone can't either. Strength and known-breach
+/// checks live server-side, so their rejections surface here as the
+/// error text rather than being re-implemented (and drifting) client-side.
+#[component]
+pub fn ChangePasswordForm() -> Element {
+    let ctx = use_context::<AuthCtx>();
+    let active = ctx.active;
+    let current = use_signal(String::new);
+    let next = use_signal(String::new);
+    let confirm = use_signal(String::new);
+    let mut status = use_signal(|| None::<Result<String, String>>);
+    let mut busy = use_signal(|| false);
+
+    let submit = move |_| {
+        let (cur, new, conf) = (current.peek().clone(), next.peek().clone(), confirm.peek().clone());
+        let Some(account) = active.peek().clone() else {
+            status.set(Some(Err("sign in first".to_owned())));
+            return;
+        };
+        if cur.is_empty() || new.is_empty() {
+            status.set(Some(Err("fill in both passwords".to_owned())));
+            return;
+        }
+        // Caught here rather than server-side: a typo in the confirm box
+        // isn't the server's business, and a round trip to say so is a
+        // worse experience than an immediate answer.
+        if new != conf {
+            status.set(Some(Err("the new passwords don't match".to_owned())));
+            return;
+        }
+        busy.set(true);
+        status.set(None);
+        spawn(async move {
+            let slug = crate::orgs::home_slug(&use_context::<Signal<Vec<OrgMeta>>>().peek());
+            let outcome = async {
+                let client = establish_for::<AuthServiceClient>(&slug).await?;
+                client
+                    .change_password(auth_proto::service::ChangePasswordRequest {
+                        session_token: account.token.clone(),
+                        current_password: cur,
+                        new_password: new,
+                    })
+                    .await
+                    .map_err(|e| format!("{e}"))
+            }
+            .await;
+            busy.set(false);
+            status.set(Some(match outcome {
+                Ok(()) => Ok("Password changed.".to_owned()),
+                Err(e) => Err(e),
+            }));
+        });
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2",
+            Input {
+                value: current,
+                input_type: "password".to_string(),
+                placeholder: "Current password",
+                on_change: move |_| status.set(None),
+            }
+            Input {
+                value: next,
+                input_type: "password".to_string(),
+                placeholder: "New password",
+                on_change: move |_| status.set(None),
+            }
+            Input {
+                value: confirm,
+                input_type: "password".to_string(),
+                placeholder: "Confirm new password",
+                on_change: move |_| status.set(None),
+            }
+            Button {
+                variant: ButtonVariant::Primary,
+                size: ButtonSize::Medium,
+                loading: busy(),
+                on_click: submit,
+                class: "w-full",
+                "Change password"
+            }
+            match status.read().as_ref() {
+                Some(Ok(msg)) => rsx! { div { class: "px-1 text-xs text-muted-foreground", "{msg}" } },
+                Some(Err(msg)) => rsx! { div { class: "px-1 text-xs text-destructive", "{msg}" } },
+                None => rsx! {},
+            }
+        }
+    }
+}
+
 /// Account & status content for the mobile bottom sheet — the same
 /// roster / status / sign-out actions as the desktop [`AccountSwitcher`]
 /// popover (both ride [`AuthCtx`] + [`PresenceLocal`]), restyled as
@@ -1239,9 +1334,17 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
                 }
                 section { class: "flex flex-col gap-2",
                     h3 { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
-                        "Sign in"
+                        if active.read().is_some() { "Password" } else { "Sign in" }
                     }
-                    LoginForm {}
+                    // Signed in, the useful action in this slot is
+                    // changing your password; signed out it's signing in.
+                    // Same place, because that's where someone looks for
+                    // either.
+                    if active.read().is_some() {
+                        ChangePasswordForm {}
+                    } else {
+                        LoginForm {}
+                    }
                 }
             }
         }
