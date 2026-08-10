@@ -51,6 +51,10 @@ pub mod relations;
 pub mod relevance;
 pub mod service;
 
+/// Filing — what a task belongs to (see [`task_proto::filing`]).
+pub use task_proto::filing;
+pub use task_proto::filing::{Anchor, anchor, is_filed, needs_triage};
+
 // FS-dependent modules (vault::Vault, std::fs walks).
 pub mod backend;
 pub mod scan;

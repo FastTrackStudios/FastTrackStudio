@@ -478,9 +478,16 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 }
             });
             if let Some(ctx) = &relevance_ctx {
-                rows.retain(|t| task::status_is_open(&t.status) && task::is_relevant(t, ctx));
-                // One next action per project — task-dumping into a
-                // project can't inflate the "right now" list.
+                // Unfiled tasks are triage, not "right now" — same
+                // exclusion the server's `query` and the web board
+                // apply, so `--relevant` means one thing everywhere.
+                rows.retain(|t| {
+                    task::status_is_open(&t.status)
+                        && task::is_filed(t)
+                        && task::is_relevant(t, ctx)
+                });
+                // One next action per anchor (project, parent epic,
+                // workstream) — task-dumping can't inflate the list.
                 task::condense_next_per_project(&mut rows);
             }
             rows.sort_by(|a, b| {

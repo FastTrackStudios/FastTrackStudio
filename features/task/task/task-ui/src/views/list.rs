@@ -11,16 +11,21 @@ use task_proto::{Priority, Status};
 use crate::display::TaskDisplay;
 use crate::{TaskInfo, TaskMutation};
 
-use super::row::TaskRow;
+use super::row::{AnchorChip, TaskRow};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TaskListProps {
     pub tasks: Vec<TaskInfo>,
-    /// Per-project condensation leftovers: `(representative task id,
-    /// the project's other tasks)`. The representative's row grows a
-    /// "N more in {project}" expander that reveals them inline.
+    /// Per-anchor condensation leftovers: `(representative task id,
+    /// the group's other tasks)`. The representative's row grows a
+    /// "N more in {group}" expander that reveals them inline.
     #[props(default)]
     pub more: Vec<(Uuid, Vec<TaskInfo>)>,
+    /// `(task id, chip)` for rows whose belonging isn't a project —
+    /// subtasks, workstream members, milestone work. Resolved by the
+    /// page layer, which holds the stores those names live in.
+    #[props(default)]
+    pub anchors: Vec<(Uuid, AnchorChip)>,
     pub on_toggle: EventHandler<Uuid>,
     pub on_open: EventHandler<Uuid>,
     pub on_event: EventHandler<TaskMutation>,
@@ -111,8 +116,10 @@ pub fn TaskList(props: TaskListProps) -> Element {
         .partition(|(g, _)| matches!(g, Group::Overdue | Group::Today | Group::NoDate));
 
     let more = props.more.clone();
+    let anchors = props.anchors.clone();
     let lane = move |groups: Vec<(Group, Vec<TaskInfo>)>| {
         let more = more.clone();
+        let anchors = anchors.clone();
         rsx! {
             div { class: "flex min-w-0 flex-col gap-3",
                 for (group, items) in groups.into_iter() {
@@ -123,7 +130,7 @@ pub fn TaskList(props: TaskListProps) -> Element {
                         // The Done section starts collapsed —
                         // typical Things 3 / Todoist behaviour.
                         initially_open: group != Group::Done,
-                        TaskList_Children { items, more: more.clone(), on_toggle: props.on_toggle, on_open: props.on_open, on_event: props.on_event }
+                        TaskList_Children { items, more: more.clone(), anchors: anchors.clone(), on_toggle: props.on_toggle, on_open: props.on_open, on_event: props.on_event }
                     }
                 }
             }
@@ -147,6 +154,8 @@ struct TaskListChildrenProps {
     items: Vec<TaskInfo>,
     #[props(default)]
     more: Vec<(Uuid, Vec<TaskInfo>)>,
+    #[props(default)]
+    anchors: Vec<(Uuid, AnchorChip)>,
     on_toggle: EventHandler<Uuid>,
     on_open: EventHandler<Uuid>,
     on_event: EventHandler<TaskMutation>,
@@ -168,12 +177,23 @@ fn TaskList_Children(props: TaskListChildrenProps) -> Element {
                         .find(|(id, _)| *id == t.id)
                         .map(|(_, rest)| rest.clone())
                         .filter(|rest| !rest.is_empty());
-                    let project = t
+                    let anchor = props
+                        .anchors
+                        .iter()
+                        .find(|(id, _)| *id == t.id)
+                        .map(|(_, chip)| chip.clone());
+                    // What to call the condensed group in the
+                    // expander. The project name when there is one,
+                    // otherwise whatever the row belongs to — a
+                    // parent epic reads "6 more in Auth hardening",
+                    // not "6 more in this project".
+                    let group_name = t
                         .projects
                         .0
                         .first()
                         .map(|p| super::row::strip_wikilink(p))
-                        .unwrap_or_else(|| "this project".to_owned());
+                        .or_else(|| anchor.as_ref().map(|a| a.label.clone()))
+                        .unwrap_or_else(|| "this group".to_owned());
                     rsx! {
                         div {
                             key: "{t.id}",
@@ -182,14 +202,16 @@ fn TaskList_Children(props: TaskListChildrenProps) -> Element {
                             class: if depth > 0 { "ml-2.5 border-l border-border/60 pl-2.5" } else { "" },
                             TaskRow {
                                 task: t,
+                                anchor,
                                 on_toggle: props.on_toggle,
                                 on_open: props.on_open,
                                 on_event: props.on_event,
                             }
                             if let Some(extra) = extra {
                                 ProjectMore {
-                                    project,
+                                    project: group_name,
                                     extra,
+                                    anchors: props.anchors.clone(),
                                     on_toggle: props.on_toggle,
                                     on_open: props.on_open,
                                     on_event: props.on_event,
@@ -203,13 +225,14 @@ fn TaskList_Children(props: TaskListChildrenProps) -> Element {
     }
 }
 
-/// The condensed list's expander: "N more in {project}" under a
-/// project's representative task, revealing the rest of that
-/// project's queue inline on the same hairline rail as subtasks.
+/// The condensed list's expander: "N more in {group}" under a
+/// group's representative task, revealing the rest of that anchor's
+/// queue inline on the same hairline rail as subtasks.
 #[component]
 fn ProjectMore(
     project: String,
     extra: Vec<TaskInfo>,
+    #[props(default)] anchors: Vec<(Uuid, AnchorChip)>,
     on_toggle: EventHandler<Uuid>,
     on_open: EventHandler<Uuid>,
     on_event: EventHandler<TaskMutation>,
@@ -237,6 +260,7 @@ fn ProjectMore(
                     for t in extra.into_iter() {
                         TaskRow {
                             key: "{t.id}",
+                            anchor: anchors.iter().find(|(id, _)| *id == t.id).map(|(_, c)| c.clone()),
                             task: t,
                             on_toggle,
                             on_open,

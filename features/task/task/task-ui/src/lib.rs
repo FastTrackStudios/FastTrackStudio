@@ -27,7 +27,7 @@ pub use store::{TaskState, apply};
 // keep the familiar `task_ui::{TaskInfo, Status, …}` paths.
 pub use task_proto::{Priority, Status, TaskInfo, TimeEntry};
 pub use views::{
-    CheckboxButton, ClaimState, LinkChips, LinkedTaskRef, QuickAdd, SessionEvent, SessionHistory,
-    SubtaskRow, SubtasksBoard, TaskDetailFull, TaskDetailFullProps, TasksApp, TasksAppProps,
-    TimeSection, WorkflowSection,
+    AnchorChip, CheckboxButton, ClaimState, LinkChips, LinkedTaskRef, QuickAdd, SessionEvent,
+    SessionHistory, SubtaskRow, SubtasksBoard, TaskDetailFull, TaskDetailFullProps, TasksApp,
+    TasksAppProps, TimeSection, TriageStrip, WorkflowSection,
 };
