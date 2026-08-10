@@ -14,7 +14,7 @@ use daw::rpc::TakeHandle;
 use daw::test::reaper_test;
 use daw_proto::midi::MidiNoteCreate;
 use daw_proto::primitives::{Duration, PositionInSeconds};
-use midi_tools::velocity::{CurvePreset, Dynamics, Note, Pattern, Pivot, Range, Session};
+use expression_editor_tools::velocity::{CurvePreset, Dynamics, Note, Pattern, Pivot, Range, Session};
 
 const PPQ: f64 = 960.0;
 

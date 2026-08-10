@@ -14,7 +14,7 @@ use daw::rpc::TakeHandle;
 use daw::test::reaper_test;
 use daw_proto::midi::MidiNoteCreate;
 use daw_proto::primitives::{Duration, PositionInSeconds};
-use midi_tools::arp::{Arp, ArpSession, DEFAULT_GAP_PPQ, Direction, PPQ, TimedNote, group_chords};
+use expression_editor_tools::arp::{Arp, ArpSession, DEFAULT_GAP_PPQ, Direction, PPQ, TimedNote, group_chords};
 
 /// Write a chord as simultaneous whole notes on a fresh track.
 async fn chord_take(

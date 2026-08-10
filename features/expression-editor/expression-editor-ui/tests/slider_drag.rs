@@ -17,7 +17,7 @@ fn LoneSlider() -> Element {
         div {
             "data-testid": "readout",
             style: "width:400px;",
-            midi_tools_ui::test_support::Slider {
+            expression_editor_ui::test_support::Slider {
                 testid: "s".to_string(),
                 value: value(),
                 min: 0.0,
