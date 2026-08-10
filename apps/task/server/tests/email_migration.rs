@@ -152,3 +152,58 @@ async fn migration_is_idempotent_and_refuses_collisions_on_real_sqlite() -> eyre
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn operator_verbs_manage_users_without_a_session() -> eyre::Result<()> {
+    // The operator path exists precisely for accounts nobody can sign in
+    // as, so none of this may require a session or an admin.
+    let (auth, _tmp) = store().await?;
+    let keep = seed(&auth, "keep@example.test").await?;
+    let drop = seed(&auth, "drop@example.test").await?;
+
+    let users = auth.auth.list_users_local_trusted().await.unwrap();
+    assert_eq!(users.len(), 2, "both seeded accounts should list");
+
+    // Reset a password with no old password and no admin.
+    auth.auth
+        .set_user_password_local_trusted(keep, "a-brand-new-correct-horse")
+        .await
+        .map_err(|e| eyre::eyre!("set password: {e:?}"))?;
+    auth.auth
+        .sign_in_email_password(architect_auth::SignInEmailPassword {
+            email: "keep@example.test".into(),
+            password: "a-brand-new-correct-horse".into(),
+            ip_address: None,
+            user_agent: None,
+        })
+        .await
+        .map_err(|e| eyre::eyre!("sign in with the reset password: {e:?}"))?;
+
+    // …and the OLD password must stop working, or a reset isn't a reset.
+    let old = auth
+        .auth
+        .sign_in_email_password(architect_auth::SignInEmailPassword {
+            email: "keep@example.test".into(),
+            password: "correct-horse-battery-staple".into(),
+            ip_address: None,
+            user_agent: None,
+        })
+        .await;
+    assert!(old.is_err(), "the superseded password must stop working");
+
+    // Delete removes it, and a second delete is an error rather than a
+    // silent success — "did that do anything?" is the operator's question.
+    auth.auth
+        .delete_user_local_trusted(drop)
+        .await
+        .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+    assert!(
+        auth.auth.delete_user_local_trusted(drop).await.is_err(),
+        "deleting an already-deleted account must report that, not succeed"
+    );
+    let after = auth.auth.list_users_local_trusted().await.unwrap();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].email.as_deref(), Some("keep@example.test"));
+
+    Ok(())
+}
