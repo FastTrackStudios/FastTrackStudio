@@ -21,6 +21,9 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# The registry shares a database with the agent-task queue in the
+# real server, so the migration tests exercise that exact pairing.
+agent-tasks = { workspace = true }
 
 [lints]
 workspace = true

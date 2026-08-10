@@ -277,6 +277,7 @@ name = "agent-runners"
 version = "0.1.0"
 dependencies = [
  "agent-proto",
+ "agent-tasks",
  "async-trait",
  "chrono",
  "sea-orm",

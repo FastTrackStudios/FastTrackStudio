@@ -769,18 +769,26 @@ pub(crate) async fn build_org_state(
         #[cfg(feature = "plugin-agent")]
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
 
-        // Runner registry. Shares the agent-tasks database — a
-        // runner registration is agent-queue-adjacent, and keeping
-        // them in one file means one backup and one restore for the
-        // whole agent lane.
+        // Runner registry. Its OWN sqlite file, like every other
+        // slice — two SeaORM migrators sharing one database share
+        // one `seaql_migrations` table, and the second one silently
+        // applies nothing. There is a regression test for that in
+        // `agent-runners`; do not co-locate this with agent-tasks.
         #[cfg(feature = "plugin-agent")]
-        let agent_runners = {
-            let conn = agent_tasks.conn().clone();
-            agent_runners::Migrator::up(&conn, None)
-                .await
-                .map_err(|e| eyre::eyre!("agent-runners migrate: {e}"))?;
-            agent_runners::Store::new(conn)
-        };
+        let agent_runners_url = std::env::var("TASK_SERVER_AGENT_RUNNERS_URL").unwrap_or_else(|_| {
+            format!(
+                "sqlite://{}?mode=rwc",
+                org_root.path().join("agent-runners.sqlite").display()
+            )
+        });
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners_conn =
+            open_sqlite_pool(scope, agent_runners_url, "agent-runners", |db| {
+                Box::pin(async move { agent_runners::Migrator::up(&db, None).await.map(|()| db) })
+            })
+            .await?;
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners = agent_runners::Store::new(agent_runners_conn);
 
         // Codex agent backend. In-process, in-memory session
         // registry + turn dispatch — hosts the `Sessions` +
