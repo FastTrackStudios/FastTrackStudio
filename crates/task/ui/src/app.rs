@@ -117,8 +117,8 @@ pub fn App() -> Element {
         async move {
             let client: identity_proto::IdentityServiceClient =
                 task_ui_core::vox_clients::establish_server(None).await?;
-            let token = task_ui_core::vox_session::bearer()
-                .ok_or_else(|| "not signed in".to_string())?;
+            let token =
+                task_ui_core::vox_session::bearer().ok_or_else(|| "not signed in".to_string())?;
             client
                 .list_links(token)
                 .await
@@ -134,12 +134,19 @@ pub fn App() -> Element {
                 .iter()
                 .filter_map(|l| l.token.clone().map(|t| (l.remote_slug.clone(), t)))
                 .collect();
+            let slugs: Vec<String> = map.keys().cloned().collect();
             if task_ui_core::vox_session::set_linked_tokens(map) {
                 // A socket presents its identity once, at establish, so
                 // connections opened under the old (single-token) view
                 // have to go before the new credentials can be used.
                 task_ui_core::vox_clients::drop_cached_connections();
             }
+            // Membership has to land ON the org list, not in a global:
+            // `org_list` is the Signal every consumer reads, so patching
+            // it here is what actually re-renders the switcher. A static
+            // holder would be invisible to Dioxus — the list would stay
+            // stale until something unrelated happened to re-render.
+            mark_linked_orgs(org_list, &slugs);
         }
     });
 
@@ -151,6 +158,12 @@ pub fn App() -> Element {
         Some(Ok(list)) => {
             if *org_list.peek() != *list {
                 org_list.set(list.clone());
+                // Discovery answers `member` for the ONE token it
+                // presented, so a fresh list forgets every linked org.
+                // Re-apply, or a re-discovery (a session change, a
+                // server switch) silently collapses the switcher back
+                // to a single org.
+                mark_linked_orgs(org_list, &task_ui_core::vox_session::linked_slugs());
             }
             if discovery_err.0.peek().is_some() {
                 discovery_err.0.set(None);
@@ -309,5 +322,36 @@ pub fn App() -> Element {
                 }
             }
         }
+    }
+}
+
+/// Mark every org we hold a locker credential for as one of ours.
+///
+/// Discovery can only answer `member` for the single token it presented,
+/// so on a server hosting several orgs it reports `false` for every org
+/// that didn't issue that token — including ones this account is a full
+/// member of. Holding a working credential is the same claim, so this
+/// folds the locker's answer into the list every consumer already reads.
+///
+/// Writing it onto the `org_list` Signal (rather than a static holder)
+/// is the part that matters: Dioxus re-renders on Signal writes, and a
+/// global would leave the switcher showing a stale single org until
+/// something unrelated forced a re-render.
+fn mark_linked_orgs(mut org_list: Signal<Vec<crate::orgs::OrgMeta>>, linked: &[String]) {
+    if linked.is_empty() {
+        return;
+    }
+    let mut list = org_list.peek().clone();
+    let mut changed = false;
+    for org in &mut list {
+        if linked.iter().any(|s| s == &org.slug) && org.member != Some(true) {
+            org.member = Some(true);
+            changed = true;
+        }
+    }
+    // Only write on a real change — an unconditional set would loop the
+    // effect that reads this list.
+    if changed {
+        org_list.set(list);
     }
 }
