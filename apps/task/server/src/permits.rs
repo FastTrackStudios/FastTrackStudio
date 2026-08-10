@@ -150,6 +150,15 @@ const AUTH: ServicePermits = ServicePermits {
         MethodPermit::new("whoami", Action::READ, "public/auth"),
         MethodPermit::new("sign_out", Action::READ, "public/auth"),
         MethodPermit::new("list_org_members", Action::READ, "public/auth"),
+        // Changing someone's login identifier is an operator action, so
+        // it sits outside `public/**` for the same reason signup does —
+        // an anonymous caller must never reach it. The impl also requires
+        // a session that validates against THIS org and records it as
+        // `changed_by`, so the gate and the flow agree.
+        MethodPermit::new("migrate_user_email", Action::WRITE, "auth/migrate").audited(),
+        // Reading the trail exposes former addresses of real people;
+        // members only, and audited so the read itself is on the record.
+        MethodPermit::new("list_email_history", Action::READ, "auth/migrate").audited(),
     ],
 };
 
