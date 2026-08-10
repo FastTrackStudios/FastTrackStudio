@@ -9635,6 +9635,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "utils",
  "vox",
  "vox-core",
  "vox-websocket",
@@ -29241,8 +29242,10 @@ name = "utils"
 version = "0.1.0"
 dependencies = [
  "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
  "serde",
  "uuid",
+ "web-sys",
 ]
 
 [[package]]
