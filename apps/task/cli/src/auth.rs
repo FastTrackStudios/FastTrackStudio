@@ -21,7 +21,13 @@ pub(crate) enum AuthCmd {
     Login {
         #[arg(long)]
         email: String,
-        #[arg(long)]
+        /// Reads `TASK_PASSWORD` when the flag is omitted.
+        ///
+        /// Prefer the env var in scripts: anything passed as an argument
+        /// is visible to `ps` for the lifetime of the process, and lands
+        /// in shell history. The env var is readable only by processes
+        /// that can already read this one's environment.
+        #[arg(long, env = "TASK_PASSWORD", hide_env_values = true)]
         password: String,
     },
     /// Create a new email/password user over the org's
@@ -68,6 +74,34 @@ pub(crate) enum AuthCmd {
     /// Useful when you need a user_id to pass to
     /// `timer reassign-user --to`.
     Users,
+    /// Move an account onto a different email, keeping its user id and
+    /// recording the change. The id is what tasks, timers and authorship
+    /// are keyed on, so this is a rename — NOT a new account.
+    ///
+    /// Identify the account by `--user <uuid>` or `--email <current>`.
+    /// Each org has its own auth store, so run this once per org
+    /// (`--org <slug>`).
+    MigrateEmail {
+        /// The account's user id in THIS org (`task auth users`).
+        #[arg(long, conflicts_with = "email")]
+        user: Option<uuid::Uuid>,
+        /// The account's current email, as an alternative to `--user`.
+        #[arg(long, conflicts_with = "user")]
+        email: Option<String>,
+        /// The address to move to.
+        #[arg(long)]
+        to: String,
+        /// Recorded on the history row — worth setting for bulk moves.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Show every email an account has held, oldest first.
+    EmailHistory {
+        #[arg(long, conflicts_with = "email")]
+        user: Option<uuid::Uuid>,
+        #[arg(long, conflicts_with = "user")]
+        email: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -505,8 +539,122 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
                 println!("{:<38}  {:<24}  {}", u.user_id, u.name, u.email);
             }
         }
+        AuthCmd::MigrateEmail {
+            user,
+            email,
+            to,
+            reason,
+        } => {
+            let (client, slug, token) = auth_client_with_session(org_override).await?;
+            let user_id = resolve_target_user(&client, &token, user, email.as_deref()).await?;
+            let moved = client
+                .migrate_user_email(architect_auth::proto::service::MigrateUserEmailRequest {
+                    session_token: token,
+                    user_id,
+                    new_email: to.clone(),
+                    reason,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("migrate email: {e}"))?;
+            println!(
+                "{slug}: {user_id} is now {}",
+                moved.email.as_deref().unwrap_or("(no email)")
+            );
+            // The id not changing IS the feature; say so, because the
+            // whole risk of an "email migration" is that it quietly
+            // created a new account and orphaned everything.
+            println!("  user id unchanged — tasks, timers and authorship stay attached");
+            println!("  email is now unverified (the new address hasn't been proven)");
+        }
+        AuthCmd::EmailHistory { user, email } => {
+            let (client, slug, token) = auth_client_with_session(org_override).await?;
+            let user_id = resolve_target_user(&client, &token, user, email.as_deref()).await?;
+            let history = client
+                .list_email_history(architect_auth::proto::service::EmailHistoryRequest {
+                    session_token: token,
+                    user_id,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("email history: {e}"))?;
+            if history.is_empty() {
+                println!("{slug}: {user_id} has never changed email");
+                return Ok(());
+            }
+            println!("{:<26}  {:<30}  {:<30}  by", "when", "from", "to");
+            for row in history {
+                println!(
+                    "{:<26}  {:<30}  {:<30}  {}",
+                    row.created_at.to_rfc3339(),
+                    row.previous_email.as_deref().unwrap_or("(none)"),
+                    row.new_email,
+                    row.changed_by
+                        .map_or_else(|| "self".to_owned(), |id| id.to_string()),
+                );
+                if let Some(reason) = row.reason {
+                    println!("{:<26}  ↳ {reason}", "");
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// An `AuthServiceClient` for the active org plus the stored session
+/// token. Both migration verbs need all three, and both fail early and
+/// clearly when there is no session — these are operator actions, and the
+/// server refuses them without one.
+async fn auth_client_with_session(
+    org_override: Option<&str>,
+) -> eyre::Result<(architect_auth::proto::AuthServiceClient, String, String)> {
+    use architect_auth::proto::AuthServiceClient;
+    let slug = match crate::resolve_active_org(org_override.map(str::to_owned)) {
+        Ok(s) => s,
+        Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
+    };
+    let url = resolve_org_vox_url(None, &slug);
+    let client: AuthServiceClient = establish_for_url(&url).await?;
+    let token = crate::session_store::load()?
+        .as_ref()
+        .and_then(|s| s.active_server().map(|e| e.token.clone()))
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "no session for this server — run `task auth login --org {slug}` first \
+                 (changing an account's email is an operator action and the server \
+                 refuses it without a session)"
+            )
+        })?;
+    Ok((client, slug, token))
+}
+
+/// Resolve `--user <uuid>` or `--email <current>` to a user id in THIS
+/// org. Emails are per-org, so the lookup has to go through this org's
+/// member list rather than assuming an id carries across servers.
+async fn resolve_target_user(
+    client: &architect_auth::proto::AuthServiceClient,
+    token: &str,
+    user: Option<uuid::Uuid>,
+    email: Option<&str>,
+) -> eyre::Result<uuid::Uuid> {
+    if let Some(id) = user {
+        return Ok(id);
+    }
+    let Some(email) = email else {
+        return Err(eyre::eyre!("pass --user <uuid> or --email <current address>"));
+    };
+    let members = client
+        .list_org_members(token.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("look up `{email}`: {e}"))?;
+    members
+        .iter()
+        .find(|m| m.email.eq_ignore_ascii_case(email))
+        .map(|m| m.user_id)
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "no account with email `{email}` in this org — `task auth users` lists them"
+            )
+        })
 }
 
 /// Resolve a `task auth use` reference against the stored session

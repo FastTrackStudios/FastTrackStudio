@@ -44,7 +44,11 @@ pub(crate) mod imp {
         // silent row so the setlist renders.
         let mut out = Vec::with_capacity(slugs.len());
         for slug in slugs {
-            let url = format!("/org/{org}/media/songs/{slug}/manifest.json");
+            // Mint the song's media grant first: everything below
+            // (manifest, chart, and later the stem `<audio>` srcs) is
+            // served by the signed media route.
+            let tok = crate::media_grant::suffix(org, slug).await;
+            let url = format!("/org/{org}/media/songs/{slug}/manifest.json{tok}");
             // Colocated `song` folder (song.md) is authoritative; the legacy
             // manifest.json is only a fallback for songs not yet migrated, so
             // migrated songs can drop it (#57 manifest retirement).
@@ -98,7 +102,11 @@ pub(crate) mod imp {
     ) -> Result<HtmlAudioElement, String> {
         let el = HtmlAudioElement::new().map_err(|e| format!("audio element: {e:?}"))?;
         el.set_preload("auto");
-        el.set_src(&format!("/org/{org}/media/songs/{slug}/{file}"));
+        // `set_src` is synchronous, so this reads the grant `load_tracks`
+        // already minted for this song. Empty until the server half is
+        // enforcing, which is exactly the pre-change URL.
+        let tok = crate::media_grant::cached_suffix(org, slug);
+        el.set_src(&format!("/org/{org}/media/songs/{slug}/{file}{tok}"));
         Ok(el)
     }
 

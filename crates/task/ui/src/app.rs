@@ -83,10 +83,29 @@ pub fn App() -> Element {
     // Hosted org list, discovered from the server's well-known endpoint
     // and published for the switcher + data fetchers.
     let mut org_list: Signal<Vec<OrgMeta>> = use_context_provider(|| Signal::new(Vec::new()));
-    // Re-discover orgs whenever the active server changes (reading the
-    // active id inside the resource closure registers the dependency).
+    // The session token, as a REACTIVE signal — provided here, before
+    // discovery, and written by `auth::publish_session_token`.
+    //
+    // Discovery is what tags which orgs are ours (#109 criterion 6), and
+    // it can only do that if it carries the token. But discovery runs
+    // FIRST: sign-in needs the home slug, so the org list has to resolve
+    // before auth can restore a session. That ordering means the boot
+    // fetch is necessarily anonymous, every org comes back `member: null`
+    // ("not asked"), and the switcher correctly falls back to showing all
+    // of them — permanently, because nothing re-ran discovery.
+    //
+    // Caught by watching the live network log: exactly ONE well-known
+    // request per page load, before the session existed. So the token is
+    // a dependency of the resource below, and resolving a session
+    // re-discovers with it.
+    let session_token: Signal<Option<String>> =
+        use_context_provider(|| Signal::new(None::<String>));
+    // Re-discover orgs whenever the active server OR the session changes
+    // (reading both inside the resource closure registers them as
+    // dependencies).
     let orgs_res = use_resource(move || {
         let _active = server_registry.active_id();
+        let _session = session_token();
         async move { fetch_orgs().await }
     });
     // Surface the discovery outcome so the Servers UI can show *why* it
@@ -246,7 +265,13 @@ pub fn App() -> Element {
         style { dangerous_inner_html: MOBILE_BASELINE_CSS }
         ThemeProvider { state: theme_state,
             div { class: "min-h-screen bg-background text-foreground",
-                Router::<Route> {}
+                // Unauthenticated visitors land on sign-in rather than on
+                // a shell full of empty panels (#109 criterion 5). The
+                // gate is presentation only — the server is what actually
+                // refuses data.
+                crate::auth::SignInGate {
+                    Router::<Route> {}
+                }
             }
         }
     }

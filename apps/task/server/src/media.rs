@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use media_proto::{MediaChunk, MediaError, MediaInfo, MediaService};
+use media_proto::{MediaChunk, MediaError, MediaGrant, MediaInfo, MediaService};
 
 use crate::attachments::AttachmentServiceImpl;
 
@@ -16,16 +16,36 @@ use crate::attachments::AttachmentServiceImpl;
 /// that a seeking player gets its first audio fast.
 const CHUNK_BYTES: u64 = 256 * 1024;
 
+/// How long a minted [`MediaGrant`] stays valid.
+///
+/// Long enough to load and play a set without re-minting mid-song, short
+/// enough that a token leaked through a browser history, a shared link,
+/// or a proxy log stops working the same day.
+const GRANT_TTL_SECONDS: i64 = 6 * 60 * 60;
+
 #[derive(Clone)]
 pub struct MediaServiceImpl {
     /// Blob store + catalog live on the attachment service; media is
     /// a read-side view over the same namespace.
     attachments: Arc<AttachmentServiceImpl>,
+    /// This org's slug — baked into every grant's subject so a token
+    /// minted here can never read another org's files.
+    slug: String,
+    /// Signs grants; the HTTP media route verifies against the same key.
+    keypair: crate::capability::ServerKeypair,
 }
 
 impl MediaServiceImpl {
-    pub fn new(attachments: Arc<AttachmentServiceImpl>) -> Self {
-        Self { attachments }
+    pub fn new(
+        attachments: Arc<AttachmentServiceImpl>,
+        slug: impl Into<String>,
+        keypair: crate::capability::ServerKeypair,
+    ) -> Self {
+        Self {
+            attachments,
+            slug: slug.into(),
+            keypair,
+        }
     }
 }
 
@@ -107,6 +127,30 @@ impl MediaService for MediaServiceImpl {
         }
         Ok(())
     }
+
+    async fn media_grant(&self, prefix: String) -> Result<MediaGrant, MediaError> {
+        // Traversal is rejected at MINT time as well as at serve time.
+        // Belt and braces on purpose: this is the only place a `..` could
+        // be baked into a *signed* subject, where it would then be
+        // presented as legitimately granted.
+        let prefix = prefix.trim_matches('/');
+        if prefix.is_empty() || prefix.split('/').any(|s| s == ".." || s.is_empty()) {
+            return Err(MediaError::InvalidRange(format!(
+                "invalid media prefix `{prefix}`"
+            )));
+        }
+        let expires_unix = chrono::Utc::now().timestamp() + GRANT_TTL_SECONDS;
+        let token = crate::attachments::signed_url::BlobToken::media(
+            &self.slug,
+            prefix,
+            expires_unix,
+        )
+        .issue(&self.keypair);
+        Ok(MediaGrant {
+            token,
+            expires_unix,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -123,7 +167,11 @@ mod tests {
             Arc::new(store),
             String::new(),
         ));
-        (MediaServiceImpl::new(attachments), tmp)
+        let keypair = attachments.keypair.clone();
+        (
+            MediaServiceImpl::new(attachments, "test-org", keypair),
+            tmp,
+        )
     }
 
     #[tokio::test]

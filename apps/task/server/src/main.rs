@@ -10,6 +10,14 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    // Operator subcommands run against this server's own data root and
+    // exit; only a bare invocation boots the server. Handled before
+    // telemetry so an admin command doesn't open exporters it will never
+    // use.
+    if task_server::admin_cli::dispatch().await? {
+        return Ok(());
+    }
+
     // Sentry error/crash telemetry — hold the guard for all of `main`.
     let _sentry = task_telemetry::init("task-server");
 

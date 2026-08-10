@@ -97,7 +97,7 @@ fn rank(query: &str, cands: &[Candidate]) -> Vec<Ranked> {
             let mut marks: Vec<usize> = neo_frizbee::match_list_indices(query, &[hays[i].as_str()], &cfg)
                 .into_iter()
                 .next()
-                .map(|mi| mi.indices.into_iter().map(|x| x as usize).collect())
+                .map(|mi| mi.indices.into_iter().collect())
                 .unwrap_or_default();
             marks.sort_unstable();
             let label_chars = cand.label.chars().count();

@@ -10,6 +10,10 @@ path = "src/main.rs"
 [dependencies]
 vox = { workspace = true, features = ["transport-websocket", "transport-websocket-tls"] }
 vox-core = { workspace = true }
+# `dial_authenticated` builds its own handshake (the session token rides
+# the upgrade) and hands the stream to `WsLink::new`; `vox::connect_lane`
+# takes only a URL.
+vox-websocket = { workspace = true }
 # vox-websocket's wss:// path needs a process-level rustls
 # CryptoProvider. This binary's graph unifies BOTH providers
 # (`ring` via octocrab/reqwest, `aws-lc-rs` via vox-websocket's

@@ -137,6 +137,10 @@ pub struct AuthCtx {
     pub error: Signal<Option<String>>,
     /// True while a switch/sign-in is in flight.
     pub busy: Signal<bool>,
+    /// Has boot restore finished? Distinguishes "no account" from "we
+    /// haven't looked yet" — without it [`SignInGate`] flashes the login
+    /// screen on every load before the cached token validates.
+    pub booted: Signal<bool>,
     /// The root auth service (see [`provide_auth`]).
     actions: Coroutine<AuthAction>,
 }
@@ -207,6 +211,48 @@ struct AuthState {
     /// by [`pull_locker`] when a signed-into server turns out to host a
     /// locker; read by [`push_link`] to decide where to push new links.
     home_locker: Signal<Option<HomeLocker>>,
+    /// Mirror of the active session token, provided at the app root
+    /// BEFORE org discovery. Writing it re-runs discovery so the org list
+    /// gets re-tagged with membership (#109 criterion 6) — the boot fetch
+    /// is necessarily anonymous, since sign-in needs the home slug that
+    /// discovery resolves.
+    session_token: Signal<Option<String>>,
+}
+
+/// Publish the resolved session token as the vox dial identity, and tear
+/// down connections established under the previous one.
+///
+/// This is the piece that was missing: the token was stored (localStorage
+/// and the registry entry) and passed as an ARGUMENT to the handful of
+/// auth methods that take one, but nothing ever attached it to the vox
+/// transport — so every other RPC arrived at the server as
+/// `principal=anonymous`, and the permission gate computed the right
+/// answer (`would_deny`) on all of them and threw it away.
+///
+/// A connection presents its identity ONCE, at the WebSocket upgrade, so
+/// publishing the token is only half the job: sockets already open from
+/// before sign-in stay anonymous forever. `set_session_token` reports
+/// whether the value actually changed, and on a change every cached
+/// connection is dropped so the next call re-dials as the new identity.
+/// The app root's supervised `Connection` re-establishes on its own (its
+/// connect closure re-runs, and `caller_for` finds no cached root).
+///
+/// Guest is NOT excluded here, unlike [`sync_active_server_entry`]: Guest
+/// is a real seeded account holding a real session token, and a debug
+/// build boots straight into it. Presenting that token is what it is — a
+/// validated session — and withholding it would make every dev boot
+/// anonymous, i.e. denied the moment enforcement goes on.
+fn publish_session_token(mut st: AuthState, account: Option<&ActiveAccount>) {
+    let token = account.map(|a| a.token.clone());
+    if crate::vox_session::set_session_token(token.clone()) {
+        crate::vox_clients::drop_cached_connections();
+    }
+    // Reactive mirror: re-runs org discovery so the well-known doc is
+    // re-fetched WITH the token and the org list gets its membership
+    // tags. Guarded so an unchanged token can't loop the resource.
+    if *st.session_token.peek() != token {
+        st.session_token.set(token);
+    }
 }
 
 /// Mirror a freshly-resolved session into the active server's registry
@@ -357,6 +403,13 @@ async fn run_switch(mut st: AuthState, email: &str) {
     if slug.is_empty() {
         st.error
             .set(Some("org discovery hasn't resolved yet".to_owned()));
+        // MUST clear `busy`. Boot restore raises it synchronously before
+        // queueing this action (so `SignInGate` doesn't flash the login
+        // form over a session that's about to restore), which means this
+        // early return owns it too — leaving it set strands the app on
+        // "Restoring your session…" forever, with no way to sign in and
+        // no way to reach the server picker.
+        st.busy.set(false);
         return;
     }
     st.busy.set(true);
@@ -365,6 +418,9 @@ async fn run_switch(mut st: AuthState, email: &str) {
         Ok(account) => {
             save_active_email(&account.email);
             sync_active_server_entry(st.registry, Some(&account));
+            // Before any further RPC: the locker/link calls below should
+            // already ride the new identity.
+            publish_session_token(st, Some(&account));
             // Multi-server sync: pull this server's locker (if it hosts
             // one, it becomes the anchor), then push it up to whatever
             // anchor stands. Both borrow `&account` before the move.
@@ -391,6 +447,7 @@ async fn run_credential_sign_in(
     if slug.is_empty() {
         st.error
             .set(Some("org discovery hasn't resolved yet".to_owned()));
+        st.busy.set(false);
         return;
     }
     st.busy.set(true);
@@ -430,6 +487,7 @@ async fn run_credential_sign_in(
         Ok(account) => {
             save_active_email(&account.email);
             sync_active_server_entry(st.registry, Some(&account));
+            publish_session_token(st, Some(&account));
             // Same multi-server sync as run_switch (borrow before move).
             pull_locker(st, &account).await;
             push_link(st, &account).await;
@@ -450,6 +508,11 @@ async fn run_sign_out(mut st: AuthState) {
     clear_cached_token(&account.email);
     clear_active_email();
     sync_active_server_entry(st.registry, None);
+    // Drop the authenticated sockets NOW, before the revoke round trip —
+    // `sign_out` passes the token as an argument, so it doesn't need the
+    // connection to carry the identity, and re-dialing anonymously for it
+    // is the correct end state anyway.
+    publish_session_token(st, None);
     st.active.set(None);
     let slug = home_slug(&st.orgs.peek());
     if !slug.is_empty() {
@@ -478,6 +541,11 @@ pub fn provide_auth() -> AuthCtx {
     let error = use_signal(|| None::<String>);
     let busy = use_signal(|| false);
     let home_locker = use_signal(|| None::<HomeLocker>);
+    // Provided by the app root ahead of discovery (see `app.rs`).
+    let session_token = use_context::<Signal<Option<String>>>();
+    // Set once boot restore has run (or decided there is nothing to
+    // restore) — see `AuthCtx::booted`.
+    let mut booted = use_signal(|| false);
     let st = AuthState {
         active,
         error,
@@ -485,6 +553,7 @@ pub fn provide_auth() -> AuthCtx {
         orgs,
         registry,
         home_locker,
+        session_token,
     };
 
     // The auth service: one sequential consumer for every auth action
@@ -519,6 +588,7 @@ pub fn provide_auth() -> AuthCtx {
         active,
         error,
         busy,
+        booted,
         actions,
     };
     use_context_provider(|| active);
@@ -527,7 +597,6 @@ pub fn provide_auth() -> AuthCtx {
     // Boot restore: wait for org discovery (home slug resolves), then
     // validate the persisted account — or auto sign-in as Guest when
     // nothing is stored. Runs exactly once.
-    let mut booted = use_signal(|| false);
     use_effect(move || {
         let slug = home_slug(&orgs.read());
         if slug.is_empty() || *booted.peek() {
@@ -538,13 +607,112 @@ pub fn provide_auth() -> AuthCtx {
         // build. With nothing stored, only a debug build can auto-land
         // on Guest — that needs a compiled-in password. Release shows
         // `LoginForm` instead of failing a sign-in nobody asked for.
+        //
+        // `busy` is raised HERE, synchronously, not left to the
+        // coroutine. `switch_account` only queues the action, so between
+        // this effect and the coroutine picking it up there is a tick
+        // where `booted` is true, `active` is None and `busy` is false —
+        // which `SignInGate` would read as "signed out" and flash the
+        // login screen over a session that is about to restore.
+        let mut busy = busy;
         match load_active_email() {
-            Some(email) => ctx.switch_account(email),
-            None if cfg!(debug_assertions) => ctx.switch_account(GUEST_EMAIL.to_owned()),
+            Some(email) => {
+                busy.set(true);
+                ctx.switch_account(email);
+            }
+            None if cfg!(debug_assertions) => {
+                busy.set(true);
+                ctx.switch_account(GUEST_EMAIL.to_owned());
+            }
+            // Nothing stored and no compiled-in password: genuinely
+            // signed out, and the gate should say so immediately.
             None => {}
         }
     });
     ctx
+}
+
+/// Gate the app on a signed-in session (issue #109 criterion 5).
+///
+/// **This is presentation, not security.** The server still answers
+/// anyone who opens a websocket to it directly; what actually refuses
+/// data is the permission gate on the org lane
+/// (`TASK_ENFORCE_PERMISSIONS`). This exists so an unauthenticated
+/// visitor lands on sign-in instead of on a shell that renders empty
+/// panels and a wall of failed requests.
+///
+/// Three states, and the middle one is the whole reason this isn't a
+/// one-line `if`:
+/// - a session → the app;
+/// - restoring (boot hasn't resolved, or a sign-in is in flight) → a
+///   neutral placeholder, NOT the login form, so a returning user with a
+///   valid cached token never sees a sign-in screen flash;
+/// - resolved with no session → sign in.
+#[component]
+pub fn SignInGate(children: Element) -> Element {
+    let ctx = use_context::<AuthCtx>();
+    let active = ctx.active;
+    let booted = ctx.booted;
+    let busy = ctx.busy;
+
+    if active.read().is_some() {
+        return rsx! { {children} };
+    }
+    if !booted() || busy() {
+        // NEVER a dead end. This branch also covers "org discovery hasn't
+        // resolved" — a failed or slow well-known fetch, or a server that
+        // isn't answering — and a bug that stranded `busy` once made it
+        // permanent: the app sat on this message with no way to sign in
+        // and no way to reach the server picker, because both live behind
+        // it. So the waiting state carries its own escape hatch, and
+        // surfaces WHY discovery hasn't resolved when it knows.
+        let discovery = use_context::<crate::orgs::DiscoveryError>();
+        let err = discovery.0.read().clone();
+        return rsx! {
+            div { class: "flex min-h-screen items-center justify-center p-6",
+                div { class: "flex w-full max-w-sm flex-col items-center gap-3",
+                    p { class: "text-sm text-muted-foreground", "Restoring your session…" }
+                    if let Some(msg) = err {
+                        p { class: "text-center text-xs text-destructive", "{msg}" }
+                    }
+                    details { class: "w-full text-sm",
+                        summary { class: "cursor-pointer text-center text-muted-foreground",
+                            "Taking too long?"
+                        }
+                        div { class: "flex flex-col gap-4 pt-3",
+                            LoginForm {}
+                            crate::server_registry::ServersPanel {}
+                        }
+                    }
+                }
+            }
+        };
+    }
+    rsx! {
+        div { class: "flex min-h-screen items-center justify-center p-6",
+            div { class: "flex w-full max-w-sm flex-col gap-4",
+                div { class: "flex flex-col gap-1",
+                    h1 { class: "text-lg font-semibold", "Sign in to Task" }
+                    p { class: "text-sm text-muted-foreground",
+                        "This server's data is private to its members."
+                    }
+                }
+                LoginForm {}
+                // Without this a user pointed at the wrong server is
+                // stuck: they cannot sign in, and the switcher that would
+                // let them change servers lives inside the app they can't
+                // reach.
+                details { class: "text-sm",
+                    summary { class: "cursor-pointer text-muted-foreground",
+                        "Connect to a different server"
+                    }
+                    div { class: "pt-2",
+                        crate::server_registry::ServersPanel {}
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Token-cache-first session resolution against the home org.
@@ -744,6 +912,184 @@ pub fn LoginForm() -> Element {
             }
             if let Some(msg) = error.read().as_ref() {
                 div { class: "px-1 text-xs text-destructive", "{msg}" }
+            }
+        }
+    }
+}
+
+/// Change your own password.
+///
+/// Self-service: the server takes the CURRENT password as well as the
+/// session, so a stolen session alone can't take an account over, and
+/// knowing the password alone can't either. Strength and known-breach
+/// checks live server-side, so their rejections surface here as the
+/// error text rather than being re-implemented (and drifting) client-side.
+#[component]
+pub fn ChangePasswordForm() -> Element {
+    let ctx = use_context::<AuthCtx>();
+    let active = ctx.active;
+    let current = use_signal(String::new);
+    let next = use_signal(String::new);
+    let confirm = use_signal(String::new);
+    let mut status = use_signal(|| None::<Result<String, String>>);
+    let mut busy = use_signal(|| false);
+
+    let submit = move |_| {
+        let (cur, new, conf) = (current.peek().clone(), next.peek().clone(), confirm.peek().clone());
+        let Some(account) = active.peek().clone() else {
+            status.set(Some(Err("sign in first".to_owned())));
+            return;
+        };
+        if cur.is_empty() || new.is_empty() {
+            status.set(Some(Err("fill in both passwords".to_owned())));
+            return;
+        }
+        // Caught here rather than server-side: a typo in the confirm box
+        // isn't the server's business, and a round trip to say so is a
+        // worse experience than an immediate answer.
+        if new != conf {
+            status.set(Some(Err("the new passwords don't match".to_owned())));
+            return;
+        }
+        busy.set(true);
+        status.set(None);
+        spawn(async move {
+            let slug = crate::orgs::home_slug(&use_context::<Signal<Vec<OrgMeta>>>().peek());
+            let outcome = async {
+                let client = establish_for::<AuthServiceClient>(&slug).await?;
+                client
+                    .change_password(auth_proto::service::ChangePasswordRequest {
+                        session_token: account.token.clone(),
+                        current_password: cur,
+                        new_password: new,
+                    })
+                    .await
+                    .map_err(|e| format!("{e}"))
+            }
+            .await;
+            busy.set(false);
+            status.set(Some(match outcome {
+                Ok(()) => Ok("Password changed.".to_owned()),
+                Err(e) => Err(e),
+            }));
+        });
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2",
+            Input {
+                value: current,
+                input_type: "password".to_string(),
+                placeholder: "Current password",
+                on_change: move |_| status.set(None),
+            }
+            Input {
+                value: next,
+                input_type: "password".to_string(),
+                placeholder: "New password",
+                on_change: move |_| status.set(None),
+            }
+            Input {
+                value: confirm,
+                input_type: "password".to_string(),
+                placeholder: "Confirm new password",
+                on_change: move |_| status.set(None),
+            }
+            Button {
+                variant: ButtonVariant::Primary,
+                size: ButtonSize::Medium,
+                loading: busy(),
+                on_click: submit,
+                class: "w-full",
+                "Change password"
+            }
+            match status.read().as_ref() {
+                Some(Ok(msg)) => rsx! { div { class: "px-1 text-xs text-muted-foreground", "{msg}" } },
+                Some(Err(msg)) => rsx! { div { class: "px-1 text-xs text-destructive", "{msg}" } },
+                None => rsx! {},
+            }
+        }
+    }
+}
+
+/// Change your own email.
+///
+/// Self-service counterpart to the operator migration: the server takes
+/// the address from the session's own user, so there is no way to move
+/// someone else's. The change appends to the account's email history and
+/// the new address starts unverified, both of which the server handles.
+#[component]
+pub fn ChangeEmailForm() -> Element {
+    let ctx = use_context::<AuthCtx>();
+    let mut active = ctx.active;
+    let orgs = use_context::<Signal<Vec<OrgMeta>>>();
+    let next = use_signal(String::new);
+    let mut status = use_signal(|| None::<Result<String, String>>);
+    let mut busy = use_signal(|| false);
+
+    let submit = move |_| {
+        let new_email = next.peek().trim().to_owned();
+        let Some(account) = active.peek().clone() else {
+            status.set(Some(Err("sign in first".to_owned())));
+            return;
+        };
+        if new_email.is_empty() {
+            status.set(Some(Err("enter an email".to_owned())));
+            return;
+        }
+        busy.set(true);
+        status.set(None);
+        spawn(async move {
+            let slug = crate::orgs::home_slug(&orgs.peek());
+            let outcome = async {
+                let client = establish_for::<AuthServiceClient>(&slug).await?;
+                client
+                    .change_email(auth_proto::service::ChangeEmailRequest {
+                        session_token: account.token.clone(),
+                        new_email: new_email.clone(),
+                    })
+                    .await
+                    .map_err(|e| format!("{e}"))
+            }
+            .await;
+            busy.set(false);
+            match outcome {
+                Ok(user) => {
+                    let shown = user.email.clone().unwrap_or(new_email);
+                    // Keep the context in step so the switcher and
+                    // presence don't keep showing the old address.
+                    active.with_mut(|a| {
+                        if let Some(a) = a.as_mut() {
+                            a.email = shown.clone();
+                        }
+                    });
+                    status.set(Some(Ok(format!("Email is now {shown}."))));
+                }
+                Err(e) => status.set(Some(Err(e))),
+            }
+        });
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2",
+            Input {
+                value: next,
+                input_type: "email".to_string(),
+                placeholder: "New email",
+                on_change: move |_| status.set(None),
+            }
+            Button {
+                variant: ButtonVariant::Secondary,
+                size: ButtonSize::Medium,
+                loading: busy(),
+                on_click: submit,
+                class: "w-full",
+                "Change email"
+            }
+            match status.read().as_ref() {
+                Some(Ok(msg)) => rsx! { div { class: "px-1 text-xs text-muted-foreground", "{msg}" } },
+                Some(Err(msg)) => rsx! { div { class: "px-1 text-xs text-destructive", "{msg}" } },
+                None => rsx! {},
             }
         }
     }
@@ -1071,9 +1417,18 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
                 }
                 section { class: "flex flex-col gap-2",
                     h3 { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
-                        "Sign in"
+                        if active.read().is_some() { "Account" } else { "Sign in" }
                     }
-                    LoginForm {}
+                    // Signed in, the useful action in this slot is
+                    // changing your password; signed out it's signing in.
+                    // Same place, because that's where someone looks for
+                    // either.
+                    if active.read().is_some() {
+                        ChangeEmailForm {}
+                        ChangePasswordForm {}
+                    } else {
+                        LoginForm {}
+                    }
                 }
             }
         }
@@ -1145,13 +1500,31 @@ fn clear_active_email() {
 // account, plus a plain `active` file naming the last account. On the
 // iOS/macOS sandbox `HOME` is the app container, so this stays inside it.
 #[cfg(not(target_arch = "wasm32"))]
+/// Native data dir for cached sessions.
+///
+/// Apple platforms get `Library/Application Support`, not
+/// `~/.local/share`: that is the sanctioned location for app data on
+/// iOS/macOS, survives app updates, and is backed up. A dotted
+/// XDG-style directory at the container root is a Linux convention iOS
+/// makes no promises about — the same reason the server registry kept
+/// forgetting its configuration between launches.
+///
+/// Kept in step with `server_registry::data_dir` deliberately: cached
+/// session and chosen server are useless without each other, so they
+/// must survive (or not) together.
 fn tokens_dir() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
+    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
-        .or_else(|| {
-            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local").join("share"))
-        })?;
+    {
+        return Some(xdg.join("task").join("ui-tokens"));
+    }
+    let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    let base = if cfg!(target_vendor = "apple") {
+        home.join("Library").join("Application Support")
+    } else {
+        home.join(".local").join("share")
+    };
     Some(base.join("task").join("ui-tokens"))
 }
 

@@ -927,6 +927,16 @@ fn infer_role(name: &str) -> Option<email_proto::FolderRole> {
     }
 }
 
+/// The `#[subscribe]` backend contract: the hub the stream host
+/// attaches subscriber sinks to. The IDLE watcher publishes into
+/// it — an IMAP server breaking IDLE means "something changed",
+/// which is exactly `EmailEvent::Resync`.
+impl email_proto::EmailSyncStreamSource for Backend {
+    fn changes_hub(&self) -> &architect::PubSub<email_proto::EmailChange> {
+        &self.changes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -940,15 +950,5 @@ mod tests {
             Some(email_proto::FolderRole::Sent)
         );
         assert_eq!(infer_role("Lists.rust-users"), None);
-    }
-}
-
-/// The `#[subscribe]` backend contract: the hub the stream host
-/// attaches subscriber sinks to. The IDLE watcher publishes into
-/// it — an IMAP server breaking IDLE means "something changed",
-/// which is exactly `EmailEvent::Resync`.
-impl email_proto::EmailSyncStreamSource for Backend {
-    fn changes_hub(&self) -> &architect::PubSub<email_proto::EmailChange> {
-        &self.changes
     }
 }

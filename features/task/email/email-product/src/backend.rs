@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use architect::vox;
 use email_proto::{
     DERIVATION_VERSION, Derivation, DerivationKind, Draft, EmailChange, EmailEvent, EmailProduct,
     EmailSync, EmailSyncError, OutboxEntry, OutboxStatus, SeqRange,

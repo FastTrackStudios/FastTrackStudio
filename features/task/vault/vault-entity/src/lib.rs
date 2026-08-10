@@ -21,7 +21,7 @@
 //! is genuinely its own: the parse/serialize field mapping and any
 //! domain operations beyond CRUD.
 //!
-//! ```ignore
+//! ```text
 //! impl VaultEntity for BodyMetric {
 //!     const TYPE: &'static str = "body-metric";
 //!     const DEFAULT_FOLDER: &'static str = "Projects/Fitness/body";

@@ -122,12 +122,54 @@ pub const PUBLIC_GLOB: &str = "public/**";
 
 // ── Platform lane ────────────────────────────────────────────────────────
 
-// Self-guarding: every method validates the token it is handed. See the
-// module docs on `public/**`.
-table!(AUTH, "auth", "public/auth", [
-    rd "sign_up_email_password", rd "sign_in_email_password", rd "current_session",
-    rd "refresh_session", rd "whoami", rd "sign_out", rd "list_org_members",
-]);
+/// Self-guarding: every method validates the token it is handed. See the
+/// module docs on `public/**`.
+///
+/// **`sign_up_email_password` is deliberately NOT public.** architect-auth
+/// has no email/password signup toggle — `email_password_enabled` gates
+/// sign-IN too, and `disable_signup` / `signup_enabled` are OneTap- and
+/// SIWE-specific — so open self-registration was on, reachable by anyone,
+/// and the org lane hands every validated user the `member` role
+/// (`DEFAULT_ORG_ROLE`). That made enforcement bypassable in a single
+/// call: sign up, become a member, read the org. Verified reachable on
+/// production 2026-08-08 (the only error was password length).
+///
+/// Pointing it at `auth/signup` instead means the gate refuses anonymous
+/// callers while leaving sign-in, whoami and session refresh public — so
+/// existing members can still provision accounts, and nobody who isn't
+/// one can. Removing it from the table entirely would fail closed for
+/// everyone (tabled-but-unlisted is a deny), which would also block the
+/// operator.
+const AUTH: ServicePermits = ServicePermits {
+    service: "auth",
+    methods: &[
+        MethodPermit::new("sign_up_email_password", Action::WRITE, "auth/signup").audited(),
+        MethodPermit::new("sign_in_email_password", Action::READ, "public/auth"),
+        MethodPermit::new("current_session", Action::READ, "public/auth"),
+        MethodPermit::new("refresh_session", Action::READ, "public/auth"),
+        MethodPermit::new("whoami", Action::READ, "public/auth"),
+        MethodPermit::new("sign_out", Action::READ, "public/auth"),
+        MethodPermit::new("list_org_members", Action::READ, "public/auth"),
+        // Changing someone's login identifier is an operator action, so
+        // it sits outside `public/**` for the same reason signup does —
+        // an anonymous caller must never reach it. The impl also requires
+        // a session that validates against THIS org and records it as
+        // `changed_by`, so the gate and the flow agree.
+        MethodPermit::new("migrate_user_email", Action::WRITE, "auth/migrate").audited(),
+        // Reading the trail exposes former addresses of real people;
+        // members only, and audited so the read itself is on the record.
+        MethodPermit::new("list_email_history", Action::READ, "auth/migrate").audited(),
+        // Self-service, but NOT public: you need a session to change your
+        // own password, so gating costs nothing and keeps the anonymous
+        // surface as small as the sign-in path requires. Audited — a
+        // credential change is worth a line even when allowed.
+        MethodPermit::new("change_password", Action::WRITE, "auth/self").audited(),
+        // Same tier as the password change: it alters your login
+        // identifier, needs a session regardless, and is worth an audit
+        // line even on allow.
+        MethodPermit::new("change_email", Action::WRITE, "auth/self").audited(),
+    ],
+};
 
 // The capability oracle — answers about the caller only.
 table!(PERMISSIONS, "permissions", "public/permissions", [rd "can", rd "capabilities"]);
@@ -142,6 +184,12 @@ const MEDIA: ServicePermits = ServicePermits {
     methods: &[
         MethodPermit::new("stat", Action::READ, "media/{content_hash}"),
         MethodPermit::new("read", Action::READ, "media/{content_hash}").audited(),
+        // Minting a signed URL for the filesystem media route. THIS call
+        // is the authorization point for `/org/{slug}/media/…` — the HTTP
+        // route only verifies the signature — so it is audited even on
+        // allow: a grant is bulk content leaving the server, and knowing
+        // who minted one is the whole audit trail for that path.
+        MethodPermit::new("media_grant", Action::DOWNLOAD, "media/**").audited(),
     ],
 };
 

@@ -447,6 +447,9 @@ fn finish_tool(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Not re-exported by the parent module — `use super::*` doesn't
+    // reach it, so the tap type is named directly.
+    use agent_proto::event::EventTap;
 
     /// Test event sink + its tap. `SessionEvents::send` mirrors into
     /// the tap synchronously, so `tap.try_next()` sees whatever the

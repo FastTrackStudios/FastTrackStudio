@@ -96,7 +96,7 @@ impl Cursor {
     }
 
     /// The next chord-note index.
-    pub fn next(&mut self) -> usize {
+    pub fn next_index(&mut self) -> usize {
         if self.len <= 1 {
             self.last = Some(0);
             return 0;
@@ -147,7 +147,7 @@ mod tests {
 
     fn take(direction: Direction, len: usize, n: usize) -> Vec<usize> {
         let mut c = Cursor::new(direction, len);
-        (0..n).map(|_| c.next()).collect()
+        (0..n).map(|_| c.next_index()).collect()
     }
 
     #[test]
@@ -201,7 +201,7 @@ mod tests {
     fn random_is_reproducible_for_a_given_seed() {
         let run = |seed| {
             let mut c = Cursor::new(Direction::Random, 5).with_seed(seed);
-            (0..50).map(|_| c.next()).collect::<Vec<_>>()
+            (0..50).map(|_| c.next_index()).collect::<Vec<_>>()
         };
         assert_eq!(run(7), run(7));
         assert_ne!(run(7), run(8));
