@@ -36,6 +36,8 @@ pub async fn dispatch() -> eyre::Result<bool> {
         Some("migrate-email") => migrate_email(&args[2..]).await.map(|()| true),
         Some("email-history") => email_history(&args[2..]).await.map(|()| true),
         Some("set-password") => set_password(&args[2..]).await.map(|()| true),
+        Some("list-users") => list_users(&args[2..]).await.map(|()| true),
+        Some("delete-user") => delete_user(&args[2..]).await.map(|()| true),
         other => {
             eprintln!(
                 "usage:\n  \
@@ -43,7 +45,9 @@ pub async fn dispatch() -> eyre::Result<bool> {
                  [--reason <text>] [--dry-run]\n  \
                  task-server admin email-history --org <slug> --email <address>\n  \
                  task-server admin set-password --org <slug> --email <address>\n    \
-                 (reads the new password from STDIN)\n"
+                 (reads the new password from STDIN)\n  \
+                 task-server admin list-users --org <slug>\n  \
+                 task-server admin delete-user --org <slug> --email <address> --yes\n"
             );
             bail!("unknown admin subcommand: {}", other.unwrap_or("(none)"));
         }
@@ -130,6 +134,63 @@ async fn migrate_email(args: &[String]) -> eyre::Result<()> {
     if moved.id != user.id {
         bail!("user id changed — this should be impossible; investigate before continuing");
     }
+    Ok(())
+}
+
+/// Every account in one org's store.
+async fn list_users(args: &[String]) -> eyre::Result<()> {
+    let Some(slug) = flag(args, "--org") else {
+        bail!("--org is required");
+    };
+    let auth = open_org_auth(&slug).await?;
+    let users = auth
+        .auth
+        .list_users_local_trusted()
+        .await
+        .map_err(|e| eyre::eyre!("list users in `{slug}`: {e:?}"))?;
+    if users.is_empty() {
+        println!("{slug}: no accounts");
+        return Ok(());
+    }
+    println!("{slug}:");
+    for u in users {
+        println!(
+            "  {}  {}",
+            u.id,
+            u.email.as_deref().unwrap_or("(no email)")
+        );
+    }
+    Ok(())
+}
+
+/// Remove an account outright.
+///
+/// Requires `--yes`. This is not recoverable from here — the row is gone
+/// and anything keyed on the user id is orphaned, so an operator should
+/// have to say so deliberately rather than discover it from a typo in an
+/// `--email` flag.
+async fn delete_user(args: &[String]) -> eyre::Result<()> {
+    let (Some(slug), Some(email)) = (flag(args, "--org"), flag(args, "--email")) else {
+        bail!("--org and --email are required");
+    };
+    let auth = open_org_auth(&slug).await?;
+    let user = auth
+        .auth
+        .find_user_by_email(&email)
+        .await
+        .map_err(|e| eyre::eyre!("look up `{email}`: {e:?}"))?
+        .ok_or_else(|| eyre::eyre!("no account with email `{email}` in org `{slug}`"))?;
+
+    if !has(args, "--yes") {
+        println!("{slug}: would delete {} ({email})", user.id);
+        println!("  re-run with --yes to actually delete — this cannot be undone");
+        return Ok(());
+    }
+    auth.auth
+        .delete_user_local_trusted(user.id)
+        .await
+        .map_err(|e| eyre::eyre!("delete `{email}` in `{slug}`: {e:?}"))?;
+    println!("{slug}: deleted {} ({email})", user.id);
     Ok(())
 }
 
