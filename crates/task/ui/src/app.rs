@@ -108,6 +108,41 @@ pub fn App() -> Element {
         let _session = session_token();
         async move { fetch_orgs().await }
     });
+    // Pull the identity locker's per-org tokens once the session
+    // resolves. Auth stores are per-org, so the ambient token makes you
+    // a member of exactly ONE org — without these, the switcher can
+    // only ever show that one, whatever the well-known doc lists.
+    let links_res = use_resource(move || {
+        let _session = session_token();
+        async move {
+            let client: identity_proto::IdentityServiceClient =
+                task_ui_core::vox_clients::establish_server(None).await?;
+            let token = task_ui_core::vox_session::bearer()
+                .ok_or_else(|| "not signed in".to_string())?;
+            client
+                .list_links(token)
+                .await
+                .map_err(|e| format!("list links: {e:?}"))
+        }
+    });
+    use_effect(move || {
+        // A server with no identity locker (not a home server) answers
+        // an error here; that is a normal deployment, not a fault, so
+        // it stays quiet and the ambient token keeps being used.
+        if let Some(Ok(links)) = &*links_res.read_unchecked() {
+            let map: std::collections::HashMap<String, String> = links
+                .iter()
+                .filter_map(|l| l.token.clone().map(|t| (l.remote_slug.clone(), t)))
+                .collect();
+            if task_ui_core::vox_session::set_linked_tokens(map) {
+                // A socket presents its identity once, at establish, so
+                // connections opened under the old (single-token) view
+                // have to go before the new credentials can be used.
+                task_ui_core::vox_clients::drop_cached_connections();
+            }
+        }
+    });
+
     // Surface the discovery outcome so the Servers UI can show *why* it
     // didn't resolve (native fetch failures are otherwise invisible).
     let mut discovery_err =
