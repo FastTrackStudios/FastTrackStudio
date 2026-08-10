@@ -201,6 +201,9 @@ pub struct OrgAppState {
     pub intake: intake::Store,
     #[cfg(feature = "plugin-agent")]
     pub agent_tasks: agent_tasks::Store,
+    /// The runner registry — who can execute agent work, what they
+    /// can do, and whether they are still alive.
+    pub agent_runners: agent_runners::Store,
     /// Codex agent backend — in-process session registry + turn
     /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
     /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
@@ -765,6 +768,19 @@ pub(crate) async fn build_org_state(
         .await?;
         #[cfg(feature = "plugin-agent")]
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
+
+        // Runner registry. Shares the agent-tasks database — a
+        // runner registration is agent-queue-adjacent, and keeping
+        // them in one file means one backup and one restore for the
+        // whole agent lane.
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners = {
+            let conn = agent_tasks.conn().clone();
+            agent_runners::Migrator::up(&conn, None)
+                .await
+                .map_err(|e| eyre::eyre!("agent-runners migrate: {e}"))?;
+            agent_runners::Store::new(conn)
+        };
 
         // Codex agent backend. In-process, in-memory session
         // registry + turn dispatch — hosts the `Sessions` +
@@ -1368,6 +1384,8 @@ pub(crate) async fn build_org_state(
             intake,
             #[cfg(feature = "plugin-agent")]
             agent_tasks,
+            #[cfg(feature = "plugin-agent")]
+            agent_runners,
             #[cfg(feature = "plugin-agent")]
             agent_codex,
             #[cfg(feature = "plugin-agent")]
@@ -2539,6 +2557,13 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 agent_proto::service::routines::routines_rpc_service_descriptor(),
                 agent_proto::service::routines::serve(org.agent_router.clone()),
+            )
+            // Runner registry — who can execute agent work, what they
+            // can do, and whether they have heartbeated recently
+            // enough to be offered any.
+            .with(
+                agent_proto::service::backends::backends_rpc_service_descriptor(),
+                agent_proto::service::backends::serve(org.agent_runners.clone()),
             );
     }
 

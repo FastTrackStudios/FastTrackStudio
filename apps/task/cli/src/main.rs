@@ -74,6 +74,7 @@ mod project;
 mod recipe;
 #[cfg(feature = "plugin-mealplan")]
 mod recipe_import;
+mod runner;
 mod session_store;
 mod setup;
 mod shared;
@@ -201,6 +202,14 @@ enum Commands {
     #[cfg(not(feature = "plugin-agent"))]
     #[command(hide = true)]
     Agent(NotCompiled),
+    /// Runners — machines that execute agent work. Register this
+    /// box, list the registry, heartbeat, deregister.
+    #[cfg(feature = "plugin-agent")]
+    #[command(subcommand)]
+    Runner(runner::RunnerCmd),
+    #[cfg(not(feature = "plugin-agent"))]
+    #[command(hide = true)]
+    Runner(NotCompiled),
     /// Mail accounts for this org (add / list / remove / test).
     #[cfg(feature = "plugin-email")]
     #[command(subcommand)]
@@ -742,6 +751,14 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         #[cfg(feature = "plugin-agent")]
         Commands::Agent(cmd) => {
             return run_agent(cmd).await;
+        }
+        #[cfg(feature = "plugin-agent")]
+        Commands::Runner(cmd) => {
+            return runner::run_runner(cmd).await;
+        }
+        #[cfg(not(feature = "plugin-agent"))]
+        Commands::Runner(_) => {
+            return Err(not_compiled("runner"));
         }
         #[cfg(not(feature = "plugin-agent"))]
         Commands::Agent(_) => {
