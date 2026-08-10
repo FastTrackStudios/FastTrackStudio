@@ -21,7 +21,13 @@ pub(crate) enum AuthCmd {
     Login {
         #[arg(long)]
         email: String,
-        #[arg(long)]
+        /// Reads `TASK_PASSWORD` when the flag is omitted.
+        ///
+        /// Prefer the env var in scripts: anything passed as an argument
+        /// is visible to `ps` for the lifetime of the process, and lands
+        /// in shell history. The env var is readable only by processes
+        /// that can already read this one's environment.
+        #[arg(long, env = "TASK_PASSWORD", hide_env_values = true)]
         password: String,
     },
     /// Create a new email/password user over the org's
