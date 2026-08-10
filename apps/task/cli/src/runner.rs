@@ -12,6 +12,7 @@ use agent_proto::backend::{AgentBackend, BackendKind};
 use agent_proto::runner::{RunnerProfile, RunnerScope, parse_capabilities};
 use agent_proto::service::backends::BackendsClient;
 use agent_proto::service::questions::QuestionsClient;
+use agent_proto::service::run_stream::RunStreamClient;
 use agent_proto::service::runs::RunsClient;
 use chrono::Utc;
 use clap::Subcommand;
@@ -174,6 +175,19 @@ pub enum RunnerCmd {
         /// Stop after this many tickets. `0` = run until stopped.
         #[arg(long, default_value_t = 0)]
         max_tickets: u32,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Watch a run live — snapshot, then fold the event stream.
+    ///
+    /// A viewer arriving mid-run sees the recent output tail rather
+    /// than an empty pane, which is the whole reason there is a
+    /// snapshot as well as a stream.
+    Watch {
+        /// Run id (or a unique prefix). Omit to watch everything.
+        run: Option<String>,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -564,6 +578,76 @@ pub(crate) async fn run_runner(cmd: RunnerCmd) -> eyre::Result<()> {
                             println!("\nstopping");
                         }
                         break;
+                    }
+                }
+            }
+        }
+
+        RunnerCmd::Watch { run, org, server } => {
+            let (_slug, url) = ctx(org, server)?;
+            let rs: RunStreamClient = establish_for_url(&url).await?;
+
+            // Fetch once…
+            let wanted = match &run {
+                None => None,
+                Some(prefix) => {
+                    let runs: RunsClient = establish_for_url(&url).await?;
+                    let all = runs
+                        .list_runs(agent_proto::run::RunFilter::default())
+                        .await?;
+                    let hit = all
+                        .iter()
+                        .find(|r| r.id.to_string().starts_with(prefix.trim()))
+                        .ok_or_else(|| eyre::eyre!("no run matching `{prefix}`"))?;
+                    let snap = rs.snapshot(hit.id).await?;
+                    println!("run {}  [{}]", crate::shared::short_uuid(&snap.run), snap.status.as_str());
+                    if !snap.activity.is_empty() {
+                        println!("activity: {}", snap.activity);
+                    }
+                    if !snap.tail.is_empty() {
+                        println!("--- recent output ---");
+                        print!("{}", snap.tail);
+                        println!("--- live ---");
+                    }
+                    Some(hit.id)
+                }
+            };
+
+            // …then fold.
+            let (tx, mut rx) = architect::vox::channel::<agent_proto::run_event::RunEventEnvelope>();
+            let events: agent_proto::service::run_stream::RunStreamStreamClient =
+                establish_for_url(&url).await?;
+            let subscribed = events.run_events(tx);
+            tokio::pin!(subscribed);
+            loop {
+                let received = tokio::select! {
+                    r = rx.recv() => r,
+                    _ = &mut subscribed => break,
+                };
+                let Ok(Some(msg)) = received else { break };
+                let mut owned: Option<agent_proto::run_event::RunEventEnvelope> = None;
+                let _ = msg.map(|e| owned = Some(e.clone()));
+                let Some(env) = owned else { continue };
+                if wanted.is_some_and(|w| w != env.run) {
+                    continue;
+                }
+                let tag = crate::shared::short_uuid(&env.run);
+                match env.event {
+                    agent_proto::run_event::RunEvent::Output(chunk) => print!("{chunk}"),
+                    agent_proto::run_event::RunEvent::Activity(what) => {
+                        println!("[{tag}] {what}");
+                    }
+                    agent_proto::run_event::RunEvent::Status(st) => {
+                        println!("[{tag}] status {}", st.as_str());
+                    }
+                    agent_proto::run_event::RunEvent::Verdict { passed, exit_code } => {
+                        println!(
+                            "[{tag}] verdict {} ({exit_code:?})",
+                            if passed { "pass" } else { "FAIL" }
+                        );
+                    }
+                    agent_proto::run_event::RunEvent::Blocked { question_id } => {
+                        println!("[{tag}] blocked on question {question_id}");
                     }
                 }
             }
@@ -1274,6 +1358,21 @@ async fn work_one(
         .await?;
     println!("run      {}", crate::shared::short_uuid(&run.id));
 
+    // Narrate. A monitor should be able to tell a working agent from
+    // a stuck one without reading the worktree.
+    let stream: RunStreamClient = establish_for_url(&job.url).await?;
+    let say = |what: &str| {
+        let s = stream.clone();
+        let text = what.to_string();
+        let id = run.id;
+        async move {
+            let _ = s
+                .publish(id, agent_proto::run_event::RunEvent::Activity(text))
+                .await;
+        }
+    };
+    say("running the agent").await;
+
     if let Some(cmd) = &job.agent_cmd {
         let prompt = format!("{}\n\n{}", chosen.title, chosen.details);
         let status = run_agent(cmd, &wt.path, &chosen.id.to_string(), &chosen.title, &prompt)?;
@@ -1282,7 +1381,16 @@ async fn work_one(
         println!("(no --agent-cmd; skipping the agent)");
     }
 
+    say("running the verify command").await;
     let verdict = agent_worktree::verify(&wt, &verify_cmd)?;
+    // Output is ephemeral: it rides the stream and the bounded tail,
+    // and is never written to the vault.
+    let _ = stream
+        .publish(
+            run.id,
+            agent_proto::run_event::RunEvent::Output(verdict.tail.clone()),
+        )
+        .await;
     println!(
         "verdict  {} ({:?})",
         if verdict.passed { "pass" } else { "FAIL" },

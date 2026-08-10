@@ -294,6 +294,19 @@ table!(AGENT_RUNS, "agent-runs", "agent/runs/**", [
 // The grill queue. Asking is a runner write; answering is the human
 // half of a human-in-the-loop decision, so both are member writes
 // rather than admin.
+// Live run state. Reading is ordinary; publishing is the runner
+// narrating its own work.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUN_STREAM, "agent-run-stream", "agent/runs/**", [
+    rd "snapshot", wr "publish",
+]);
+
+// The subscribe half is its own vox service with its own descriptor.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUN_EVENTS, "agent-run-events", "agent/runs/**", [
+    rd "run_events",
+]);
+
 #[cfg(feature = "plugin-agent")]
 table!(AGENT_QUESTIONS, "agent-questions", "agent/questions/**", [
     rd "unresolved_questions", rd "questions_for_ticket",
@@ -732,6 +745,16 @@ pub fn mounts() -> Vec<Mount> {
             "agent",
             agent_proto::service::questions::questions_rpc_service_descriptor(),
             AGENT_QUESTIONS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::run_stream::run_stream_rpc_service_descriptor(),
+            AGENT_RUN_STREAM,
+        ),
+        m(
+            "agent",
+            agent_proto::service::run_stream::run_stream_stream_service_descriptor(),
+            AGENT_RUN_EVENTS,
         ),
     ]);
     v.extend([

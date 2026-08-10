@@ -2596,7 +2596,16 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 agent_proto::service::questions::questions_rpc_service_descriptor(),
                 agent_proto::service::questions::serve(org.agent_questions.clone()),
-            );
+            )
+            // Live run state — the snapshot half…
+            .with(
+                agent_proto::service::run_stream::run_stream_rpc_service_descriptor(),
+                agent_proto::service::run_stream::serve(org.agent_runs.clone()),
+            )
+            // …and the stream half, off the hub the run store owns.
+            .merge(agent_proto::service::run_stream::stream_layer(
+                org.agent_runs.clone(),
+            ));
     }
 
     router = router
