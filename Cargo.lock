@@ -5978,6 +5978,7 @@ dependencies = [
 name = "daw-extension-runtime"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "crossbeam-channel",
  "daw-control",
  "daw-module",
