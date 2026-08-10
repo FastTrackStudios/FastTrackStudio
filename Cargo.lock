@@ -8965,6 +8965,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "expression-editor-corpus"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "expression-editor-audio",
+ "hound",
+ "midly",
+]
+
+[[package]]
 name = "expression-editor-daw"
 version = "0.1.0"
 dependencies = [
