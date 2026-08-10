@@ -27,6 +27,7 @@ pub mod connections;
 pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
+pub mod admin_cli;
 pub mod media;
 pub mod notifier;
 pub mod otlp;
