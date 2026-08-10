@@ -78,6 +78,9 @@ pub use service::{
 };
 pub use states::{StateDef, StateGroup, StatesConfig, default_states, resolve_state_group};
 
+/// Verify-command resolution (see [`project_proto::verify`]).
+pub use project_proto::verify;
+
 pub use backend::ProjectBackend;
 pub use scan::scan_vault;
 pub use write::{WriteError, serialize_project, write_project};

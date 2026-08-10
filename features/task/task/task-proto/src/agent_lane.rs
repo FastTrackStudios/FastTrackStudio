@@ -135,6 +135,57 @@ pub fn has_triage_label(t: &TaskInfo, label: TriageLabel) -> bool {
         .any(|s| TriageLabel::parse(s) == Some(label))
 }
 
+/// Why an issue cannot be marked [`TriageLabel::ReadyForAgent`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotAgentReady {
+    /// Nothing in the ticket-then-project chain declares a verify
+    /// command, so an agent would have no way to know it was done.
+    NoVerifyCommand,
+}
+
+impl NotAgentReady {
+    /// A message naming the reason, for a CLI or a UI toast.
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NoVerifyCommand => {
+                "no verify command: set `verifyCommand` on the ticket or its project \
+                 — an agent needs an exit code to know it is done"
+            }
+        }
+    }
+}
+
+impl core::fmt::Display for NotAgentReady {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.reason())
+    }
+}
+
+impl std::error::Error for NotAgentReady {}
+
+/// May this issue be marked ready for an agent?
+///
+/// `resolved_verify` is the outcome of walking the ticket override
+/// and then the project chain — see `project_proto::verify::resolve`.
+/// The chain walk needs project data, which this wasm-clean crate
+/// deliberately does not depend on, so the caller resolves and this
+/// function judges.
+///
+/// This is a **gate, not a warning**. A ticket with no verify command
+/// is one whose completion nobody can check, and an agent lane built
+/// on unverifiable tickets is a review queue with extra steps.
+///
+/// # Errors
+///
+/// [`NotAgentReady::NoVerifyCommand`] when nothing resolved.
+pub fn check_agent_ready(resolved_verify: Option<&str>) -> Result<(), NotAgentReady> {
+    match resolved_verify.map(str::trim) {
+        Some(cmd) if !cmd.is_empty() => Ok(()),
+        _ => Err(NotAgentReady::NoVerifyCommand),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +289,28 @@ mod tests {
         ] {
             assert!(label.blocks_human(), "{label:?} should block a human");
         }
+    }
+
+    #[test]
+    fn a_resolved_verify_command_opens_the_agent_ready_gate() {
+        assert_eq!(check_agent_ready(Some("cargo check -p task")), Ok(()));
+    }
+
+    #[test]
+    fn no_verify_command_closes_the_gate_and_names_the_reason() {
+        for missing in [None, Some(""), Some("   ")] {
+            assert_eq!(
+                check_agent_ready(missing),
+                Err(NotAgentReady::NoVerifyCommand),
+                "{missing:?} should not be agent-ready"
+            );
+        }
+        assert!(
+            NotAgentReady::NoVerifyCommand
+                .reason()
+                .contains("verify command"),
+            "the refusal must name the reason"
+        );
     }
 
     #[test]

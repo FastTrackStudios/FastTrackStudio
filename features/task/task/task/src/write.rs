@@ -163,6 +163,7 @@ mod tests {
             cycle: Some(cycle),
             workstream: Some(workstream),
             parent: None,
+            verify_command: None,
             estimate: Some(Estimate::M),
             assignees: AgentRefList(vec![
                 AgentRef::human("cody"),
@@ -220,6 +221,10 @@ mod tests {
         let parsed_attrs = parsed.workflow.expect("workflow attrs present");
         assert_eq!(parsed_attrs.cycle, Some(cycle));
         assert_eq!(parsed_attrs.workstream, Some(workstream));
+        assert_eq!(
+            parsed_attrs.verify_command, None,
+            "a ticket with no override must not grow the key"
+        );
         assert_eq!(parsed_attrs.assignees.len(), 2);
         assert_eq!(parsed_attrs.blockers.0, vec![blocker]);
         assert_eq!(
@@ -229,6 +234,38 @@ mod tests {
                 target: dup_target,
             }],
             "typed relations round-trip alongside the legacy lists"
+        );
+    }
+
+    /// A ticket's verify-command override round-trips, and a ticket
+    /// without one serializes no `verifyCommand:` key — most tickets
+    /// inherit their project's default and must stay byte-stable.
+    #[test]
+    fn ticket_verify_override_round_trips_and_is_omitted_when_absent() {
+        use crate::model::WorkflowAttrs;
+        let mut t = crate::parse::parse_str(
+            "tasks/plain.md",
+            "plain",
+            "---\ntype: task\ntitle: plain\nworkflow:\n  parent: null\n---\n",
+        )
+        .expect("parse");
+
+        t.workflow = Some(WorkflowAttrs::default());
+        let plain = serialize_task(&t).expect("serialize");
+        assert!(
+            !plain.contains("verifyCommand"),
+            "spurious verifyCommand key:\n{plain}"
+        );
+
+        t.workflow = Some(WorkflowAttrs {
+            verify_command: Some("cargo test -p task-proto".into()),
+            ..Default::default()
+        });
+        let yaml = serialize_task(&t).expect("serialize");
+        let back = crate::parse::parse_str("tasks/plain.md", "plain", &yaml).expect("re-parse");
+        assert_eq!(
+            back.workflow.expect("workflow").verify_command,
+            Some("cargo test -p task-proto".into())
         );
     }
 
