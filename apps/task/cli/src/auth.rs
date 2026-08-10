@@ -19,16 +19,21 @@ pub(crate) enum AuthCmd {
     /// commands need nothing else: the stored server URL is
     /// used whenever `--server` / `TASK_VOX_URL` is absent.
     Login {
+        /// Prompted for when omitted, if stdin is a terminal.
         #[arg(long)]
-        email: String,
-        /// Reads `TASK_PASSWORD` when the flag is omitted.
+        email: Option<String>,
+        /// Reads `TASK_PASSWORD` when the flag is omitted; prompted
+        /// for (with echo off) when neither is set and stdin is a
+        /// terminal — the best option of the three, since it reaches
+        /// neither `ps` nor the environment.
         ///
-        /// Prefer the env var in scripts: anything passed as an argument
-        /// is visible to `ps` for the lifetime of the process, and lands
-        /// in shell history. The env var is readable only by processes
-        /// that can already read this one's environment.
+        /// Prefer the env var over the flag in scripts: anything
+        /// passed as an argument is visible to `ps` for the lifetime
+        /// of the process, and lands in shell history. The env var is
+        /// readable only by processes that can already read this
+        /// one's environment.
         #[arg(long, env = "TASK_PASSWORD", hide_env_values = true)]
-        password: String,
+        password: Option<String>,
     },
     /// Create a new email/password user over the org's
     /// `AuthService` and persist the resulting session — like
@@ -37,10 +42,14 @@ pub(crate) enum AuthCmd {
     /// separate ownership concept yet. Use `--org <slug>` /
     /// `--server <url>` to target a specific org.
     Signup {
+        /// Prompted for when omitted, if stdin is a terminal.
         #[arg(long)]
-        email: String,
+        email: Option<String>,
+        /// Prompted for (twice, with echo off) when omitted and
+        /// stdin is a terminal — there's no password reset flow, so
+        /// a typo here is a locked-out account.
         #[arg(long)]
-        password: String,
+        password: Option<String>,
         /// Optional username — needed if you want
         /// `SignInUsername` to work later. Free-form, but the
         /// architect-auth username uniqueness constraint
@@ -192,6 +201,48 @@ async fn fetch_hosted_orgs(base: &str) -> eyre::Result<Vec<HostedOrg>> {
 /// hosted list — clearer than a raw vox connect error. When the
 /// well-known endpoint is unreachable the vox connect downstream
 /// reports the connection failure with its own taxonomy.
+/// The email to sign in/up with: the flag, else a prompt when a
+/// person is watching. Piped stdin gets the flag error instead of a
+/// read that would hang a script forever.
+fn resolve_email(flag: Option<String>) -> eyre::Result<String> {
+    if let Some(email) = flag.map(|e| e.trim().to_owned()).filter(|e| !e.is_empty()) {
+        return Ok(email);
+    }
+    if !crate::shared::stdin_is_tty() {
+        return Err(eyre::eyre!(
+            "no email — pass `--email <address>` (stdin is not a terminal, so there's nobody to prompt)"
+        ));
+    }
+    let email = crate::shared::prompt_line("Email")?;
+    if email.is_empty() {
+        return Err(eyre::eyre!("no email entered"));
+    }
+    Ok(email)
+}
+
+/// The password: the flag or `TASK_PASSWORD`, else a hidden prompt.
+/// `confirm` asks twice and compares — used on signup, where there is
+/// no reset flow, so a typo is a locked-out account. Sign-in doesn't
+/// need it: a wrong password just fails to authenticate.
+fn resolve_password(flag: Option<String>, confirm: bool) -> eyre::Result<String> {
+    if let Some(password) = flag.filter(|p| !p.is_empty()) {
+        return Ok(password);
+    }
+    if !crate::shared::stdin_is_tty() {
+        return Err(eyre::eyre!(
+            "no password — pass `--password` or set `TASK_PASSWORD` (stdin is not a terminal, so there's nobody to prompt)"
+        ));
+    }
+    let password = crate::shared::prompt_secret("Password")?;
+    if password.is_empty() {
+        return Err(eyre::eyre!("no password entered"));
+    }
+    if confirm && crate::shared::prompt_secret("Confirm password")? != password {
+        return Err(eyre::eyre!("passwords didn't match"));
+    }
+    Ok(password)
+}
+
 async fn resolve_auth_target(org_override: Option<&str>) -> eyre::Result<(String, String)> {
     let base = resolve_server_base(None);
     let hosted = fetch_hosted_orgs(&base).await.ok();
@@ -242,6 +293,8 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             username,
             name,
         } => {
+            let email = resolve_email(email)?;
+            let password = resolve_password(password, true)?;
             // Remote-first: sign up over the org's AuthService —
             // the same per-org vox endpoint every other service
             // rides. No local org dir required.
@@ -289,6 +342,8 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             println!("  session:  {key}");
         }
         AuthCmd::Login { email, password } => {
+            let email = resolve_email(email)?;
+            let password = resolve_password(password, false)?;
             // Remote-first sign-in over the org's AuthService.
             // The org is resolved via the server's well-known
             // document — no `task org init` needed on this box.

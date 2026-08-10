@@ -36,6 +36,9 @@ clap = { version = "4", features = ["derive", "env"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile = "3"
+# `auth login` / `auth signup` prompt for a password with terminal echo
+# off (isatty + termios), so it never reaches `ps` or shell history.
+libc.workspace = true
 # Parse `project set-states --from` registry files (YAML, a JSON superset).
 serde_yaml.workspace = true
 uuid.workspace = true

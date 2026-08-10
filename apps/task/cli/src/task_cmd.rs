@@ -407,6 +407,7 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 || ctx_filter.is_some()
                 || milestone_filter.is_some()
                 || open
+                || untriaged
                 || relevant;
             let want_server_query =
                 (status.is_some() || project_id.is_some() || limit.is_some() || offset.is_some())
