@@ -1012,6 +1012,89 @@ pub fn ChangePasswordForm() -> Element {
     }
 }
 
+/// Change your own email.
+///
+/// Self-service counterpart to the operator migration: the server takes
+/// the address from the session's own user, so there is no way to move
+/// someone else's. The change appends to the account's email history and
+/// the new address starts unverified, both of which the server handles.
+#[component]
+pub fn ChangeEmailForm() -> Element {
+    let ctx = use_context::<AuthCtx>();
+    let mut active = ctx.active;
+    let orgs = use_context::<Signal<Vec<OrgMeta>>>();
+    let next = use_signal(String::new);
+    let mut status = use_signal(|| None::<Result<String, String>>);
+    let mut busy = use_signal(|| false);
+
+    let submit = move |_| {
+        let new_email = next.peek().trim().to_owned();
+        let Some(account) = active.peek().clone() else {
+            status.set(Some(Err("sign in first".to_owned())));
+            return;
+        };
+        if new_email.is_empty() {
+            status.set(Some(Err("enter an email".to_owned())));
+            return;
+        }
+        busy.set(true);
+        status.set(None);
+        spawn(async move {
+            let slug = crate::orgs::home_slug(&orgs.peek());
+            let outcome = async {
+                let client = establish_for::<AuthServiceClient>(&slug).await?;
+                client
+                    .change_email(auth_proto::service::ChangeEmailRequest {
+                        session_token: account.token.clone(),
+                        new_email: new_email.clone(),
+                    })
+                    .await
+                    .map_err(|e| format!("{e}"))
+            }
+            .await;
+            busy.set(false);
+            match outcome {
+                Ok(user) => {
+                    let shown = user.email.clone().unwrap_or(new_email);
+                    // Keep the context in step so the switcher and
+                    // presence don't keep showing the old address.
+                    active.with_mut(|a| {
+                        if let Some(a) = a.as_mut() {
+                            a.email = shown.clone();
+                        }
+                    });
+                    status.set(Some(Ok(format!("Email is now {shown}."))));
+                }
+                Err(e) => status.set(Some(Err(e))),
+            }
+        });
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2",
+            Input {
+                value: next,
+                input_type: "email".to_string(),
+                placeholder: "New email",
+                on_change: move |_| status.set(None),
+            }
+            Button {
+                variant: ButtonVariant::Secondary,
+                size: ButtonSize::Medium,
+                loading: busy(),
+                on_click: submit,
+                class: "w-full",
+                "Change email"
+            }
+            match status.read().as_ref() {
+                Some(Ok(msg)) => rsx! { div { class: "px-1 text-xs text-muted-foreground", "{msg}" } },
+                Some(Err(msg)) => rsx! { div { class: "px-1 text-xs text-destructive", "{msg}" } },
+                None => rsx! {},
+            }
+        }
+    }
+}
+
 /// Account & status content for the mobile bottom sheet — the same
 /// roster / status / sign-out actions as the desktop [`AccountSwitcher`]
 /// popover (both ride [`AuthCtx`] + [`PresenceLocal`]), restyled as
@@ -1334,13 +1417,14 @@ pub fn AccountSwitcher(#[props(default = false)] rail: bool) -> Element {
                 }
                 section { class: "flex flex-col gap-2",
                     h3 { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
-                        if active.read().is_some() { "Password" } else { "Sign in" }
+                        if active.read().is_some() { "Account" } else { "Sign in" }
                     }
                     // Signed in, the useful action in this slot is
                     // changing your password; signed out it's signing in.
                     // Same place, because that's where someone looks for
                     // either.
                     if active.read().is_some() {
+                        ChangeEmailForm {}
                         ChangePasswordForm {}
                     } else {
                         LoginForm {}
@@ -1416,13 +1500,31 @@ fn clear_active_email() {
 // account, plus a plain `active` file naming the last account. On the
 // iOS/macOS sandbox `HOME` is the app container, so this stays inside it.
 #[cfg(not(target_arch = "wasm32"))]
+/// Native data dir for cached sessions.
+///
+/// Apple platforms get `Library/Application Support`, not
+/// `~/.local/share`: that is the sanctioned location for app data on
+/// iOS/macOS, survives app updates, and is backed up. A dotted
+/// XDG-style directory at the container root is a Linux convention iOS
+/// makes no promises about — the same reason the server registry kept
+/// forgetting its configuration between launches.
+///
+/// Kept in step with `server_registry::data_dir` deliberately: cached
+/// session and chosen server are useless without each other, so they
+/// must survive (or not) together.
 fn tokens_dir() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
+    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
-        .or_else(|| {
-            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local").join("share"))
-        })?;
+    {
+        return Some(xdg.join("task").join("ui-tokens"));
+    }
+    let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    let base = if cfg!(target_vendor = "apple") {
+        home.join("Library").join("Application Support")
+    } else {
+        home.join(".local").join("share")
+    };
     Some(base.join("task").join("ui-tokens"))
 }
 

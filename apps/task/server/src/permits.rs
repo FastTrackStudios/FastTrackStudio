@@ -164,6 +164,10 @@ const AUTH: ServicePermits = ServicePermits {
         // surface as small as the sign-in path requires. Audited — a
         // credential change is worth a line even when allowed.
         MethodPermit::new("change_password", Action::WRITE, "auth/self").audited(),
+        // Same tier as the password change: it alters your login
+        // identifier, needs a session regardless, and is worth an audit
+        // line even on allow.
+        MethodPermit::new("change_email", Action::WRITE, "auth/self").audited(),
     ],
 };
 
