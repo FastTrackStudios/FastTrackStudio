@@ -1251,7 +1251,75 @@ opt-level = 3
 [profile.wasm-dev.package.daw-standalone]
 opt-level = 3
 
+# Dependencies. Was 3 across the board, which meant paying full LLVM
+# optimization on ~1500 registry crates for every cold build / new
+# worktree. Dropped to 1: still gets rid of the pathological O0 debug
+# codegen, at a fraction of the compile cost. The crates that actually
+# run on the audio thread are exempted below — this override applies to
+# dependencies only, so workspace members are governed by profile.dev's
+# base opt-level and the explicit list further down.
 [profile.dev.package."*"]
+opt-level = 1
+
+# Audio-thread dependencies, kept at 3. `package."*"` above would
+# otherwise drop these to 1, and a dev run of the rig would start
+# xrunning. Sourced from `cargo tree` over audiocore-dsp /
+# daw-audio-graph / signal-sampler / neural-amp-modeler / eq-dsp /
+# pitch-dsp, keeping the crates that do real per-sample or per-block
+# work (resampling, decode, FFT, sample-pack decompression, JIT).
+#
+# If a dev run ever xruns on a path not covered here: run it --release
+# (the launch paths already do), or add the crate to this list.
+[profile.dev.package.rubato]
+opt-level = 3
+[profile.dev.package.fixed-resample]
+opt-level = 3
+[profile.dev.package.fast-interleave]
+opt-level = 3
+[profile.dev.package.dasp_frame]
+opt-level = 3
+[profile.dev.package.dasp_sample]
+opt-level = 3
+[profile.dev.package.rustfft]
+opt-level = 3
+[profile.dev.package.realfft]
+opt-level = 3
+[profile.dev.package.transpose]
+opt-level = 3
+[profile.dev.package.strength_reduce]
+opt-level = 3
+[profile.dev.package.primal-check]
+opt-level = 3
+[profile.dev.package.num-complex]
+opt-level = 3
+[profile.dev.package.symphonia-core]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-adpcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-aac]
+opt-level = 3
+[profile.dev.package.symphonia-format-riff]
+opt-level = 3
+[profile.dev.package.symphonia-format-mkv]
+opt-level = 3
+# Sample-pack streaming: packs are zstd-framed, so decompression is on
+# the voice-start path, and blake3 hashes pack content on load.
+[profile.dev.package.zstd-safe]
+opt-level = 3
+[profile.dev.package.zstd-sys]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+# phon's JIT engine — generates and runs the DSP graph itself.
+[profile.dev.package.phon]
+opt-level = 3
+[profile.dev.package.phon-engine]
+opt-level = 3
+[profile.dev.package.phon-jit]
 opt-level = 3
 
 # Build scripts + proc macros and their deps. `package."*"` does NOT cover
