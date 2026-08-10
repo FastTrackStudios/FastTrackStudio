@@ -207,3 +207,35 @@ async fn operator_verbs_manage_users_without_a_session() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn admin_role_can_be_seeded_without_an_existing_admin() -> eyre::Result<()> {
+    // The bootstrap property: `require_admin` needs an admin, so the
+    // FIRST admin cannot be made through the admin flows. If this path
+    // needed one too, an org could never get its first.
+    let (auth, _tmp) = store().await?;
+    let id = seed(&auth, "owner@example.test").await?;
+
+    let before = auth.auth.list_users_local_trusted().await.unwrap();
+    assert!(
+        before[0].role.as_deref() != Some("admin"),
+        "a freshly seeded user should not already be admin"
+    );
+
+    let promoted = auth
+        .auth
+        .set_user_role_local_trusted(id, Some("admin".into()))
+        .await
+        .map_err(|e| eyre::eyre!("grant admin: {e:?}"))?;
+    assert_eq!(promoted.role.as_deref(), Some("admin"));
+
+    // …and it can be taken away again, or a mistake would be permanent.
+    let cleared = auth
+        .auth
+        .set_user_role_local_trusted(id, None)
+        .await
+        .map_err(|e| eyre::eyre!("clear role: {e:?}"))?;
+    assert_eq!(cleared.role, None);
+
+    Ok(())
+}

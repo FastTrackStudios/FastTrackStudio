@@ -38,6 +38,7 @@ pub async fn dispatch() -> eyre::Result<bool> {
         Some("set-password") => set_password(&args[2..]).await.map(|()| true),
         Some("list-users") => list_users(&args[2..]).await.map(|()| true),
         Some("delete-user") => delete_user(&args[2..]).await.map(|()| true),
+        Some("set-role") => set_role(&args[2..]).await.map(|()| true),
         other => {
             eprintln!(
                 "usage:\n  \
@@ -47,7 +48,8 @@ pub async fn dispatch() -> eyre::Result<bool> {
                  task-server admin set-password --org <slug> --email <address>\n    \
                  (reads the new password from STDIN)\n  \
                  task-server admin list-users --org <slug>\n  \
-                 task-server admin delete-user --org <slug> --email <address> --yes\n"
+                 task-server admin delete-user --org <slug> --email <address> --yes\n  \
+                 task-server admin set-role --org <slug> --email <address> [--role admin|--clear]\n"
             );
             bail!("unknown admin subcommand: {}", other.unwrap_or("(none)"));
         }
@@ -134,6 +136,47 @@ async fn migrate_email(args: &[String]) -> eyre::Result<()> {
     if moved.id != user.id {
         bail!("user id changed — this should be impossible; investigate before continuing");
     }
+    Ok(())
+}
+
+/// Grant or clear architect-auth's `admin` role.
+///
+/// This is the bootstrap for admin itself: `require_admin` needs an
+/// existing admin, so the FIRST one cannot be made through the admin
+/// flows. Possession of the auth store is the only authority that
+/// predates any account.
+///
+/// Scope note: this sets `auth_users.role`, which gates architect-auth's
+/// `admin_*` flows. It is NOT the permission gate's role — that comes
+/// from architect-permissions, which currently gives every validated
+/// user the same default and never consults this column. Granting admin
+/// therefore does not (yet) widen what the gate allows.
+async fn set_role(args: &[String]) -> eyre::Result<()> {
+    let (Some(slug), Some(email)) = (flag(args, "--org"), flag(args, "--email")) else {
+        bail!("--org and --email are required");
+    };
+    let role = if has(args, "--clear") {
+        None
+    } else {
+        Some(flag(args, "--role").unwrap_or_else(|| "admin".to_owned()))
+    };
+    let auth = open_org_auth(&slug).await?;
+    let user = auth
+        .auth
+        .find_user_by_email(&email)
+        .await
+        .map_err(|e| eyre::eyre!("look up `{email}`: {e:?}"))?
+        .ok_or_else(|| eyre::eyre!("no account with email `{email}` in org `{slug}`"))?;
+    let updated = auth
+        .auth
+        .set_user_role_local_trusted(user.id, role.clone())
+        .await
+        .map_err(|e| eyre::eyre!("set role for `{email}` in `{slug}`: {e:?}"))?;
+    println!(
+        "{slug}: {} ({email}) role = {}",
+        updated.id,
+        updated.role.as_deref().unwrap_or("(none)")
+    );
     Ok(())
 }
 

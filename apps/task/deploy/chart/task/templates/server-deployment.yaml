@@ -61,16 +61,32 @@ spec:
               value: {{ .Values.backup.git.fullRepo | quote }}
             - name: TASK_BACKUP_ORG_REPO_PREFIX
               value: {{ .Values.backup.git.orgRepoPrefix | quote }}
+            # `optional: true` on BOTH: a missing backup secret must not
+            # stop the server booting. Without it the kubelet refuses to
+            # create the container at all — `CreateContainerConfigError`,
+            # which takes the whole deployment down for a feature that is
+            # off by default. That happened twice on 2026-08-10, both
+            # times because the live Argo Application had
+            # backup.git.enabled=true (drift; git says false) pointing at
+            # a secret that was never created.
+            #
+            # The server already handles the token being absent: it
+            # disables the snapshot endpoint and says so
+            # (`/server/snapshot` → 503 "TASK_BACKUP_GIT_TOKEN is not
+            # configured"). The chart was simply stricter than the app,
+            # turning a degraded feature into an outage.
             - name: TASK_BACKUP_GIT_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ required "backup.git.existingSecret is required (GIT_USER + GIT_TOKEN)" .Values.backup.git.existingSecret }}
                   key: GIT_USER
+                  optional: true
             - name: TASK_BACKUP_GIT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.backup.git.existingSecret }}
                   key: GIT_TOKEN
+                  optional: true
             {{- end }}
           {{- with .Values.server.existingSecret }}
           envFrom:
