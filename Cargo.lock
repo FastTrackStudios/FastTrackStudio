@@ -6261,15 +6261,18 @@ dependencies = [
 name = "daw-ui"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "daw-control",
  "daw-module",
  "daw-proto",
  "daw-reaper-dioxus",
+ "daw-theme",
  "daw-theme-art",
  "daw-theme-reaper",
  "dioxus",
  "dioxus-native",
  "dioxus-ssr",
+ "dioxus-test",
  "dock-dioxus",
  "dock-proto",
  "eyre",
