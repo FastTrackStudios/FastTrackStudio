@@ -247,6 +247,7 @@ members = [
     "features/expression-editor/expression-editor-core",
     "features/expression-editor/expression-editor-daw",
     "features/expression-editor/expression-editor-reaper",
+    "features/expression-editor/expression-editor-standalone",
     "features/expression-editor/expression-editor-ui",
     "features/fx/level/level",
     "features/fx/level/level-dsp",
@@ -635,6 +636,7 @@ expression-editor-audio = { path = "features/expression-editor/expression-editor
 expression-editor-core = { path = "features/expression-editor/expression-editor-core" }
 expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
 expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
+expression-editor-standalone = { path = "features/expression-editor/expression-editor-standalone" }
 expression-editor-ui = { path = "features/expression-editor/expression-editor-ui" }
 level = { path = "features/fx/level/level" }
 level-dsp = { path = "features/fx/level/level-dsp" }
