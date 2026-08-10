@@ -6342,6 +6342,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawfile-standalone"
+version = "0.1.0"
+dependencies = [
+ "daw-proto",
+ "dawfile-reaper",
+ "facet 0.50.0-rc.5",
+ "facet-styx 5.0.0-rc.5",
+ "sha2 0.10.9",
+ "styx-format 5.0.0-rc.5",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "dbus"
 version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8994,6 +9008,23 @@ dependencies = [
  "expression-editor-daw",
  "expression-editor-ui",
  "eyre",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "expression-editor-standalone"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "dawfile-reaper",
+ "dioxus",
+ "dioxus-test",
+ "expression-editor-audio",
+ "expression-editor-core",
+ "expression-editor-daw",
+ "expression-editor-ui",
+ "nice-plug-dioxus",
  "tokio",
  "tracing",
 ]
