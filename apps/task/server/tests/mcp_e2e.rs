@@ -217,4 +217,90 @@ async fn mcp_surface_end_to_end() {
         .find(|m| m["name"] == "create")
         .expect("task create method");
     assert_eq!(create["permit"], "write tasks/**");
+
+    // ── triage loop: see the unfiled, file it, watch it leave ────
+    let (err, bare) = call_tool(
+        &client,
+        &url,
+        "create_task",
+        json!({ "text": "Telemetry + Observability: Sentry" }),
+    )
+    .await;
+    assert!(!err, "create_task failed: {bare}");
+    let bare_id = bare["id"].as_str().expect("id").to_owned();
+    assert_eq!(bare["filed"], false, "a bare title is unfiled: {bare}");
+
+    let (err, proj) = call_tool(
+        &client,
+        &url,
+        "create_project",
+        json!({ "title": "Task platform" }),
+    )
+    .await;
+    assert!(!err, "create_project failed: {proj}");
+    let project_id = proj["id"].as_str().expect("project id").to_owned();
+
+    let (err, queue) = call_tool(&client, &url, "list_untriaged_tasks", json!({})).await;
+    assert!(!err, "list_untriaged_tasks failed: {queue}");
+    assert!(
+        queue["tasks"]
+            .as_array()
+            .expect("tasks")
+            .iter()
+            .any(|t| t["id"] == bare_id.as_str()),
+        "the bare task must be in the triage queue: {queue}"
+    );
+    assert!(
+        queue["projects"]
+            .as_array()
+            .expect("projects")
+            .iter()
+            .any(|p| p["id"] == project_id.as_str()),
+        "candidate homes ride along so triage is one call: {queue}"
+    );
+
+    // Filing needs an anchor — an empty call is a no-op, not a lie.
+    let (err, _) = call_tool(&client, &url, "file_task", json!({ "id": bare_id })).await;
+    assert!(err, "file_task with nothing to file by must fail");
+
+    let (err, filed) = call_tool(
+        &client,
+        &url,
+        "file_task",
+        json!({
+            "id": bare_id,
+            "project": project_id,
+            "reason": "Sentry wiring is platform observability work",
+        }),
+    )
+    .await;
+    assert!(!err, "file_task failed: {filed}");
+    assert_eq!(filed["filed"], true);
+    assert_eq!(filed["project_id"], project_id.as_str());
+    assert_eq!(
+        filed["projects"][0], "[[Task platform]]",
+        "the markdown page keeps its human-readable wikilink: {filed}"
+    );
+
+    // And it's out of the queue — the loop terminates.
+    let (err, queue) = call_tool(&client, &url, "list_untriaged_tasks", json!({})).await;
+    assert!(!err, "list_untriaged_tasks failed: {queue}");
+    assert!(
+        !queue["tasks"]
+            .as_array()
+            .expect("tasks")
+            .iter()
+            .any(|t| t["id"] == bare_id.as_str()),
+        "a filed task must leave the triage queue: {queue}"
+    );
+
+    // A parent that doesn't exist would orphan the task invisibly.
+    let (err, bad) = call_tool(
+        &client,
+        &url,
+        "file_task",
+        json!({ "id": bare_id, "parent": uuid::Uuid::new_v4().to_string() }),
+    )
+    .await;
+    assert!(err, "filing under a nonexistent parent must fail: {bad}");
 }

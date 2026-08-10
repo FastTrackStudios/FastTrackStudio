@@ -60,6 +60,12 @@ pub(crate) enum TaskCmd {
         /// Only tasks whose status is not done.
         #[arg(long)]
         open: bool,
+        /// Only *unfiled* tasks — no project, parent, workstream,
+        /// milestone or `@context`. The triage queue: these are
+        /// excluded from `--relevant` because a bare title says
+        /// nothing about what it's for. Implies `--open`.
+        #[arg(long)]
+        untriaged: bool,
         /// Only tasks relevant *right now* (see task::relevance):
         /// time-window contexts (`@morning` / `@mealprep` /
         /// `@evening`) gate to their windows, `@<location>` /
@@ -351,6 +357,7 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             project,
             milestone,
             open,
+            untriaged,
             relevant,
             at,
             location,
@@ -461,6 +468,12 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 })
                 .filter(|t| {
                     !open || !task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
+                })
+                // The triage queue — the exact complement of what
+                // `--relevant` keeps, so the two flags partition the
+                // open set between them.
+                .filter(|t| {
+                    !untriaged || (task::status_is_open(&t.status) && task::needs_triage(t))
                 })
                 .collect();
             // Same business logic the web store applies — one
