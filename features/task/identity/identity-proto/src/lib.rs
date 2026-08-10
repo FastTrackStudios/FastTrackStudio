@@ -25,7 +25,10 @@ pub mod linked_server;
 pub mod service;
 
 pub use linked_server::LinkedServer;
-pub use service::{IdentityService, IdentityServiceError, LinkServerRequest, LinkView};
+pub use service::{
+    IdentityService, IdentityServiceError, LinkServerRequest, LinkView, ProfileSyncReport,
+    ProfileView, SyncProfileRequest,
+};
 
 #[cfg(feature = "vox")]
 pub use service::{

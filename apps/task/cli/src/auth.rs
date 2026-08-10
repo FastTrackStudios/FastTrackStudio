@@ -106,6 +106,28 @@ pub(crate) enum AuthCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Show the authoritative profile your home org holds.
+    Profile {
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set your display name / avatar once, on home, and push it to
+    /// every linked org.
+    ///
+    /// The home copy is authoritative; each linked org keeps a cache so
+    /// it keeps working when home is unreachable. Passing neither field
+    /// re-pushes the current profile — the repair path for a link that
+    /// was down during an earlier edit.
+    ///
+    /// An empty string clears a field; omitting it leaves it alone.
+    SetProfile {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        image: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     /// Print the active session (email, user id, org id).
     Whoami,
     /// Switch the active session entry (server profile) without
@@ -246,6 +268,25 @@ async fn fetch_hosted_orgs(base: &str) -> eyre::Result<Vec<HostedOrg>> {
 /// hosted list — clearer than a raw vox connect error. When the
 /// well-known endpoint is unreachable the vox connect downstream
 /// reports the connection failure with its own taxonomy.
+/// A client for the home server's identity locker, plus the home
+/// session entry it authenticates with. The locker lives on HOME, so
+/// every locker verb needs both.
+async fn home_identity_client(
+    server: Option<String>,
+) -> eyre::Result<(
+    identity_proto::IdentityServiceClient,
+    crate::session_store::ServerEntry,
+)> {
+    let home = crate::session_store::load()?
+        .and_then(|s| s.home_entry().cloned())
+        .ok_or_else(|| {
+            eyre::eyre!("no home session — run `task auth login` against your home server first")
+        })?;
+    let base = server.unwrap_or_else(|| home.url.clone());
+    let (client, _endpoint) = crate::establish_server_client(Some(&base)).await?;
+    Ok((client, home))
+}
+
 /// Choose an org from a server's well-known list. Non-interactive
 /// callers must pass `--org`; a picker with nobody watching would hang.
 async fn pick_org_interactively(base: &str) -> eyre::Result<String> {
@@ -504,12 +545,8 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             println!("  session: {key}   (switch with `task auth use {key}`)");
         }
         AuthCmd::Links { server, json } => {
-            let home = crate::session_store::load()?
-                .and_then(|s| s.home_entry().cloned())
-                .ok_or_else(|| eyre::eyre!("no home session — run `task auth login` first"))?;
-            let base = server.unwrap_or_else(|| home.url.clone());
-            let (identity, _endpoint): (identity_proto::IdentityServiceClient, String) =
-                crate::establish_server_client(Some(&base)).await?;
+            let (identity, home) = home_identity_client(server).await?;
+            let base = home.url.clone();
             let links = identity
                 .list_links(home.token.clone())
                 .await
@@ -550,15 +587,11 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             }
         }
         AuthCmd::Unlink { id, server } => {
-            let home = crate::session_store::load()?
-                .and_then(|s| s.home_entry().cloned())
-                .ok_or_else(|| eyre::eyre!("no home session — run `task auth login` first"))?;
-            let base = server.unwrap_or_else(|| home.url.clone());
             let uuid = id
                 .parse::<uuid::Uuid>()
                 .map_err(|_| eyre::eyre!("`{id}` is not a link id — see `task auth links`"))?;
-            let (identity, _endpoint): (identity_proto::IdentityServiceClient, String) =
-                crate::establish_server_client(Some(&base)).await?;
+            let (identity, home) = home_identity_client(server).await?;
+            let base = home.url.clone();
             identity
                 .unlink_server(home.token.clone(), uuid)
                 .await
@@ -567,6 +600,55 @@ pub(crate) async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::
             println!(
                 "  the local session entry (if any) is untouched — `task auth logout` to drop it"
             );
+        }
+        AuthCmd::Profile { server } => {
+            let (identity, home) = home_identity_client(server).await?;
+            let p = identity
+                .get_profile(home.token.clone())
+                .await
+                .map_err(|e| eyre::eyre!("get profile: {e:?}"))?;
+            println!("Profile (authoritative, on {}):", home.url);
+            println!("  user:  {}", p.user_id);
+            println!("  email: {}", p.email.as_deref().unwrap_or("(none)"));
+            println!("  name:  {}", p.name.as_deref().unwrap_or("(none)"));
+            println!("  image: {}", p.image.as_deref().unwrap_or("(none)"));
+        }
+        AuthCmd::SetProfile {
+            name,
+            image,
+            server,
+        } => {
+            let (identity, home) = home_identity_client(server).await?;
+            let report = identity
+                .sync_profile(identity_proto::SyncProfileRequest {
+                    session_token: home.token.clone(),
+                    name,
+                    image,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("sync profile: {e:?}"))?;
+            let p = &report.profile;
+            println!("Profile set on home ({}):", home.url);
+            println!("  name:  {}", p.name.as_deref().unwrap_or("(none)"));
+            println!("  image: {}", p.image.as_deref().unwrap_or("(none)"));
+            if !report.updated.is_empty() {
+                println!("  pushed to: {}", report.updated.join(", "));
+            }
+            // Anything short of "everywhere" gets said out loud — a
+            // partial fan-out that reads as success is how caches rot.
+            if !report.pending.is_empty() {
+                println!(
+                    "  pending (other servers — needs federated push): {}",
+                    report.pending.join(", ")
+                );
+            }
+            if !report.failed.is_empty() {
+                println!("  FAILED:");
+                for f in &report.failed {
+                    println!("    {f}");
+                }
+                println!("  re-run `task auth set-profile` to retry those");
+            }
         }
         AuthCmd::Login { email, password } => {
             let email = resolve_email(email)?;

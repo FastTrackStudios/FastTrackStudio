@@ -76,9 +76,62 @@ pub struct LinkServerRequest {
     pub expires_at: Option<i64>,
 }
 
+/// The account's display profile — one authoritative copy, owned by
+/// the home org, cached by every linked org.
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(C)]
+pub struct ProfileView {
+    pub user_id: Uuid,
+    pub email: Option<String>,
+    pub name: Option<String>,
+    pub image: Option<String>,
+}
+
+/// Set the home profile (when `name` / `image` are given) and push it
+/// to every linked org. Passing neither is a pure re-push — the
+/// repair path when a link was down for an earlier edit.
+///
+/// `None` leaves a field alone; `Some("")` clears it.
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(C)]
+pub struct SyncProfileRequest {
+    pub session_token: String,
+    pub name: Option<String>,
+    pub image: Option<String>,
+}
+
+/// What one fan-out actually managed to do. Nothing here is silent:
+/// a link that couldn't be reached is named, so "update once,
+/// everywhere" never quietly means "update once, mostly".
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(C)]
+pub struct ProfileSyncReport {
+    /// The authoritative profile after the write.
+    pub profile: ProfileView,
+    /// Org slugs whose cached copy now matches.
+    pub updated: Vec<String>,
+    /// Links this server cannot push to yet — they live on another
+    /// server, and cross-server push needs the federation assertion
+    /// (`plans/federated-task-platform.md` §4). They keep serving
+    /// their cached copy until then.
+    pub pending: Vec<String>,
+    /// `slug: reason` for links that were reachable and still failed
+    /// — an expired stored token is the common one.
+    pub failed: Vec<String>,
+}
+
 /// Identity-locker surface. Mounted at `/server/vox`.
 #[architect::rpc]
 pub trait IdentityService {
+    /// The authoritative profile, straight from the home org.
+    fn get_profile(&self, session_token: String) -> Result<ProfileView, IdentityServiceError>;
+
+    /// Write the home profile and fan it out to every linked org.
+    fn sync_profile(
+        &self,
+        req: SyncProfileRequest,
+    ) -> Result<ProfileSyncReport, IdentityServiceError>;
+
     /// Every linked server owned by the authenticated caller,
     /// tokens decrypted.
     fn list_links(&self, session_token: String) -> Result<Vec<LinkView>, IdentityServiceError>;
