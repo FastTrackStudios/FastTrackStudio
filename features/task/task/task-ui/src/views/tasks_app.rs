@@ -5,9 +5,9 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
-use crate::display::TaskDisplay;
 use crate::TaskInfo;
 use crate::TaskMutation;
+use crate::display::TaskDisplay;
 
 use super::detail::TaskDetail;
 use super::kanban::KanbanBoard;
@@ -33,11 +33,21 @@ impl ViewMode {
 #[derive(Props, Clone, PartialEq)]
 pub struct TasksAppProps {
     pub tasks: Vec<TaskInfo>,
-    /// Per-project condensation leftovers (see
+    /// Per-anchor condensation leftovers (see
     /// [`super::list::TaskListProps::more`]): the list view renders
-    /// them behind an inline "N more in {project}" expander.
+    /// them behind an inline "N more in {group}" expander.
     #[props(default)]
     pub more: Vec<(Uuid, Vec<TaskInfo>)>,
+    /// Non-project belonging per task (see
+    /// [`super::row::AnchorChip`]) — what keeps a row from reading as
+    /// a bare title when it has no project.
+    #[props(default)]
+    pub anchors: Vec<(Uuid, super::row::AnchorChip)>,
+    /// Open tasks that belong to nothing at all. Rendered above the
+    /// list as the triage strip rather than mixed into it; see
+    /// [`super::triage::TriageStrip`].
+    #[props(default)]
+    pub triage: Vec<TaskInfo>,
     pub on_event: EventHandler<TaskMutation>,
     #[props(default)]
     pub initial_view: Option<ViewMode>,
@@ -65,10 +75,12 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
     let find_task = {
         let tasks = props.tasks.clone();
         let more = props.more.clone();
+        let triage = props.triage.clone();
         move |id: Uuid| -> Option<TaskInfo> {
             tasks
                 .iter()
                 .chain(more.iter().flat_map(|(_, rest)| rest.iter()))
+                .chain(triage.iter())
                 .find(|t| t.id == id)
                 .cloned()
         }
@@ -140,12 +152,21 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
                     on_create: move |task: TaskInfo| props.on_event.call(TaskMutation::Create { task }),
                 }
             }
+            // Unfiled work, above the list in both views — excluded
+            // from Relevant, but never silently.
+            super::triage::TriageStrip {
+                tasks: props.triage.clone(),
+                projects: props.projects.clone(),
+                on_event: props.on_event,
+                on_open: move |id: Uuid| open_id.set(Some(id)),
+            }
             div { class: "flex-1 min-h-0 overflow-y-auto",
                 match view() {
                     ViewMode::List => rsx! {
                         TaskList {
                             tasks: props.tasks.clone(),
                             more: props.more.clone(),
+                            anchors: props.anchors.clone(),
                             on_event: props.on_event,
                             on_toggle: {
                                 let find_task = find_task.clone();

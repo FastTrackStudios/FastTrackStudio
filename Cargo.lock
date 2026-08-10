@@ -26484,6 +26484,7 @@ dependencies = [
  "inbox-proto",
  "intake",
  "label-proto",
+ "libc",
  "links",
  "locations",
  "mealplan",

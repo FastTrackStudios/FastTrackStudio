@@ -50,6 +50,22 @@ const LATEST_PROTOCOL: &str = "2025-06-18";
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
 
+/// Per-task body cap in `list_untriaged_tasks`. The body is where a
+/// bare title's missing context usually hides, so it's worth sending
+/// — but a batch of 50 full notes is not.
+const TRIAGE_BODY_CAP: usize = 800;
+
+/// Head-truncate on a char boundary, marking the cut so the agent
+/// knows it's reading a fragment and doesn't conclude from silence.
+fn truncate_body(body: &str, cap: usize) -> String {
+    let body = body.trim();
+    if body.chars().count() <= cap {
+        return body.to_string();
+    }
+    let head: String = body.chars().take(cap).collect();
+    format!("{head}\n…[truncated]")
+}
+
 /// Vault id the org's `VaultSync` backend is keyed by (single-vault
 /// per org today, same constant the UI passes).
 const VAULT_ID: &str = "default";
@@ -220,6 +236,48 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                         "scheduled": s_("New scheduled date (ISO YYYY-MM-DD); empty string clears."),
                         "priority": s_("'none' | 'low' | 'normal' | 'high' | 'critical'."),
                         "assignees": a_("Replace who owns the task: 'agent:NAME' or 'human:USER_ID' entries (bare names mean agent:). Empty array unclaims. Prefer claim_task to take a task for yourself."),
+                    }),
+                    &["id"],
+                )
+            },
+        },
+        ToolDef {
+            name: "list_untriaged_tasks",
+            plugin: "core",
+            description: "List open tasks that belong to nothing — no project, no parent task, \
+                          no workstream, no @context. These are hidden from the user's \
+                          'Relevant' view because a bare title like 'Telemetry: Sentry' says \
+                          nothing about what it's for. Returns each task's title, body and \
+                          age, plus the org's projects and open tasks that could be its home, \
+                          so one call gives you everything needed to decide. Follow with \
+                          file_task for each one you can place confidently.",
+            schema: || {
+                obj(
+                    json!({
+                        "limit": i_("Max tasks to triage this pass (default 50, max 200). Oldest first."),
+                    }),
+                    &[],
+                )
+            },
+        },
+        ToolDef {
+            name: "file_task",
+            plugin: "core",
+            description: "File a task under what it belongs to: a project, a parent task, a \
+                          workstream, or GTD @contexts. This is the write that ends triage — \
+                          a filed task rejoins the user's working list. Pass only what you're \
+                          confident about; one correct anchor beats three guesses. If nothing \
+                          fits, leave the task alone and say so rather than inventing a home \
+                          for it.",
+            schema: || {
+                obj(
+                    json!({
+                        "id": s_("Task UUID from list_untriaged_tasks."),
+                        "project": s_("Project UUID it belongs to (from list_projects)."),
+                        "parent": s_("Task UUID this is a subtask of — use when the task is one slice of a bigger tracked item."),
+                        "workstream": s_("Workstream UUID this rolls up into."),
+                        "contexts": a_("GTD contexts like '@studio', '@phone' — the right answer for standalone errands that have no project."),
+                        "reason": s_("One line on why it belongs there. Recorded in the response so the user can audit your filing."),
                     }),
                     &["id"],
                 )
@@ -1396,6 +1454,151 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(task_json(&saved))
         }
 
+        "list_untriaged_tasks" => {
+            let rows = org
+                .tasks
+                .query(task::TaskListFilter {
+                    open_only: true,
+                    ..Default::default()
+                })
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
+            let mut unfiled: Vec<&task::TaskInfo> =
+                rows.iter().filter(|t| task::needs_triage(t)).collect();
+            // Oldest capture first: the thing that's been sitting
+            // longest is the thing most worth naming.
+            unfiled.sort_by(|a, b| {
+                a.date_created
+                    .cmp(&b.date_created)
+                    .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+            });
+            let total = unfiled.len();
+            let out: Vec<Value> = unfiled
+                .iter()
+                .take(arg_limit(args))
+                .map(|t| {
+                    let mut v = task_json(t);
+                    // The body is where the "what is this for" answer
+                    // usually hides — a bare title rarely carries it.
+                    if let Some(map) = v.as_object_mut() {
+                        map.insert(
+                            "details".into(),
+                            json!(truncate_body(&t.details, TRIAGE_BODY_CAP)),
+                        );
+                        map.insert("created".into(), json!(t.date_created));
+                    }
+                    v
+                })
+                .collect();
+
+            // The candidate homes, inline. Triage that needs three
+            // round-trips before it can think is triage nobody runs.
+            let projects: Vec<Value> = org
+                .projects
+                .list()
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?
+                .iter()
+                .filter(|p| project::Status::from_str(&p.status).is_none_or(|s| !s.is_closed()))
+                .map(project_json)
+                .collect();
+            let parents: Vec<Value> = rows
+                .iter()
+                .filter(|t| task::is_filed(t))
+                .map(|t| json!({ "id": t.id.to_string(), "title": t.title }))
+                .collect();
+            Ok(json!({
+                "count": out.len(),
+                "total_untriaged": total,
+                "tasks": out,
+                "projects": projects,
+                "filed_tasks": parents,
+                "note": "File each task with file_task. Leave anything you can't place \
+                         confidently — an unfiled task is recoverable, a wrongly filed one \
+                         is invisible.",
+            }))
+        }
+
+        "file_task" => {
+            let id = required_str(args, "id")?;
+            let uuid = parse_uuid(&id, "task")?;
+            let mut current = org
+                .tasks
+                .get(uuid)
+                .map_err(|e| backend_err("task", &id, &e))?;
+
+            let mut filed_as: Vec<String> = Vec::new();
+            if let Some(p) = arg_str(args, "project") {
+                let pid = parse_uuid(&p, "project")?;
+                // Resolve the title so the markdown page keeps its
+                // human-readable `projects:` wikilink — the vault is
+                // the source of truth, not just the DB column.
+                let title = org
+                    .projects
+                    .list()
+                    .ok()
+                    .and_then(|ps| ps.iter().find(|x| x.id == pid).map(|x| x.title.clone()));
+                let Some(title) = title else {
+                    return Err(ToolFailure::Message(format!(
+                        "no project with id `{p}` — call list_projects first"
+                    )));
+                };
+                current.project_id = Some(pid);
+                current.projects = vec![format!("[[{title}]]")].into();
+                filed_as.push(format!("project {title}"));
+            }
+            if let Some(p) = arg_str(args, "parent") {
+                let parent = parse_uuid(&p, "task")?;
+                if parent == uuid {
+                    return Err(ToolFailure::Message(
+                        "a task cannot be its own parent".into(),
+                    ));
+                }
+                // A parent that doesn't exist would orphan the task
+                // in a way no view can show.
+                org.tasks
+                    .get(parent)
+                    .map_err(|_| ToolFailure::Message(format!("no task with id `{p}`")))?;
+                current.workflow.get_or_insert_with(Default::default).parent = Some(parent);
+                filed_as.push("parent task".to_string());
+            }
+            if let Some(w) = arg_str(args, "workstream") {
+                current
+                    .workflow
+                    .get_or_insert_with(Default::default)
+                    .workstream = Some(parse_uuid(&w, "workstream")?);
+                filed_as.push("workstream".to_string());
+            }
+            if let Some(cs) = arg_str_list(args, "contexts")? {
+                current.contexts = cs
+                    .iter()
+                    .map(|c| {
+                        let c = c.trim().trim_start_matches('@');
+                        format!("@{c}")
+                    })
+                    .collect::<Vec<_>>()
+                    .into();
+                filed_as.push("contexts".to_string());
+            }
+            if filed_as.is_empty() {
+                return Err(ToolFailure::Message(
+                    "nothing to file by — pass at least one of project, parent, workstream, \
+                     or contexts"
+                        .into(),
+                ));
+            }
+            let saved = org
+                .tasks
+                .update(current)
+                .map_err(|e| backend_err("task", &id, &e))?;
+            let mut out = task_json(&saved);
+            if let Some(map) = out.as_object_mut() {
+                map.insert("filed_as".into(), json!(filed_as.join(", ")));
+                if let Some(reason) = arg_str(args, "reason") {
+                    map.insert("reason".into(), json!(reason));
+                }
+            }
+            Ok(out)
+        }
+
         "claim_task" => {
             let id = required_str(args, "id")?;
             let uuid = parse_uuid(&id, "task")?;
@@ -2351,6 +2554,7 @@ fn email_err(e: email_proto::EmailSyncError) -> ToolFailure {
 /// carries time entries, recurrence anchors, and relation graphs that
 /// would only burn context.
 fn task_json(t: &task::TaskInfo) -> Value {
+    let workflow = t.workflow.as_ref();
     json!({
         "id": t.id.to_string(),
         "title": t.title,
@@ -2361,7 +2565,15 @@ fn task_json(t: &task::TaskInfo) -> Value {
         "tags": t.tags.0,
         "contexts": t.contexts.0,
         "projects": t.projects.0,
-        "assignees": t.workflow.as_ref().map(|w| {
+        // Filing, spelled out: without these an agent can't tell a
+        // task that belongs somewhere from one that doesn't, and
+        // "which of my tasks need sorting" is unanswerable.
+        "project_id": t.project_id.map(|id| id.to_string()),
+        "parent": workflow.and_then(|w| w.parent).map(|id| id.to_string()),
+        "workstream": workflow.and_then(|w| w.workstream).map(|id| id.to_string()),
+        "milestone_id": t.milestone_id.map(|id| id.to_string()),
+        "filed": task::is_filed(t),
+        "assignees": workflow.map(|w| {
             w.assignees.0.iter().map(|a| a.short_label()).collect::<Vec<_>>()
         }),
         "path": t.path,

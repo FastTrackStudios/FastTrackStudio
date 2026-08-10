@@ -39,6 +39,7 @@ pub async fn dispatch() -> eyre::Result<bool> {
         Some("list-users") => list_users(&args[2..]).await.map(|()| true),
         Some("delete-user") => delete_user(&args[2..]).await.map(|()| true),
         Some("set-role") => set_role(&args[2..]).await.map(|()| true),
+        Some("create-user") => create_user(&args[2..]).await.map(|()| true),
         other => {
             eprintln!(
                 "usage:\n  \
@@ -49,7 +50,9 @@ pub async fn dispatch() -> eyre::Result<bool> {
                  (reads the new password from STDIN)\n  \
                  task-server admin list-users --org <slug>\n  \
                  task-server admin delete-user --org <slug> --email <address> --yes\n  \
-                 task-server admin set-role --org <slug> --email <address> [--role admin|--clear]\n"
+                 task-server admin set-role --org <slug> --email <address> [--role admin|--clear]\n  \
+                 task-server admin create-user --org <slug> --email <address> \\\n    \
+                 [--name <display>] [--username <handle>] (reads the password from STDIN)\n"
             );
             bail!("unknown admin subcommand: {}", other.unwrap_or("(none)"));
         }
@@ -234,6 +237,85 @@ async fn delete_user(args: &[String]) -> eyre::Result<()> {
         .await
         .map_err(|e| eyre::eyre!("delete `{email}` in `{slug}`: {e:?}"))?;
     println!("{slug}: deleted {} ({email})", user.id);
+    Ok(())
+}
+
+/// Create an account in one org's auth store.
+///
+/// **This is the bootstrap for org membership**, and it exists because
+/// there was no way in. `AuthService::sign_up_email_password` is
+/// deliberately not public — open self-registration plus the org lane's
+/// default `member` role made enforcement bypassable in one call — so
+/// only an existing member can provision an account. An org with zero
+/// accounts therefore has nobody who could create the first one, and is
+/// unreachable by every client: CLI, GUI and agent alike. Five of the
+/// six orgs on production are in exactly that state.
+///
+/// Possession of the auth store is the only authority that predates any
+/// account, which is why this lives on the server binary next to
+/// [`set_role`] rather than behind an RPC.
+///
+/// The password is read from STDIN for the same reason as
+/// [`set_password`]: arguments are visible to every user on the box via
+/// `ps` and land in shell history.
+///
+/// Creating the same email in several orgs makes several *distinct*
+/// accounts with distinct user ids — auth stores are per-org and there
+/// is no cross-org identity yet (see `plans/federated-task-platform.md`
+/// phase 3). They share a login, not a principal.
+async fn create_user(args: &[String]) -> eyre::Result<()> {
+    use std::io::Read as _;
+
+    let (Some(slug), Some(email)) = (flag(args, "--org"), flag(args, "--email")) else {
+        bail!("--org and --email are required");
+    };
+    let mut password = String::new();
+    std::io::stdin()
+        .read_to_string(&mut password)
+        .wrap_err("read the password from stdin")?;
+    let password = password.trim_end_matches(['\n', '\r']).to_owned();
+    if password.is_empty() {
+        bail!(
+            "no password on stdin — pipe it in, e.g. `kubectl exec -i … -- task-server admin create-user …`"
+        );
+    }
+
+    let auth = open_org_auth(&slug).await?;
+    // Idempotence: re-running after a partial sweep across several orgs
+    // should report the existing account, not fail halfway with a
+    // uniqueness error that leaves the operator guessing which orgs got
+    // done.
+    if let Some(existing) = auth
+        .auth
+        .find_user_by_email(&email)
+        .await
+        .map_err(|e| eyre::eyre!("look up `{email}` in `{slug}`: {e:?}"))?
+    {
+        println!(
+            "{slug}: {email} already exists ({}) — nothing to do",
+            existing.id
+        );
+        println!("  use `set-password` to change its credential");
+        return Ok(());
+    }
+
+    let bundle = auth
+        .auth
+        .create_email_password_user(architect_auth::CreateEmailPasswordUser {
+            email: email.clone(),
+            password,
+            name: flag(args, "--name"),
+            username: flag(args, "--username"),
+            image: None,
+            metadata_json: None,
+            ip_address: None,
+            user_agent: Some("task-server admin create-user".into()),
+        })
+        .await
+        .map_err(|e| eyre::eyre!("create `{email}` in `{slug}`: {e:?}"))?;
+
+    println!("{slug}: created {} ({email})", bundle.user.id);
+    println!("  sign in with: task auth login --org {slug} --email {email}");
     Ok(())
 }
 

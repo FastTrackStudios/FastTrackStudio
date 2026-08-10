@@ -60,6 +60,12 @@ pub(crate) enum TaskCmd {
         /// Only tasks whose status is not done.
         #[arg(long)]
         open: bool,
+        /// Only *unfiled* tasks — no project, parent, workstream,
+        /// milestone or `@context`. The triage queue: these are
+        /// excluded from `--relevant` because a bare title says
+        /// nothing about what it's for. Implies `--open`.
+        #[arg(long)]
+        untriaged: bool,
         /// Only tasks relevant *right now* (see task::relevance):
         /// time-window contexts (`@morning` / `@mealprep` /
         /// `@evening`) gate to their windows, `@<location>` /
@@ -351,6 +357,7 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             project,
             milestone,
             open,
+            untriaged,
             relevant,
             at,
             location,
@@ -400,6 +407,7 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 || ctx_filter.is_some()
                 || milestone_filter.is_some()
                 || open
+                || untriaged
                 || relevant;
             let want_server_query =
                 (status.is_some() || project_id.is_some() || limit.is_some() || offset.is_some())
@@ -462,6 +470,12 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 .filter(|t| {
                     !open || !task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
                 })
+                // The triage queue — the exact complement of what
+                // `--relevant` keeps, so the two flags partition the
+                // open set between them.
+                .filter(|t| {
+                    !untriaged || (task::status_is_open(&t.status) && task::needs_triage(t))
+                })
                 .collect();
             // Same business logic the web store applies — one
             // relevance implementation (task::relevance), two
@@ -478,9 +492,16 @@ pub(crate) async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 }
             });
             if let Some(ctx) = &relevance_ctx {
-                rows.retain(|t| task::status_is_open(&t.status) && task::is_relevant(t, ctx));
-                // One next action per project — task-dumping into a
-                // project can't inflate the "right now" list.
+                // Unfiled tasks are triage, not "right now" — same
+                // exclusion the server's `query` and the web board
+                // apply, so `--relevant` means one thing everywhere.
+                rows.retain(|t| {
+                    task::status_is_open(&t.status)
+                        && task::is_filed(t)
+                        && task::is_relevant(t, ctx)
+                });
+                // One next action per anchor (project, parent epic,
+                // workstream) — task-dumping can't inflate the list.
                 task::condense_next_per_project(&mut rows);
             }
             rows.sort_by(|a, b| {

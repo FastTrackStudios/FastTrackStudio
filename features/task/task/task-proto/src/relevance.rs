@@ -138,9 +138,41 @@ pub fn relevance_rank(task: &TaskInfo, ctx: &RelevanceContext) -> u8 {
 /// The shared "Active + Relevant" pipeline: keep open tasks that are
 /// relevant, stably ordered by [`relevance_rank`]. Both the server's
 /// `query` filter and the web store's client-side view call this.
+///
+/// Unfiled tasks (see [`crate::filing`]) are **not** relevant — a row
+/// that can't say what it belongs to isn't an answer to "what should
+/// I do now", it's an answer to "what haven't I sorted". Callers that
+/// want them (the triage surface) use [`partition_triage`] to take
+/// them off the list first.
 pub fn filter_relevant(tasks: &mut Vec<TaskInfo>, ctx: &RelevanceContext) {
-    tasks.retain(|t| status_is_open(&t.status) && is_relevant(t, ctx));
+    tasks
+        .retain(|t| status_is_open(&t.status) && crate::filing::is_filed(t) && is_relevant(t, ctx));
     tasks.sort_by_key(|t| relevance_rank(t, ctx));
+}
+
+/// Split the unfiled open tasks off the front of a list, returning
+/// them in triage order (oldest capture first — the thing you've been
+/// ignoring longest gets sorted first). `tasks` keeps everything else.
+///
+/// This is the honest counterpart to [`filter_relevant`]'s exclusion:
+/// nothing is dropped, it's routed. A surface that hides unfiled work
+/// without offering somewhere to file it is just losing tasks.
+pub fn partition_triage(tasks: &mut Vec<TaskInfo>) -> Vec<TaskInfo> {
+    let mut triage: Vec<TaskInfo> = Vec::new();
+    tasks.retain(|t| {
+        if status_is_open(&t.status) && crate::filing::needs_triage(t) {
+            triage.push(t.clone());
+            false
+        } else {
+            true
+        }
+    });
+    triage.sort_by(|a, b| {
+        a.date_created
+            .cmp(&b.date_created)
+            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+    });
+    triage
 }
 
 #[cfg(test)]
@@ -218,13 +250,16 @@ mod tests {
     #[test]
     fn pipeline_filters_done_and_ranks_active_project_first() {
         let pid = Uuid::new_v4();
+        let other = Uuid::new_v4();
         let mut a = task(&[]);
         a.title = "other".into();
+        a.project_id = Some(other);
         let mut b = task(&[]);
         b.title = "on the clock".into();
         b.project_id = Some(pid);
         let mut done = task(&[]);
         done.status = "done".into();
+        done.project_id = Some(other);
         let mut hidden = task(&["@morning"]);
         hidden.title = "routine".into();
 
@@ -237,21 +272,59 @@ mod tests {
         let titles: Vec<&str> = rows.iter().map(|t| t.title.as_str()).collect();
         assert_eq!(titles, vec!["on the clock", "other"]);
     }
+
+    #[test]
+    fn unfiled_tasks_are_not_relevant_they_are_triage() {
+        let mut bare = task(&[]);
+        bare.title = "Telemetry + Observability: Sentry".into();
+        let mut filed = task(&[]);
+        filed.title = "filed".into();
+        filed.project_id = Some(Uuid::new_v4());
+
+        let mut rows = vec![bare, filed];
+        filter_relevant(&mut rows, &at("14:00"));
+        let titles: Vec<&str> = rows.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["filed"], "a bare title is not an action");
+    }
+
+    #[test]
+    fn partition_triage_routes_rather_than_drops() {
+        let mut bare = task(&[]);
+        bare.title = "Sentry".into();
+        bare.date_created = Some("2026-01-01T00:00:00Z".parse().unwrap());
+        let mut older = task(&[]);
+        older.title = "older".into();
+        older.date_created = Some("2025-01-01T00:00:00Z".parse().unwrap());
+        let mut filed = task(&[]);
+        filed.title = "filed".into();
+        filed.project_id = Some(Uuid::new_v4());
+        let mut closed = task(&[]);
+        closed.title = "closed".into();
+        closed.status = "done".into();
+
+        let mut rows = vec![bare, filed, closed, older];
+        let triage = partition_triage(&mut rows);
+
+        let t: Vec<&str> = triage.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(t, vec!["older", "Sentry"], "oldest capture triaged first");
+        let kept: Vec<&str> = rows.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(
+            kept,
+            vec!["filed", "closed"],
+            "closed work is not triage, however bare"
+        );
+    }
 }
 
-/// Condense a Relevant view to the single **next action per project**
-/// — a project with forty queued tasks contributes one row ("what
-/// would I do on this project right now"), so task-dumping into a
-/// project can't inflate the list. Tasks with no `project_id` are
-/// untouched (routines, one-offs).
+/// Sort key picking a group's **next action**: anything in-progress
+/// wins outright (you're already doing it), then soonest hard due
+/// date (undated last), then priority, then title. Smaller is better.
 ///
-/// The pick within a project: anything in-progress wins outright
-/// (you're doing it), then soonest hard due date (undated last),
-/// then priority, then title — the same "first action" the project
-/// dashboard shows.
-pub fn condense_next_per_project<T: std::borrow::Borrow<TaskInfo>>(tasks: &mut Vec<T>) {
-    use std::collections::HashMap;
-
+/// Exposed because every surface that condenses also wants to order
+/// the leftovers the same way — the web list's inline "N more in …"
+/// expander sorts with this rather than re-deriving it.
+#[must_use]
+pub fn next_action_key(t: &TaskInfo) -> NextKey {
     fn priority_rank(p: &str) -> u8 {
         match crate::model::Priority::from_str(p) {
             Some(crate::model::Priority::Critical) => 0,
@@ -261,39 +334,69 @@ pub fn condense_next_per_project<T: std::borrow::Borrow<TaskInfo>>(tasks: &mut V
             Some(crate::model::Priority::None) => 4,
         }
     }
-    /// Sort key: (not-in-progress, undated, due, priority, title).
-    type NextKey = (bool, bool, String, u8, String);
-    fn key(t: &TaskInfo) -> NextKey {
-        let in_progress =
-            crate::model::Status::from_str(&t.status) == Some(crate::model::Status::InProgress);
-        (
-            !in_progress, // running work sorts first
-            t.due.is_none(),
-            t.due.clone().unwrap_or_default(),
-            priority_rank(&t.priority),
-            t.title.to_lowercase(),
-        )
-    }
+    let in_progress =
+        crate::model::Status::from_str(&t.status) == Some(crate::model::Status::InProgress);
+    (
+        !in_progress, // running work sorts first
+        t.due.is_none(),
+        t.due.clone().unwrap_or_default(),
+        priority_rank(&t.priority),
+        t.title.to_lowercase(),
+    )
+}
 
-    let mut winner: HashMap<Uuid, (usize, NextKey)> = HashMap::new();
+/// Sort key: (not-in-progress, undated, due, priority, title).
+pub type NextKey = (bool, bool, String, u8, String);
+
+/// Condense a Relevant view to the single **next action per anchor**
+/// — a project with forty queued tasks contributes one row ("what
+/// would I do here right now"), so task-dumping can't inflate the
+/// list. Grouping is by [`crate::filing::Anchor`], so a triaged PRD
+/// broken into a dozen subtasks also collapses to its next action,
+/// not twelve rows.
+///
+/// `resolve` supplies each task's anchor. Pass
+/// [`crate::filing::anchor`] for the pure structural answer; callers
+/// holding a project list (the web store) pass a closure that first
+/// resolves `projects:` wikilinks to a project id, so wikilink-only
+/// membership condenses too. Returning `None` leaves the task
+/// untouched — one-offs each keep their row.
+pub fn condense_next_per_anchor<T, F>(tasks: &mut Vec<T>, resolve: F)
+where
+    T: std::borrow::Borrow<TaskInfo>,
+    F: Fn(&TaskInfo) -> Option<crate::filing::Anchor>,
+{
+    use std::collections::HashMap;
+
+    let mut winner: HashMap<crate::filing::Anchor, (usize, NextKey)> = HashMap::new();
+    let mut anchors: Vec<Option<crate::filing::Anchor>> = Vec::with_capacity(tasks.len());
     for (i, t) in tasks.iter().enumerate() {
         let t = t.borrow();
-        let Some(pid) = t.project_id else { continue };
-        let k = key(t);
-        match winner.get(&pid) {
+        let a = resolve(t);
+        anchors.push(a);
+        let Some(a) = a else { continue };
+        let k = next_action_key(t);
+        match winner.get(&a) {
             Some((_, best)) if *best <= k => {}
             _ => {
-                winner.insert(pid, (i, k));
+                winner.insert(a, (i, k));
             }
         }
     }
     let keep: std::collections::HashSet<usize> = winner.into_values().map(|(i, _)| i).collect();
     let mut i = 0;
-    tasks.retain(|t| {
-        let keep_it = t.borrow().project_id.is_none() || keep.contains(&i);
+    tasks.retain(|_| {
+        let keep_it = anchors[i].is_none() || keep.contains(&i);
         i += 1;
         keep_it
     });
+}
+
+/// [`condense_next_per_anchor`] over the structural anchor — the
+/// backwards-compatible entry point for callers with no project list
+/// to resolve wikilinks against (the server's `query`, the CLI).
+pub fn condense_next_per_project<T: std::borrow::Borrow<TaskInfo>>(tasks: &mut Vec<T>) {
+    condense_next_per_anchor(tasks, crate::filing::anchor);
 }
 
 #[cfg(test)]
@@ -339,5 +442,50 @@ mod condense_tests {
         condense_next_per_project(&mut rows);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].title, "on the clock");
+    }
+
+    #[test]
+    fn subtasks_of_one_parent_condense_to_their_next_action() {
+        // The case that motivated widening project → anchor: a
+        // triaged PRD becomes N project-less subtasks, and N rows in
+        // the list is exactly the noise condensation exists to cut.
+        let parent = Uuid::new_v4();
+        let sub = |title: &str, due: Option<&str>| {
+            let mut t = task(title, None, due, "open");
+            t.workflow = Some(crate::model::WorkflowAttrs {
+                parent: Some(parent),
+                ..Default::default()
+            });
+            t
+        };
+        let mut rows = vec![
+            sub("attach identity to http", None),
+            sub("attach identity to vox", Some("2026-07-05")),
+            task("unrelated one-off", None, None, "open"),
+        ];
+        condense_next_per_project(&mut rows);
+        let titles: Vec<&str> = rows.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, vec!["attach identity to vox", "unrelated one-off"]);
+    }
+
+    #[test]
+    fn a_resolver_can_group_by_wikilink_only_membership() {
+        // The web store's case: `projects: [[Task platform]]` with no
+        // `projectId` yet. Structurally unanchored, but the caller
+        // holds the project list and can say otherwise.
+        let p = Uuid::new_v4();
+        let mut a = task("slice 1", None, None, "open");
+        a.projects.push("[[Task platform]]".into());
+        let mut b = task("slice 2", None, Some("2026-07-05"), "open");
+        b.projects.push("[[Task platform]]".into());
+
+        let mut rows = vec![a, b];
+        super::condense_next_per_anchor(&mut rows, |t| {
+            t.projects
+                .first()
+                .map(|_| crate::filing::Anchor::Project(p))
+        });
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "slice 2");
     }
 }

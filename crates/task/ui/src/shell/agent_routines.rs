@@ -18,6 +18,35 @@ use fts_ui::prelude::*;
 pub mod logic;
 use logic::{relative_when, runs_label, schedule_hint};
 
+/// Ready-made routines, offered in the composer so the common ones
+/// are a click rather than an exercise in prompt-writing. A preset
+/// only fills the draft fields — the user still reads it and presses
+/// Schedule, and can edit anything first.
+struct RoutinePreset {
+    name: &'static str,
+    /// What it's for, in the user's terms — one line under the chip.
+    blurb: &'static str,
+    schedule: &'static str,
+    prompt: &'static str,
+}
+
+/// The triage prompt is the one from `apps/task/skills/task-triage.md`
+/// — keep them in step. Daily before the workday: hourly burns tokens
+/// on an empty queue, weekly lets the strip grow past the point
+/// anyone reads it.
+const PRESETS: &[RoutinePreset] = &[RoutinePreset {
+    name: "Triage unfiled tasks",
+    blurb: "Files tasks that belong to nothing, so they rejoin your list",
+    schedule: "0 8 * * *",
+    prompt: "Run the task-triage skill for this org. Call \
+             list_untriaged_tasks, file what you can place confidently \
+             with file_task, and leave the rest — an unfiled task is \
+             recoverable, a wrongly filed one is invisible. Reply with \
+             one line per task: filed (where + why) or skipped (why \
+             not). If nothing is untriaged, reply \"nothing to triage\" \
+             and stop.",
+}];
+
 #[component]
 pub fn RoutinesPanel(slug: String) -> Element {
     // Clone up front: the org slug feeds the resource key *and*
@@ -144,6 +173,24 @@ pub fn RoutinesPanel(slug: String) -> Element {
 
             if composing() {
                 div { class: "flex flex-col gap-2 rounded-lg border border-border/60 bg-card/40 p-2.5",
+                    // Presets first — a blank prompt box is the reason
+                    // most routines never get written.
+                    div { class: "flex flex-col gap-1",
+                        for p in PRESETS.iter() {
+                            button {
+                                key: "{p.name}",
+                                r#type: "button",
+                                class: "flex flex-col items-start gap-0.5 rounded-md border border-border/50 bg-card/30 px-2 py-1.5 text-left transition-colors hover:border-primary/50 hover:bg-accent/30",
+                                onclick: move |_| {
+                                    draft_name.set(p.name.to_string());
+                                    draft_schedule.set(p.schedule.to_string());
+                                    draft_prompt.set(p.prompt.to_string());
+                                },
+                                span { class: "text-xs font-medium text-foreground", "{p.name}" }
+                                span { class: "text-[11px] leading-snug text-muted-foreground", "{p.blurb}" }
+                            }
+                        }
+                    }
                     input {
                         class: "rounded-md border border-border/60 bg-card/30 px-2 py-2 text-base outline-none focus:border-primary/60 md:py-1 md:text-xs",
                         placeholder: "Name (optional)",
