@@ -2076,32 +2076,65 @@ async fn permissions_report_handler(headers: axum::http::HeaderMap) -> axum::res
 /// Per `plans/federated-task-platform.md`: peers fetch this
 /// to learn what slugs are available on a federation host
 /// before opening a vox connection.
-async fn well_known_handler(State(state): State<AppState>) -> axum::Json<serde_json::Value> {
-    let orgs: Vec<serde_json::Value> = state
-        .org_slugs()
-        .into_iter()
-        .filter_map(|slug| {
-            // We only have the slug here — the display
-            // name + federation URL live in `org.toml`,
-            // re-loaded for each entry. Cheap (TOML parse
-            // of a tiny file) and avoids holding manifest
-            // copies on every dispatched request.
-            let manifest = state.data_root.org(slug.as_str()).manifest().ok()?;
-            Some(serde_json::json!({
-                "slug": slug,
-                "id": manifest.id,
-                "display_name": manifest.display_name,
-                "is_home": manifest.is_home,
-                "federation_url": manifest.federation_url,
-                // Org-level config, not secret (the doc already carries
-                // schema stamps): the client shell hides a disabled
-                // plugin's nav/widgets/routes from this list.
-                "disabled_plugins": manifest.disabled_plugins.0,
-                "vox": format!("/org/{slug}/vox"),
-                "health": format!("/org/{slug}/health"),
-            }))
-        })
-        .collect();
+async fn well_known_handler(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> axum::Json<serde_json::Value> {
+    // Membership, when the caller says who they are. Each org has its OWN
+    // auth database (`AppState::new` opens one `AuthState` per
+    // `org_root.auth_db()`), so "orgs I belong to" is exactly "orgs where
+    // my token validates" — no cross-org membership table to consult, and
+    // a token from one org is simply unknown to another.
+    //
+    // The list itself is NOT filtered here. A client must be able to see
+    // an org before it can sign into it, and discovery runs before any
+    // session exists; filtering server-side would make sign-in
+    // unreachable. Instead each entry is tagged, and the client uses the
+    // tag to decide what "All organizations" means (issue #109 criterion
+    // 6). Enforcement of actual data access is the permission gate's job
+    // on the org lane, not this endpoint's.
+    let bearer = crate::watch_bridge::bearer(&headers);
+    let mut orgs: Vec<serde_json::Value> = Vec::new();
+    for slug in state.org_slugs() {
+        // We only have the slug here — the display
+        // name + federation URL live in `org.toml`,
+        // re-loaded for each entry. Cheap (TOML parse
+        // of a tiny file) and avoids holding manifest
+        // copies on every dispatched request.
+        let Ok(manifest) = state.data_root.org(slug.as_str()).manifest() else {
+            continue;
+        };
+        // `null` (unknown) when the caller presented nothing, so a client
+        // can tell "signed out" from "signed in and not a member" — the
+        // former must still show every org (that's the sign-in path), the
+        // latter must not.
+        let member = match (&bearer, state.org(&slug)) {
+            (Some(token), Some(org)) => Some(
+                org.auth
+                    .auth
+                    .current_session(architect_auth::CurrentSession {
+                        token: token.clone(),
+                    })
+                    .await
+                    .is_ok(),
+            ),
+            _ => None,
+        };
+        orgs.push(serde_json::json!({
+            "slug": slug,
+            "id": manifest.id,
+            "display_name": manifest.display_name,
+            "is_home": manifest.is_home,
+            "federation_url": manifest.federation_url,
+            // Org-level config, not secret (the doc already carries
+            // schema stamps): the client shell hides a disabled
+            // plugin's nav/widgets/routes from this list.
+            "disabled_plugins": manifest.disabled_plugins.0,
+            "member": member,
+            "vox": format!("/org/{slug}/vox"),
+            "health": format!("/org/{slug}/health"),
+        }));
+    }
     // Schema stamps — the proto/server skew guard. Clients
     // (`task doctor`, ui-lab smoke) compare these against their
     // own build; see `schema_stamps`.
