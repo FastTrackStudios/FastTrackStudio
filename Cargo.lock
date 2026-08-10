@@ -9002,6 +9002,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "expression-editor-standalone"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "dawfile-reaper",
+ "dioxus",
+ "dioxus-test",
+ "expression-editor-audio",
+ "expression-editor-core",
+ "expression-editor-daw",
+ "expression-editor-ui",
+ "nice-plug-dioxus",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "expression-editor-ui"
 version = "0.1.0"
 dependencies = [
