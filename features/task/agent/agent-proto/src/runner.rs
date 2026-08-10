@@ -25,10 +25,11 @@
 //! is worse than one that failed to start.
 
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// One thing a runner can do.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub enum Capability {
     /// Read and write Task entities. Every runner has this.
@@ -107,7 +108,7 @@ where
 /// for" — the single-machine default. Narrowing either list narrows
 /// what the runner is offered, so a shared box never sees work from
 /// an org it should not touch.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct RunnerScope {
     /// Org slugs this runner serves. Empty = any.
@@ -139,7 +140,7 @@ impl RunnerScope {
 }
 
 /// What a ticket needs from whoever runs it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct TicketRequirements {
     /// Capabilities the runner must have, all of them.
@@ -151,7 +152,7 @@ pub struct TicketRequirements {
 }
 
 /// A runner's advertised profile, as routing sees it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct RunnerProfile {
     /// Matches [`crate::backend::AgentBackend::id`].

@@ -6,11 +6,12 @@
 
 use chrono::{DateTime, Utc};
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
 /// One configured agent runtime. The `kind` field tells the
 /// service whether the backend dispatches in-process,
 /// monitors an external CLI, or talks HTTP.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct AgentBackend {
     /// Stable id — `"hermes"`, `"codex"`, `"claude-cli"`,
@@ -47,7 +48,7 @@ pub struct AgentBackend {
     pub runner: crate::runner::RunnerProfile,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub enum BackendKind {
     /// Embeds an agent runtime — Hermes Rust SDK, `OpenAI`
