@@ -39,6 +39,10 @@ tempfile = "3"
 # `auth login` / `auth signup` prompt for a password with terminal echo
 # off (isatty + termios), so it never reaches `ps` or shell history.
 libc.workspace = true
+# `auth link` / `auth links` / `auth unlink` — the identity locker on the
+# home server's `/server/vox` lane, which holds the encrypted session
+# token for every other (server, org) this account has linked.
+identity-proto = { workspace = true, features = ["vox"] }
 # Parse `project set-states --from` registry files (YAML, a JSON superset).
 serde_yaml.workspace = true
 uuid.workspace = true

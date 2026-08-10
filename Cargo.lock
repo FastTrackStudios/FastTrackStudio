@@ -26511,6 +26511,7 @@ dependencies = [
  "git-github",
  "git-proto",
  "goal",
+ "identity-proto",
  "inbox-proto",
  "intake",
  "label-proto",
