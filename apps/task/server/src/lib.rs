@@ -38,6 +38,7 @@ pub mod share;
 pub mod snapshot;
 pub mod watch_bridge;
 #[cfg(feature = "plugin-forge")]
+pub mod webdav;
 pub mod webhooks;
 
 use std::path::PathBuf;
@@ -151,6 +152,11 @@ pub struct OrgAppState {
     /// per-root jj repos live under `<org>/files/`, outside the vault
     /// (a File Root is never vault-replicated; see the glossary).
     pub files: files::FilesBackend,
+    /// WebDAV compat bridge over the same roots (issue #274) — mounted
+    /// at `/org/{slug}/dav`, current heads only, never the sync path.
+    /// Holds this org's per-root WebDAV policy and lock managers, so it
+    /// is built once per org rather than per request.
+    pub files_webdav: files_webdav::WebdavBridge,
     /// Task backend — walks every `type: task` page in the
     /// vault.
     pub tasks: task::TaskBackend,
@@ -1159,6 +1165,8 @@ pub(crate) async fn build_org_state(
         let workstreams = workstream::WorkstreamBackend::new(vault_root.clone());
         let files = files::FilesBackend::new(org_root.path().join("files"))
             .map_err(|e| eyre::eyre!("files backend: {e}"))?;
+        let files_webdav = files_webdav::WebdavBridge::new(files.clone())
+            .map_err(|e| eyre::eyre!("files webdav bridge: {e}"))?;
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.
@@ -1382,6 +1390,7 @@ pub(crate) async fn build_org_state(
             milestones,
             workstreams,
             files,
+            files_webdav,
             tasks,
             #[cfg(feature = "plugin-home")]
             locations,
@@ -1992,6 +2001,19 @@ pub fn router(state: AppState) -> Router {
         // can reach, instead of one registration per org.
         .route("/mcp", axum::routing::post(mcp::mcp_account_handler))
         .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
+        // Files WebDAV bridge (issue #274) — mount an org's File Roots
+        // from Finder/Explorer. `any` because WebDAV's verbs (PROPFIND,
+        // MKCOL, MOVE, LOCK, …) are not in axum's method router, and
+        // both shapes because a mount addresses the collection itself
+        // (`/dav`) as well as everything under it.
+        // All three shapes: a WebDAV collection is addressed with a
+        // trailing slash (`/dav/` is what a client PROPFINDs at mount
+        // time), which axum's wildcard does not match — it needs at
+        // least one character — and `/dav` without one is what a user
+        // types into the mount dialog.
+        .route("/org/{slug}/dav", any(webdav::webdav_handler))
+        .route("/org/{slug}/dav/", any(webdav::webdav_handler))
+        .route("/org/{slug}/dav/{*path}", any(webdav::webdav_handler))
         .with_state(state.clone());
 
     // Server-management vox: `OrgManagementService` +

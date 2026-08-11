@@ -149,6 +149,18 @@ impl FilesBackend {
         &self.data_dir
     }
 
+    /// Does `path` resolve inside this org's files area (see the module
+    /// doc's "Filesystem confinement")? The read-only half of
+    /// [`FilesBackend::confine`], for other surfaces over the same
+    /// roots — the WebDAV bridge (`files-webdav`, issue #274) checks a
+    /// root's live tree with it before handing a filesystem view of it
+    /// to a network client, so a registry entry that somehow points
+    /// outside confinement fails closed there too.
+    #[must_use]
+    pub fn is_confined(&self, path: impl AsRef<Path>) -> bool {
+        self.confine(path.as_ref()).is_ok()
+    }
+
     fn publish(&self, event: FilesEvent) {
         self.events.publish(event);
     }
