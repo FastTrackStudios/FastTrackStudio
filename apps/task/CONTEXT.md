@@ -35,6 +35,14 @@ on their tickets.
   binding is mutable. Roots may live anywhere, including inside a
   vault folder — vault replication excludes root subtrees. Policies
   (versioning, retention, placement) live on the root itself.
+- **Root flavor** — a File Root's versioning mode, chosen at creation:
+  *media* (the default) or *software* (a real git repo, fully usable by
+  git tooling). Doctrine: big media lives in media roots; a software
+  root ignores stray heavy files rather than versioning them.
+- **Version store** — the engine and storage behind version chains,
+  checkpoints, and divergent versions for a root. Authoritative beside
+  the root's live tree; names and curation (Named Versions, Project
+  Versions) live in the Vault, never in the store.
 - **Root slice** — a reference to (root, subpath): how subprojects,
   share links, and note-embedded widgets point at part of a root
   without creating a nested root.
