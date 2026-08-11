@@ -339,6 +339,11 @@ table!(WORKSTREAM, "workstream", "workstreams/**", [
     wr "set_status", wa "delete", rd "rollup",
 ]);
 table!(WORKSTREAM_STREAM, "workstream-stream", "workstreams/**", [rd "events"]);
+table!(FILES, "files", "files/**", [
+    wr "create_root", rd "list_roots", rd "get_root", rd "browse", rd "drive_browse",
+    rd "chain", wr "checkpoint_now",
+]);
+table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
 table!(TASK, "task", "tasks/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "try_claim",
     rd "reverse_relations", rd "reverse_relations_batch", rd "query", wr "rename", wa "delete",
@@ -779,6 +784,8 @@ pub fn mounts() -> Vec<Mount> {
             workstream::workstream_stream_descriptor(),
             WORKSTREAM_STREAM,
         ),
+        m("core", files::files_service_descriptor(), FILES),
+        m("core", files::files_stream_descriptor(), FILES_STREAM),
         m("core", task::task_service_descriptor(), TASK),
         m("core", task::task_stream_descriptor(), TASK_STREAM),
         m(

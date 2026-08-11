@@ -159,12 +159,7 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
     // local is PRESENTATION: the `task-pdf-render` shell-out, the
     // vault export of the markdown stub, and the issuer-profile /
     // auth-name joins (each documented at its site).
-    let slug = match crate::resolve_active_org(org_override.map(str::to_owned)) {
-        Ok(s) => s,
-        // No --org and no session: local single-org disambiguation /
-        // auto-bootstrap, as the old direct-disk path did.
-        Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
-    };
+    let slug = crate::resolve_slug(org_override)?;
     // `TASK_TIMER_DB` fixture override → the embedded server's knob.
     crate::timer::forward_timer_db_override();
     let data_root = org_proto::DataRoot::from_env().ok();
@@ -446,8 +441,7 @@ pub(crate) async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> 
                 let mut map: std::collections::HashMap<uuid::Uuid, String> =
                     std::collections::HashMap::new();
                 let ids: Vec<uuid::Uuid> = build.line_meta.iter().map(|m| m.user_id).collect();
-                if let (false, Some(auth_path)) =
-                    (ids.is_empty(), auth_path.filter(|p| p.exists()))
+                if let (false, Some(auth_path)) = (ids.is_empty(), auth_path.filter(|p| p.exists()))
                 {
                     let url = format!("sqlite://{}?mode=ro", auth_path.display());
                     if let Ok(db) = Database::connect(&url).await {
