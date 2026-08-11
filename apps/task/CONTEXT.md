@@ -83,9 +83,18 @@ on their tickets.
   binding inside a declared unavailability window; the source is
   demoted to a read-only copy. Never automatic.
 - **Session checkpoint** — the guarantee that matters: everything is
-  versioned by the end of a working session. High-frequency writes
-  during a session (a recording pass creating files every few minutes)
-  need not each become a version.
+  versioned by the end of a working session. The durable, chain-visible
+  version, minted when a root's session ends (quiescence or an explicit
+  "checkpoint now") and certified by a full scan. Sessions are per-root:
+  concurrent writers to one root share one session.
+- **Auto-snapshot** — an ephemeral safety capture taken automatically
+  during activity. Expirable, invisible by default, never a chain
+  entry; it exists so a mid-session mistake is recoverable. A
+  project-file save marks the nearest auto-snapshot as a **save point**
+  (display metadata, not a version).
+- **Ignore set** — the per-root list of patterns that are neither
+  versioned nor synced (backup files, peak caches). Seeded by root
+  flavor, edited per root; versioning and selective sync share it.
 - **Share link** — the one link entity for everything shared outward:
   tracked, retroactively editable, disable-not-delete. Targets a note,
   a root slice, a Named Version, or a Review page. Carries capability
