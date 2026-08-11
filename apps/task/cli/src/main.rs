@@ -81,6 +81,7 @@ mod session_store;
 mod setup;
 mod shared;
 mod task_cmd;
+mod files;
 mod threads;
 mod timer;
 mod vault;
@@ -123,6 +124,7 @@ use crate::project::{ProjectCmd, run_project};
 use crate::recipe::{RecipeCmd, run_recipe};
 use crate::setup::{SetupCmd, run_setup};
 use crate::task_cmd::{TaskCmd, run_task};
+use crate::files::{FilesCmd, run_files};
 use crate::threads::{ThreadsCmd, run_threads};
 use crate::timer::{TimerCmd, run_timer};
 use crate::vault::{VaultCmd, run_vault, run_vault_sync};
@@ -237,6 +239,11 @@ enum Commands {
     /// rate cascade.
     #[command(subcommand)]
     Timer(TimerCmd),
+    /// Files RPC surface v1 (issue #259, ADR 0001): turn a folder into
+    /// a File Root, browse it, read a file's version chain, checkpoint
+    /// on demand.
+    #[command(subcommand)]
+    Files(FilesCmd),
     /// Finance — reports + invoice generation from billable
     /// sessions, PDF rendering via fulgur.
     #[cfg(feature = "plugin-finance")]
@@ -790,6 +797,9 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         }
         Commands::Timer(cmd) => {
             return run_timer(cmd, cli.org.as_deref()).await;
+        }
+        Commands::Files(cmd) => {
+            return run_files(cmd, cli.org.as_deref()).await;
         }
         #[cfg(feature = "plugin-finance")]
         Commands::Finance(cmd) => {

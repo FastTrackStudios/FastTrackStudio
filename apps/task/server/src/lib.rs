@@ -147,6 +147,10 @@ pub struct OrgAppState {
     /// walks `vault/Projects/<slug>/workstreams/*.md`. Also
     /// hosts the `WorkstreamService` event-stream hub.
     pub workstreams: workstream::WorkstreamBackend,
+    /// Files RPC surface v1 backend (issue #259/ADR 0001) — registry +
+    /// per-root jj repos live under `<org>/files/`, outside the vault
+    /// (a File Root is never vault-replicated; see the glossary).
+    pub files: files::FilesBackend,
     /// Task backend — walks every `type: task` page in the
     /// vault.
     pub tasks: task::TaskBackend,
@@ -1153,6 +1157,8 @@ pub(crate) async fn build_org_state(
         let goals = goal::GoalBackend::new(vault_root.clone());
         let milestones = milestone::MilestoneBackend::new(vault_root.clone());
         let workstreams = workstream::WorkstreamBackend::new(vault_root.clone());
+        let files = files::FilesBackend::new(org_root.path().join("files"))
+            .map_err(|e| eyre::eyre!("files backend: {e}"))?;
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.
@@ -1375,6 +1381,7 @@ pub(crate) async fn build_org_state(
             goals,
             milestones,
             workstreams,
+            files,
             tasks,
             #[cfg(feature = "plugin-home")]
             locations,
@@ -2834,6 +2841,14 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             workstream::workstream_service_descriptor(),
             workstream::serve_workstream_service(org.workstreams.clone()),
         )
+        .with(
+            files::files_service_descriptor(),
+            files::serve_files_service(org.files.clone()),
+        )
+        // Live root-creation / checkpoint events — `FilesService`'s
+        // `#[subscribe]` stream sibling, served from the hub on the
+        // `FilesBackend` above.
+        .merge(files::files_service_stream_layer(org.files.clone()))
         .with(
             task::task_service_descriptor(),
             // The raw backend serves directly. There used to be a
