@@ -36,24 +36,33 @@
 //! disk-backed `TaskBackend`. Same split as `milestone` /
 //! `milestone-proto`.
 
+pub mod agent_lane;
 pub mod capture;
+pub mod filing;
 pub mod model;
 pub mod relations;
 pub mod relevance;
 pub mod service;
+pub mod wayfinder;
 
+pub use agent_lane::{
+    TriageLabel, has_triage_label, is_untriaged, triage_label, triage_labels,
+};
 pub use capture::{capture, infer_project_id};
+pub use filing::{Anchor, anchor, is_filed, is_unfiled};
 pub use model::{
     Priority, Relation, RelationKind, Status, TaskInfo, TimeEntry, close_open_time_entries,
     is_due_on_or_before, status_is_open, status_is_terminal, track_status_transition,
 };
 pub use relations::{ReverseRelation, arrange_families, cascade_status, click_transition};
 pub use relevance::{
-    RelevanceContext, condense_next_per_project, filter_relevant, is_relevant, relevance_rank,
+    RelevanceContext, condense_next_per_anchor, condense_next_per_project, filter_relevant,
+    is_relevant, next_action_key, partition_triage, relevance_rank,
 };
 pub use service::{
     TaskError, TaskEvent, TaskListFilter, TaskReverseRelations, TaskService, TaskServiceRpc,
 };
+pub use wayfinder::{MapBody, Section, map_body};
 // Workflow actor/audit types referenced by `WorkflowAttrs` — re-exported
 // so UI consumers don't need their own workflows-proto dep.
 pub use workflows_proto;

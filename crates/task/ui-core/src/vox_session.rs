@@ -57,6 +57,42 @@ pub fn set_session_token(token: Option<String>) -> bool {
     }
 }
 
+/// Per-org session tokens from the home identity locker, keyed by org
+/// slug.
+///
+/// Auth stores are per-org: a token issued by `codywright` is not a
+/// credential anywhere else, and presenting it to another org resolves
+/// to `anonymous`. That is why one global bearer can only ever make you
+/// a member of ONE org, and why the org switcher could never show more.
+///
+/// `IdentityService::list_links` hands back the token for every org this
+/// account has linked, so the client can present the RIGHT credential
+/// per org instead of the same wrong one everywhere.
+static LINKED_TOKENS: LazyLock<RwLock<std::collections::HashMap<String, String>>> =
+    LazyLock::new(|| RwLock::new(std::collections::HashMap::new()));
+
+/// Publish the locker's tokens. Returns `true` when the set changed —
+/// callers tear down cached connections on a change, since a socket
+/// presents its identity once, at establish.
+pub fn set_linked_tokens(tokens: std::collections::HashMap<String, String>) -> bool {
+    match LINKED_TOKENS.write() {
+        Ok(mut w) if *w != tokens => {
+            *w = tokens;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Every org slug the locker gave us a token for.
+#[must_use]
+pub fn linked_slugs() -> Vec<String> {
+    LINKED_TOKENS
+        .read()
+        .map(|r| r.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
 /// The bearer to present when dialing vox.
 ///
 /// A user-selected server carries its OWN token on the registry entry, and
@@ -69,6 +105,24 @@ pub fn bearer() -> Option<String> {
         return server.token.filter(|t| !t.trim().is_empty());
     }
     SESSION_TOKEN.read().ok().and_then(|r| r.clone())
+}
+
+/// The bearer for a SPECIFIC org — the locker's token when we hold one,
+/// otherwise the ambient identity.
+///
+/// The fallback matters: the org that issued the ambient token is
+/// normally not in the locker (you don't link your home to itself), so
+/// falling back is what keeps home working, and any org we have no link
+/// for behaves exactly as it did before.
+#[must_use]
+pub fn bearer_for(slug: &str) -> Option<String> {
+    if let Ok(map) = LINKED_TOKENS.read()
+        && let Some(token) = map.get(slug)
+        && !token.trim().is_empty()
+    {
+        return Some(token.clone());
+    }
+    bearer()
 }
 
 /// Set (or clear) the active server. Called from the app root whenever

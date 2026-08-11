@@ -6,11 +6,12 @@
 
 use chrono::{DateTime, Utc};
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
 /// One configured agent runtime. The `kind` field tells the
 /// service whether the backend dispatches in-process,
 /// monitors an external CLI, or talks HTTP.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct AgentBackend {
     /// Stable id — `"hermes"`, `"codex"`, `"claude-cli"`,
@@ -30,9 +31,24 @@ pub struct AgentBackend {
     /// Last time the backend successfully answered a
     /// `health` ping. Empty when never.
     pub last_seen: Option<DateTime<Utc>>,
+
+    /// What this backend can do, as a runner: its capabilities, the
+    /// orgs and projects it serves, and how many tickets it will
+    /// hold at once.
+    ///
+    /// Routing is a match against this — there is no switch on
+    /// [`BackendKind`]. That is what lets the in-process runtime and
+    /// a workstation runner be the same kind of thing, differing
+    /// only in that one of them declares
+    /// [`crate::runner::Capability::Build`] and the other does not.
+    ///
+    /// Defaults to no capabilities and zero concurrency, so a
+    /// backend registered by older code is inert as a runner rather
+    /// than accidentally eligible for every ticket.
+    pub runner: crate::runner::RunnerProfile,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub enum BackendKind {
     /// Embeds an agent runtime — Hermes Rust SDK, `OpenAI`

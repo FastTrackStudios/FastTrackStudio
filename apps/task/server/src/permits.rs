@@ -159,6 +159,21 @@ const AUTH: ServicePermits = ServicePermits {
         // Reading the trail exposes former addresses of real people;
         // members only, and audited so the read itself is on the record.
         MethodPermit::new("list_email_history", Action::READ, "auth/migrate").audited(),
+        // Self-service, but NOT public: you need a session to change your
+        // own password, so gating costs nothing and keeps the anonymous
+        // surface as small as the sign-in path requires. Audited — a
+        // credential change is worth a line even when allowed.
+        MethodPermit::new("change_password", Action::WRITE, "auth/self").audited(),
+        // Same tier as the password change: it alters your login
+        // identifier, needs a session regardless, and is worth an audit
+        // line even on allow.
+        MethodPermit::new("change_email", Action::WRITE, "auth/self").audited(),
+        // Display name / avatar. Same self-service tier — the session
+        // names the account, so there is no target to widen. Not
+        // audited: unlike a credential or login identifier, changing
+        // your display name is not a security event, and the identity
+        // fan-out writes it once per linked org.
+        MethodPermit::new("update_profile", Action::WRITE, "auth/self"),
     ],
 };
 
@@ -255,6 +270,54 @@ table!(AGENT_DISCOVERY, "agent-discovery", "agent/discovery/**", [
 table!(AGENT_ROUTINES, "agent-routines", "agent/routines/**", [
     rd "list_routines", wr "create_routine", wr "set_routine_paused",
     wa "run_routine", wa "delete_routine",
+]);
+
+// The runner registry. Reads are ordinary — anyone who can see the
+// org can see which machines serve it. Registering and deregistering
+// are administrative: a runner declares what it may execute, so being
+// able to write here is being able to grant yourself the right to run
+// code for this org.
+//
+// `heartbeat_backend` is a write rather than a read because it is the
+// liveness signal routing depends on — a caller who could forge it
+// could keep a dead machine in the routing pool.
+// Run records. Reads are ordinary; writes are the runner reporting
+// its own progress, which is a member action, not an admin one — a
+// runner that cannot say what it did is useless.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUNS, "agent-runs", "agent/runs/**", [
+    rd "get_run", rd "list_runs",
+    wr "start_run", wr "beat_run", wr "finish_run",
+    wr "archive_run", wr "sweep_stale_runs",
+]);
+
+// The grill queue. Asking is a runner write; answering is the human
+// half of a human-in-the-loop decision, so both are member writes
+// rather than admin.
+// Live run state. Reading is ordinary; publishing is the runner
+// narrating its own work.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUN_STREAM, "agent-run-stream", "agent/runs/**", [
+    rd "snapshot", wr "publish",
+]);
+
+// The subscribe half is its own vox service with its own descriptor.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUN_EVENTS, "agent-run-events", "agent/runs/**", [
+    rd "run_events",
+]);
+
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_QUESTIONS, "agent-questions", "agent/questions/**", [
+    rd "unresolved_questions", rd "questions_for_ticket",
+    rd "list_pending_questions", rd "question_ticket",
+    wr "ask_question", wr "answer_question",
+]);
+
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_BACKENDS, "agent-backends", "agent/runners/**", [
+    rd "list_backends", rd "backend_health", rd "backends_by_kind",
+    wr "heartbeat_backend", wa "upsert_backend", wa "remove_backend",
 ]);
 
 // ── Work lane (projects / goals / milestones / workstreams / tasks) ──────
@@ -667,6 +730,31 @@ pub fn mounts() -> Vec<Mount> {
             "agent",
             agent_proto::service::routines::routines_rpc_service_descriptor(),
             AGENT_ROUTINES,
+        ),
+        m(
+            "agent",
+            agent_proto::service::backends::backends_rpc_service_descriptor(),
+            AGENT_BACKENDS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::runs::runs_rpc_service_descriptor(),
+            AGENT_RUNS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::questions::questions_rpc_service_descriptor(),
+            AGENT_QUESTIONS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::run_stream::run_stream_rpc_service_descriptor(),
+            AGENT_RUN_STREAM,
+        ),
+        m(
+            "agent",
+            agent_proto::service::run_stream::run_stream_stream_service_descriptor(),
+            AGENT_RUN_EVENTS,
         ),
     ]);
     v.extend([
