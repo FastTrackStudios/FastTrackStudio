@@ -9128,6 +9128,7 @@ dependencies = [
  "expression-editor-audio",
  "expression-editor-core",
  "expression-editor-daw",
+ "expression-editor-guitarpro",
  "expression-editor-ui",
  "nice-plug-dioxus",
  "tokio",
