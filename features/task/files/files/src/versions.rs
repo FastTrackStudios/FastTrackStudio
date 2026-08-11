@@ -28,6 +28,16 @@ use crate::entity::{
 };
 use crate::error::{Error, Result};
 
+/// One Vault reference into a root's store, as
+/// [`VaultVersions::protect_refs`] read it — the page it came from
+/// (so a failure names the file a human has to fix) and the commit it
+/// claims.
+#[derive(Debug, Clone)]
+pub struct VersionEntityRef {
+    pub page: String,
+    pub commit_id: String,
+}
+
 /// The org vault holding Files' curated version entities.
 #[derive(Debug, Clone)]
 pub struct VaultVersions {
@@ -45,15 +55,68 @@ impl VaultVersions {
         &self.vault_root
     }
 
-    /// A store over a freshly scanned vault. The directory is created
-    /// on demand: a brand-new org has no vault on disk until something
-    /// writes into it, and listing versions must be an empty list
-    /// rather than an error there.
-    fn store<E: VaultEntity>(&self) -> Result<VaultEntityStore<E>> {
+    /// A store over a freshly scanned vault, for a *read*. A vault
+    /// that isn't on disk yet (a brand-new org writes nothing until
+    /// something asks it to) reads as empty rather than erroring, and
+    /// nothing is created — creating directories is a write's job.
+    fn read_store<E: VaultEntity>(&self) -> Result<VaultEntityStore<E>> {
+        if !self.vault_root.exists() {
+            let empty = Vault::from_entries(&self.vault_root, Vec::new())
+                .map_err(|e| Error::Repo(format!("empty vault snapshot: {e}")))?;
+            return Ok(VaultEntityStore::new(empty));
+        }
+        self.write_store()
+    }
+
+    /// A store over a freshly scanned vault, for a *write*: the vault
+    /// root is created if missing, and a vault that can't be read is
+    /// an error rather than an empty list.
+    fn write_store<E: VaultEntity>(&self) -> Result<VaultEntityStore<E>> {
         std::fs::create_dir_all(&self.vault_root)?;
         let vault = Vault::open(&self.vault_root)
             .map_err(|e| Error::Repo(format!("open vault {}: {e}", self.vault_root.display())))?;
         Ok(VaultEntityStore::new(vault))
+    }
+
+    /// Every version entity of `root_id`, from **one** vault scan, with
+    /// **no page silently skipped** — the input `gc_root`'s protect set
+    /// is built from.
+    ///
+    /// The ordinary list paths above go through `VaultEntityStore::scan`,
+    /// which logs and drops a page it can't parse. That is right for a
+    /// listing (one broken page must not blank the UI) and catastrophic
+    /// for GC: ADR 0001 makes the Vault "the authority on immortality",
+    /// so a reference the Vault holds but this process failed to read
+    /// must stop the sweep, never quietly forfeit that content's
+    /// protection. Hence a separate, strict walk that returns the first
+    /// parse failure.
+    pub fn protect_refs(&self, root_id: Uuid) -> Result<Vec<VersionEntityRef>> {
+        let store = self.read_store::<NamedVersions>()?;
+        store.with_vault(|vault| {
+            let mut out = Vec::new();
+            for page in &vault.pages {
+                if NamedVersions::matches(page) {
+                    let v =
+                        NamedVersions::from_page(page).map_err(|e| strict_parse_err(page, e))?;
+                    if v.root_id == root_id {
+                        out.push(VersionEntityRef {
+                            page: page.rel_path.clone(),
+                            commit_id: v.commit_id,
+                        });
+                    }
+                } else if ProjectVersions::matches(page) {
+                    let v =
+                        ProjectVersions::from_page(page).map_err(|e| strict_parse_err(page, e))?;
+                    if v.root_id == root_id {
+                        out.push(VersionEntityRef {
+                            page: page.rel_path.clone(),
+                            commit_id: v.commit_id,
+                        });
+                    }
+                }
+            }
+            Ok(out)
+        })
     }
 
     // ── Named Versions ────────────────────────────────────────────
@@ -61,7 +124,7 @@ impl VaultVersions {
     /// Every Named Version, newest first; `root_id` filters to one
     /// root.
     pub fn named_versions(&self, root_id: Option<Uuid>) -> Result<Vec<NamedVersion>> {
-        let mut list = self.store::<NamedVersions>()?.list();
+        let mut list = self.read_store::<NamedVersions>()?.list();
         if let Some(root_id) = root_id {
             list.retain(|v| v.root_id == root_id);
         }
@@ -70,7 +133,7 @@ impl VaultVersions {
     }
 
     pub fn named_version(&self, id: Uuid) -> Result<NamedVersion> {
-        self.store::<NamedVersions>()?
+        self.read_store::<NamedVersions>()?
             .get_by_uuid(id)
             .ok_or_else(|| Error::NotFound(format!("named version {id}")))
     }
@@ -85,16 +148,22 @@ impl VaultVersions {
         change_id: String,
         commit_id: String,
     ) -> Result<NamedVersion> {
-        let existing = self.named_versions(Some(root_id))?;
-        if existing.iter().any(|v| v.name == name) {
+        // One snapshot for both the uniqueness check and the path
+        // choice: two scans would leave a window where the name was
+        // free in the first and taken in the second.
+        let store = self.write_store::<NamedVersions>()?;
+        let taken = store
+            .list()
+            .into_iter()
+            .any(|v| v.root_id == root_id && v.name == name);
+        if taken {
             return Err(Error::AlreadyExists(format!(
                 "root {root_id} already has a Named Version called {name:?}"
             )));
         }
-        let store = self.store::<NamedVersions>()?;
         let folder = root_folder(root_name, NAMED_SUBFOLDER);
         let path = store.with_vault(|vault| {
-            unique_path(vault, &folder, &vault_entity::slugify(&name, "version"))
+            self.unique_path(vault, &folder, &vault_entity::slugify(&name, "version"))
         });
         let model = NamedVersion {
             id: Uuid::new_v4(),
@@ -110,7 +179,7 @@ impl VaultVersions {
     }
 
     pub fn delete_named_version(&self, id: Uuid) -> Result<()> {
-        self.store::<NamedVersions>()?
+        self.write_store::<NamedVersions>()?
             .delete(&id.to_string())
             .map_err(entity_err)
     }
@@ -119,7 +188,7 @@ impl VaultVersions {
 
     /// Every Project Version of `root_id`, oldest number first.
     pub fn project_versions(&self, root_id: Uuid) -> Result<Vec<ProjectVersion>> {
-        let mut list = self.store::<ProjectVersions>()?.list();
+        let mut list = self.read_store::<ProjectVersions>()?.list();
         list.retain(|v| v.root_id == root_id);
         list.sort_by_key(|v| v.number);
         Ok(list)
@@ -137,20 +206,23 @@ impl VaultVersions {
         change_id: String,
         commit_id: String,
     ) -> Result<ProjectVersion> {
-        let number = self
-            .project_versions(root_id)?
-            .iter()
+        // One snapshot for both the numbering and the path (see
+        // `create_named_version`).
+        let store = self.write_store::<ProjectVersions>()?;
+        let number = store
+            .list()
+            .into_iter()
+            .filter(|v| v.root_id == root_id)
             .map(|v| v.number)
             .max()
             .unwrap_or(0)
             + 1;
-        let store = self.store::<ProjectVersions>()?;
         let folder = root_folder(root_name, PROJECT_SUBFOLDER);
         let stem = match &label {
             Some(label) => format!("v{number}-{}", vault_entity::slugify(label, "iteration")),
             None => format!("v{number}"),
         };
-        let path = store.with_vault(|vault| unique_path(vault, &folder, &stem));
+        let path = store.with_vault(|vault| self.unique_path(vault, &folder, &stem));
         let model = ProjectVersion {
             id: Uuid::new_v4(),
             path,
@@ -162,6 +234,30 @@ impl VaultVersions {
             started_at: Utc::now(),
         };
         store.create(model).map_err(entity_err)
+    }
+
+    /// `<folder>/<stem>.md`, suffixed `-2`, `-3`, … past a page that is
+    /// already there. Two roots whose names slugify the same, or a page
+    /// a human wrote by hand, must never make a write fail — and the
+    /// on-disk check matters as much as the snapshot one: `create_page`
+    /// only consults the in-memory page list, so a file another writer
+    /// created since this snapshot would otherwise be overwritten.
+    fn unique_path(&self, vault: &Vault, folder: &str, stem: &str) -> String {
+        let taken = |candidate: &str| {
+            vault.pages.iter().any(|p| p.rel_path == candidate)
+                || self.vault_root.join(candidate).exists()
+        };
+        let first = format!("{folder}/{stem}.md");
+        if !taken(&first) {
+            return first;
+        }
+        for n in 2..1000 {
+            let candidate = format!("{folder}/{stem}-{n}.md");
+            if !taken(&candidate) {
+                return candidate;
+            }
+        }
+        format!("{folder}/{stem}-{}.md", Uuid::new_v4())
     }
 }
 
@@ -175,22 +271,12 @@ fn root_folder(root_name: &str, sub: &str) -> String {
     )
 }
 
-/// `<folder>/<stem>.md`, suffixed `-2`, `-3`, … past a page that is
-/// already there. Two roots whose names slugify the same, or a page a
-/// human wrote by hand, must never make a write fail.
-fn unique_path(vault: &Vault, folder: &str, stem: &str) -> String {
-    let taken = |candidate: &str| vault.pages.iter().any(|p| p.rel_path == candidate);
-    let first = format!("{folder}/{stem}.md");
-    if !taken(&first) {
-        return first;
-    }
-    for n in 2..1000 {
-        let candidate = format!("{folder}/{stem}-{n}.md");
-        if !taken(&candidate) {
-            return candidate;
-        }
-    }
-    format!("{folder}/{stem}-{}.md", Uuid::new_v4())
+fn strict_parse_err(page: &vault::VaultPage, e: vault_entity::ParseError) -> Error {
+    Error::BadRequest(format!(
+        "{}: unreadable Files version page ({e}) — refusing to compute a GC protect set that \
+         might silently forfeit the version it references; fix or remove the page",
+        page.rel_path
+    ))
 }
 
 fn entity_err(e: vault_entity::EntityError) -> Error {

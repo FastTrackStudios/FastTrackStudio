@@ -43,6 +43,9 @@ pub enum FilesEvent {
     Checkpointed(CheckpointInfo),
     /// A version was curated with a name (issue #261).
     VersionNamed(NamedVersion),
+    /// A Named Version's curation was dropped — the entity that was
+    /// removed, so a subscriber can drop it by id without a refetch.
+    VersionUnnamed(NamedVersion),
     /// A new Project Version of a root was started.
     ProjectVersionStarted(ProjectVersion),
 }
@@ -153,6 +156,14 @@ pub trait FilesService {
     /// index reachability. `keep_newer_secs` guards concurrent writers
     /// by refusing to sweep anything written within that many seconds
     /// (default 60).
+    ///
+    /// The pass holds the root's write lock, so writers *in this
+    /// process* are already excluded and the guard is really about a
+    /// second process on the same store (a CLI's embedded backend, a
+    /// storage agent). `Some(0)` therefore disables the only
+    /// protection those writers have: pass it when you know nothing
+    /// else holds this root — a test, or a maintenance window — and
+    /// never on a live rig.
     async fn gc_root(
         &self,
         root_id: Uuid,

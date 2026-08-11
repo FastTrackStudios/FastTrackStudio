@@ -45,7 +45,7 @@ use files_proto::{
     GcReport, NamedVersion, ProjectVersion, RootFlavor, VersionRef,
 };
 use jj_lib::backend::{ChangeId, CommitId};
-use jj_lib::object_id::ObjectId as _;
+use jj_lib::object_id::{HexPrefix, ObjectId as _, PrefixResolution};
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use task_files_version_store::VersionStoreBackend;
@@ -90,11 +90,15 @@ pub struct FilesBackend {
     /// what carries them offline-first to every device.
     versions: VaultVersions,
     repos: Arc<Mutex<HashMap<Uuid, RootRuntime>>>,
-    /// One lock per root, serializing `checkpoint_now` calls on that
-    /// root so two concurrent checkpoints can't both read the same
-    /// head and silently orphan one commit (PR #280 review) — created
-    /// lazily, never removed (roots are not deleted in v1).
-    checkpoint_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
+    /// One lock per root, serializing every write that reads this
+    /// root's state before changing it: `checkpoint_now` (two
+    /// concurrent checkpoints must not both read the same head and
+    /// silently orphan one commit — PR #280 review), the curation
+    /// writes (two namings must not claim one vault page path), and
+    /// `gc_root` (a sweep must not miss a name that lands after it
+    /// snapshotted its protect set). Created lazily, never removed
+    /// (roots are not deleted in v1).
+    root_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
     /// Fan-out hub behind `#[subscribe] fn events` — every successful
     /// root creation / checkpoint publishes here. Sliding mailbox: a
     /// slow subscriber loses its *oldest* queued events, correct for
@@ -161,7 +165,7 @@ impl FilesBackend {
             registry: Arc::new(registry),
             versions: VaultVersions::new(vault_root),
             repos: Arc::new(Mutex::new(HashMap::new())),
-            checkpoint_locks: Arc::new(Mutex::new(HashMap::new())),
+            root_locks: Arc::new(Mutex::new(HashMap::new())),
             events: architect::PubSub::sliding(256),
         })
     }
@@ -300,10 +304,10 @@ impl FilesBackend {
             .insert(root_id, RootRuntime { repo, head });
     }
 
-    fn checkpoint_lock(&self, root_id: Uuid) -> Arc<Mutex<()>> {
-        self.checkpoint_locks
+    fn root_lock(&self, root_id: Uuid) -> Arc<Mutex<()>> {
+        self.root_locks
             .lock()
-            .expect("checkpoint lock map poisoned")
+            .expect("root lock map poisoned")
             .entry(root_id)
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
@@ -460,13 +464,31 @@ impl FilesBackend {
         ))?;
         // Curated metadata (issue #261): the Vault, not the store, is
         // where names live — so every chain read resolves them fresh
-        // from the vault pages rather than caching a projection.
+        // from the vault pages rather than caching a projection. That
+        // costs one vault scan per call, the same live-scan bargain
+        // every other vault-backed slice makes (`WorkstreamBackend`);
+        // if it ever measures slow, the fix is a shared vault snapshot
+        // on the backend, never a second authority on names.
+        //
+        // Names are decoration on a store-owned answer, so a vault
+        // that can't be read degrades this call to an uncurated chain
+        // rather than failing it — the opposite of `protected_commits`,
+        // where an unreadable page must stop the sweep.
         let mut names_by_commit: HashMap<String, Vec<String>> = HashMap::new();
-        for named in self.versions.named_versions(Some(root_id))? {
-            names_by_commit
-                .entry(named.commit_id)
-                .or_default()
-                .push(named.name);
+        match self.versions.named_versions(Some(root_id)) {
+            Ok(named) => {
+                for named in named {
+                    names_by_commit
+                        .entry(named.commit_id)
+                        .or_default()
+                        .push(named.name);
+                }
+            }
+            Err(e) => tracing::warn!(
+                %root_id,
+                ?e,
+                "reading Named Versions failed; serving the chain uncurated"
+            ),
         }
         Ok(entries
             .into_iter()
@@ -487,24 +509,57 @@ impl FilesBackend {
             .collect())
     }
 
-    /// The `(commit, change)` pair `commit_id_hex` names in `root`'s
+    /// The `(commit, change)` pair `commit_ref` names in `root`'s
     /// store — the validation every curation write does before writing
     /// a Vault entity, so a reference can never name a commit that
     /// isn't there.
+    ///
+    /// `commit_ref` may be a full hex id or an unambiguous hex prefix,
+    /// because a prefix is what every human-facing surface prints
+    /// (`task files chain` shows twelve characters, and jj itself is
+    /// prefix-addressed throughout). An ambiguous prefix is a bad
+    /// request, never a coin flip.
     fn resolve_commit(
         &self,
         root: &FileRootInfo,
-        commit_id_hex: &str,
+        commit_ref: &str,
     ) -> Result<(CommitId, ChangeId), Error> {
         let (repo, _head) = self.ensure_repo(root)?;
         let backend = repo
             .store()
             .backend_impl::<VersionStoreBackend>()
             .ok_or_else(|| Error::Repo("root's repo is not a VersionStoreBackend".into()))?;
-        let commit_id = CommitId::try_from_hex(commit_id_hex)
-            .ok_or_else(|| Error::BadRequest(format!("{commit_id_hex:?}: not a commit id")))?;
+
+        // A full id is just an even-length hex string as far as
+        // `CommitId::try_from_hex` is concerned — it happily decodes a
+        // twelve-character prefix into a six-byte id that no object
+        // will ever match. So the exact lookup has to be *tried*, not
+        // assumed, with prefix resolution as the fallback.
+        if let Some(id) = CommitId::try_from_hex(commit_ref) {
+            if let Ok(commit) = pollster::block_on(backend.commit(&id)) {
+                return Ok((id, commit.change_id));
+            }
+        }
+        let prefix = HexPrefix::try_from_hex(commit_ref)
+            .ok_or_else(|| Error::BadRequest(format!("{commit_ref:?}: not a hex commit id")))?;
+        let commit_id = match repo.index().resolve_commit_id_prefix(&prefix) {
+            Ok(PrefixResolution::SingleMatch(id)) => id,
+            Ok(PrefixResolution::AmbiguousMatch) => {
+                return Err(Error::BadRequest(format!(
+                    "{commit_ref:?}: ambiguous commit prefix in root {}",
+                    root.id
+                )));
+            }
+            Ok(PrefixResolution::NoMatch) => {
+                return Err(Error::NotFound(format!(
+                    "commit {commit_ref} in root {}",
+                    root.id
+                )));
+            }
+            Err(e) => return Err(Error::Repo(format!("resolving {commit_ref:?}: {e}"))),
+        };
         let commit = pollster::block_on(backend.commit(&commit_id))
-            .map_err(|_| Error::NotFound(format!("commit {commit_id_hex} in root {}", root.id)))?;
+            .map_err(|_| Error::NotFound(format!("commit {commit_ref} in root {}", root.id)))?;
         Ok((commit_id, commit.change_id))
     }
 
@@ -519,6 +574,12 @@ impl FilesBackend {
             return Err(Error::BadRequest("a Named Version needs a name".into()));
         }
         let root = self.get_root_info(root_id)?;
+        // Same lock a checkpoint and a GC pass take: it serializes the
+        // read-then-write over the vault snapshot (so two namings can't
+        // both claim one page path) *and* keeps a naming from landing
+        // inside a sweep that has already snapshotted its protect set.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
         let (commit_id, change_id) = self.resolve_commit(&root, &commit_id)?;
         self.versions.create_named_version(
             root_id,
@@ -527,6 +588,14 @@ impl FilesBackend {
             change_id.hex(),
             commit_id.hex(),
         )
+    }
+
+    fn unname_version_inner(&self, id: Uuid) -> Result<NamedVersion, Error> {
+        let named = self.versions.named_version(id)?;
+        let lock = self.root_lock(named.root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        self.versions.delete_named_version(id)?;
+        Ok(named)
     }
 
     /// Resolve a Named Version the way a share link must: prefer the
@@ -577,6 +646,10 @@ impl FilesBackend {
         label: Option<String>,
     ) -> Result<ProjectVersion, Error> {
         let root = self.get_root_info(root_id)?;
+        // See `name_version_inner` for why curation writes take the
+        // root lock.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
         let (_repo, head) = self.ensure_repo(&root)?;
         let (commit_id, change_id) = self.resolve_commit(&root, &head.hex())?;
         let label = label
@@ -595,20 +668,46 @@ impl FilesBackend {
     /// references — the protect set ADR 0001 calls "Vault-referenced",
     /// resolved live from the vault pages on every pass so a name
     /// deleted (or replicated in) since the last one is honored.
-    fn protected_commits(&self, root_id: Uuid) -> Result<Vec<CommitId>, Error> {
-        let mut out = Vec::new();
-        let mut push = |hex: &str| {
-            if let Some(id) = CommitId::try_from_hex(hex) {
-                if !out.contains(&id) {
-                    out.push(id);
+    ///
+    /// Two failure modes both matter here and pull in opposite
+    /// directions, so each gets its own answer:
+    ///
+    /// - A page this process **cannot read or cannot parse as a commit
+    ///   id** is a reference we might be about to forfeit. It fails the
+    ///   whole pass (`protect_refs` is the strict walk; a malformed hex
+    ///   is rejected here) — GC is destructive and unnamed content is
+    ///   cheap to keep one more day.
+    /// - A page naming a commit the store **doesn't have** protects
+    ///   nothing: that content is already gone, and treating it as
+    ///   fatal would wedge GC for the root forever (one stale page from
+    ///   a replication reorder, and the store never gets swept again).
+    ///   It is logged and skipped.
+    fn protected_commits(&self, root: &FileRootInfo) -> Result<Vec<CommitId>, Error> {
+        let mut out: Vec<CommitId> = Vec::new();
+        for reference in self.versions.protect_refs(root.id)? {
+            let id = CommitId::try_from_hex(&reference.commit_id)
+                .filter(|id| !id.as_bytes().is_empty())
+                .ok_or_else(|| {
+                    Error::BadRequest(format!(
+                        "{}: {:?} is not a commit id — refusing to compute a GC protect set that \
+                         might silently forfeit the version it references",
+                        reference.page, reference.commit_id
+                    ))
+                })?;
+            match self.resolve_commit(root, &id.hex()) {
+                Ok(_) => {
+                    if !out.contains(&id) {
+                        out.push(id);
+                    }
                 }
+                Err(e) => tracing::warn!(
+                    page = %reference.page,
+                    commit = %reference.commit_id,
+                    ?e,
+                    "a Files version page references a commit this root's store doesn't have; \
+                     nothing to protect"
+                ),
             }
-        };
-        for named in self.versions.named_versions(Some(root_id))? {
-            push(&named.commit_id);
-        }
-        for pv in self.versions.project_versions(root_id)? {
-            push(&pv.commit_id);
         }
         Ok(out)
     }
@@ -619,13 +718,17 @@ impl FilesBackend {
         keep_newer_secs: Option<u64>,
     ) -> Result<GcReport, Error> {
         let root = self.get_root_info(root_id)?;
-        // Hold the root's checkpoint lock: a sweep that raced a
-        // checkpoint could read a head the checkpoint is still
-        // building on top of.
-        let lock = self.checkpoint_lock(root_id);
-        let _guard = lock.lock().expect("checkpoint lock poisoned");
+        // Hold the root lock for the whole pass. It blocks that root's
+        // checkpoints (and curation writes) for the duration, which is
+        // the deliberate trade: a sweep that raced a checkpoint could
+        // read a head the checkpoint is still building on top of, or
+        // miss a name that landed after the protect set was read, and
+        // both of those lose data. GC is an occasional maintenance
+        // verb; a checkpoint waiting on it is a delay, not a loss.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
 
-        let protected = self.protected_commits(root_id)?;
+        let protected = self.protected_commits(&root)?;
         let (repo, _head) = self.ensure_repo(&root)?;
         let backend = repo
             .store()
@@ -662,7 +765,7 @@ impl FilesBackend {
         // can't both read the same head and each commit on top of it
         // (PR #280 review) — the second one now genuinely observes the
         // first's result as its parent instead of racing it.
-        let lock = self.checkpoint_lock(root_id);
+        let lock = self.root_lock(root_id);
         let _guard = lock.lock().expect("checkpoint lock poisoned");
 
         let (repo, head) = self.ensure_repo(&root)?;
@@ -780,7 +883,9 @@ impl FilesService for FilesBackend {
 
     async fn unname_version(&self, id: Uuid) -> Result<(), FilesError> {
         let this = self.clone();
-        blocking(move || this.versions.delete_named_version(id)).await
+        let removed = blocking(move || this.unname_version_inner(id)).await?;
+        self.publish(FilesEvent::VersionUnnamed(removed));
+        Ok(())
     }
 
     async fn start_project_version(

@@ -627,3 +627,156 @@ async fn share_link_targeting_resolves_to_the_exact_change() {
 
     fx.finish().await;
 }
+
+/// Review findings on the first cut of this ticket, all about the GC
+/// protect set being the one place a mistake destroys data.
+///
+/// - A version page this process can't parse must **stop** the sweep.
+///   The list paths log-and-skip a broken page (right for a listing,
+///   fatal here): skipping it silently forfeits the protection of the
+///   version it names, and GC is not undoable.
+/// - A page naming a commit the store doesn't have must **not** stop
+///   it. There is nothing left to protect, and failing would wedge GC
+///   for that root forever — one stale page from a replication
+///   reorder and the store is never swept again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broken_version_page_stops_gc_but_a_stale_reference_does_not() {
+    let fx = fixture("Retention Edge").await;
+    let root_id = fx.root_id().await;
+
+    let (kept_commit, kept_chunk, swept_chunk) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    let (kept, kept_chunk) =
+                        write_unreachable_commit(vs, "keeper.wav", b"the deliverable").await;
+                    let (_swept, swept_chunk) =
+                        write_unreachable_commit(vs, "scratch.wav", b"an expired auto-snapshot")
+                            .await;
+                    (kept, kept_chunk, swept_chunk)
+                })
+            })
+            .expect("with_version_store")
+    });
+    let named = fx
+        .client
+        .name_version(root_id, kept_commit.hex(), "keeper".into())
+        .await
+        .expect("name_version rpc");
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // Corrupt the page the way a hand-edit or a bad merge would.
+    let page = fx.vault_dir.join(&named.path);
+    let original = std::fs::read_to_string(&page).unwrap();
+    std::fs::write(&page, original.replace("rootId:", "rootID-typo:")).unwrap();
+
+    let err = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect_err("an unreadable version page must abort the sweep");
+    assert!(
+        format!("{err}").contains(&named.path),
+        "the error names the page a human has to fix: {err}"
+    );
+    let (kept_present, swept_present) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    (
+                        vs.chunks().has(kept_chunk).await,
+                        vs.chunks().has(swept_chunk).await,
+                    )
+                })
+            })
+            .expect("with_version_store")
+    });
+    assert!(
+        kept_present && swept_present,
+        "an aborted pass sweeps nothing at all"
+    );
+
+    // Repair the page, and point a second (Project Version) page at a
+    // commit this store has never had. The sweep proceeds: there is
+    // nothing to protect there, and wedging GC would be worse.
+    std::fs::write(&page, &original).unwrap();
+    let pv = fx
+        .client
+        .start_project_version(root_id, None)
+        .await
+        .expect("start_project_version rpc");
+    let pv_page = fx.vault_dir.join(&pv.path);
+    let pv_body = std::fs::read_to_string(&pv_page).unwrap();
+    std::fs::write(&pv_page, pv_body.replace(&pv.commit_id, &"cd".repeat(32))).unwrap();
+
+    let report = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("a stale reference must not wedge gc");
+    assert_eq!(
+        report.protected_commits, 1,
+        "the stale reference protects nothing; the readable one still does"
+    );
+    let (kept_present, swept_present) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    (
+                        vs.chunks().has(kept_chunk).await,
+                        vs.chunks().has(swept_chunk).await,
+                    )
+                })
+            })
+            .expect("with_version_store")
+    });
+    assert!(kept_present, "the Named Version's content survived");
+    assert!(!swept_present, "the unnamed content was swept");
+
+    fx.finish().await;
+}
+
+/// `task files chain` prints a twelve-character commit prefix, and the
+/// CLI tells the user to paste it into `version name` — so the service
+/// has to accept an unambiguous prefix, and reject an ambiguous one
+/// rather than pick.
+#[tokio::test(flavor = "multi_thread")]
+async fn naming_accepts_the_commit_prefix_the_chain_prints() {
+    let fx = fixture("Prefixes").await;
+    let root_id = fx.root_id().await;
+
+    std::fs::write(fx.root_dir.join("take.wav"), b"one").unwrap();
+    let cp1 = fx
+        .client
+        .checkpoint_now(root_id, None)
+        .await
+        .expect("checkpoint_now rpc");
+
+    let named = fx
+        .client
+        .name_version(root_id, cp1.commit_id[..12].to_string(), "v1".into())
+        .await
+        .expect("a twelve-character prefix must resolve");
+    assert_eq!(
+        named.commit_id, cp1.commit_id,
+        "the entity records the full id it resolved to"
+    );
+
+    // An empty prefix matches everything, so it must be refused.
+    assert!(
+        fx.client
+            .name_version(root_id, String::new(), "v2".into())
+            .await
+            .is_err(),
+        "an ambiguous (here: empty) prefix must not silently pick a commit"
+    );
+    // Not hex at all.
+    assert!(
+        fx.client
+            .name_version(root_id, "not-a-commit".into(), "v3".into())
+            .await
+            .is_err()
+    );
+
+    fx.finish().await;
+}

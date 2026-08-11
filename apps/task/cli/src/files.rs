@@ -82,7 +82,8 @@ pub(crate) enum FilesVersionCmd {
     /// Name a checkpoint as a deliverable.
     Name {
         root_id: uuid::Uuid,
-        /// Hex commit id, as printed by `task files chain`.
+        /// Hex commit id — the full id, or any unambiguous prefix
+        /// (`task files chain` prints the first twelve characters).
         commit_id: String,
         name: String,
         #[arg(long)]
@@ -240,7 +241,7 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                     };
                     println!(
                         "{}  {}{}{}",
-                        &entry.commit_id[..12.min(entry.commit_id.len())],
+                        short(&entry.commit_id),
                         entry.path,
                         renamed,
                         named
@@ -262,7 +263,7 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
             } else {
                 println!(
                     "{}  {} ({} paths changed)",
-                    &info.commit_id[..12.min(info.commit_id.len())],
+                    short(&info.commit_id),
                     info.description,
                     info.changed_paths.len()
                 );

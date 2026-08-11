@@ -39,10 +39,30 @@ pub struct NamedVersions;
 /// Vault mapping marker for [`ProjectVersion`].
 pub struct ProjectVersions;
 
+/// Read a uuid from `key`, accepting `alt` as the snake_case spelling
+/// a hand-written page might use.
 fn uuid_at(map: &serde_yaml::Mapping, key: &str, alt: &str) -> Option<Uuid> {
     yaml::str_at(map, key)
         .or_else(|| yaml::str_at(map, alt))
         .and_then(|s| Uuid::parse_str(&s).ok())
+}
+
+fn id_at(map: &serde_yaml::Mapping, rel_path: &str) -> Uuid {
+    yaml::str_at(map, "id")
+        .and_then(|s| Uuid::parse_str(&s).ok())
+        // A page with no `id` still needs a stable identity — derive
+        // one from its path, the same way `milestone` does, so a
+        // hand-written version page keeps working across reads.
+        .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_URL, rel_path.as_bytes()))
+}
+
+/// Fallback timestamp for a page with no `dateCreated`. Deliberately
+/// the epoch and not `Utc::now()`: parsing happens on *every* read, so
+/// "now" would make a page's own timestamp change between two calls
+/// and reorder the list under the caller. The epoch is stable, and
+/// `on_create` treats it as "unstamped" when the page is next written.
+fn epoch() -> DateTime<Utc> {
+    DateTime::UNIX_EPOCH
 }
 
 fn hex_at(map: &serde_yaml::Mapping, key: &str, alt: &str) -> Option<String> {
@@ -90,8 +110,7 @@ impl VaultEntity for NamedVersions {
             ParseError::Field("named version is missing required `commitId`".into())
         })?;
         Ok(NamedVersion {
-            id: uuid_at(&map, "id", "id")
-                .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_URL, page.rel_path.as_bytes())),
+            id: id_at(&map, &page.rel_path),
             path: page.rel_path.clone(),
             name: yaml::str_at(&map, "name").unwrap_or_else(|| page.basename.clone()),
             root_id,
@@ -100,7 +119,7 @@ impl VaultEntity for NamedVersions {
             change_id: hex_at(&map, "changeId", "change_id").unwrap_or_default(),
             commit_id,
             note: body.trim_start_matches('\n').to_string(),
-            created_at: yaml::timestamp_at(&map, "dateCreated").unwrap_or_else(Utc::now),
+            created_at: yaml::timestamp_at(&map, "dateCreated").unwrap_or_else(epoch),
         })
     }
 
@@ -134,9 +153,11 @@ impl VaultEntity for ProjectVersions {
     fn set_path(m: &mut ProjectVersion, path: String) {
         m.path = path;
     }
-    /// A Project Version's human name is its number plus any label —
-    /// `v2` / `v2 — Client remix`. Only used for the default filename,
-    /// which [`crate::versions`] overrides anyway.
+    /// The label alone — a Project Version's real display name is
+    /// `v<number>`, which this signature (returning a borrow) can't
+    /// build. Nothing depends on that: this feeds only
+    /// [`VaultEntity::default_path`], and [`crate::versions`] always
+    /// supplies the `v<number>[-label]` path itself.
     fn name(m: &ProjectVersion) -> &str {
         m.label.as_deref().unwrap_or("project version")
     }
@@ -158,15 +179,14 @@ impl VaultEntity for ProjectVersions {
                 ParseError::Field("project version is missing required `number`".into())
             })?;
         Ok(ProjectVersion {
-            id: uuid_at(&map, "id", "id")
-                .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_URL, page.rel_path.as_bytes())),
+            id: id_at(&map, &page.rel_path),
             path: page.rel_path.clone(),
             root_id,
             number,
             label: yaml::str_at(&map, "label").filter(|s| !s.is_empty()),
             change_id: hex_at(&map, "changeId", "change_id").unwrap_or_default(),
             commit_id: hex_at(&map, "commitId", "commit_id").unwrap_or_default(),
-            started_at: yaml::timestamp_at(&map, "dateCreated").unwrap_or_else(Utc::now),
+            started_at: yaml::timestamp_at(&map, "dateCreated").unwrap_or_else(epoch),
         })
     }
 
