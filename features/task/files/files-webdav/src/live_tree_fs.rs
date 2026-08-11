@@ -50,7 +50,9 @@ pub struct LiveTreeFs {
 
 impl std::fmt::Debug for LiveTreeFs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LiveTreeFs").field("base", &self.base).finish()
+        f.debug_struct("LiveTreeFs")
+            .field("base", &self.base)
+            .finish()
     }
 }
 
@@ -204,11 +206,19 @@ impl DavFileSystem for LiveTreeFs {
         guarded!(self, path, self.inner.patch_props(path, patch))
     }
 
-    fn set_accessed<'a>(&'a self, path: &'a DavPath, tm: std::time::SystemTime) -> FsFuture<'a, ()> {
+    fn set_accessed<'a>(
+        &'a self,
+        path: &'a DavPath,
+        tm: std::time::SystemTime,
+    ) -> FsFuture<'a, ()> {
         guarded!(self, path, self.inner.set_accessed(path, tm))
     }
 
-    fn set_modified<'a>(&'a self, path: &'a DavPath, tm: std::time::SystemTime) -> FsFuture<'a, ()> {
+    fn set_modified<'a>(
+        &'a self,
+        path: &'a DavPath,
+        tm: std::time::SystemTime,
+    ) -> FsFuture<'a, ()> {
         guarded!(self, path, self.inner.set_modified(path, tm))
     }
 

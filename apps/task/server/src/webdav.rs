@@ -7,8 +7,8 @@
 //! Task's identity normally rides the vox WS upgrade. WebDAV clients
 //! speak plain HTTP and cannot, so this route re-uses the shape
 //! `/media` established for the same reason: authenticate the request
-//! itself, then hand an already-scoped call to the feature. Three
-//! credentials are accepted, all of them *existing* tokens — this
+//! itself, then hand an already-scoped call to the feature. Two
+//! credentials are accepted, both of them *existing* tokens — this
 //! ticket adds no new credential type:
 //!
 //! 1. `Authorization: Bearer <session token>` — native clients and
@@ -18,8 +18,14 @@
 //!    (paste what `task` already holds, no password on disk in a
 //!    keychain entry), then as an email/password sign-in, which is what
 //!    a human typing into the OS mount dialog will do.
-//! 3. `?token=` — a signed `BlobToken` media grant covering this org's
-//!    dav space, for the odd tool that can only carry a URL.
+//!
+//! Deliberately *not* accepted: `/media`'s signed `?token=` grants. A
+//! `BlobToken` is scoped to a path under the org's `resources/` tree,
+//! and this route's paths are root segments in a different namespace —
+//! checking one against the other would let a grant for the vault path
+//! `Projects/Mix` unlock the WebDAV root that happens to be named
+//! `Projects/Mix`. Widening an existing token is not respecting it, and
+//! no file manager can attach a query string to every request anyway.
 //!
 //! Whatever the route, the session must be valid **in this org's own
 //! auth store**, which is the same "any member of this org" boundary
@@ -38,10 +44,14 @@
 //! `WWW-Authenticate: Basic` challenge that makes an OS client prompt
 //! for credentials instead of silently failing to mount.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use axum::extract::State;
+use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::{IntoResponse as _, Response};
 use base64::Engine as _;
-use axum::http::{HeaderMap, Request, StatusCode, header};
 
 use crate::AppState;
 
@@ -49,12 +59,50 @@ use crate::AppState;
 /// keychain entries on it.
 const REALM: &str = "Task Files";
 
-/// Query string of [`webdav_handler`] — the signed grant, for callers
-/// that can only carry a URL.
-#[derive(serde::Deserialize, Default)]
-pub struct DavQuery {
-    #[serde(default)]
-    pub token: Option<String>,
+/// How long a verified `Basic` email/password pair keeps re-using the
+/// session it minted. Short enough that a revoked account loses the
+/// mount within minutes; long enough that a Finder window's burst of
+/// `PROPFIND`s costs one sign-in, not one per request.
+const BASIC_SESSION_TTL: Duration = Duration::from_secs(300);
+
+/// Sessions minted for `Basic` email/password callers, keyed by a hash
+/// of `(org, Authorization header)`.
+///
+/// Without this, `sign_in_email_password` ran on *every* request from a
+/// password-authenticated client — and a file manager opening one
+/// folder issues dozens — so browsing a root filled the session table
+/// with live credentials nobody would ever use again. The cache holds
+/// the minted token and re-validates it through the ordinary session
+/// path, so a revoked session stops working immediately; only the
+/// *minting* is amortized. The password itself is never stored: the key
+/// is a SHA-256 of the header, and the value is a session token.
+static BASIC_SESSIONS: Mutex<Option<HashMap<[u8; 32], (String, Instant)>>> = Mutex::new(None);
+
+fn basic_session_key(slug: &str, header: &str) -> [u8; 32] {
+    use sha2::{Digest as _, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(slug.as_bytes());
+    hasher.update([0]);
+    hasher.update(header.as_bytes());
+    hasher.finalize().into()
+}
+
+/// The cached session for this credential, if it has not aged out.
+fn cached_basic_session(key: &[u8; 32]) -> Option<String> {
+    let mut guard = BASIC_SESSIONS.lock().expect("basic session cache poisoned");
+    let map = guard.get_or_insert_with(HashMap::new);
+    // Sweep here rather than on a timer: the map only ever grows on a
+    // successful sign-in, so the request that would grow it is the
+    // right moment to drop what has expired.
+    map.retain(|_, (_, minted)| minted.elapsed() < BASIC_SESSION_TTL);
+    map.get(key).map(|(token, _)| token.clone())
+}
+
+fn remember_basic_session(key: [u8; 32], token: String) {
+    let mut guard = BASIC_SESSIONS.lock().expect("basic session cache poisoned");
+    guard
+        .get_or_insert_with(HashMap::new)
+        .insert(key, (token, Instant::now()));
 }
 
 fn challenge() -> Response {
@@ -112,7 +160,6 @@ async fn authorize(
     state: &AppState,
     slug: &str,
     path: &str,
-    token: Option<&str>,
     headers: &HeaderMap,
 ) -> Option<Response> {
     use task_telemetry::wide;
@@ -139,11 +186,27 @@ async fn authorize(
 
     // 2. HTTP Basic — what Finder and Explorer send.
     if let Some((user, secret)) = basic(headers) {
+        // The password *is* a session token: the paste-what-you-have
+        // route, and the one a keychain entry should hold.
         if session_ok(state, slug, &secret).await {
             wide::set("dav.auth_via", "basic-session-token");
             return None;
         }
-        let signed_in = match state.org(slug) {
+        // Already signed this exact credential in recently — re-validate
+        // the session it minted instead of minting another.
+        let raw = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        let key = basic_session_key(slug, raw);
+        if let Some(cached) = cached_basic_session(&key)
+            && session_ok(state, slug, &cached).await
+        {
+            wide::set("dav.auth_via", "basic-password-cached");
+            return None;
+        }
+        // Email/password — what a human types into the mount dialog.
+        let minted = match state.org(slug) {
             Some(org) => org
                 .auth
                 .auth
@@ -154,32 +217,25 @@ async fn authorize(
                     user_agent: Some(format!("webdav/{REALM}")),
                 })
                 .await
-                .is_ok(),
-            None => false,
+                .ok()
+                .map(|bundle| bundle.token),
+            None => None,
         };
         wide::set(
             "dav.auth_via",
-            if signed_in {
+            if minted.is_some() {
                 "basic-password"
             } else {
                 "basic-invalid"
             },
         );
-        return if signed_in { None } else { Some(challenge()) };
-    }
-
-    // 3. Signed URL grant.
-    if let Some(token) = token.filter(|t| !t.is_empty()) {
-        let now = chrono::Utc::now().timestamp();
-        let ok = matches!(
-            crate::attachments::signed_url::BlobToken::verify(token, &state.keypair, now),
-            Ok(tok) if tok.allows_media(slug, path)
-        );
-        wide::set(
-            "dav.auth_via",
-            if ok { "signed-token" } else { "token-invalid" },
-        );
-        return if ok { None } else { Some(challenge()) };
+        return match minted {
+            Some(token) => {
+                remember_basic_session(key, token);
+                None
+            }
+            None => Some(challenge()),
+        };
     }
 
     wide::set("dav.auth_via", "absent");
@@ -190,18 +246,15 @@ async fn authorize(
 /// org's File Roots from a file manager. See the module doc.
 pub async fn webdav_handler(
     State(state): State<AppState>,
-    axum::extract::Path(params): axum::extract::Path<
-        std::collections::HashMap<String, String>,
-    >,
-    axum::extract::Query(q): axum::extract::Query<DavQuery>,
+    axum::extract::Path(params): axum::extract::Path<std::collections::HashMap<String, String>>,
     req: Request<axum::body::Body>,
 ) -> Response {
     let Some(slug) = params.get("slug").cloned() else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let mount = format!("/org/{slug}/dav");
-    // The path *within* the mount, for the auth trail and for the
-    // signed-grant scope check.
+    // The path *within* the mount — for the auth trail only; the
+    // decision itself is org-wide.
     let rel = req
         .uri()
         .path()
@@ -210,15 +263,7 @@ pub async fn webdav_handler(
         .trim_start_matches('/')
         .to_owned();
 
-    if let Some(refusal) = authorize(
-        &state,
-        &slug,
-        &rel,
-        q.token.as_deref(),
-        req.headers(),
-    )
-    .await
-    {
+    if let Some(refusal) = authorize(&state, &slug, &rel, req.headers()).await {
         return refusal;
     }
 

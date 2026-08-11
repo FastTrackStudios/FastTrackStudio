@@ -37,8 +37,8 @@ pub mod server_mgmt;
 pub mod share;
 pub mod snapshot;
 pub mod watch_bridge;
-#[cfg(feature = "plugin-forge")]
 pub mod webdav;
+#[cfg(feature = "plugin-forge")]
 pub mod webhooks;
 
 use std::path::PathBuf;

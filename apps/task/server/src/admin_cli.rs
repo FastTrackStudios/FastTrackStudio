@@ -40,6 +40,7 @@ pub async fn dispatch() -> eyre::Result<bool> {
         Some("delete-user") => delete_user(&args[2..]).await.map(|()| true),
         Some("set-role") => set_role(&args[2..]).await.map(|()| true),
         Some("create-user") => create_user(&args[2..]).await.map(|()| true),
+        Some("webdav") => webdav(&args[2..]).map(|()| true),
         other => {
             eprintln!(
                 "usage:\n  \
@@ -52,7 +53,9 @@ pub async fn dispatch() -> eyre::Result<bool> {
                  task-server admin delete-user --org <slug> --email <address> --yes\n  \
                  task-server admin set-role --org <slug> --email <address> [--role admin|--clear]\n  \
                  task-server admin create-user --org <slug> --email <address> \\\n    \
-                 [--name <display>] [--username <handle>] (reads the password from STDIN)\n"
+                 [--name <display>] [--username <handle>] (reads the password from STDIN)\n  \
+                 task-server admin webdav --org <slug> [--hide <root-id>|--show <root-id>]\n    \
+                 (no flag lists the org's File Roots and their WebDAV visibility)\n"
             );
             bail!("unknown admin subcommand: {}", other.unwrap_or("(none)"));
         }
@@ -397,6 +400,82 @@ async fn email_history(args: &[String]) -> eyre::Result<()> {
         if let Some(reason) = row.reason {
             println!("      {reason}");
         }
+    }
+    Ok(())
+}
+
+/// `admin webdav --org <slug> [--hide <root-id>|--show <root-id>]` —
+/// the operator surface for "a per-root policy can hide a root from
+/// WebDAV" (issue #274).
+///
+/// The policy lives in a JSON file beside the org's Files registry, and
+/// that file is deliberately the source of truth (see
+/// `files_webdav::WebdavPolicy`): hiding a root is an operator decision
+/// on a compat surface, not something the RPC contract should carry. But
+/// "edit this JSON by hand" is not an operator surface, so this verb is
+/// the one that writes it correctly — and, with no flag, answers the
+/// question an operator actually has, which is "what is exposed right
+/// now?". The running server re-reads the file on its next request; no
+/// restart, no signal.
+///
+/// Authorization is filesystem ownership of the data root, exactly like
+/// every other verb in this module.
+fn webdav(args: &[String]) -> eyre::Result<()> {
+    let Some(slug) = flag(args, "--org") else {
+        bail!("--org <slug> is required");
+    };
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    let files_dir = data_root.org(&slug).path().join("files");
+    if !files_dir.is_dir() {
+        bail!("org `{slug}` has no Files area at {}", files_dir.display());
+    }
+    let backend = files::FilesBackend::new(&files_dir)
+        .map_err(|e| eyre::eyre!("open files backend for `{slug}`: {e}"))?;
+    let policy = files_webdav::WebdavPolicy::open(&files_dir)
+        .wrap_err_with(|| format!("open webdav policy for `{slug}`"))?;
+
+    for (name, hide) in [("--hide", true), ("--show", false)] {
+        if let Some(raw) = flag(args, name) {
+            let id = raw
+                .parse::<uuid::Uuid>()
+                .wrap_err_with(|| format!("{name} takes a root id, got `{raw}`"))?;
+            // Refuse an id this org does not have — a typo'd uuid would
+            // otherwise be accepted silently and hide nothing.
+            let roots = pollster::block_on(files::FilesService::list_roots(&backend))
+                .map_err(|e| eyre::eyre!("list roots: {e}"))?;
+            if !roots.iter().any(|r| r.id == id) {
+                bail!("org `{slug}` has no File Root {id}");
+            }
+            policy
+                .set_hidden(id, hide)
+                .wrap_err_with(|| format!("write webdav policy for `{slug}`"))?;
+            println!(
+                "{slug}: root {id} is now {} on WebDAV",
+                if hide { "hidden" } else { "visible" }
+            );
+            return Ok(());
+        }
+    }
+
+    let roots = pollster::block_on(files::FilesService::list_roots(&backend))
+        .map_err(|e| eyre::eyre!("list roots: {e}"))?;
+    if roots.is_empty() {
+        println!("{slug}: no File Roots");
+        return Ok(());
+    }
+    let hidden = policy.hidden_set();
+    println!("{slug}: WebDAV policy at {}", policy.path().display());
+    for root in roots {
+        println!(
+            "  {}  {:<8}  {}",
+            root.id,
+            if hidden.contains(&root.id) {
+                "hidden"
+            } else {
+                "visible"
+            },
+            root.name,
+        );
     }
     Ok(())
 }

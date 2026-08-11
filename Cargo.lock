@@ -28268,6 +28268,7 @@ dependencies = [
  "org-proto",
  "org-snapshot",
  "pantry",
+ "pollster 0.4.0",
  "prefs",
  "prefs-proto",
  "project",

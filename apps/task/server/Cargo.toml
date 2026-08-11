@@ -75,6 +75,7 @@ workstream = { workspace = true, features = ["vox"] }
 # chain / checkpoint-now over `task-files-version-store`.
 files = { workspace = true }
 files-webdav = { workspace = true }
+pollster = { workspace = true }
 # Entity-CRUD services additionally mounted on `/org/<slug>/vox`.
 # All four expose architect-generated clients agents + the CLI
 # consume directly.

@@ -155,7 +155,9 @@ async fn a_root_mounts_read_write() {
     let root_url = format!("{MOUNT}/Mix%20Session");
 
     // PUT a file, then read it back byte for byte.
-    let (status, _) = h.send("PUT", &format!("{root_url}/mix.wav"), b"take one").await;
+    let (status, _) = h
+        .send("PUT", &format!("{root_url}/mix.wav"), b"take one")
+        .await;
     assert_eq!(status, StatusCode::CREATED);
     let (status, body) = h.send("GET", &format!("{root_url}/mix.wav"), b"").await;
     assert_eq!(status, StatusCode::OK);
@@ -188,13 +190,17 @@ async fn a_root_mounts_read_write() {
         )
         .await;
     assert_eq!(status, StatusCode::CREATED);
-    let (status, _) = h.send("GET", &format!("{root_url}/stems/kik.wav"), b"").await;
+    let (status, _) = h
+        .send("GET", &format!("{root_url}/stems/kik.wav"), b"")
+        .await;
     assert_eq!(status, StatusCode::OK);
     let (status, _) = h
         .send("DELETE", &format!("{root_url}/stems/kik.wav"), b"")
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _) = h.send("GET", &format!("{root_url}/stems/kik.wav"), b"").await;
+    let (status, _) = h
+        .send("GET", &format!("{root_url}/stems/kik.wav"), b"")
+        .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // LOCK / UNLOCK: the exchange an OS client performs before it will
@@ -253,8 +259,12 @@ async fn writes_through_the_bridge_enter_the_cadence_pipeline() {
 
     // A second save through the bridge extends the same chain — one
     // history, whichever surface wrote.
-    h.send("PUT", &format!("{root_url}/session.rpp"), b"reaper project v2")
-        .await;
+    h.send(
+        "PUT",
+        &format!("{root_url}/session.rpp"),
+        b"reaper project v2",
+    )
+    .await;
     let cp2 = h
         .backend
         .checkpoint_now(root.id, None)
@@ -283,7 +293,8 @@ async fn version_history_is_not_exposed() {
     let root = h.root("Private History").await;
     let root_url = format!("{MOUNT}/Private%20History");
 
-    h.send("PUT", &format!("{root_url}/mix.wav"), b"take one").await;
+    h.send("PUT", &format!("{root_url}/mix.wav"), b"take one")
+        .await;
     h.backend
         .checkpoint_now(root.id, None)
         .await
@@ -317,7 +328,9 @@ async fn version_history_is_not_exposed() {
     }
 
     // And it cannot be destroyed or written through the mount.
-    let (status, _) = h.send("DELETE", &format!("{root_url}/.fts-files"), b"").await;
+    let (status, _) = h
+        .send("DELETE", &format!("{root_url}/.fts-files"), b"")
+        .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     // A `PUT` at a hidden name is refused as 409 rather than 404 —
     // dav-server reads "the target's parent chain does not resolve" as
@@ -365,7 +378,11 @@ async fn a_hidden_root_is_unreachable_over_webdav() {
     // Not reachable by name, nor by the uuid escape hatch.
     for seg in ["Client%20Masters", &secret.id.to_string()] {
         let (status, _) = h.propfind_depth1(&format!("{MOUNT}/{seg}/")).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "hidden root reachable as {seg}");
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "hidden root reachable as {seg}"
+        );
     }
     // The visible one still works, so hiding is per-root and not a
     // global off switch.
@@ -425,7 +442,9 @@ async fn paths_cannot_escape_the_root_they_address() {
     {
         std::os::unix::fs::symlink(outside.path(), std::path::Path::new(&a.path).join("link"))
             .unwrap();
-        let (status, _) = h.send("GET", "/org/acme/dav/Root%20A/link/secret.txt", b"").await;
+        let (status, _) = h
+            .send("GET", "/org/acme/dav/Root%20A/link/secret.txt", b"")
+            .await;
         assert_ne!(
             status,
             StatusCode::OK,
@@ -482,7 +501,9 @@ async fn the_mount_point_itself_is_read_only() {
     let h = Harness::new();
     h.root("Existing").await;
 
-    let (status, _) = h.send("MKCOL", &format!("{MOUNT}/New%20Project"), b"").await;
+    let (status, _) = h
+        .send("MKCOL", &format!("{MOUNT}/New%20Project"), b"")
+        .await;
     assert_ne!(status, StatusCode::CREATED);
     let (status, _) = h.send("PUT", &format!("{MOUNT}/stray.txt"), b"nope").await;
     assert_ne!(status, StatusCode::CREATED);
@@ -492,6 +513,8 @@ async fn the_mount_point_itself_is_read_only() {
     );
 
     // An unknown root is a 404, not a server error.
-    let (status, _) = h.propfind_depth1(&format!("{MOUNT}/No%20Such%20Root/")).await;
+    let (status, _) = h
+        .propfind_depth1(&format!("{MOUNT}/No%20Such%20Root/"))
+        .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }

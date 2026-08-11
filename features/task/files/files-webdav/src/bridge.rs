@@ -84,9 +84,13 @@ impl WebdavBridge {
             // Every method the OS clients need, and nothing that would
             // hand out a second, version-shaped view of the tree.
             .methods(DavMethodSet::WEBDAV_RW)
-            // A browser hitting the mount gets a usable listing; a
-            // WebDAV client never sees it (it PROPFINDs).
-            .autoindex(true)
+            // No HTML directory index. dav-server will happily render
+            // one for a browser `GET`, but a browsable file listing is
+            // a *surface*, and the spec puts browsing behind the
+            // explorer widgets over the Files RPC surface — not on the
+            // compat bridge. WebDAV clients `PROPFIND`; they never
+            // wanted it.
+            .autoindex(false)
             // A symlink out of the live tree is already refused by
             // `LiveTreeFs`; not listing them keeps the mount honest
             // about what it will actually serve.
@@ -109,11 +113,13 @@ impl WebdavBridge {
 
     /// Roots this bridge may expose right now, in registry order,
     /// paired with their URL segments.
-    async fn visible(&self) -> Vec<(String, FileRootInfo)> {
+    async fn visible(&self) -> Vec<naming::RootSegment> {
         let roots = self.backend.list_roots().await.unwrap_or_default();
+        // One policy read for the whole request, not one per root.
+        let hidden = self.policy.hidden_set();
         let visible: Vec<FileRootInfo> = roots
             .into_iter()
-            .filter(|r| self.policy.is_visible(r.id))
+            .filter(|r| !hidden.contains(&r.id))
             .collect();
         naming::segments(&visible)
     }
@@ -160,10 +166,7 @@ impl WebdavBridge {
             return self.handler.handle_with(config, req).await;
         }
 
-        let Some(root) = naming::resolve(
-            &entries.iter().map(|(_, r)| r.clone()).collect::<Vec<_>>(),
-            &segment,
-        ) else {
+        let Some(root) = naming::find(&entries, &segment).map(|e| e.root.clone()) else {
             // Hidden and nonexistent are the same answer on purpose: a
             // hidden root must not be distinguishable from one that was
             // never created.

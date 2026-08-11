@@ -50,7 +50,22 @@ curl -X PROPFIND -H 'Depth: 1' \
 
 ## Hiding a root from WebDAV
 
-Per-root visibility is a policy file next to the org's Files registry:
+On the server:
+
+```bash
+# what's exposed right now
+task-server admin webdav --org <slug>
+
+# hide / un-hide one root
+task-server admin webdav --org <slug> --hide <root-id>
+task-server admin webdav --org <slug> --show <root-id>
+```
+
+Like every other `admin` verb, authorization is filesystem ownership of
+the data root — in the cluster, `kubectl exec` into the pod.
+
+Underneath, this is a policy file next to the org's Files registry,
+which an operator can also edit directly:
 
 ```
 <data_root>/orgs/<slug>/files/webdav-policy.json
@@ -85,3 +100,12 @@ force) rather than silently un-hiding anything.
 - **This is not the sync path.** For a real local replica with offline
   versioning, use the sync daemon. WebDAV is for the machine that does
   not have it.
+- **Access is org-wide, then per-root visibility.** Any member of the
+  org reaches every root the policy does not hide. Narrowing further —
+  root granularity narrowed by slices, per the Files spec — waits on
+  the Files permission model; until then, `--hide` is the only
+  per-root control.
+- **No signed-URL grants.** `/media`'s `?token=` grants are scoped to
+  paths under the org's `resources/` tree, a different namespace from
+  the root segments here; honouring one on this route would widen it.
+  Use a session bearer or Basic auth.

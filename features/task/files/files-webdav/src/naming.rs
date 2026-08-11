@@ -56,10 +56,20 @@ fn short_id(id: Uuid) -> String {
     id.simple().to_string()[..8].to_string()
 }
 
+/// A root and the URL segment it is addressed by — computed once per
+/// request by [`segments`] and then passed around, so the mount's
+/// listing and its dispatch can never disagree about what a folder is
+/// called.
+#[derive(Debug, Clone)]
+pub struct RootSegment {
+    pub segment: String,
+    pub root: FileRootInfo,
+}
+
 /// Every visible root paired with the URL segment it is addressed by.
 /// Order follows `roots`.
 #[must_use]
-pub fn segments(roots: &[FileRootInfo]) -> Vec<(String, FileRootInfo)> {
+pub fn segments(roots: &[FileRootInfo]) -> Vec<RootSegment> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for root in roots {
         *counts.entry(sanitize(root).to_lowercase()).or_default() += 1;
@@ -73,25 +83,27 @@ pub fn segments(roots: &[FileRootInfo]) -> Vec<(String, FileRootInfo)> {
             } else {
                 base
             };
-            (segment, root.clone())
+            RootSegment {
+                segment,
+                root: root.clone(),
+            }
         })
         .collect()
 }
 
-/// Resolve one URL segment against the visible roots: its uuid, or the
-/// name segment [`segments`] assigned it (case-insensitively, matching
-/// how the mounting OS compares names).
+/// Resolve one URL segment against already-computed [`segments`]: its
+/// uuid, or its name segment (case-insensitively, matching how the
+/// mounting OS compares names).
 #[must_use]
-pub fn resolve(roots: &[FileRootInfo], segment: &str) -> Option<FileRootInfo> {
+pub fn find<'a>(entries: &'a [RootSegment], segment: &str) -> Option<&'a RootSegment> {
     if let Ok(id) = Uuid::parse_str(segment)
-        && let Some(root) = roots.iter().find(|r| r.id == id)
+        && let Some(entry) = entries.iter().find(|e| e.root.id == id)
     {
-        return Some(root.clone());
+        return Some(entry);
     }
-    segments(roots)
-        .into_iter()
-        .find(|(seg, _)| seg.eq_ignore_ascii_case(segment))
-        .map(|(_, root)| root)
+    entries
+        .iter()
+        .find(|e| e.segment.eq_ignore_ascii_case(segment))
 }
 
 #[cfg(test)]
@@ -114,39 +126,45 @@ mod tests {
     fn unique_names_keep_their_name() {
         let roots = vec![root("El Artisa"), root("Dr Jaramillo")];
         let segs = segments(&roots);
-        assert_eq!(segs[0].0, "El Artisa");
-        assert_eq!(segs[1].0, "Dr Jaramillo");
+        assert_eq!(segs[0].segment, "El Artisa");
+        assert_eq!(segs[1].segment, "Dr Jaramillo");
     }
 
     #[test]
     fn colliding_names_are_all_suffixed() {
         let roots = vec![root("Mix"), root("mix")];
         let segs = segments(&roots);
-        assert!(segs[0].0.starts_with("Mix ("), "{}", segs[0].0);
-        assert!(segs[1].0.starts_with("mix ("), "{}", segs[1].0);
-        assert_ne!(segs[0].0, segs[1].0);
+        assert!(segs[0].segment.starts_with("Mix ("), "{}", segs[0].segment);
+        assert!(segs[1].segment.starts_with("mix ("), "{}", segs[1].segment);
+        assert_ne!(segs[0].segment, segs[1].segment);
         // Both remain resolvable by their own segment.
-        for (seg, expected) in &segs {
-            assert_eq!(resolve(&roots, seg).unwrap().id, expected.id);
+        for entry in &segs {
+            assert_eq!(
+                find(&segs, &entry.segment).unwrap().root.id,
+                entry.root.id,
+                "{} resolves to itself",
+                entry.segment
+            );
         }
     }
 
     #[test]
     fn reserved_characters_are_replaced() {
         let roots = vec![root("A/B:C")];
-        assert_eq!(segments(&roots)[0].0, "A-B-C");
+        assert_eq!(segments(&roots)[0].segment, "A-B-C");
     }
 
     #[test]
     fn a_root_is_always_addressable_by_uuid() {
         let roots = vec![root("Mix")];
-        let by_id = resolve(&roots, &roots[0].id.to_string()).expect("uuid segment resolves");
-        assert_eq!(by_id.id, roots[0].id);
+        let segs = segments(&roots);
+        let by_id = find(&segs, &roots[0].id.to_string()).expect("uuid segment resolves");
+        assert_eq!(by_id.root.id, roots[0].id);
     }
 
     #[test]
     fn an_unnameable_root_falls_back_to_its_id() {
         let roots = vec![root("   ")];
-        assert_eq!(segments(&roots)[0].0, roots[0].id.to_string());
+        assert_eq!(segments(&roots)[0].segment, roots[0].id.to_string());
     }
 }

@@ -20,6 +20,8 @@ use dav_server::fs::{
 use files_proto::FileRootInfo;
 use futures_util::stream;
 
+use crate::naming::{self, RootSegment};
+
 /// A root, or the mount point itself, as WebDAV metadata. Roots are
 /// collections with no meaningful size.
 #[derive(Debug, Clone)]
@@ -51,7 +53,9 @@ impl DavDirEntry for RootEntry {
     }
     fn metadata(&'_ self) -> FsFuture<'_, Box<dyn DavMetaData>> {
         let meta = self.meta.clone();
-        Box::pin(std::future::ready(Ok(Box::new(meta) as Box<dyn DavMetaData>)))
+        Box::pin(std::future::ready(Ok(
+            Box::new(meta) as Box<dyn DavMetaData>
+        )))
     }
     fn is_dir(&'_ self) -> FsFuture<'_, bool> {
         Box::pin(std::future::ready(Ok(true)))
@@ -70,11 +74,11 @@ fn created_at(root: &FileRootInfo) -> SystemTime {
 /// The mount's top-level collection: the visible roots, by segment.
 #[derive(Debug, Clone)]
 pub struct RootsFs {
-    entries: Vec<(String, FileRootInfo)>,
+    entries: Vec<RootSegment>,
 }
 
 impl RootsFs {
-    pub fn new(entries: Vec<(String, FileRootInfo)>) -> Self {
+    pub fn new(entries: Vec<RootSegment>) -> Self {
         Self { entries }
     }
 
@@ -84,7 +88,7 @@ impl RootsFs {
         let modified = self
             .entries
             .iter()
-            .map(|(_, r)| created_at(r))
+            .map(|e| created_at(&e.root))
             .max()
             .unwrap_or(UNIX_EPOCH);
         DirMeta { modified }
@@ -94,6 +98,10 @@ impl RootsFs {
     /// root. Anything deeper never reaches this filesystem — the bridge
     /// dispatches those to the root's own view — so a deeper path here
     /// means a client asked for a root that is hidden or gone.
+    ///
+    /// Resolution goes through [`naming::find`], the same call the
+    /// bridge dispatches with: what this collection lists and what the
+    /// bridge will route are the same answer by construction.
     fn lookup(&self, path: &DavPath) -> Result<Option<DirMeta>, FsError> {
         let rel = path.as_rel_ospath();
         let mut components = rel.components();
@@ -104,13 +112,9 @@ impl RootsFs {
             return Err(FsError::NotFound);
         }
         let segment = first.as_os_str().to_str().ok_or(FsError::NotFound)?;
-        Ok(self
-            .entries
-            .iter()
-            .find(|(seg, _)| seg.eq_ignore_ascii_case(segment))
-            .map(|(_, root)| DirMeta {
-                modified: created_at(root),
-            }))
+        Ok(naming::find(&self.entries, segment).map(|e| DirMeta {
+            modified: created_at(&e.root),
+        }))
     }
 }
 
@@ -145,11 +149,11 @@ impl DavFileSystem for RootsFs {
             let entries: Vec<Result<Box<dyn DavDirEntry>, FsError>> = self
                 .entries
                 .iter()
-                .map(|(segment, root)| {
+                .map(|e| {
                     Ok(Box::new(RootEntry {
-                        segment: segment.clone(),
+                        segment: e.segment.clone(),
                         meta: DirMeta {
-                            modified: created_at(root),
+                            modified: created_at(&e.root),
                         },
                     }) as Box<dyn DavDirEntry>)
                 })

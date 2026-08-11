@@ -75,7 +75,10 @@ fn basic_header(user: &str, secret: &str) -> String {
 
 /// `PROPFIND Depth: 1` — what a file manager sends when it opens a
 /// folder — with an optional `Authorization` header.
-async fn propfind(url: &str, authorization: Option<&str>) -> (u16, reqwest::header::HeaderMap, String) {
+async fn propfind(
+    url: &str,
+    authorization: Option<&str>,
+) -> (u16, reqwest::header::HeaderMap, String) {
     let mut req = reqwest::Client::new()
         .request(
             reqwest::Method::from_bytes(b"PROPFIND").expect("PROPFIND is a valid method"),
@@ -165,6 +168,36 @@ async fn webdav_mount_requires_an_existing_task_credential() -> eyre::Result<()>
     let (status, _, body) = propfind(&root, Some(&basic_header(EMAIL, PASSWORD))).await;
     assert_eq!(status, 207, "email/password must authenticate");
     assert!(body.contains("mix.wav"), "live tree not listed: {body}");
+
+    // ── …and a burst of them costs ONE sign-in, not one per request.
+    //    A file manager opening a folder issues dozens; minting a live
+    //    session for each would fill the session table with credentials
+    //    nobody will ever present again.
+    let sessions_before = auth_state
+        .auth
+        .list_sessions(architect_auth::ListSessions {
+            session_token: token.clone(),
+        })
+        .await
+        .map_err(|e| eyre::eyre!("list sessions: {e:?}"))?
+        .len();
+    for _ in 0..10 {
+        let (status, _, _) = propfind(&root, Some(&basic_header(EMAIL, PASSWORD))).await;
+        assert_eq!(status, 207);
+    }
+    let sessions_after = auth_state
+        .auth
+        .list_sessions(architect_auth::ListSessions {
+            session_token: token.clone(),
+        })
+        .await
+        .map_err(|e| eyre::eyre!("list sessions: {e:?}"))?
+        .len();
+    assert_eq!(
+        sessions_after, sessions_before,
+        "ten password-authenticated requests must re-use the cached session, \
+         not mint ten more"
+    );
 
     // ── An org this server does not host answers exactly like a bad
     //    credential — a caller does not get to enumerate orgs.

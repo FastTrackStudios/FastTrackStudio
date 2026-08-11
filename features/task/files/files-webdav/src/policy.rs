@@ -85,11 +85,18 @@ impl WebdavPolicy {
     /// restart. A malformed file is *ignored* (logged, previous policy
     /// kept): a typo must not silently un-hide a root that was
     /// deliberately hidden.
+    ///
+    /// The file read happens *outside* the lock. The steady state is
+    /// "nothing changed", where this costs one `stat` and no lock at
+    /// all; only a genuine change takes the lock, and never while
+    /// blocked on the filesystem.
     fn reload_if_changed(&self) {
         let stamp = self.stamp();
-        let mut cached = self.cached.lock().expect("webdav policy lock poisoned");
-        if stamp == cached.stamp && stamp.is_some() {
-            return;
+        {
+            let cached = self.cached.lock().expect("webdav policy lock poisoned");
+            if stamp == cached.stamp && stamp.is_some() {
+                return;
+            }
         }
         let file = match std::fs::read(&self.path) {
             Ok(bytes) => match serde_json::from_slice::<PolicyFile>(&bytes) {
@@ -107,6 +114,7 @@ impl WebdavPolicy {
             // Absent (or unreadable) = the empty policy.
             Err(_) => PolicyFile::default(),
         };
+        let mut cached = self.cached.lock().expect("webdav policy lock poisoned");
         cached.file = file;
         cached.stamp = stamp;
     }
@@ -119,18 +127,26 @@ impl WebdavPolicy {
         std::fs::write(&self.path, bytes)
     }
 
-    /// May the bridge expose `root_id`? Picks up an operator's edit to
-    /// the policy file first.
+    /// Every hidden root id, as one snapshot. This is the shape callers
+    /// want: filtering a root list needs *one* policy read, not one per
+    /// root — a mount with twenty roots would otherwise `stat` the
+    /// policy file twenty times per request.
     #[must_use]
-    pub fn is_visible(&self, root_id: Uuid) -> bool {
+    pub fn hidden_set(&self) -> BTreeSet<Uuid> {
         self.reload_if_changed();
-        !self
-            .cached
+        self.cached
             .lock()
             .expect("webdav policy lock poisoned")
             .file
             .hidden
-            .contains(&root_id)
+            .clone()
+    }
+
+    /// May the bridge expose `root_id`? Picks up an operator's edit to
+    /// the policy file first.
+    #[must_use]
+    pub fn is_visible(&self, root_id: Uuid) -> bool {
+        !self.hidden_set().contains(&root_id)
     }
 
     /// Hide (or un-hide) a root from the WebDAV bridge. Idempotent.
@@ -153,15 +169,7 @@ impl WebdavPolicy {
     /// Every root id this policy hides, sorted.
     #[must_use]
     pub fn hidden(&self) -> Vec<Uuid> {
-        self.reload_if_changed();
-        self.cached
-            .lock()
-            .expect("webdav policy lock poisoned")
-            .file
-            .hidden
-            .iter()
-            .copied()
-            .collect()
+        self.hidden_set().into_iter().collect()
     }
 
     /// The policy file this instance reads and writes — the operator's
