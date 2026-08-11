@@ -10,9 +10,15 @@ on their tickets.
   layer: audio/video/project media. Lives primarily on servers;
   reaches devices only by selective sync or NAS-transparent access.
   Distinct from the Vault: the Vault indexes it, never contains it.
-- **Selective sync** — pulling a chosen project's Files onto a device
-  for local work, with ignore rules (e.g. `.rpp-bak`). The opposite of
-  the Vault's everything-everywhere replication.
+- **Selective sync** — placing a replica of a chosen root or root
+  slice onto a device for local work, with the root's ignore set
+  applied. The opposite of the Vault's everything-everywhere
+  replication.
+- **Replica** — a device-local copy of a root or slice, hosted by that
+  machine's storage agent as a real live tree with its own version
+  store: offline edits checkpoint locally and reconcile later, possibly
+  as divergent versions. May be partial (pointer stubs, hydrate on
+  demand).
 - **NAS-transparent access** — using server-resident Files in place
   over the network (NFS today) as if local, without syncing them.
 - **File version chain** — the automatic, per-file history of every
