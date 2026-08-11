@@ -19,7 +19,16 @@ const EDIT_LEN: u64 = 256 * 1024; // a 256 KiB in-place edit
 const EDIT_START: u64 = FILE_LEN / 2;
 
 #[tokio::test]
+#[ignore = "streams 3 GiB total through tempfile::tempdir() (tmpfs = real RAM on typical Linux); opt in with FILES_CHUNK_STORE_STRESS=1 cargo test -- --ignored"]
 async fn near_identical_multi_gb_saves_share_the_vast_majority_of_chunks() {
+    if !common::stress_tests_enabled() {
+        eprintln!(
+            "skipping: set {} to run this stress test",
+            common::STRESS_ENV_VAR
+        );
+        return;
+    }
+
     let dir = tempfile::tempdir().unwrap();
     let config = ChunkerConfig::with_avg_size(1024 * 1024);
     let store = ChunkStore::open_with_config(dir.path(), config)

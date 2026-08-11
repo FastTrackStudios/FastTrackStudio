@@ -93,6 +93,11 @@ pub async fn chunk_to_vec<R>(source: R, config: ChunkerConfig) -> Result<Vec<Vec
 where
     R: AsyncRead + Unpin + Send,
 {
+    // fastcdc only `debug_assert!`s these bounds — in a release build an
+    // out-of-range config wouldn't fail loudly, it would silently corrupt
+    // chunking, so this public entry point must validate before handing
+    // the config to AsyncStreamCDC::new.
+    config.validate()?;
     let mut chunker =
         AsyncStreamCDC::new(source, config.min_size, config.avg_size, config.max_size);
     let mut stream = std::pin::pin!(chunker.as_stream());
@@ -152,6 +157,22 @@ mod tests {
             max_size: 0,
         };
         assert!(config.validate().is_err());
+    }
+
+    /// `chunk_to_vec` is the entry point a caller can hand a hand-built
+    /// `ChunkerConfig` to — it must reject an invalid one itself rather
+    /// than handing it to `AsyncStreamCDC::new`, which only
+    /// `debug_assert!`s the bounds and would silently corrupt chunking in
+    /// a release build.
+    #[tokio::test]
+    async fn rejects_invalid_config_instead_of_reaching_the_chunker() {
+        let config = ChunkerConfig {
+            min_size: 0,
+            avg_size: 0,
+            max_size: 0,
+        };
+        let err = chunk_to_vec(&b"some bytes"[..], config).await.unwrap_err();
+        assert!(matches!(err, Error::InvalidConfig(_)));
     }
 
     /// `chunk_to_vec`'s future must be `Send` — a prior version routed

@@ -30,7 +30,16 @@ fn rss_bytes() -> u64 {
 }
 
 #[tokio::test]
+#[ignore = "streams 2 GiB through tempfile::tempdir() (tmpfs = real RAM on typical Linux); opt in with FILES_CHUNK_STORE_STRESS=1 cargo test -- --ignored"]
 async fn writes_and_reads_a_multi_gb_stream_with_bounded_memory() {
+    if !common::stress_tests_enabled() {
+        eprintln!(
+            "skipping: set {} to run this stress test",
+            common::STRESS_ENV_VAR
+        );
+        return;
+    }
+
     let dir = tempfile::tempdir().unwrap();
     // Larger-than-default chunks (4 MiB avg / 16 MiB max) keep the chunk
     // count — and so the number of blob-store round trips — reasonable

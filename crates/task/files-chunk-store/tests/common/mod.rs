@@ -16,6 +16,24 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 const BLOCK_SIZE: usize = 64 * 1024;
 
+/// Env var that gates the multi-GiB stress tests. They're marked
+/// `#[ignore]` (so plain `cargo test` / CI never runs them), and each one
+/// checks this too as a second, explicit opt-in — `--ignored` alone can be
+/// passed by habit or by a broader test-running wrapper, and these tests
+/// stream multiple GiB through `tempfile::tempdir()`, which is tmpfs (real
+/// RAM, not disk) on a typical Linux box.
+///
+/// Run them with:
+/// `FILES_CHUNK_STORE_STRESS=1 cargo test -p task-files-chunk-store -- --ignored`
+pub const STRESS_ENV_VAR: &str = "FILES_CHUNK_STORE_STRESS";
+
+/// Returns `true` if the multi-GiB stress tests should actually run their
+/// heavy body. If not, the caller should skip with a clear message rather
+/// than silently doing nothing.
+pub fn stress_tests_enabled() -> bool {
+    std::env::var(STRESS_ENV_VAR).is_ok()
+}
+
 /// Fill a `BLOCK_SIZE`-aligned block deterministically from `(seed,
 /// block_index)`: one blake3 hash seeds a splitmix64 stream, which is fast
 /// enough to generate multiple GiB in a `cargo test` run.
