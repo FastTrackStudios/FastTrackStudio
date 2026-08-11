@@ -246,6 +246,30 @@ pub(crate) enum ProjectCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Set or clear the project's cover image.
+    ///
+    /// Two kinds of value are accepted, and they behave
+    /// differently in the app:
+    ///
+    /// - an absolute `http(s)://` URL, used verbatim;
+    /// - anything else, treated as a path inside the org's own
+    ///   media tree (served from `/org/<slug>/media/<path>`),
+    ///   which the app signs before loading.
+    ///
+    /// Pass `none` / `null` / `""` to clear it.
+    SetImage {
+        target: String,
+        /// URL, org-media path (`projects/cover.jpg`), or
+        /// `none` to clear.
+        image: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Set or clear the project parent. Pass `none` / `null`
     /// to unparent.
     SetParent {
@@ -920,6 +944,19 @@ pub(crate) async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             json,
         } => {
             mutate_project(target, org, server, json, |p| p.priority = priority).await?;
+        }
+        ProjectCmd::SetImage {
+            target,
+            image,
+            org,
+            server,
+            json,
+        } => {
+            let image = match image.as_str() {
+                "none" | "null" | "" => String::new(),
+                other => other.to_owned(),
+            };
+            mutate_project(target, org, server, json, |p| p.image = image).await?;
         }
         ProjectCmd::SetParent {
             target,

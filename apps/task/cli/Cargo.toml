@@ -156,6 +156,9 @@ email-imap = { workspace = true, optional = true }
 email-proto = { workspace = true, optional = true }
 timer-proto = { workspace = true, features = ["server", "vox"] }
 timer = { workspace = true }
+# `task files …` — the Files RPC surface v1 (issue #259, ADR 0001);
+# client-only, no direct-disk fallback (unlike timer's local SQLite).
+files-proto = { workspace = true, features = ["vox"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 # `task-cli auth …` — local-sqlite ArchitectAuth flow. Same

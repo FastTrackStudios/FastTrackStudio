@@ -54,7 +54,11 @@ mod json_out;
 mod label;
 // pantry/intake reuse location's client helpers, so the module
 // compiles whenever any of the three owners is in.
-#[cfg(any(feature = "plugin-home", feature = "plugin-mealplan", feature = "plugin-fitness"))]
+#[cfg(any(
+    feature = "plugin-home",
+    feature = "plugin-mealplan",
+    feature = "plugin-fitness"
+))]
 mod location;
 #[cfg(feature = "plugin-mealplan")]
 mod meal;
@@ -67,6 +71,7 @@ mod org;
 mod org_ctx;
 // `intake` (fitness) reuses pantry's client helpers, so the module
 // compiles under either plugin.
+mod files;
 #[cfg(any(feature = "plugin-mealplan", feature = "plugin-fitness"))]
 mod pantry;
 mod plan;
@@ -76,10 +81,10 @@ mod recipe;
 #[cfg(feature = "plugin-mealplan")]
 mod recipe_import;
 mod runner;
-mod skills;
 mod session_store;
 mod setup;
 mod shared;
+mod skills;
 mod task_cmd;
 mod threads;
 mod timer;
@@ -99,8 +104,11 @@ use crate::auth::{AuthCmd, run_auth};
 use crate::body::{BodyCmd, run_body};
 use crate::code::{CodeCmd, run_code};
 use crate::cycle::{CycleCmd, run_cycle};
+#[cfg(feature = "plugin-email")]
+use crate::email::{EmailCmd, run_email};
 #[cfg(feature = "plugin-fitness")]
 use crate::exercise::{ExerciseCmd, run_exercise};
+use crate::files::{FilesCmd, run_files};
 #[cfg(feature = "plugin-finance")]
 use crate::finance::{FinanceCmd, run_finance};
 use crate::goal::{GoalCmd, run_goal};
@@ -126,8 +134,6 @@ use crate::task_cmd::{TaskCmd, run_task};
 use crate::threads::{ThreadsCmd, run_threads};
 use crate::timer::{TimerCmd, run_timer};
 use crate::vault::{VaultCmd, run_vault, run_vault_sync};
-#[cfg(feature = "plugin-email")]
-use crate::email::{EmailCmd, run_email};
 #[cfg(feature = "plugin-wiki")]
 use crate::wiki::{WikiCmd, run_wiki};
 #[cfg(feature = "plugin-fitness")]
@@ -237,6 +243,11 @@ enum Commands {
     /// rate cascade.
     #[command(subcommand)]
     Timer(TimerCmd),
+    /// Files RPC surface v1 (issue #259, ADR 0001): turn a folder into
+    /// a File Root, browse it, read a file's version chain, checkpoint
+    /// on demand.
+    #[command(subcommand)]
+    Files(FilesCmd),
     /// Finance — reports + invoice generation from billable
     /// sessions, PDF rendering via fulgur.
     #[cfg(feature = "plugin-finance")]
@@ -607,18 +618,14 @@ async fn doctor_check_api(ws_url: &str) -> eyre::Result<()> {
     // every hosted slug; prefer the home org.
     let wk_url = format!("{origin}/.well-known/task-server.json");
     let slug = match reqwest::get(&wk_url).await {
-        Ok(resp) => resp
-            .json::<serde_json::Value>()
-            .await
-            .ok()
-            .and_then(|doc| {
-                let orgs = doc.get("orgs")?.as_array()?.clone();
-                let pick = orgs
-                    .iter()
-                    .find(|o| o.get("is_home").and_then(|v| v.as_bool()).unwrap_or(false))
-                    .or_else(|| orgs.first())?;
-                Some(pick.get("slug")?.as_str()?.to_owned())
-            }),
+        Ok(resp) => resp.json::<serde_json::Value>().await.ok().and_then(|doc| {
+            let orgs = doc.get("orgs")?.as_array()?.clone();
+            let pick = orgs
+                .iter()
+                .find(|o| o.get("is_home").and_then(|v| v.as_bool()).unwrap_or(false))
+                .or_else(|| orgs.first())?;
+            Some(pick.get("slug")?.as_str()?.to_owned())
+        }),
         Err(e) => {
             println!("API check: SKIPPED — could not fetch {wk_url} ({e})");
             return Ok(());
@@ -671,9 +678,9 @@ async fn doctor_check_api(ws_url: &str) -> eyre::Result<()> {
     let mut stale: Vec<String> = Vec::new();
     let mut unserved: Vec<&str> = Vec::new();
     for (name, stamp) in &local {
-        let served = services.iter().find_map(|s| {
-            (s.get("name")?.as_str()? == *name).then(|| s.get("stamp"))?
-        });
+        let served = services
+            .iter()
+            .find_map(|s| (s.get("name")?.as_str()? == *name).then(|| s.get("stamp"))?);
         match served.and_then(|v| v.as_str()) {
             Some(s) if s == stamp => {}
             Some(s) => stale.push(format!("{name} (server {s}, this build {stamp})")),
@@ -790,6 +797,9 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         }
         Commands::Timer(cmd) => {
             return run_timer(cmd, cli.org.as_deref()).await;
+        }
+        Commands::Files(cmd) => {
+            return run_files(cmd, cli.org.as_deref()).await;
         }
         #[cfg(feature = "plugin-finance")]
         Commands::Finance(cmd) => {
@@ -1044,7 +1054,6 @@ fn pick_server_base(flag_or_env: Option<&str>, session_url: Option<&str>) -> Str
     session_store::DEFAULT_LOCAL_VOX.to_owned()
 }
 
-
 /// Embedded backend, built once per process: a full `AppState` plus the
 /// construction `Scope` that keeps its in-process vox acceptor tasks
 /// alive. Only initialized when embedded mode is active.
@@ -1098,7 +1107,11 @@ where
 /// server share a session, two servers never do.
 fn origin(u: &str) -> &str {
     let (scheme, rest) = u.split_once("://").unwrap_or(("", u));
-    let prefix = if scheme.is_empty() { 0 } else { scheme.len() + 3 };
+    let prefix = if scheme.is_empty() {
+        0
+    } else {
+        scheme.len() + 3
+    };
     let authority_len = rest.find('/').unwrap_or(rest.len());
     &u[..prefix + authority_len]
 }
@@ -1316,6 +1329,22 @@ fn resolve_active_org(override_slug: Option<String>) -> eyre::Result<String> {
     Ok(slug)
 }
 
+/// The org-slug resolution every RPC-only command module needs before
+/// it can establish a client: `resolve_active_org` first (the
+/// session/`--org` path — server-aware, see its own doc), falling back
+/// to `org_ctx::resolve_active`'s local single-org disambiguation /
+/// fresh-install auto-bootstrap of `default` when there's no `--org`
+/// and no stored session, exactly as the pre-RPC direct-disk commands
+/// used to behave. Shared so `timer`/`finance`/`cycle`/`files` (PR
+/// #280 review: this exact match block had drifted into four verbatim
+/// copies) don't grow a fifth.
+pub(crate) fn resolve_slug(org_override: Option<&str>) -> eyre::Result<String> {
+    match resolve_active_org(org_override.map(str::to_owned)) {
+        Ok(s) => Ok(s),
+        Err(_) => Ok(org_ctx::resolve_active(None)?.root.slug().to_owned()),
+    }
+}
+
 /// Resolve the server-management vox URL:
 /// - explicit `--server <ws://...>` flag wins
 /// - else honor `TASK_SERVER_VOX_URL`
@@ -1382,7 +1411,10 @@ mod bearer_scope_tests {
             origin("wss://evil.example/org/x/vox"),
         );
         // Port and scheme are part of the authority, not decoration.
-        assert_ne!(origin("ws://127.0.0.1:18080/vox"), origin("ws://127.0.0.1:9/vox"));
+        assert_ne!(
+            origin("ws://127.0.0.1:18080/vox"),
+            origin("ws://127.0.0.1:9/vox")
+        );
         assert_ne!(origin("ws://host/vox"), origin("wss://host/vox"));
     }
 }
