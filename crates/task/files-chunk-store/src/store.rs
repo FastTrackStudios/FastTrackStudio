@@ -3,15 +3,22 @@
 //! own `FileId -> chunk list` records, kept outside iroh-blobs per
 //! ADR 0001).
 
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::SystemTime;
 
 use fastcdc::v2020::AsyncStreamCDC;
 use futures::StreamExt;
+use iroh_blobs::store::fs::options::Options;
+use iroh_blobs::store::{GcConfig as IrohGcConfig, ProtectCb, ProtectOutcome};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::sync::RwLock;
 
 use crate::chunker::ChunkerConfig;
 use crate::error::{Error, Result};
+use crate::gc::{GcConfig, GcStats};
 use crate::manifest::{ChunkRef, FileId, Manifest};
 
 /// The chunk-store substrate: streaming write/read of files as
@@ -39,19 +46,54 @@ pub struct ChunkStore {
     blobs: iroh_blobs::store::fs::FsStore,
     manifests_dir: PathBuf,
     chunker_config: ChunkerConfig,
+    /// `Some` only for a store opened via [`ChunkStore::open_with_gc`]: the
+    /// chunk-hash set iroh-blobs' background GC task's `add_protected`
+    /// callback reads before each sweep, kept up to date by
+    /// [`ChunkStore::gc`]. The inner `Option` is `None` until `gc` has run
+    /// at least once — the callback returns `Abort` in that state rather
+    /// than protecting nothing, since iroh-blobs' background task fires on
+    /// its own interval regardless of whether `gc` has ever been called.
+    /// See the `gc` module doc for why this two-phase split (our mark,
+    /// iroh-blobs' own scheduled sweep) is the only deletion path 0.103
+    /// exposes publicly.
+    chunk_protection: Option<Arc<RwLock<Option<HashSet<blake3::Hash>>>>>,
 }
 
 impl ChunkStore {
-    /// Open (creating if absent) a chunk store rooted at `root`.
+    /// Open (creating if absent) a chunk store rooted at `root`, with no
+    /// chunk-level GC — [`ChunkStore::gc`] on a store opened this way
+    /// removes swept manifests but returns [`Error::GcDisabled`] rather
+    /// than reclaiming chunks, since nothing would ever sweep them.
     pub async fn open(root: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_config(root, ChunkerConfig::default()).await
     }
 
     /// Open a chunk store with a non-default [`ChunkerConfig`] (e.g. a
-    /// smaller average chunk size for a root of many small text files).
+    /// smaller average chunk size for a root of many small text files) and
+    /// no chunk-level GC — see [`ChunkStore::open`].
     pub async fn open_with_config(
         root: impl AsRef<Path>,
         chunker_config: ChunkerConfig,
+    ) -> Result<Self> {
+        Self::open_inner(root, chunker_config, None).await
+    }
+
+    /// Open a chunk store with chunk-level GC enabled: [`ChunkStore::gc`]
+    /// will actually reclaim unreferenced chunks (on iroh-blobs' own
+    /// background schedule, per the `gc` module doc — not synchronously
+    /// within the `gc` call itself).
+    pub async fn open_with_gc(
+        root: impl AsRef<Path>,
+        chunker_config: ChunkerConfig,
+        gc: GcConfig,
+    ) -> Result<Self> {
+        Self::open_inner(root, chunker_config, Some(gc)).await
+    }
+
+    async fn open_inner(
+        root: impl AsRef<Path>,
+        chunker_config: ChunkerConfig,
+        gc: Option<GcConfig>,
     ) -> Result<Self> {
         chunker_config.validate()?;
         let root = root.as_ref();
@@ -59,7 +101,41 @@ impl ChunkStore {
         let manifests_dir = root.join("manifests");
         tokio::fs::create_dir_all(&blobs_dir).await?;
         tokio::fs::create_dir_all(&manifests_dir).await?;
-        let blobs = iroh_blobs::store::fs::FsStore::load(&blobs_dir)
+
+        // `None` until the first `ChunkStore::gc` call: until then we have
+        // no idea what's live, and iroh-blobs' background task runs on its
+        // own fixed interval regardless of whether `gc` has ever been
+        // called — an empty protect set at that point would delete every
+        // chunk written so far. `ProtectOutcome::Abort` is exactly the
+        // documented escape hatch for "the protect source has nothing
+        // trustworthy yet, skip this sweep entirely" (see
+        // `iroh_blobs::store::GcConfig::add_protected`'s doc).
+        let chunk_protection = gc
+            .as_ref()
+            .map(|_| Arc::new(RwLock::<Option<HashSet<blake3::Hash>>>::new(None)));
+        let mut options = Options::new(&blobs_dir);
+        if let Some(gc) = gc {
+            let protection = chunk_protection.clone().expect("set above");
+            let add_protected: ProtectCb = Arc::new(move |live: &mut HashSet<iroh_blobs::Hash>| {
+                let protection = protection.clone();
+                Box::pin(async move {
+                    match &*protection.read().await {
+                        Some(protected) => {
+                            live.extend(protected.iter().map(|hash| iroh_blobs::Hash::from(*hash)));
+                            ProtectOutcome::Continue
+                        }
+                        None => ProtectOutcome::Abort,
+                    }
+                })
+            });
+            options.gc = Some(IrohGcConfig {
+                interval: gc.interval,
+                add_protected: Some(add_protected),
+            });
+        }
+
+        let db_path = blobs_dir.join("blobs.db");
+        let blobs = iroh_blobs::store::fs::FsStore::load_with_opts(db_path, options)
             .await
             .map_err(|e| {
                 Error::Store(format!(
@@ -71,7 +147,110 @@ impl ChunkStore {
             blobs,
             manifests_dir,
             chunker_config,
+            chunk_protection,
         })
+    }
+
+    /// Mark-and-sweep chunk-level GC (issue #258), over a store opened with
+    /// [`ChunkStore::open_with_gc`].
+    ///
+    /// A manifest is kept if its `FileId` is in `protected` (the caller's
+    /// externally-referenced set — Vault-referenced versions, from the
+    /// version-store layer above) or its mtime is at or after `keep_newer`
+    /// (guards a manifest written concurrently with this call, mirroring
+    /// `Backend::gc`'s own `keep_newer` contract). Every other manifest is
+    /// durably removed *now*; the chunks it alone referenced are marked
+    /// eligible for iroh-blobs' own background sweep to reclaim (see the
+    /// `gc` module doc — that reclamation is asynchronous relative to this
+    /// call returning).
+    pub async fn gc(
+        &self,
+        protected: &BTreeSet<FileId>,
+        keep_newer: SystemTime,
+    ) -> Result<GcStats> {
+        let Some(chunk_protection) = &self.chunk_protection else {
+            return Err(Error::GcDisabled);
+        };
+
+        let mut referenced: HashSet<blake3::Hash> = HashSet::new();
+        let mut manifests_swept = 0usize;
+        for (file_id, mtime) in self.manifests_with_mtime().await? {
+            let keep = protected.contains(&file_id) || mtime >= keep_newer;
+            if keep {
+                let manifest = self.read_manifest(file_id).await?;
+                referenced.extend(manifest.chunks.iter().map(|c| c.hash));
+            } else {
+                self.remove_manifest(file_id).await?;
+                manifests_swept += 1;
+            }
+        }
+
+        let all_chunks = self
+            .blobs
+            .blobs()
+            .list()
+            .hashes()
+            .await
+            .map_err(|e| Error::Store(format!("listing chunks for gc: {e}")))?;
+        let chunks_marked_for_reclamation = all_chunks
+            .iter()
+            .filter(|hash| !referenced.contains(&blake3::Hash::from(**hash)))
+            .count();
+
+        *chunk_protection.write().await = Some(referenced);
+
+        Ok(GcStats {
+            manifests_swept,
+            chunks_marked_for_reclamation,
+        })
+    }
+
+    /// Every manifest currently on disk, with its last-modified time (the
+    /// `keep_newer` protection signal, mirroring
+    /// `ObjectStore::list_with_mtime` in the version-store crate).
+    async fn manifests_with_mtime(&self) -> Result<Vec<(FileId, SystemTime)>> {
+        let mut out = Vec::new();
+        let mut entries = tokio::fs::read_dir(&self.manifests_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some(hex) = name.strip_suffix(".manifest") else {
+                continue; // skip temp files (`.manifest.tmp.<pid>.<n>`)
+            };
+            let Ok(file_id) = FileId::from_hex(hex) else {
+                continue;
+            };
+            let metadata = entry.metadata().await?;
+            out.push((file_id, metadata.modified()?));
+        }
+        Ok(out)
+    }
+
+    async fn remove_manifest(&self, file_id: FileId) -> Result<()> {
+        let path = self.manifest_path(file_id);
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(Error::Io(e)),
+        }
+    }
+
+    /// The number of distinct chunk blobs currently in the store — a cheap
+    /// observability hook, and how `gc`'s test suite observes iroh-blobs'
+    /// background sweep actually reclaiming a chunk (see the `gc` module
+    /// doc: reclamation happens on iroh-blobs' own schedule, not
+    /// synchronously within `ChunkStore::gc`).
+    pub async fn chunk_count(&self) -> Result<usize> {
+        let hashes = self
+            .blobs
+            .blobs()
+            .list()
+            .hashes()
+            .await
+            .map_err(|e| Error::Store(format!("listing chunks: {e}")))?;
+        Ok(hashes.len())
     }
 
     /// Stream `source` into the store: chunk it with FastCDC, blake3-hash
@@ -196,16 +375,24 @@ impl ChunkStore {
     /// Durably write `manifest` at `file_id`'s path. If a file already
     /// exists there *and decodes*, it is necessarily byte-identical (the
     /// path is derived from the content hash of the manifest bytes), so
-    /// there is nothing to do. If it exists but fails to decode — e.g. a
-    /// prior write crashed between `rename` and this process' next start,
-    /// on a filesystem where rename can be observed before the data it
-    /// pointed at is durable — that is treated as damage to repair, not a
-    /// reason to skip the write: without this, `read_to` for that
-    /// `FileId` would fail forever.
+    /// there is nothing to do beyond refreshing its mtime (see below). If
+    /// it exists but fails to decode — e.g. a prior write crashed between
+    /// `rename` and this process' next start, on a filesystem where rename
+    /// can be observed before the data it pointed at is durable — that is
+    /// treated as damage to repair, not a reason to skip the write:
+    /// without this, `read_to` for that `FileId` would fail forever.
     async fn write_manifest(&self, file_id: FileId, manifest: &Manifest) -> Result<()> {
         let path = self.manifest_path(file_id);
         if let Ok(existing) = tokio::fs::read(&path).await {
             if Manifest::decode(&existing).is_ok() {
+                // `ChunkStore::gc`'s `keep_newer` protection relies on
+                // mtime reflecting the most recent write, not just the
+                // first one — a caller re-`write_stream`ing already-stored
+                // content is exactly the "written concurrently with a gc
+                // pass" case that contract exists to protect (mirrors
+                // `ObjectStore::write`'s identical fix in the version-store
+                // crate).
+                self.touch_manifest(&path).await?;
                 return Ok(());
             }
         }
@@ -239,6 +426,19 @@ impl ChunkStore {
     async fn fsync_dir(dir: &Path) -> Result<()> {
         let dir = tokio::fs::File::open(dir).await?;
         dir.sync_all().await?;
+        Ok(())
+    }
+
+    /// Set `path`'s mtime to now (see `ObjectStore::touch` for the same
+    /// pattern: `std::fs::File::set_modified` has no tokio-native
+    /// equivalent, so this hands the already-open, already I/O-completed
+    /// file handle to a blocking thread).
+    async fn touch_manifest(&self, path: &Path) -> Result<()> {
+        let file = tokio::fs::OpenOptions::new().write(true).open(path).await?;
+        let std_file = file.into_std().await;
+        tokio::task::spawn_blocking(move || std_file.set_modified(SystemTime::now()))
+            .await
+            .map_err(|e| Error::Io(std::io::Error::other(e)))??;
         Ok(())
     }
 

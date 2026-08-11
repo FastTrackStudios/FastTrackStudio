@@ -28,10 +28,12 @@
 
 mod chunker;
 mod error;
+pub mod gc;
 mod manifest;
 mod store;
 
 pub use chunker::{ChunkerConfig, chunk_to_vec};
 pub use error::{Error, Result};
+pub use gc::{GcConfig, GcStats};
 pub use manifest::{ChunkRef, FileId, Manifest};
 pub use store::ChunkStore;

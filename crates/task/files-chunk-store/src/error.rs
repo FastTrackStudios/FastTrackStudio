@@ -28,6 +28,12 @@ pub enum Error {
     /// stored chunk is a different length than the manifest recorded.
     #[error("chunk {0} missing or corrupt in blob store")]
     MissingChunk(String),
+
+    /// [`crate::ChunkStore::gc`] was called on a store opened without
+    /// chunk-level GC enabled (`ChunkStore::open`/`open_with_config`, not
+    /// [`crate::ChunkStore::open_with_gc`]).
+    #[error("chunk-level GC is not enabled for this store (open it with ChunkStore::open_with_gc)")]
+    GcDisabled,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

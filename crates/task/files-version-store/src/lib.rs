@@ -46,7 +46,7 @@ pub mod chain;
 pub mod checkpoint;
 mod codec;
 mod error;
-mod gc;
+pub mod gc;
 mod objects;
 pub mod repo;
 
