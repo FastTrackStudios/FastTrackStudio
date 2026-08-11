@@ -434,3 +434,360 @@ async fn heavy_stray_files_respect_the_ignore_set() {
 
     backend.shutdown().await;
 }
+
+// ---------------------------------------------------------------------
+// Regressions from the PR #282 review — each of these failed before the
+// fix it names.
+// ---------------------------------------------------------------------
+
+/// Ignoring a *directory* must not delete the tracked files inside it.
+/// The per-file "ignored but already tracked keeps being versioned"
+/// exemption is worthless if the walk prunes the directory before its
+/// files are ever enumerated: the removal pass then commits them as
+/// deleted. Two shapes, both real: a project adding `docs/` to its
+/// `.gitignore`, and adopting a repo that deliberately commits fixtures
+/// under `target/` (which the software flavor's own seed ignores).
+#[tokio::test(flavor = "multi_thread")]
+async fn ignoring_a_directory_never_deletes_what_is_already_tracked() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let root_dir = make_root_dir(data_dir.path(), "docs-project");
+    std::fs::create_dir(root_dir.join("docs")).unwrap();
+    std::fs::write(root_dir.join("docs").join("notes.txt"), b"notes\n").unwrap();
+    // Committed-on-purpose fixtures under a seed-ignored directory.
+    git(&root_dir, &["init", "--quiet", "-b", "main", "."]);
+    std::fs::create_dir(root_dir.join("target")).unwrap();
+    std::fs::write(root_dir.join("target").join("fixture.bin"), b"golden\n").unwrap();
+    std::fs::write(root_dir.join("lib.rs"), b"// code\n").unwrap();
+    git(&root_dir, &["add", "-A"]);
+    git(&root_dir, &["commit", "--quiet", "-m", "seed"]);
+
+    let (backend, client, _scope) = client_for(data_dir.path()).await;
+    let root = client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            "Docs Project".to_string(),
+            RootFlavor::Software,
+        )
+        .await
+        .expect("create_root(Software)");
+
+    // The seed ignores `target/`, but those files are already tracked, so
+    // the first checkpoint must leave them exactly where they are.
+    let cp = client
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("first checkpoint");
+    assert!(
+        cp.changed_paths.is_empty(),
+        "adopting a repo that tracks files under a seed-ignored directory must change nothing, \
+         got {:?}",
+        cp.changed_paths
+    );
+    let tracked = git(&root_dir, &["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(tracked.lines().any(|l| l == "target/fixture.bin"));
+    assert!(tracked.lines().any(|l| l == "docs/notes.txt"));
+
+    // Now the project ignores a directory full of tracked files.
+    std::fs::write(root_dir.join(".gitignore"), b"docs/\n").unwrap();
+    let cp = client
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("checkpoint after ignoring a tracked directory");
+    assert_eq!(
+        cp.changed_paths,
+        vec![".gitignore".to_string()],
+        "ignoring a directory must not record deletions of the tracked files under it"
+    );
+    let tracked = git(&root_dir, &["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(
+        tracked.lines().any(|l| l == "docs/notes.txt"),
+        "docs/notes.txt must still be tracked; tree was: {tracked:?}"
+    );
+
+    // A *new* file under the now-ignored directory still stays out.
+    std::fs::write(root_dir.join("docs").join("draft.txt"), b"draft\n").unwrap();
+    let cp = client
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("checkpoint with a new file under an ignored directory");
+    assert!(
+        cp.changed_paths.is_empty(),
+        "a new file under an ignored directory must not be versioned, got {:?}",
+        cp.changed_paths
+    );
+
+    backend.shutdown().await;
+}
+
+/// On an adopted repo with several branches, the checkpoint must report
+/// the commit it actually wrote and move only the checked-out branch.
+/// `view().heads()` holds every imported branch tip in unordered set
+/// order, so deriving the result from it could report — and force the
+/// checked-out branch onto — a different branch's head.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_multi_branch_repo_moves_only_the_checked_out_branch() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let root_dir = make_root_dir(data_dir.path(), "many-branches");
+    git(&root_dir, &["init", "--quiet", "-b", "main", "."]);
+    std::fs::write(root_dir.join("lib.rs"), b"// base\n").unwrap();
+    git(&root_dir, &["add", "-A"]);
+    git(&root_dir, &["commit", "--quiet", "-m", "base"]);
+
+    // A handful of other branches, each with its own tip.
+    for (i, branch) in ["alpha", "beta", "gamma"].iter().enumerate() {
+        git(&root_dir, &["checkout", "--quiet", "-b", branch]);
+        std::fs::write(root_dir.join("lib.rs"), format!("// {branch} {i}\n")).unwrap();
+        git(&root_dir, &["add", "-A"]);
+        git(&root_dir, &["commit", "--quiet", "-m", branch]);
+    }
+    git(&root_dir, &["checkout", "--quiet", "main"]);
+    let main_before = git(&root_dir, &["rev-parse", "main"]).trim().to_string();
+    let others: Vec<(String, String)> = ["alpha", "beta", "gamma"]
+        .iter()
+        .map(|b| {
+            (
+                (*b).to_string(),
+                git(&root_dir, &["rev-parse", b]).trim().to_string(),
+            )
+        })
+        .collect();
+
+    let (backend, client, _scope) = client_for(data_dir.path()).await;
+    let root = client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            "Many Branches".to_string(),
+            RootFlavor::Software,
+        )
+        .await
+        .expect("create_root(Software)");
+
+    std::fs::write(root_dir.join("lib.rs"), b"// files edit\n").unwrap();
+    let cp = client
+        .checkpoint_now(root.id, Some("files checkpoint".to_string()))
+        .await
+        .expect("checkpoint_now");
+
+    assert_eq!(
+        git(&root_dir, &["rev-parse", "main"]).trim(),
+        cp.commit_id,
+        "the checked-out branch is at the reported checkpoint"
+    );
+    assert_eq!(
+        git(&root_dir, &["rev-parse", "HEAD~1"]).trim(),
+        main_before,
+        "the checkpoint's parent is main's own previous tip, not another branch's"
+    );
+    for (branch, before) in &others {
+        assert_eq!(
+            git(&root_dir, &["rev-parse", branch]).trim(),
+            before,
+            "{branch} must not have moved"
+        );
+    }
+    assert_eq!(git(&root_dir, &["status", "--porcelain"]).trim(), "");
+
+    backend.shutdown().await;
+}
+
+/// A human committing with plain `git` while the server is running must
+/// be seen by the *same* backend instance — no restart. Otherwise the
+/// per-process repo cache serves a stale view: chains miss their commit,
+/// and the next checkpoint parents onto the stale head, forking history.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_git_side_commit_mid_session_is_picked_up_without_a_restart() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let root_dir = make_root_dir(data_dir.path(), "live-repo");
+    std::fs::write(root_dir.join("lib.rs"), b"// v1\n").unwrap();
+
+    let (backend, client, _scope) = client_for(data_dir.path()).await;
+    let root = client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            "Live Repo".to_string(),
+            RootFlavor::Software,
+        )
+        .await
+        .expect("create_root(Software)");
+    let first = client
+        .checkpoint_now(root.id, Some("files v1".to_string()))
+        .await
+        .expect("checkpoint 1");
+
+    // A human commits in the checkout, with this backend still live.
+    std::fs::write(root_dir.join("lib.rs"), b"// v2 by hand\n").unwrap();
+    git(&root_dir, &["add", "-A"]);
+    git(&root_dir, &["commit", "--quiet", "-m", "by hand"]);
+    let human = git(&root_dir, &["rev-parse", "HEAD"]).trim().to_string();
+
+    // The same client, no restart: the chain shows their commit.
+    let chain = client
+        .chain(root.id, "lib.rs".to_string())
+        .await
+        .expect("chain");
+    assert_eq!(
+        chain.first().map(|e| e.commit_id.as_str()),
+        Some(human.as_str()),
+        "a git-side commit must be visible without restarting the server; chain was {chain:?}"
+    );
+
+    // ...and the next checkpoint builds on it rather than forking.
+    std::fs::write(root_dir.join("lib.rs"), b"// v3 by files\n").unwrap();
+    let third = client
+        .checkpoint_now(root.id, Some("files v3".to_string()))
+        .await
+        .expect("checkpoint 3");
+    assert_eq!(
+        git(&root_dir, &["rev-parse", "HEAD~1"]).trim(),
+        human,
+        "the checkpoint's parent is the human's commit"
+    );
+    assert_eq!(
+        git(&root_dir, &["rev-parse", "HEAD"]).trim(),
+        third.commit_id
+    );
+    assert_eq!(git(&root_dir, &["status", "--porcelain"]).trim(), "");
+    assert_ne!(third.commit_id, first.commit_id);
+
+    backend.shutdown().await;
+}
+
+/// A repo checked out at a detached HEAD (a tag, a CI checkout) must keep
+/// its detached checkout: the checkpoint commits on top of that commit and
+/// moves HEAD itself, touching no branch — exactly what `git commit` does
+/// there. Substituting a `main` fallback would move an unrelated branch
+/// and yank the user off their checkout.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_detached_head_is_preserved_and_no_branch_is_clobbered() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let root_dir = make_root_dir(data_dir.path(), "detached-repo");
+    git(&root_dir, &["init", "--quiet", "-b", "main", "."]);
+    std::fs::write(root_dir.join("lib.rs"), b"// v1\n").unwrap();
+    git(&root_dir, &["add", "-A"]);
+    git(&root_dir, &["commit", "--quiet", "-m", "v1"]);
+    let v1 = git(&root_dir, &["rev-parse", "HEAD"]).trim().to_string();
+    std::fs::write(root_dir.join("lib.rs"), b"// v2\n").unwrap();
+    git(&root_dir, &["add", "-A"]);
+    git(&root_dir, &["commit", "--quiet", "-m", "v2"]);
+    let main_tip = git(&root_dir, &["rev-parse", "main"]).trim().to_string();
+    // Check out an older commit, detached — the CI / release-tag shape.
+    git(&root_dir, &["checkout", "--quiet", "--detach", &v1]);
+
+    let (backend, client, _scope) = client_for(data_dir.path()).await;
+    let root = client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            "Detached Repo".to_string(),
+            RootFlavor::Software,
+        )
+        .await
+        .expect("create_root(Software) on a detached checkout");
+
+    std::fs::write(root_dir.join("lib.rs"), b"// v1 edited\n").unwrap();
+    let cp = client
+        .checkpoint_now(root.id, Some("on a detached head".to_string()))
+        .await
+        .expect("checkpoint_now on a detached HEAD");
+
+    assert_eq!(
+        git(&root_dir, &["rev-parse", "HEAD"]).trim(),
+        cp.commit_id,
+        "HEAD moved to the checkpoint"
+    );
+    assert_eq!(
+        git(&root_dir, &["rev-parse", "HEAD~1"]).trim(),
+        v1,
+        "the checkpoint parented on the detached commit, not on a branch"
+    );
+    assert_eq!(
+        git(&root_dir, &["rev-parse", "main"]).trim(),
+        main_tip,
+        "main must not have moved"
+    );
+    let symbolic = Command::new("git")
+        .args(["symbolic-ref", "-q", "HEAD"])
+        .current_dir(&root_dir)
+        .output()
+        .expect("git symbolic-ref");
+    assert!(
+        !symbolic.status.success(),
+        "HEAD must still be detached, but it points at {}",
+        String::from_utf8_lossy(&symbolic.stdout)
+    );
+    assert_eq!(git(&root_dir, &["status", "--porcelain"]).trim(), "");
+
+    backend.shutdown().await;
+}
+
+/// File modes are real git metadata: a checkpoint must record 100755 for
+/// an executable file and preserve it across edits, or a clone ships a
+/// script that won't run — and `git status` shows a mode diff immediately
+/// after a supposedly clean checkpoint.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_executable_bit_is_recorded_and_preserved() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fn mode_of(dir: &Path, path: &str) -> String {
+        let out = git(dir, &["ls-files", "--stage", path]);
+        out.split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let root_dir = make_root_dir(data_dir.path(), "scripts");
+    let script = root_dir.join("build.sh");
+    std::fs::write(&script, b"#!/bin/sh\necho hi\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(root_dir.join("readme.md"), b"# hi\n").unwrap();
+
+    let (backend, client, _scope) = client_for(data_dir.path()).await;
+    let root = client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            "Scripts".to_string(),
+            RootFlavor::Software,
+        )
+        .await
+        .expect("create_root(Software)");
+    client
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("first checkpoint");
+
+    assert_eq!(mode_of(&root_dir, "build.sh"), "100755");
+    assert_eq!(mode_of(&root_dir, "readme.md"), "100644");
+    assert_eq!(
+        git(&root_dir, &["status", "--porcelain"]).trim(),
+        "",
+        "a clean worktree means git agrees about modes too"
+    );
+
+    // Editing the script keeps it executable.
+    std::fs::write(&script, b"#!/bin/sh\necho bye\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cp = client
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("checkpoint after editing the script");
+    assert_eq!(cp.changed_paths, vec!["build.sh".to_string()]);
+    assert_eq!(mode_of(&root_dir, "build.sh"), "100755");
+    assert_eq!(git(&root_dir, &["status", "--porcelain"]).trim(), "");
+
+    // Flipping the bit alone is itself a change worth recording.
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let cp = client
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("checkpoint after chmod -x");
+    assert_eq!(
+        cp.changed_paths,
+        vec!["build.sh".to_string()],
+        "a mode-only change is a change"
+    );
+    assert_eq!(mode_of(&root_dir, "build.sh"), "100644");
+
+    backend.shutdown().await;
+}

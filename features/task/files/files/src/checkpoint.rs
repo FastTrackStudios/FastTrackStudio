@@ -5,12 +5,15 @@
 //! `Vec<u8>` before handing it to `checkpoint()` peaks RSS at the
 //! whole root's size — a 40 GB media root OOMs the shared
 //! `task-server`). Each disk file streams straight into the backend via
-//! `Backend::write_file` (bounded-memory on both flavors: the CAS
-//! backend chunks the reader as it goes, git's streams into a loose
-//! object); a file whose content is unchanged from the checkpoint head is
-//! skipped entirely — both to avoid the wasted read/hash/CAS-write and
-//! so `CheckpointInfo::changed_paths` reflects only what actually
-//! changed, honoring its own doc contract.
+//! [`crate::content`], which is bounded-memory on both flavors (the CAS
+//! backend chunks the reader as it goes; git blobs stream straight into
+//! the object database rather than through jj's buffering
+//! `GitBackend::write_file` — see that module's doc). A file whose
+//! content and mode are unchanged from the checkpoint head is skipped
+//! entirely — on the git flavor without even writing an object, since
+//! the id is probed first — both to avoid wasted I/O and so
+//! `CheckpointInfo::changed_paths` reflects only what actually changed,
+//! honoring its own doc contract.
 //!
 //! This bypasses `checkpoint::checkpoint` (the version-store crate's
 //! own convenience helper) and builds the commit directly via jj-lib's
@@ -32,17 +35,18 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use jj_lib::backend::{
-    Backend, BackendError, CommitId, CopyHistory, CopyId, FileId, Tree, TreeId, TreeValue,
+    Backend, BackendError, CommitId, CopyHistory, CopyId, Tree, TreeId, TreeValue,
 };
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use jj_lib::tree_builder::TreeBuilder;
-use tokio_util::compat::TokioAsyncReadCompatExt as _;
+use task_files_version_store::chain::lookup_dyn;
 
+use crate::content::ContentStore;
 use crate::error::{Error, Result};
-use crate::scan::{LiveFile, lookup};
+use crate::scan::LiveFile;
 
 pub struct CheckpointResult {
     pub repo: Arc<ReadonlyRepo>,
@@ -115,6 +119,7 @@ async fn write_checkpoint_async(
     description: String,
 ) -> Result<CheckpointResult> {
     let store = repo.store().clone();
+    let content = ContentStore::for_repo(repo, backend)?;
     let mut builder = TreeBuilder::new(store.clone(), base_tree_id);
     let mut changed_paths = Vec::new();
     let mut present: BTreeSet<RepoPathBuf> = BTreeSet::new();
@@ -128,23 +133,52 @@ async fn write_checkpoint_async(
             continue;
         }
         present.insert(repo_path.clone());
-        let existing = lookup(backend, head_tree, repo_path).await?;
+        let existing = lookup_dyn(backend, head_tree, repo_path).await?;
 
-        // Bounded-memory streaming write straight from disk — never a
-        // `std::fs::read` into a `Vec<u8>` (see module doc).
-        // `Backend::write_file` reads through futures-io; tokio's file
-        // handle wears the `compat()` adapter (same seam the version-store
-        // backend uses internally).
-        let mut disk = tokio::fs::File::open(&file.disk_path).await?.compat();
-        let new_id: FileId = backend.write_file(repo_path, &mut disk).await?;
+        // The mode to record: the live file's own executable bit where
+        // the filesystem has one, otherwise whatever the tree already
+        // said (never a silent flip to non-executable — see
+        // `scan::is_executable`).
+        let executable = if cfg!(unix) {
+            file.executable
+        } else {
+            matches!(
+                &existing,
+                Some(TreeValue::File {
+                    executable: true,
+                    ..
+                })
+            )
+        };
+
+        // Probe the content id before writing anything: an untouched file
+        // is then skipped without any object write at all (see
+        // `crate::content`). `None` means this backend can't know the id
+        // in advance, and the write below establishes it.
+        let probed = content.probe(&file.disk_path)?;
+        if let (
+            Some(new_id),
+            Some(TreeValue::File {
+                id: old_id,
+                executable: old_exec,
+                ..
+            }),
+        ) = (&probed, &existing)
+            && old_id == new_id
+            && *old_exec == executable
+        {
+            continue;
+        }
+
+        let new_id = content.write(repo_path, &file.disk_path, probed).await?;
 
         let copy_id = match &existing {
             Some(TreeValue::File {
                 id: old_id,
+                executable: old_exec,
                 copy_id,
-                ..
             }) => {
-                if *old_id == new_id {
+                if *old_id == new_id && *old_exec == executable {
                     // Unchanged: no builder mutation, no changed_paths
                     // entry — this is what keeps a no-op checkpoint a
                     // true no-op in both the commit tree and the
@@ -157,7 +191,7 @@ async fn write_checkpoint_async(
         };
         let value = TreeValue::File {
             id: new_id,
-            executable: false,
+            executable,
             copy_id,
         };
         builder.set(repo_path.clone(), value);
@@ -179,23 +213,23 @@ async fn write_checkpoint_async(
     let merged_tree = MergedTree::resolved(store, new_tree_id);
 
     let mut tx = repo.start_transaction();
-    tx.repo_mut()
+    // The commit id comes from the commit we just wrote — never from
+    // `view().heads()`, which is an unordered set that on an adopted
+    // multi-branch git repo also holds every other branch tip (PR #282
+    // review: picking from it could report, and then force the checked-out
+    // branch onto, an unrelated branch's head).
+    let commit = tx
+        .repo_mut()
         .new_commit(vec![parent_id], merged_tree)
         .set_description(description)
         .write()
         .await
         .map_err(|e| Error::Repo(format!("write commit: {e}")))?;
+    let commit_id = commit.id().clone();
     let new_repo = tx
         .commit("checkpoint")
         .await
         .map_err(|e| Error::Repo(e.to_string()))?;
-    let commit_id = new_repo
-        .view()
-        .heads()
-        .iter()
-        .next()
-        .cloned()
-        .ok_or_else(|| Error::Repo("checkpoint produced no head".into()))?;
 
     Ok(CheckpointResult {
         repo: new_repo,

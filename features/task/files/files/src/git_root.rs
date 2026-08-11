@@ -41,10 +41,24 @@ use jj_lib::settings::UserSettings;
 
 use crate::error::{Error, Result};
 
-/// Branch a root's checkpoints land on when git's `HEAD` doesn't name
-/// one (a fresh repo whose `HEAD` is unborn is fine — this is the name
-/// the first checkpoint gives it).
-const FALLBACK_BOOKMARK: &str = "main";
+/// Where a software root's `HEAD` points, which decides both what a
+/// checkpoint parents onto and what it moves afterwards.
+///
+/// Distinguishing these matters (PR #282 review): gix returns
+/// `head_name() == Ok(None)` *only* for a detached HEAD — an unborn HEAD
+/// still names its branch — so a "fall back to `main`" default would fire
+/// exactly where it does damage, moving an unrelated branch and yanking a
+/// user off a deliberate detached checkout (a tag, a CI checkout).
+#[derive(Debug, Clone)]
+pub enum HeadRef {
+    /// HEAD points at a branch (born or unborn). Checkpoints move that
+    /// branch and HEAD stays attached to it.
+    Branch(RefNameBuf),
+    /// HEAD points straight at a commit. Checkpoints commit on top of it
+    /// and move HEAD itself — precisely what `git commit` does on a
+    /// detached HEAD — touching no branch at all.
+    Detached(CommitId),
+}
 
 fn import_options(settings: &UserSettings) -> Result<GitImportOptions> {
     let git_settings = GitSettings::from_settings(settings)
@@ -56,38 +70,59 @@ fn import_options(settings: &UserSettings) -> Result<GitImportOptions> {
     })
 }
 
-/// The local bookmark git's `HEAD` points at, e.g. `main` or `master` —
-/// read from the git repo itself so an adopted repository keeps
-/// committing to the branch it was already on.
-pub fn checked_out_bookmark(repo: &Arc<ReadonlyRepo>) -> Result<RefNameBuf> {
+/// Read git's own `HEAD` — the branch it is on (`main`, `master`,
+/// whatever the adopted repo used), or the commit it is detached at.
+pub fn head_ref(repo: &Arc<ReadonlyRepo>) -> Result<HeadRef> {
     let git_repo = jj_lib::git::get_git_repo(repo.store())
         .map_err(|e| Error::Repo(format!("not a git-backed root: {e}")))?;
-    let name = git_repo
-        .head_name()
-        .map_err(|e| Error::Repo(format!("reading git HEAD: {e}")))?
-        .map(|full| full.shorten().to_string());
-    Ok(RefNameBuf::from(
-        name.unwrap_or_else(|| FALLBACK_BOOKMARK.to_string()),
-    ))
+    let head = git_repo
+        .head()
+        .map_err(|e| Error::Repo(format!("reading git HEAD: {e}")))?;
+    match &head.kind {
+        gix::head::Kind::Symbolic(reference) => Ok(HeadRef::Branch(branch_name(
+            reference.name.shorten().to_string(),
+        ))),
+        gix::head::Kind::Unborn(name) => {
+            Ok(HeadRef::Branch(branch_name(name.shorten().to_string())))
+        }
+        gix::head::Kind::Detached { target, peeled } => Ok(HeadRef::Detached(
+            CommitId::from_bytes(peeled.unwrap_or(*target).as_bytes()),
+        )),
+    }
 }
 
-/// The commit a software root's next checkpoint builds on: the tip of
-/// the checked-out branch, or the root commit when the branch is unborn.
+fn branch_name(shortened: String) -> RefNameBuf {
+    RefNameBuf::from(shortened)
+}
+
+/// The commit a software root's next checkpoint builds on: the tip of the
+/// checked-out branch (or the root commit when that branch is unborn), or
+/// the commit HEAD is detached at.
 ///
 /// Deliberately *not* `view().heads().next()` (what media roots use):
 /// an adopted repo can have many branches, and picking an arbitrary head
 /// would silently commit onto whichever one sorted first.
 pub fn head_commit(repo: &Arc<ReadonlyRepo>) -> Result<CommitId> {
-    let bookmark = checked_out_bookmark(repo)?;
-    let target = repo.view().get_local_bookmark(&bookmark);
-    Ok(target
-        .as_normal()
-        .cloned()
-        .unwrap_or_else(|| repo.store().root_commit_id().clone()))
+    match head_ref(repo)? {
+        HeadRef::Detached(id) => Ok(id),
+        HeadRef::Branch(bookmark) => {
+            let target = repo.view().get_local_bookmark(&bookmark);
+            Ok(target
+                .as_normal()
+                .cloned()
+                .unwrap_or_else(|| repo.store().root_commit_id().clone()))
+        }
+    }
 }
+
+/// Marks our own block in `info/exclude`, so re-running this recognizes
+/// *its own* previous write rather than any line that merely mentions the
+/// store directory (a user's own `.fts-files` rule, say).
+const EXCLUDE_SENTINEL: &str = "# fts-files:root-internals:v1";
 
 /// What Files itself keeps in the tree, hidden from git.
 const EXCLUDE_BLOCK: &str = "\
+# fts-files:root-internals:v1
 # Files (Task) root internals — the version store and the root marker.
 # Written to .git/info/exclude rather than .gitignore: this is Files'
 # business with this checkout, not a project decision to commit.
@@ -105,7 +140,7 @@ pub fn exclude_root_internals(repo: &Arc<ReadonlyRepo>) -> Result<()> {
         .map_err(|e| Error::Repo(format!("not a git-backed root: {e}")))?;
     let path = git_repo.common_dir().join("info").join("exclude");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    if existing.contains("/.fts-files/") {
+    if existing.contains(EXCLUDE_SENTINEL) {
         return Ok(());
     }
     if let Some(dir) = path.parent() {
@@ -137,16 +172,50 @@ pub fn import_from_git(repo: Arc<ReadonlyRepo>) -> Result<Arc<ReadonlyRepo>> {
     }
 }
 
-/// Make `commit_id` the tip of the root's checked-out branch, in both
-/// views: jj's (a local bookmark) and git's (`refs/heads/<branch>` plus a
-/// rewritten index). After this, `git log`, `git status`, `git clone`,
-/// and `git push` behave exactly as they would in a repository a human
-/// had committed to.
+/// Make `commit_id` what git sees: the tip of the root's checked-out
+/// branch (or `HEAD` itself when detached), with the index rewritten to
+/// match. After this, `git log`, `git status`, `git clone`, and `git push`
+/// behave exactly as they would in a repository a human had committed to.
+///
+/// Fails rather than half-publishing: if git refuses the ref move —
+/// because someone moved that branch with `git` since our last import —
+/// the branch, HEAD, and index are all left alone and the divergence is
+/// reported (PR #282 review).
 pub fn publish_checkpoint(
     repo: Arc<ReadonlyRepo>,
     commit_id: &CommitId,
 ) -> Result<Arc<ReadonlyRepo>> {
-    let bookmark = checked_out_bookmark(&repo)?;
+    let head = head_ref(&repo)?;
+    let repo = match &head {
+        HeadRef::Branch(bookmark) => export_bookmark(repo, bookmark, commit_id)?,
+        HeadRef::Detached(_) => record_git_head(repo, commit_id)?,
+    };
+    match &head {
+        HeadRef::Branch(bookmark) => {
+            verify_branch(&repo, bookmark, commit_id)?;
+            attach_head(&repo, bookmark)?;
+        }
+        // Detached: move HEAD itself, touching no branch — the same thing
+        // `git commit` does on a detached checkout.
+        HeadRef::Detached(_) => set_detached_head(&repo, commit_id)?,
+    }
+    write_git_index(&repo, commit_id)?;
+    Ok(repo)
+}
+
+/// Move the local bookmark and export it to `refs/heads/<bookmark>`.
+///
+/// `export_refs` reports refusals through its return value, *not* through
+/// `Err`: a branch that moved on the git side since jj last imported it
+/// lands in `GitExportStats.failed_bookmarks` while the call still
+/// succeeds (jj-lib 0.44 `git.rs`, whose doc says conflicted refs are
+/// left for the next import). Dropping that would leave the git branch at
+/// the human's commit while we rewrote HEAD and the index to ours.
+fn export_bookmark(
+    repo: Arc<ReadonlyRepo>,
+    bookmark: &RefNameBuf,
+    commit_id: &CommitId,
+) -> Result<Arc<ReadonlyRepo>> {
     let mut tx = repo.start_transaction();
     tx.repo_mut().set_local_bookmark_target(
         RefName::new(bookmark.as_str()),
@@ -157,14 +226,63 @@ pub fn publish_checkpoint(
     // mistaking our own export for a git-side change.
     tx.repo_mut()
         .set_git_head_target(RefTarget::normal(commit_id.clone()));
-    jj_lib::git::export_refs(tx.repo_mut())
+    let stats = jj_lib::git::export_refs(tx.repo_mut())
         .map_err(|e| Error::Repo(format!("exporting git refs: {e}")))?;
-    let repo =
-        pollster::block_on(tx.commit("export git refs")).map_err(|e| Error::Repo(e.to_string()))?;
+    if !stats.failed_bookmarks.is_empty() || !stats.failed_tags.is_empty() {
+        return Err(Error::Repo(format!(
+            "git refused to update {} ref(s) — the repository moved outside Files since its \
+             history was last read; the checkpoint was not published: {:?}",
+            stats.failed_bookmarks.len() + stats.failed_tags.len(),
+            stats.failed_bookmarks,
+        )));
+    }
+    pollster::block_on(tx.commit("export git refs")).map_err(|e| Error::Repo(e.to_string()))
+}
 
-    attach_head(&repo, &bookmark)?;
-    write_git_index(&repo, commit_id)?;
-    Ok(repo)
+/// The detached-HEAD counterpart of [`export_bookmark`]: no bookmark, no
+/// export — only jj's record of where git's HEAD now is.
+fn record_git_head(repo: Arc<ReadonlyRepo>, commit_id: &CommitId) -> Result<Arc<ReadonlyRepo>> {
+    let mut tx = repo.start_transaction();
+    tx.repo_mut()
+        .set_git_head_target(RefTarget::normal(commit_id.clone()));
+    pollster::block_on(tx.commit("record git HEAD")).map_err(|e| Error::Repo(e.to_string()))
+}
+
+/// Confirm `refs/heads/<bookmark>` really is at `commit_id` before HEAD
+/// and the index are pointed at it — the belt to `export_bookmark`'s
+/// braces, catching any refusal jj reports some other way.
+fn verify_branch(
+    repo: &Arc<ReadonlyRepo>,
+    bookmark: &RefNameBuf,
+    commit_id: &CommitId,
+) -> Result<()> {
+    let git_repo = jj_lib::git::get_git_repo(repo.store())
+        .map_err(|e| Error::Repo(format!("not a git-backed root: {e}")))?;
+    let full = format!("refs/heads/{}", bookmark.as_str());
+    let actual = git_repo
+        .find_reference(full.as_str())
+        .map_err(|e| Error::Repo(format!("reading {full}: {e}")))?
+        .target()
+        .id()
+        .to_owned();
+    if actual.as_bytes() != commit_id.as_bytes() {
+        return Err(Error::Repo(format!(
+            "{full} is at {actual}, not the checkpoint {}: the repository moved outside Files \
+             since its history was last read",
+            commit_id.hex(),
+        )));
+    }
+    Ok(())
+}
+
+/// Point git's `HEAD` straight at `commit_id`, leaving it detached.
+fn set_detached_head(repo: &Arc<ReadonlyRepo>, commit_id: &CommitId) -> Result<()> {
+    let git_repo = jj_lib::git::get_git_repo(repo.store())
+        .map_err(|e| Error::Repo(format!("not a git-backed root: {e}")))?;
+    edit_head(
+        &git_repo,
+        gix::refs::Target::Object(gix::ObjectId::from_bytes_or_panic(commit_id.as_bytes())),
+    )
 }
 
 /// Point git's `HEAD` back at `refs/heads/<bookmark>`.
@@ -177,14 +295,21 @@ pub fn publish_checkpoint(
 /// state this flavor exists to avoid (`git status` says "HEAD detached",
 /// `git push` needs an explicit refspec, IDEs show no branch). So the
 /// branch is re-attached after every export — it already points at the
-/// checkpoint we just wrote, so attaching changes nothing about what is
-/// reachable, only how git presents it.
+/// checkpoint we just wrote (checked by `verify_branch`), so attaching
+/// changes nothing about what is reachable, only how git presents it.
+///
+/// A root whose HEAD was *already* detached never reaches here: that is
+/// its own [`HeadRef`] case, and it keeps its detached checkout.
 fn attach_head(repo: &Arc<ReadonlyRepo>, bookmark: &RefNameBuf) -> Result<()> {
     let git_repo = jj_lib::git::get_git_repo(repo.store())
         .map_err(|e| Error::Repo(format!("not a git-backed root: {e}")))?;
     let branch_ref: gix::refs::FullName = format!("refs/heads/{}", bookmark.as_str())
         .try_into()
         .map_err(|e| Error::Repo(format!("invalid branch name {bookmark:?}: {e}")))?;
+    edit_head(&git_repo, gix::refs::Target::Symbolic(branch_ref))
+}
+
+fn edit_head(git_repo: &gix::Repository, new: gix::refs::Target) -> Result<()> {
     git_repo
         .edit_reference(gix::refs::transaction::RefEdit {
             change: gix::refs::transaction::Change::Update {
@@ -193,14 +318,14 @@ fn attach_head(repo: &Arc<ReadonlyRepo>, bookmark: &RefNameBuf) -> Result<()> {
                     ..Default::default()
                 },
                 expected: gix::refs::transaction::PreviousValue::Any,
-                new: gix::refs::Target::Symbolic(branch_ref),
+                new,
             },
             name: "HEAD"
                 .try_into()
                 .expect("HEAD is a valid full reference name"),
             deref: false,
         })
-        .map_err(|e| Error::Repo(format!("attaching git HEAD: {e}")))?;
+        .map_err(|e| Error::Repo(format!("updating git HEAD: {e}")))?;
     Ok(())
 }
 

@@ -14,6 +14,7 @@
 mod backend;
 mod checkpoint;
 mod consts;
+mod content;
 mod error;
 mod git_root;
 mod ignore;

@@ -223,14 +223,27 @@ impl FilesBackend {
 
     /// Backend + current head for `root`, opening (and caching) the
     /// repo on first touch.
+    ///
+    /// A software root's cached repo is *refreshed* on every call, not
+    /// just opened once: its history has a second author (a human or CI
+    /// running plain `git` in the same checkout), and serving a cached
+    /// view would mean chains that never show their commits and
+    /// checkpoints that parent onto a stale head, forking history behind
+    /// git's back (PR #282 review). Refreshing is a git-ref read, which
+    /// is what the colocated promise costs. Media roots have no second
+    /// author — Files owns their store outright — so their cache stands.
     fn ensure_repo(&self, root: &FileRootInfo) -> Result<(Arc<ReadonlyRepo>, CommitId), Error> {
-        {
+        let cached = {
             let repos = self.repos.lock().expect("repo cache lock poisoned");
-            if let Some(rt) = repos.get(&root.id) {
-                return Ok((rt.repo.clone(), rt.head.clone()));
-            }
-        }
-        let repo = repo_open::open_or_init_repo(Path::new(&root.path), root.flavor)?;
+            repos
+                .get(&root.id)
+                .map(|rt| (rt.repo.clone(), rt.head.clone()))
+        };
+        let repo = match (cached, root.flavor) {
+            (Some((repo, head)), RootFlavor::Media) => return Ok((repo, head)),
+            (Some((repo, _)), RootFlavor::Software) => git_root::import_from_git(repo)?,
+            (None, _) => repo_open::open_or_init_repo(Path::new(&root.path), root.flavor)?,
+        };
         let head = Self::head_of(&repo, root.flavor)?;
         self.repos.lock().expect("repo cache lock poisoned").insert(
             root.id,
@@ -388,11 +401,13 @@ impl FilesBackend {
         if !metadata.is_dir() {
             return Err(Error::BadRequest(format!("{subpath}: not a directory")));
         }
-        let at_root = canonical_target == root_path;
+        // `.git` is hidden at every depth on a software root (a nested
+        // one is a submodule's object store — not this root's content),
+        // while the marker/store pair only ever exists at the top level.
         Self::list_dir(
             &canonical_target,
-            at_root,
-            at_root && root.flavor == RootFlavor::Software,
+            canonical_target == root_path,
+            root.flavor == RootFlavor::Software,
         )
     }
 
@@ -461,7 +476,7 @@ impl FilesBackend {
             &mut head_paths,
         ))?;
 
-        let disk_files = scan::walk_live_tree(Path::new(&root.path), root.flavor)?;
+        let disk_files = scan::walk_live_tree(Path::new(&root.path), root.flavor, &head_paths)?;
         let description = description.unwrap_or_else(|| "checkpoint now".to_string());
         let result = crate::checkpoint::write_checkpoint(
             &repo,

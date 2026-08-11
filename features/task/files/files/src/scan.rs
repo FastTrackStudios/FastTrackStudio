@@ -22,6 +22,11 @@ pub struct LiveFile {
     pub repo_path: RepoPathBuf,
     /// Absolute path on disk.
     pub disk_path: PathBuf,
+    /// The file's on-disk executable bit, carried through to the tree
+    /// entry's git mode (100755 vs 100644). On a software root this is
+    /// real git metadata a clone depends on; recording every file as
+    /// non-executable would ship broken scripts (PR #282 review).
+    pub executable: bool,
     /// Matched by the root's Ignore set ([`crate::ignore`]). Such a file
     /// is skipped by a checkpoint *unless it is already tracked* — an
     /// ignore pattern must never turn into a recorded deletion.
@@ -43,22 +48,46 @@ pub struct LiveFile {
 ///
 /// `flavor` selects the Ignore set: its seed, and whether the tree's own
 /// `.gitignore` files are chained in as the walk descends (software roots
-/// only — see [`crate::ignore`]). Ignored *directories* are not descended
-/// into at all, which is both correct gitignore semantics and what keeps a
-/// stray `node_modules` from costing a full-tree stat walk.
-pub fn walk_live_tree(root_path: &Path, flavor: RootFlavor) -> Result<Vec<LiveFile>> {
+/// only — see [`crate::ignore`]).
+///
+/// `tracked` is the checkpoint head's path set, and it is what makes
+/// ignoring safe: an ignored directory is normally pruned unvisited (both
+/// correct gitignore semantics and what keeps a stray `node_modules` from
+/// costing a full-tree stat walk), but a directory holding *already
+/// tracked* files is descended into anyway, with everything under it
+/// marked [`LiveFile::ignored`]. Without that, adding `docs/` to a
+/// `.gitignore` — or adopting a repo that deliberately commits fixtures
+/// under `target/`, which the software seed ignores — would make the next
+/// checkpoint record a mass deletion (PR #282 review). An Ignore set
+/// decides what *starts* being versioned; it never ends it.
+pub fn walk_live_tree(
+    root_path: &Path,
+    flavor: RootFlavor,
+    tracked: &BTreeSet<RepoPathBuf>,
+) -> Result<Vec<LiveFile>> {
     let mut out = Vec::new();
     let ignores = ignore::seed(flavor)?;
     let ignores = chain_dir_gitignore(&ignores, RepoPath::root(), root_path, flavor)?;
-    walk_dir(
-        root_path,
-        root_path,
-        RepoPath::root(),
-        &ignores,
-        flavor,
-        &mut out,
-    )?;
+    let ctx = WalkCtx { flavor, tracked };
+    walk_dir(root_path, RepoPath::root(), &ignores, false, &ctx, &mut out)?;
     Ok(out)
+}
+
+struct WalkCtx<'a> {
+    flavor: RootFlavor,
+    tracked: &'a BTreeSet<RepoPathBuf>,
+}
+
+impl WalkCtx<'_> {
+    /// Does the checkpoint head track anything under `dir`? Answered by
+    /// one ordered range probe, not a scan of the whole path set.
+    fn tracks_anything_under(&self, dir: &RepoPath) -> bool {
+        let prefix = format!("{}/", dir.as_internal_file_string());
+        self.tracked
+            .range(dir.to_owned()..)
+            .next()
+            .is_some_and(|p| p.as_internal_file_string().starts_with(&prefix))
+    }
 }
 
 /// Layer `dir`'s own `.gitignore` onto `parent`, on flavors that honor it.
@@ -76,12 +105,16 @@ fn chain_dir_gitignore(
         .map_err(|e| Error::Repo(format!("{}: reading .gitignore: {e}", dir.display())))
 }
 
+/// `dir_ignored` means this directory (or an ancestor) matched the Ignore
+/// set: every file below it is ignored regardless of its own name, since
+/// gitignore's per-file matching isn't meaningful inside an ignored
+/// directory (jj's [`GitIgnoreFile`] documents exactly that).
 fn walk_dir(
-    root_path: &Path,
     dir: &Path,
     dir_repo_path: &RepoPath,
     ignores: &Arc<GitIgnoreFile>,
-    flavor: RootFlavor,
+    dir_ignored: bool,
+    ctx: &WalkCtx<'_>,
     out: &mut Vec<LiveFile>,
 ) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
@@ -92,7 +125,7 @@ fn walk_dir(
         if name == MARKER_FILE || name == STORE_DIR {
             continue;
         }
-        if name == GIT_DIR && flavor == RootFlavor::Software {
+        if name == GIT_DIR && ctx.flavor == RootFlavor::Software {
             continue;
         }
         let Some(name_str) = name.to_str() else {
@@ -104,23 +137,24 @@ fn walk_dir(
         let child_repo_path = dir_repo_path.join(&component);
 
         if file_type.is_dir() {
-            if ignores.matches_dir(&child_repo_path) {
-                // Ignored directory: not descended into (gitignore
-                // semantics — every child is ignored too).
+            let child_ignored = dir_ignored || ignores.matches_dir(&child_repo_path);
+            if child_ignored && !ctx.tracks_anything_under(&child_repo_path) {
+                // Ignored and holding no history: pruned unvisited.
                 continue;
             }
-            let child_ignores = chain_dir_gitignore(ignores, &child_repo_path, &path, flavor)?;
+            let child_ignores = chain_dir_gitignore(ignores, &child_repo_path, &path, ctx.flavor)?;
             walk_dir(
-                root_path,
                 &path,
                 &child_repo_path,
                 &child_ignores,
-                flavor,
+                child_ignored,
+                ctx,
                 out,
             )?;
         } else if file_type.is_file() {
             out.push(LiveFile {
-                ignored: ignores.matches_file(&child_repo_path),
+                ignored: dir_ignored || ignores.matches_file(&child_repo_path),
+                executable: is_executable(&entry)?,
                 repo_path: child_repo_path,
                 disk_path: path,
             });
@@ -128,6 +162,21 @@ fn walk_dir(
         // symlinks: skipped (see doc comment).
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn is_executable(entry: &std::fs::DirEntry) -> Result<bool> {
+    use std::os::unix::fs::PermissionsExt as _;
+    Ok(entry.metadata()?.permissions().mode() & 0o111 != 0)
+}
+
+/// Non-unix filesystems carry no executable bit. Returning `false` keeps
+/// a file's recorded mode stable there: [`crate::checkpoint`] only rewrites
+/// a tree entry whose content changed, and it carries the previous mode
+/// forward on this platform rather than flipping every entry to 100644.
+#[cfg(not(unix))]
+fn is_executable(_entry: &std::fs::DirEntry) -> Result<bool> {
+    Ok(false)
 }
 
 /// Recursively list every file path tracked in `tree` (root-relative jj
@@ -155,33 +204,4 @@ pub async fn walk_tree_paths(
         }
     }
     Ok(())
-}
-
-/// Look up `path` inside `tree`, descending through subtrees as needed.
-/// Mirrors `task_files_version_store::chain::lookup` (that one is
-/// `pub(crate)` to its own crate, and this ticket consumes the
-/// version-store crate as-is rather than widening its visibility) —
-/// small enough to duplicate. Written against `&dyn Backend` so it serves
-/// both Root flavors (media's CAS backend and software's stock git one).
-pub(crate) async fn lookup(
-    backend: &dyn Backend,
-    tree: &Tree,
-    path: &RepoPath,
-) -> Result<Option<TreeValue>> {
-    let Some((dir, basename)) = path.split() else {
-        return Ok(None);
-    };
-    if dir.as_internal_file_string().is_empty() {
-        return Ok(tree.value(basename).cloned());
-    }
-    let mut current = tree.clone();
-    let mut prefix = RepoPathBuf::root();
-    for component in dir.components() {
-        prefix = prefix.join(component);
-        match current.value(component) {
-            Some(TreeValue::Tree(id)) => current = backend.read_tree(&prefix, id).await?,
-            _ => return Ok(None),
-        }
-    }
-    Ok(current.value(basename).cloned())
 }
