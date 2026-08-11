@@ -683,6 +683,11 @@ vox-stream = { version = "0.10.0-rc.5" }
 vox-core = { version = "0.10.0-rc.5" }
 vox-websocket = { version = "0.10.0-rc.5" }
 iroh = { version = "1" }
+# Files CAS chunk store (issue #256): streaming FastCDC content-defined
+# chunking, blake3 content addressing, iroh-blobs as the local blob store.
+fastcdc = { version = "4", features = ["tokio"] }
+iroh-blobs = { version = "0.103", default-features = false, features = ["fs-store"] }
+blake3 = { version = "1.8" }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
 # Embeds the staged fasttrackstudio web bundle into the native binary
@@ -886,6 +891,7 @@ proc-macro2 = "1"
 dssim-core = "3"
 png = "0.17"
 proptest = "1"
+tempfile = "3"
 
 # ── Audio / plugin framework externals (nice-plug + audiocore) ───────
 atomic_float = "1.1"
@@ -953,6 +959,10 @@ task-player-ui = { path = "crates/task/player-ui" }
 task-widgets = { path = "crates/task/widgets" }
 task-note-tabs = { path = "crates/task/note-tabs" }
 ui = { path = "crates/task/ui" }
+# Files platform (issue #255/ADR 0001): the content-addressed chunk-store
+# substrate for media File Roots — fastcdc + blake3 + iroh-blobs, with
+# Files-owned manifests kept outside the blob store (issue #256).
+task-files-chunk-store = { path = "crates/task/files-chunk-store" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }
