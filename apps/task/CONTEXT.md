@@ -26,11 +26,22 @@ on their tickets.
 - **Divergent versions** — when two machines save the same file
   concurrently, both saves survive as sibling versions to be merged or
   chosen later. There is no locking and no lost data.
-- **File Root** — a folder tree associated with a project. A project may
-  have several roots, on different Storage Locations (video on one
-  server, audio on another); one root may be shared by multiple
-  projects (a common asset folder). Roots are how backup, sync, and
-  versioning are scoped.
+- **File Root** — a folder tree with its own identity: a first-class
+  vault entity (own note) that projects *reference*, never own. Roots
+  never overlap on disk — one tree, one root, versioned once. A root's
+  live tree sits wholly on one Storage Location; its version-store
+  blobs may be placed across locations. Identified by a stable id in
+  its entity plus a marker file in the tree; the (location, path)
+  binding is mutable. Roots may live anywhere, including inside a
+  vault folder — vault replication excludes root subtrees. Policies
+  (versioning, retention, placement) live on the root itself.
+- **Root slice** — a reference to (root, subpath): how subprojects,
+  share links, and note-embedded widgets point at part of a root
+  without creating a nested root.
+- **Drive** — the raw, NextCloud-style browsing surface over Storage
+  Locations: loose files outside any root. Projects are a convenient
+  view over Files, not a cage; a per-user Home root covers personal
+  files that still deserve versioning.
 - **Storage Location** — a named place Files can live: a server volume,
   an S3 bucket, an external drive. Task decides *placement* (which
   location holds what); physical tiering/redundancy below a location
