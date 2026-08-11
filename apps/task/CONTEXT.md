@@ -43,9 +43,37 @@ on their tickets.
   view over Files, not a cage; a per-user Home root covers personal
   files that still deserve versioning.
 - **Storage Location** — a named place Files can live: a server volume,
-  an S3 bucket, an external drive. Task decides *placement* (which
-  location holds what); physical tiering/redundancy below a location
-  (SSD cache, RAID, ZFS) belongs to the substrate.
+  an S3 bucket, an external drive. Deployment-scoped: the operator
+  registers locations; orgs reach them only through Storage grants.
+  Each location declares its capability classes — hosting *live trees*
+  (POSIX/NFS) and/or holding *blobs* (get/put) — and is spoken for by
+  exactly one Storage agent. Task decides *placement* (which location
+  holds what); physical tiering/redundancy below a location (SSD cache,
+  RAID, ZFS) belongs to the substrate.
+- **Storage grant** — an org's admission onto a Storage Location: a
+  capability subset, a byte quota (counted logically — the bytes the
+  org's roots reference, dedup savings belong to the operator), and a
+  path prefix that is the org's own subtree on a shared volume.
+- **Storage agent** — the process that speaks for a location: in-process
+  in task-server for its own volumes, the desktop app's headless agent
+  for a plugged-in drive, or a standalone agent on a NAS/storage box.
+  One protocol, three hostings; agents announce their volumes, the
+  operator approves. Agents, not the server, carry blob transfers
+  between locations — the coordinator is never the data path.
+- **Pointer stub** — a small placeholder file standing in for
+  non-resident content inside a live tree (a dehydrated file). The
+  agent hydrates on demand: explicitly, by root policy patterns, or on
+  access through Task-mediated surfaces. Raw NFS reads a stub as a
+  stub — no fault-in without FUSE.
+- **Removable location** — a location on an external drive:
+  replica-first (a tracked replica of server-primary roots for
+  portable/offline work; offline edits reconcile as divergent
+  versions), hosting a live tree only when specifically declared.
+  Expected-offline is a health state, not an error.
+- **Relocation** — the deliberate move of a root's live tree between
+  locations: checkpoint, copy, verify, flip the (location, path)
+  binding inside a declared unavailability window; the source is
+  demoted to a read-only copy. Never automatic.
 - **Session checkpoint** — the guarantee that matters: everything is
   versioned by the end of a working session. High-frequency writes
   during a session (a recording pass creating files every few minutes)
