@@ -114,6 +114,7 @@ members = [
     "features/dawfile/dawfile-logic",
     "features/dawfile/dawfile-protools",
     "features/dawfile/dawfile-reaper",
+    "features/dawfile/dawfile-standalone",
     # ── features/reaper ───────────────────────────────────────────────
     "features/reaper/daw-reaper",
     "features/reaper/daw-bridge",
@@ -179,9 +180,6 @@ members = [
     "features/dynamic-template/music-catalog",
     "features/chord-tool/chord-tool",
     "features/chord-tool/chord-tool-daw",
-    "features/midi-tools/midi-tools",
-    "features/midi-tools/midi-tools-daw",
-    "features/midi-tools/midi-tools-ui",
     "features/dynamic-template/color-palette",
     "features/dynamic-template/tests",
     # ── crates/signal — signal domain core (wave 4) ───────────────────
@@ -243,9 +241,14 @@ members = [
     "features/fx/tune/tune-dsp",
     # ── features/expression-editor — the note+curve editing surface,
     #    shared by the MPE editor and the audio pitch editor
+    "features/expression-editor/expression-editor-audio",
     "features/expression-editor/expression-editor-core",
+    "features/expression-editor/expression-editor-corpus",
     "features/expression-editor/expression-editor-daw",
+    "features/expression-editor/expression-editor-guitarpro",
     "features/expression-editor/expression-editor-reaper",
+    "features/expression-editor/expression-editor-standalone",
+    "features/expression-editor/expression-editor-tools",
     "features/expression-editor/expression-editor-ui",
     "features/fx/level/level",
     "features/fx/level/level-dsp",
@@ -469,6 +472,7 @@ dawfile-dawproject = { path = "features/dawfile/dawfile-dawproject" }
 dawfile-logic = { path = "features/dawfile/dawfile-logic" }
 dawfile-protools = { path = "features/dawfile/dawfile-protools" }
 dawfile-reaper = { path = "features/dawfile/dawfile-reaper" }
+dawfile-standalone = { path = "features/dawfile/dawfile-standalone" }
 # default = all-formats; the daw facade opts into formats individually,
 # so the root entry keeps defaults OFF and consumers that want every
 # importer set `default-features = true`.
@@ -630,9 +634,14 @@ pitch-dsp = { path = "features/fx/pitch/pitch-dsp" }
 tune = { path = "features/fx/tune/tune" }
 world-sys = { path = "libs/vendor/world" }
 tune-dsp = { path = "features/fx/tune/tune-dsp" }
+expression-editor-audio = { path = "features/expression-editor/expression-editor-audio" }
 expression-editor-core = { path = "features/expression-editor/expression-editor-core" }
+expression-editor-corpus = { path = "features/expression-editor/expression-editor-corpus" }
 expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
+expression-editor-guitarpro = { path = "features/expression-editor/expression-editor-guitarpro" }
 expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
+expression-editor-standalone = { path = "features/expression-editor/expression-editor-standalone" }
+expression-editor-tools = { path = "features/expression-editor/expression-editor-tools" }
 expression-editor-ui = { path = "features/expression-editor/expression-editor-ui" }
 level = { path = "features/fx/level/level" }
 level-dsp = { path = "features/fx/level/level-dsp" }
@@ -660,6 +669,10 @@ facet = { version = "0.50.0-rc.5", features = ["reflect", "chrono", "uuid"] }
 facet-json = { version = "0.50.0-rc.5" }
 facet-postcard = { version = "0.50.0-rc.5" }
 facet-styx = { version = "5.0.0-rc.5" }
+# facet-styx's formatter, needed directly by anyone who has to set
+# `omit_none` (the `.daw` writer). Routed to libs/vendor/styx-format by the
+# [patch.crates-io] table below.
+styx-format = { version = "5.0.0-rc.5" }
 facet-toml = { version = "0.50.0-rc.5" }
 # figue pairs with facet-styx 5.0 (reaper-input keybind config parsing).
 figue = { version = "5.0.0-rc.5" }
@@ -728,9 +741,6 @@ dynamic-template-proto = { path = "features/dynamic-template/dynamic-template-pr
 music-catalog = { path = "features/dynamic-template/music-catalog" }
 chord-tool = { path = "features/chord-tool/chord-tool" }
 chord-tool-daw = { path = "features/chord-tool/chord-tool-daw" }
-midi-tools = { path = "features/midi-tools/midi-tools" }
-midi-tools-daw = { path = "features/midi-tools/midi-tools-daw" }
-midi-tools-ui = { path = "features/midi-tools/midi-tools-ui" }
 color-palette = { path = "features/dynamic-template/color-palette" }
 # Monarchy hierarchy framework (dynamic-template's engine) — subtree-
 # imported at libs/monarchy so the whole graph shares one facet line.
