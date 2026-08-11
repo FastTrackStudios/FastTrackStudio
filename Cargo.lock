@@ -9945,6 +9945,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "files-storage"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "files-proto",
+ "files-storage-proto",
+ "jj-lib",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+ "task-files-chunk-store",
+ "task-files-version-store",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vox",
+]
+
+[[package]]
+name = "files-storage-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -28171,6 +28208,7 @@ dependencies = [
  "eyre",
  "facet 0.50.0-rc.5",
  "files",
+ "files-storage",
  "finance",
  "finance-db",
  "finance-proto",

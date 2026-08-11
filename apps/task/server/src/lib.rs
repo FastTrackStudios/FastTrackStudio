@@ -36,6 +36,7 @@ pub mod presence;
 pub mod server_mgmt;
 pub mod share;
 pub mod snapshot;
+pub mod storage;
 pub mod watch_bridge;
 #[cfg(feature = "plugin-forge")]
 pub mod webhooks;
@@ -151,6 +152,12 @@ pub struct OrgAppState {
     /// per-root jj repos live under `<org>/files/`, outside the vault
     /// (a File Root is never vault-replicated; see the glossary).
     pub files: files::FilesBackend,
+    /// This org's lane onto the Files placement layer (issue #262) — the
+    /// Storage Locations it was granted, and where its roots are placed.
+    /// The registry underneath is deployment-scoped and shared by every
+    /// org (see [`crate::storage`]); this backend is the org-confined
+    /// view of it.
+    pub storage: files_storage::StorageBackend,
     /// Task backend — walks every `type: task` page in the
     /// vault.
     pub tasks: task::TaskBackend,
@@ -1159,6 +1166,14 @@ pub(crate) async fn build_org_state(
         let workstreams = workstream::WorkstreamBackend::new(vault_root.clone());
         let files = files::FilesBackend::new(org_root.path().join("files"))
             .map_err(|e| eyre::eyre!("files backend: {e}"))?;
+        // Placement lane. The coordinator is process-wide (one
+        // deployment, one Storage Location registry); this is just this
+        // org's view of it. The registry lives at the DATA root, above
+        // every org — resolved the same way `AppState::new` resolves it.
+        let data_root =
+            org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+        let storage_core = crate::storage::core(data_root.path())?;
+        let storage = files_storage::StorageBackend::new(storage_core, org_root.slug());
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.
@@ -1382,6 +1397,7 @@ pub(crate) async fn build_org_state(
             milestones,
             workstreams,
             files,
+            storage,
             tasks,
             #[cfg(feature = "plugin-home")]
             locations,
@@ -2320,7 +2336,23 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
             crate::identity_mgmt::IdentityServiceImpl::new(state.clone()),
         )
     };
-    architect::LayerRouter::new()
+    // The Files placement layer's operator + agent lanes (issue #262).
+    // Both are deployment-scoped, so they belong here rather than on any
+    // org router: the operator registers locations and admits orgs onto
+    // them, and Storage agents announce, heartbeat, take directives and
+    // report outcomes. A missing/unreadable data root is not fatal —
+    // the rest of the server lane still serves.
+    let storage_core = org_proto::DataRoot::from_env().ok().and_then(|data_root| {
+        match crate::storage::core(data_root.path()) {
+            Ok(core) => Some(core),
+            Err(e) => {
+                tracing::warn!("files placement lanes not mounted: {e}");
+                None
+            }
+        }
+    });
+
+    let mut router = architect::LayerRouter::new()
         .with(
             org_proto::org_management_descriptor(),
             org_proto::serve_org_management(mgmt),
@@ -2332,7 +2364,27 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
         .with(
             identity_proto::identity_descriptor(),
             identity_proto::serve_identity(identity),
-        )
+        );
+
+    if let Some(core) = storage_core {
+        router = router
+            .with(
+                files_storage::storage_admin_descriptor(),
+                files_storage::serve_storage_admin(files_storage::StorageAdminBackend::new(
+                    core.clone(),
+                )),
+            )
+            .with(
+                files_storage::storage_agent_descriptor(),
+                files_storage::serve_storage_agent(files_storage::StorageAgentBackend::new(
+                    core.clone(),
+                )),
+            )
+            .merge(files_storage::storage_agent_stream_layer(
+                files_storage::StorageAgentBackend::new(core),
+            ));
+    }
+    router
 }
 
 /// `/vox` — legacy single-org alias. Dispatches into the
@@ -2849,6 +2901,17 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         // `#[subscribe]` stream sibling, served from the hub on the
         // `FilesBackend` above.
         .merge(files::files_service_stream_layer(org.files.clone()))
+        // Placement — Storage Locations this org was granted, where its
+        // roots live, and blob replicas (issue #262). The operator and
+        // agent lanes of the same layer sit on the SERVER router, not
+        // here: the registry is deployment-scoped.
+        .with(
+            files_storage::storage_service_descriptor(),
+            files_storage::serve_storage_service(org.storage.clone()),
+        )
+        .merge(files_storage::storage_service_stream_layer(
+            org.storage.clone(),
+        ))
         .with(
             task::task_service_descriptor(),
             // The raw backend serves directly. There used to be a
