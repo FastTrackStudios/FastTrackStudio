@@ -75,6 +75,7 @@ mod recipe;
 #[cfg(feature = "plugin-mealplan")]
 mod recipe_import;
 mod runner;
+mod skills;
 mod session_store;
 mod setup;
 mod shared;
@@ -210,6 +211,9 @@ enum Commands {
     #[cfg(not(feature = "plugin-agent"))]
     #[command(hide = true)]
     Runner(NotCompiled),
+    /// The agent-lane skills — install them into a working copy.
+    #[command(subcommand)]
+    Skills(skills::SkillsCmd),
     /// Mail accounts for this org (add / list / remove / test).
     #[cfg(feature = "plugin-email")]
     #[command(subcommand)]
@@ -755,6 +759,9 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         #[cfg(feature = "plugin-agent")]
         Commands::Runner(cmd) => {
             return runner::run_runner(cmd).await;
+        }
+        Commands::Skills(cmd) => {
+            return skills::run_skills(cmd).await;
         }
         #[cfg(not(feature = "plugin-agent"))]
         Commands::Runner(_) => {

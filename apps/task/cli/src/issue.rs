@@ -882,6 +882,38 @@ async fn resolve_workstream_filter(
 /// flags (the `issue` group dropped its per-variant duplicates).
 /// Called per-arm so org-free verbs (`pr-list`, dry runs) keep
 /// working without a session.
+/// Refuse to send an agent-lane artifact outward.
+///
+/// Task may cite a GitHub issue; GitHub never cites Task. The issue
+/// list stays human-authored, so anything carrying an agent-lane
+/// triage label — or belonging to a workstream, which makes it part
+/// of a map rather than a report someone filed — does not leave.
+///
+/// This is a *constraint on the existing sync*, not its removal:
+/// pushing and syncing human tickets keeps working exactly as before.
+/// Automatic mirroring is what produced the issue-list pollution the
+/// agent lane exists to end, so the boundary is enforced rather than
+/// documented.
+pub(crate) fn refuse_if_agent_artifact(t: &task::TaskInfo) -> eyre::Result<()> {
+    if let Some(label) = task::triage_labels(t).first() {
+        return Err(eyre::eyre!(
+            "refusing to push {}: it carries `{}`, an agent-lane label. \
+             Agent artifacts live only in Task — remove the label first, \
+             or write the GitHub issue by hand.",
+            short_uuid(&t.id),
+            label.as_str()
+        ));
+    }
+    if t.workflow.as_ref().and_then(|w| w.workstream).is_some() {
+        return Err(eyre::eyre!(
+            "refusing to push {}: it belongs to a workstream, so it is part \
+             of a wayfinding map rather than something a person reported.",
+            short_uuid(&t.id)
+        ));
+    }
+    Ok(())
+}
+
 fn issue_ctx() -> eyre::Result<(String, String)> {
     let slug = resolve_active_org(None)?;
     let url = resolve_org_vox_url(None, &slug);
@@ -2130,6 +2162,7 @@ pub(crate) async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             let (slug, url) = issue_ctx()?;
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, &id).await?;
+            refuse_if_agent_artifact(&t)?;
             let repo_id = build_repo_id(&repo, github, base_url)?;
 
             // Skip if we already have a link to this repo.
@@ -2681,6 +2714,14 @@ async fn sync_repo(
         .map_err(|e| eyre::eyre!("list: {e:?}"))?;
     let mut reconciled = 0usize;
     for t in &local {
+        // The boundary, enforced where the sweep runs rather than
+        // only at `push`: a sync over a whole repo must not carry
+        // agent artifacts outward just because someone linked one by
+        // hand. Skipping (not erroring) keeps the sweep useful for
+        // every human ticket alongside it.
+        if refuse_if_agent_artifact(t).is_err() {
+            continue;
+        }
         let links = store
             .issues_for_task(&t.id.to_string())
             .map_err(|e| eyre::eyre!("link store: {e}"))?;

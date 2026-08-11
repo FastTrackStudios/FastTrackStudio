@@ -75,6 +75,7 @@ pub struct OrgMeta {
 ///   empty span rather than a fan-out that the permission gate will
 ///   refuse call by call — an empty state is a better answer than a wall
 ///   of errors, and it is the truthful one.
+///
 /// Note on where linked orgs enter this: NOT here. The app root folds
 /// the identity locker's answer into each `OrgMeta::member` as the org
 /// list resolves, because `org_list` is the Signal every consumer

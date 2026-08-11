@@ -278,6 +278,7 @@ version = "0.1.0"
 dependencies = [
  "agent-proto",
  "agent-tasks",
+ "architect",
  "async-trait",
  "chrono",
  "sea-orm",
@@ -26541,6 +26542,7 @@ dependencies = [
  "goal",
  "identity-proto",
  "inbox-proto",
+ "include_dir",
  "intake",
  "label-proto",
  "libc",

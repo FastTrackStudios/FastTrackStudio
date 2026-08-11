@@ -15,6 +15,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260810_000001_create_agent_backends::Migration),
             Box::new(m20260810_000002_create_agent_runs::Migration),
+            Box::new(m20260810_000003_create_agent_questions::Migration),
         ]
     }
 }
@@ -164,6 +165,80 @@ mod m20260810_000002_create_agent_runs {
         async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
             manager
                 .drop_table(Table::drop().table(AgentRuns::Table).if_exists().to_owned())
+                .await
+        }
+    }
+}
+
+mod m20260810_000003_create_agent_questions {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260810_000003_create_agent_questions"
+        }
+    }
+
+    #[derive(DeriveIden)]
+    enum AgentQuestions {
+        Table,
+        Id,
+        Ticket,
+        Resolved,
+        Json,
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .create_table(
+                    Table::create()
+                        .table(AgentQuestions::Table)
+                        .if_not_exists()
+                        .col(
+                            ColumnDef::new(AgentQuestions::Id)
+                                .string()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .col(ColumnDef::new(AgentQuestions::Ticket).string().not_null())
+                        .col(ColumnDef::new(AgentQuestions::Resolved).integer().not_null())
+                        .col(ColumnDef::new(AgentQuestions::Json).text().not_null())
+                        .to_owned(),
+                )
+                .await?;
+
+            // The grill queue reads unresolved-by-ticket; both
+            // columns are in every hot query.
+            for (name, col) in [
+                ("idx_agent_questions_ticket", AgentQuestions::Ticket),
+                ("idx_agent_questions_resolved", AgentQuestions::Resolved),
+            ] {
+                manager
+                    .create_index(
+                        Index::create()
+                            .if_not_exists()
+                            .name(name)
+                            .table(AgentQuestions::Table)
+                            .col(col)
+                            .to_owned(),
+                    )
+                    .await?;
+            }
+            Ok(())
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .drop_table(
+                    Table::drop()
+                        .table(AgentQuestions::Table)
+                        .if_exists()
+                        .to_owned(),
+                )
                 .await
         }
     }

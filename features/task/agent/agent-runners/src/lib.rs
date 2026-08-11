@@ -39,9 +39,11 @@ use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, Statement};
 
 pub mod migrations;
+pub mod questions;
 pub mod runs;
 
 pub use migrations::Migrator;
+pub use questions::QuestionStore;
 pub use runs::{RUN_STALE_AFTER, RunStore};
 
 /// How long after its last heartbeat a runner is considered stale.

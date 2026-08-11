@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use agent_proto::error::AgentError;
 use agent_proto::run::{FinishRun, Run, RunFilter, RunStatus, StartRun};
+use agent_proto::run_event::{RunEvent, RunEventEnvelope, RunSnapshot, append_tail};
+use agent_proto::service::run_stream::{RunStream, RunStreamStreamSource};
 use agent_proto::service::runs::Runs;
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, Statement, Value};
@@ -18,9 +20,20 @@ use uuid::Uuid;
 /// one notion of "recently".
 pub const RUN_STALE_AFTER: Duration = Duration::from_secs(120);
 
-#[derive(Clone, Debug)]
+/// Live, in-memory state for a run: what it is doing and the tail
+/// of its output. Deliberately not persisted — output is ephemeral,
+/// and a restart losing a tail costs nothing a viewer cares about.
+#[derive(Debug, Default, Clone)]
+struct Live {
+    activity: String,
+    tail: String,
+}
+
+#[derive(Clone)]
 pub struct RunStore {
     conn: DatabaseConnection,
+    events: architect::PubSub<RunEventEnvelope>,
+    live: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<Uuid, Live>>>,
 }
 
 fn ts(v: DateTime<Utc>) -> String {
@@ -36,10 +49,44 @@ fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
         .map(|d| d.with_timezone(&Utc))
 }
 
+impl std::fmt::Debug for RunStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunStore").finish_non_exhaustive()
+    }
+}
+
 impl RunStore {
     #[must_use]
     pub fn new(conn: DatabaseConnection) -> Self {
-        Self { conn }
+        Self {
+            conn,
+            events: architect::PubSub::sliding(256),
+            live: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+
+    /// The hub every run event is published into.
+    #[must_use]
+    pub fn events(&self) -> &architect::PubSub<RunEventEnvelope> {
+        &self.events
+    }
+
+    /// Fold an event into the live state and broadcast it.
+    fn emit(&self, run: Uuid, ticket: Uuid, event: RunEvent) {
+        if let Ok(mut map) = self.live.lock() {
+            let entry = map.entry(run).or_default();
+            match &event {
+                RunEvent::Output(chunk) => append_tail(&mut entry.tail, chunk),
+                RunEvent::Activity(what) => entry.activity = what.clone(),
+                _ => {}
+            }
+        }
+        self.events.publish(RunEventEnvelope {
+            run,
+            ticket,
+            event,
+            at: Utc::now(),
+        });
     }
 
     fn backend(&self) -> sea_orm::DatabaseBackend {
@@ -150,7 +197,9 @@ impl Runs for RunStore {
             ],
         )
         .await?;
-        self.one(id).await
+        let created = self.one(id).await?;
+        self.emit(created.id, created.ticket, RunEvent::Status(RunStatus::InProgress));
+        created_ok(created)
     }
 
     async fn beat_run(&self, run_id: Uuid) -> Result<(), AgentError> {
@@ -187,7 +236,17 @@ impl Runs for RunStore {
             ],
         )
         .await?;
-        self.one(finish.run).await
+        let done = self.one(finish.run).await?;
+        self.emit(
+            done.id,
+            done.ticket,
+            RunEvent::Verdict {
+                passed: finish.passed,
+                exit_code: finish.exit_code,
+            },
+        );
+        self.emit(done.id, done.ticket, RunEvent::Status(done.status));
+        Ok(done)
     }
 
     async fn get_run(&self, run_id: Uuid) -> Result<Run, AgentError> {
@@ -255,4 +314,45 @@ impl Runs for RunStore {
         }
         Ok(u32::try_from(lapsed.len()).unwrap_or(u32::MAX))
     }
+}
+
+/// The `#[subscribe]` contract: one hub, every run.
+impl RunStreamStreamSource for RunStore {
+    fn run_events_hub(&self) -> &architect::PubSub<RunEventEnvelope> {
+        &self.events
+    }
+}
+
+impl RunStream for RunStore {
+    async fn snapshot(&self, run: Uuid) -> Result<RunSnapshot, AgentError> {
+        let row = self.one(run).await?;
+        let live = self
+            .live
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&run).cloned())
+            .unwrap_or_default();
+        Ok(RunSnapshot {
+            run: row.id,
+            ticket: row.ticket,
+            status: row.status,
+            activity: live.activity,
+            tail: live.tail,
+        })
+    }
+
+    async fn publish(&self, run: Uuid, event: RunEvent) -> Result<(), AgentError> {
+        // Resolve the ticket so every envelope is self-describing —
+        // a fleet view should not have to join to know what it is
+        // looking at.
+        let ticket = self.one(run).await?.ticket;
+        self.emit(run, ticket, event);
+        Ok(())
+    }
+}
+
+/// Tiny helper so `start_run` can emit before returning without an
+/// extra clone dance at the call site.
+fn created_ok(run: Run) -> Result<Run, AgentError> {
+    Ok(run)
 }
