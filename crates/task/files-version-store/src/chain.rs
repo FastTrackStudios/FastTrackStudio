@@ -1,0 +1,452 @@
+//! Derives per-file version chains from the commit DAG (ADR 0001: "per-file
+//! chains are derived", never a second source of truth) and implements the
+//! DAG-range copy-record walk that backs
+//! [`jj_lib::backend::Backend::get_copy_records`].
+//!
+//! This crate assumes single-parent (linear) checkpoint history for the
+//! chain walk in [`version_chain`] — Files' own checkpoint cadence never
+//! creates merge commits, only jj's automatic op-log reconciliation does
+//! (see `checkpoint.rs`'s divergence demo), and a divergent file's history
+//! is presented as sibling versions, not walked through as one chain.
+
+use std::collections::BTreeSet;
+
+use jj_lib::backend::{CommitId, CopyRecord, Tree, TreeValue};
+use jj_lib::repo_path::{RepoPath, RepoPathBuf};
+
+use crate::backend::VersionStoreBackend;
+use crate::error::{Error, Result};
+
+/// One entry in a file's version chain: the commit that produced this saved
+/// state, the path the file lived at in that commit (chains follow
+/// renames), and its content address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionEntry {
+    pub commit_id: CommitId,
+    pub path: RepoPathBuf,
+    pub file_id: jj_lib::backend::FileId,
+    /// Set when this entry is the commit where the file arrived at `path`
+    /// via a recorded rename (as opposed to a plain content edit).
+    pub renamed_from: Option<RepoPathBuf>,
+}
+
+async fn resolved_tree_id(commit: &jj_lib::backend::Commit) -> Result<jj_lib::backend::TreeId> {
+    commit.root_tree.clone().into_resolved().map_err(|_| {
+        Error::Object("conflicted trees are not supported by chain derivation (v1)".into())
+    })
+}
+
+/// Look up `path` inside `tree`, descending through subtrees as needed.
+pub(crate) async fn lookup(
+    backend: &VersionStoreBackend,
+    tree: &Tree,
+    path: &RepoPath,
+) -> Result<Option<TreeValue>> {
+    let Some((dir, basename)) = path.split() else {
+        return Ok(None);
+    };
+    if dir.as_internal_file_string().is_empty() {
+        return Ok(tree.value(basename).cloned());
+    }
+    // Descend one component at a time from the root.
+    let mut current = tree.clone();
+    for component in dir.components() {
+        match current.value(component) {
+            Some(TreeValue::Tree(id)) => {
+                current = backend.tree(id).await?;
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(current.value(basename).cloned())
+}
+
+/// Derive the version chain for `path` as seen from `head`, newest first.
+pub async fn version_chain(
+    backend: &VersionStoreBackend,
+    head: &CommitId,
+    path: &RepoPath,
+) -> Result<Vec<VersionEntry>> {
+    let mut entries = Vec::new();
+    let mut commit_id = head.clone();
+    let mut tracked_path = path.to_owned();
+
+    loop {
+        let commit = backend.commit(&commit_id).await?;
+        let tree_id = resolved_tree_id(&commit).await?;
+        let tree = backend.tree(&tree_id).await?;
+        let Some(TreeValue::File { id, copy_id, .. }) =
+            lookup(backend, &tree, &tracked_path).await?
+        else {
+            break;
+        };
+
+        if commit.parents.len() != 1 {
+            // Root, or a merge commit — either way this chain walk (linear
+            // by design, see module doc) stops here; this is the file's
+            // earliest known state on this line of history.
+            entries.push(VersionEntry {
+                commit_id: commit_id.clone(),
+                path: tracked_path.clone(),
+                file_id: id,
+                renamed_from: None,
+            });
+            break;
+        }
+        let parent_id = commit.parents[0].clone();
+        let parent_commit = backend.commit(&parent_id).await?;
+        let parent_tree_id = resolved_tree_id(&parent_commit).await?;
+        let parent_tree = backend.tree(&parent_tree_id).await?;
+        let parent_value = lookup(backend, &parent_tree, &tracked_path).await?;
+
+        let (is_new_state, next_path, renamed_from) = match &parent_value {
+            Some(TreeValue::File {
+                id: parent_id_at_path,
+                copy_id: parent_copy_id,
+                ..
+            }) if *parent_copy_id == copy_id => {
+                // Same lineage at the same path: a new saved state only if
+                // the content actually changed.
+                (*parent_id_at_path != id, tracked_path.clone(), None)
+            }
+            _ => {
+                // Not present with the same lineage at this path in the
+                // parent — follow the recorded copy history to see whether
+                // this is a rename rather than a fresh origin.
+                let history = backend.copy_history(&copy_id).await?;
+                match history.parents.first() {
+                    Some(source_copy_id) => {
+                        let source_history = backend.copy_history(source_copy_id).await?;
+                        let source_path = source_history.current_path.clone();
+                        (true, source_path.clone(), Some(source_path))
+                    }
+                    None => {
+                        // No copy ancestry at all: this commit is where the
+                        // file was born.
+                        entries.push(VersionEntry {
+                            commit_id: commit_id.clone(),
+                            path: tracked_path.clone(),
+                            file_id: id,
+                            renamed_from: None,
+                        });
+                        return Ok(entries);
+                    }
+                }
+            }
+        };
+
+        if is_new_state {
+            entries.push(VersionEntry {
+                commit_id: commit_id.clone(),
+                path: tracked_path.clone(),
+                file_id: id,
+                renamed_from,
+            });
+        }
+        commit_id = parent_id;
+        tracked_path = next_path;
+    }
+
+    Ok(entries)
+}
+
+/// A flat (path, old value, new value) tree diff, recursing into changed
+/// subtrees. Used only by [`copy_records_between`] — chain derivation above
+/// walks path-first instead, since it already knows which path it's
+/// following.
+async fn diff_tree<'a>(
+    backend: &'a VersionStoreBackend,
+    prefix: &'a RepoPath,
+    old: Option<&'a Tree>,
+    new: Option<&'a Tree>,
+    out: &mut Vec<(RepoPathBuf, Option<TreeValue>, Option<TreeValue>)>,
+) -> Result<()> {
+    let empty = Tree::default();
+    let old_tree = old.unwrap_or(&empty);
+    let new_tree = new.unwrap_or(&empty);
+
+    let names: BTreeSet<_> = old_tree.names().chain(new_tree.names()).collect();
+    for name in names {
+        let old_value = old_tree.value(name);
+        let new_value = new_tree.value(name);
+        if old_value == new_value {
+            continue;
+        }
+        let path = prefix.join(name);
+        match (old_value, new_value) {
+            (Some(TreeValue::Tree(oid)), Some(TreeValue::Tree(nid))) if oid != nid => {
+                let old_sub = backend.tree(oid).await?;
+                let new_sub = backend.tree(nid).await?;
+                Box::pin(diff_tree(
+                    backend,
+                    &path,
+                    Some(&old_sub),
+                    Some(&new_sub),
+                    out,
+                ))
+                .await?;
+            }
+            (Some(TreeValue::Tree(_)), Some(TreeValue::Tree(_))) => {}
+            (Some(TreeValue::Tree(oid)), other) => {
+                let old_sub = backend.tree(oid).await?;
+                Box::pin(diff_tree(backend, &path, Some(&old_sub), None, out)).await?;
+                if let Some(value) = other {
+                    out.push((path, None, Some(value.clone())));
+                }
+            }
+            (other, Some(TreeValue::Tree(nid))) => {
+                if let Some(value) = other {
+                    out.push((path.clone(), Some(value.clone()), None));
+                }
+                let new_sub = backend.tree(nid).await?;
+                Box::pin(diff_tree(backend, &path, None, Some(&new_sub), out)).await?;
+            }
+            (old_leaf, new_leaf) => {
+                out.push((path, old_leaf.cloned(), new_leaf.cloned()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Ancestor commit ids of `head`, reachable by walking `parents` (assumes a
+/// backend-local, not-too-deep history — fine at Files' checkpoint cadence
+/// per ADR 0001; a path→commits cache is future work if this ever measures
+/// slow).
+async fn ancestors(backend: &VersionStoreBackend, head: &CommitId) -> Result<Vec<CommitId>> {
+    let mut seen = vec![head.clone()];
+    let mut frontier = vec![head.clone()];
+    while let Some(id) = frontier.pop() {
+        let commit = backend.commit(&id).await?;
+        for parent in commit.parents {
+            if !seen.contains(&parent) {
+                seen.push(parent.clone());
+                frontier.push(parent);
+            }
+        }
+    }
+    Ok(seen)
+}
+
+/// Implements `Backend::get_copy_records`: every recorded copy/rename event
+/// for commits in the dag range `root..head`, optionally restricted to
+/// `paths` (matched against the copy's target).
+pub async fn copy_records_between(
+    backend: &VersionStoreBackend,
+    paths: Option<&[RepoPathBuf]>,
+    root: &CommitId,
+    head: &CommitId,
+) -> Result<Vec<CopyRecord>> {
+    let excluded = ancestors(backend, root).await?;
+    let mut range = Vec::new();
+    let mut seen = vec![head.clone()];
+    let mut frontier = vec![head.clone()];
+    while let Some(id) = frontier.pop() {
+        if excluded.contains(&id) {
+            continue;
+        }
+        let commit = backend.commit(&id).await?;
+        range.push((id.clone(), commit.clone()));
+        for parent in commit.parents {
+            if !seen.contains(&parent) {
+                seen.push(parent.clone());
+                frontier.push(parent);
+            }
+        }
+    }
+
+    let mut records = Vec::new();
+    for (commit_id, commit) in &range {
+        for parent_id in &commit.parents {
+            let parent_commit = backend.commit(parent_id).await?;
+            let tree_id = resolved_tree_id(commit).await?;
+            let parent_tree_id = resolved_tree_id(&parent_commit).await?;
+            let tree = backend.tree(&tree_id).await?;
+            let parent_tree = backend.tree(&parent_tree_id).await?;
+
+            let mut diffs = Vec::new();
+            diff_tree(
+                backend,
+                RepoPath::root(),
+                Some(&parent_tree),
+                Some(&tree),
+                &mut diffs,
+            )
+            .await?;
+
+            for (path, old_value, new_value) in diffs {
+                let Some(TreeValue::File { copy_id, .. }) = &new_value else {
+                    continue;
+                };
+                if let Some(paths) = paths {
+                    if !paths.contains(&path) {
+                        continue;
+                    }
+                }
+                let unchanged_lineage = matches!(
+                    &old_value,
+                    Some(TreeValue::File { copy_id: old_copy_id, .. }) if old_copy_id == copy_id
+                );
+                if unchanged_lineage {
+                    continue;
+                }
+                let history = backend.copy_history(copy_id).await?;
+                for source_copy_id in &history.parents {
+                    let source_history = backend.copy_history(source_copy_id).await?;
+                    let source_path = source_history.current_path.clone();
+                    // The source must actually be a file in the parent
+                    // commit's tree — anything else (absent, a directory)
+                    // means there is no real file content to report as
+                    // "copied from" in this commit, and substituting the
+                    // *target's* new file id would fabricate content that
+                    // never existed at `source_path`. Skip the record
+                    // rather than inventing one.
+                    let Some(TreeValue::File {
+                        id: source_file, ..
+                    }) = lookup(backend, &parent_tree, &source_path).await?
+                    else {
+                        continue;
+                    };
+                    records.push(CopyRecord {
+                        target: path.clone(),
+                        target_commit: commit_id.clone(),
+                        source: source_path,
+                        source_file,
+                        source_commit: parent_id.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(records)
+}
+
+#[cfg(test)]
+mod tests {
+    use jj_lib::backend::TreeValue;
+    use jj_lib::merged_tree::MergedTree;
+    use jj_lib::repo::Repo as _;
+    use jj_lib::repo_path::RepoPathBuf;
+    use jj_lib::tree_builder::TreeBuilder;
+
+    use super::copy_records_between;
+    use super::lookup;
+    use crate::backend::VersionStoreBackend;
+    use crate::checkpoint::{Change, checkpoint};
+    use crate::repo::init_repo;
+
+    fn path(s: &str) -> RepoPathBuf {
+        RepoPathBuf::from_internal_string(s).unwrap()
+    }
+
+    /// Regression test for a defect where a copy-history record naming a
+    /// source path that's absent from the immediate parent tree (e.g. the
+    /// source was deleted in an intermediate commit) caused
+    /// `copy_records_between` to fabricate `source_file` from the
+    /// *target's own* new content. `checkpoint::checkpoint`'s own
+    /// accumulated-state validation can't produce this — `Change::Rename`
+    /// always requires the source to currently exist — so this test builds
+    /// the scenario directly against the `Backend` trait, the way any other
+    /// caller writing commits straight through `write_tree`/`write_commit`
+    /// legitimately could.
+    #[tokio::test]
+    async fn copy_record_is_skipped_not_fabricated_when_source_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = init_repo(dir.path().join("repo").as_path()).await.unwrap();
+        let root_id = repo.store().root_commit_id().clone();
+        let a = path("a");
+        let c = path("c");
+
+        // commit1: create `a`.
+        let repo = checkpoint(
+            &repo,
+            root_id,
+            vec![Change::Write {
+                path: a.clone(),
+                content: b"hello".to_vec(),
+            }],
+            "create a",
+        )
+        .await
+        .unwrap();
+        let commit1 = repo.view().heads().iter().next().unwrap().clone();
+
+        let backend = repo.store().backend_impl::<VersionStoreBackend>().unwrap();
+        let commit1_tree_id = repo
+            .store()
+            .get_commit_async(&commit1)
+            .await
+            .unwrap()
+            .tree()
+            .tree_ids()
+            .as_resolved()
+            .cloned()
+            .unwrap();
+        let commit1_tree = backend.tree(&commit1_tree_id).await.unwrap();
+        let Some(TreeValue::File {
+            copy_id: a_copy_id, ..
+        }) = lookup(backend, &commit1_tree, &a).await.unwrap()
+        else {
+            panic!("a should be a file in commit1's tree");
+        };
+
+        // commit2: remove `a` (the source genuinely stops existing here).
+        let repo = checkpoint(
+            &repo,
+            commit1.clone(),
+            vec![Change::Remove { path: a.clone() }],
+            "remove a",
+        )
+        .await
+        .unwrap();
+        let commit2 = repo.view().heads().iter().next().unwrap().clone();
+
+        // commit3: planted directly through the `Backend` trait (bypassing
+        // `checkpoint`'s own validation) — a file at `c` whose copy history
+        // claims descent from `a`, even though `a` is absent from commit3's
+        // real parent (commit2).
+        let backend = repo.store().backend_impl::<VersionStoreBackend>().unwrap();
+        let phantom_copy_id = backend.write_copy_from(&c, a_copy_id).await.unwrap();
+        let store = repo.store().clone();
+        let commit2_tree_id = repo
+            .store()
+            .get_commit_async(&commit2)
+            .await
+            .unwrap()
+            .tree()
+            .tree_ids()
+            .as_resolved()
+            .cloned()
+            .unwrap();
+        let mut builder = TreeBuilder::new(store.clone(), commit2_tree_id);
+        builder.set(
+            c.clone(),
+            TreeValue::File {
+                id: jj_lib::backend::FileId::from_bytes(b"phantom-content-id-000000000000"),
+                executable: false,
+                copy_id: phantom_copy_id,
+            },
+        );
+        let commit3_tree_id = builder.write_tree().await.unwrap();
+        let merged_tree = MergedTree::resolved(store, commit3_tree_id);
+        let mut tx = repo.start_transaction();
+        tx.repo_mut()
+            .new_commit(vec![commit2.clone()], merged_tree)
+            .set_description("plant phantom copy record")
+            .write()
+            .await
+            .unwrap();
+        let repo = tx.commit("plant").await.unwrap();
+        let commit3 = repo.view().heads().iter().next().unwrap().clone();
+
+        let backend = repo.store().backend_impl::<VersionStoreBackend>().unwrap();
+        let records = copy_records_between(backend, None, &commit2, &commit3)
+            .await
+            .unwrap();
+        assert!(
+            records.is_empty(),
+            "a copy record with an absent source must be skipped, not fabricated: {records:?}"
+        );
+    }
+}
