@@ -5,8 +5,15 @@
 //! Sentry` is a list you can't act on: it says what to do and nothing
 //! about why, for whom, or under which effort. Rather than paper over
 //! that with a decorative chip, the domain names the condition — a
-//! task with no [`Anchor`] and no GTD context is **unfiled**, and
-//! unfiled work belongs in triage until somebody says what it is.
+//! task with no [`Anchor`], no GTD context and no meaningful tag is
+//! **unfiled**, and unfiled work belongs in triage until somebody says
+//! what it is.
+//!
+//! Tags count because **areas are tags here**. An area (Health, Bible
+//! Study, Prayer) is a standing part of life you maintain and never
+//! finish; a project has an outcome and can be completed. Keeping
+//! areas out of the project list is what stops that list lying about
+//! what is finishable.
 //!
 //! Two consequences, both applied by [`crate::relevance`]:
 //!
@@ -90,15 +97,58 @@ pub fn anchor(t: &TaskInfo) -> Option<Anchor> {
     t.milestone_id.map(Anchor::Milestone)
 }
 
+/// Tags that say nothing about what a task is *for*.
+///
+/// Three kinds of bookkeeping, none of which is a subject:
+///
+/// - `task`, the page discriminator;
+/// - a tag naming a [`crate::model::Status`], echoing a field the row
+///   already renders;
+/// - an agent-lane [`crate::agent_lane::TriageLabel`]
+///   (`ready-for-agent`, `needs-review`, …), which records that an
+///   agent *evaluated* the task — process, not purpose.
+///
+/// The last one is why filing and triage stay independent questions:
+/// labelling a bare capture `ready-for-agent` must not make it look
+/// filed, or the agent lane would quietly empty the triage strip.
+fn is_bookkeeping_tag(tag: &str) -> bool {
+    let t = tag.trim().trim_start_matches('#');
+    t.is_empty()
+        || t.eq_ignore_ascii_case("task")
+        || crate::model::Status::from_str(t).is_some()
+        || crate::agent_lane::TriageLabel::parse(t).is_some()
+}
+
 /// Does this task carry *any* context a reader could act on?
 ///
-/// An anchor is the strong form. A GTD context (`@home`, `@phone`) is
-/// the weak-but-sufficient form: `buy milk @errands` is a legitimate
-/// standalone task, not something to file under a project. A bare
-/// title with neither is what this module exists to catch.
+/// Three sufficient forms, in descending strength:
+///
+/// - an [`Anchor`] — it belongs to a project, parent, workstream or
+///   milestone;
+/// - a GTD `@context` — `buy milk @errands` is a legitimate standalone
+///   task, not something to file under a project;
+/// - a meaningful **tag** — `#errand`, `#health`, `#dev`.
+///
+/// Tags count because that is how areas are modelled here. An *area*
+/// (Health, Bible Study, Prayer) is a standing part of life you
+/// maintain and never finish; a *project* has an outcome and can be
+/// completed. Forcing areas into projects makes the project list lie
+/// about what is finishable, so areas live as tags — and a task
+/// tagged `#health` is every bit as filed as one under a project.
+///
+/// This deliberately reversed an earlier rule that ignored tags. In a
+/// vault where every task was already tagged (`#errand`, `#dev`,
+/// `#habit`) and NO task was attached to a project, that rule flagged
+/// well-described work as needing triage and pushed the user to invent
+/// projects for things that were never projects.
+///
+/// A bare title with none of the three is what this module exists to
+/// catch — and it stays caught.
 #[must_use]
 pub fn is_filed(t: &TaskInfo) -> bool {
-    anchor(t).is_some() || !t.contexts.is_empty()
+    anchor(t).is_some()
+        || !t.contexts.is_empty()
+        || t.tags.iter().any(|tag| !is_bookkeeping_tag(tag))
 }
 
 /// The inverse of [`is_filed`], named for the condition rather than
@@ -130,6 +180,43 @@ mod tests {
         let t = bare("Telemetry + Observability: Sentry");
         assert_eq!(anchor(&t), None);
         assert!(is_unfiled(&t));
+    }
+
+    #[test]
+    fn a_meaningful_tag_is_enough() {
+        // The case that reversed the original rule: a vault where the
+        // tags carry all the meaning and nothing is attached to a
+        // project. `#errand` says what this is; demanding a project
+        // for it invents structure the user never wanted.
+        let mut t = bare("Reach out to Erica and Kevin");
+        t.tags.push("errand".into());
+        assert_eq!(anchor(&t), None);
+        assert!(is_filed(&t));
+    }
+
+    #[test]
+    fn bookkeeping_tags_do_not_count_as_filing() {
+        // `task` is the page discriminator and `open` echoes a field
+        // the row already renders — neither says what the task is for.
+        let mut t = bare("Telemetry + Observability: Sentry");
+        t.tags = vec!["task".into(), "open".into()].into();
+        assert!(is_unfiled(&t), "a bare title stays caught: {:?}", t.tags);
+
+        // …but one real tag alongside them is enough.
+        t.tags.push("observability".into());
+        assert!(is_filed(&t));
+    }
+
+    #[test]
+    fn areas_are_tags_and_that_is_filing() {
+        // Health / Bible Study / Prayer are areas: standing parts of
+        // life with no completion, so they are tags rather than
+        // projects. A task in an area is filed.
+        for area in ["health", "bible-study", "prayer", "relationships"] {
+            let mut t = bare("some ongoing thing");
+            t.tags = vec!["task".into(), area.into()].into();
+            assert!(is_filed(&t), "#{area} should count as filing");
+        }
     }
 
     #[test]
