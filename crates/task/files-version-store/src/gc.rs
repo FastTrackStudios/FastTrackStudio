@@ -79,9 +79,23 @@ pub async fn sweep(
     let mut live_commits = BTreeSet::new();
     let mut live_trees = BTreeSet::new();
     let mut live_copies = BTreeSet::new();
+    // Always pin the empty tree: it's the root commit's tree, it's handed
+    // out as `empty_tree_id()` to any caller building a fresh tree, and
+    // it's cheap to keep unconditionally rather than relying on the root
+    // commit (a synthesized, never-written object — see `backend.commit`'s
+    // special case for `root_commit_id`) to flow through the walk below to
+    // mark it.
+    mark_tree(
+        backend,
+        backend.empty_tree_id_for_gc(),
+        &mut live_trees,
+        &mut live_copies,
+    )
+    .await?;
+
     let mut frontier = heads;
     while let Some(id) = frontier.pop() {
-        if id == *backend.root_commit_id_for_gc() || !live_commits.insert(id.clone()) {
+        if !live_commits.insert(id.clone()) {
             continue;
         }
         let commit = backend.commit(&id).await?;
@@ -111,6 +125,14 @@ pub async fn sweep(
             objects.remove(&hash).await?;
         }
     }
+
+    // Note: swept copy-history objects can leave dangling entries behind in
+    // `copy-children` index files (a hint, not an authority — see
+    // `ObjectStore::append_index_line`'s doc). Rather than pruning those
+    // here — which would need to enumerate every index file, not just the
+    // ones reachable from what we happened to mark — `VersionStoreBackend::
+    // copy_children` tolerates a missing child object directly: it's
+    // unreachable by definition once its own object is gone.
 
     Ok(())
 }

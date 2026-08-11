@@ -33,14 +33,24 @@ impl ObjectStore {
     }
 
     /// Store `bytes`, returning their content address. Idempotent: writing
-    /// the same bytes twice is a no-op the second time, but a prior write
-    /// that crashed before its data was durable (existing file present with
-    /// the wrong length) is repaired rather than silently trusted.
+    /// the same bytes twice is a no-op the second time (beyond refreshing
+    /// the object's mtime — see below), but a prior write that crashed
+    /// before its data was durable (existing file present with the wrong
+    /// length) is repaired rather than silently trusted.
     pub async fn write(&self, bytes: &[u8]) -> Result<blake3::Hash> {
         let hash = blake3::hash(bytes);
         let path = self.object_path(&hash);
         if let Ok(metadata) = tokio::fs::metadata(&path).await {
             if metadata.len() == bytes.len() as u64 {
+                // `gc`'s `keep_newer` protection (and, for objects this
+                // crate marks live independently of mtime, nothing) relies
+                // on mtime reflecting the most recent write, not just the
+                // first one — a caller re-`write`ing already-stored bytes
+                // is exactly the "written concurrently with a gc pass"
+                // case the `Backend::gc` contract asks backends to protect.
+                // Skipping the rename is still correct (the bytes are
+                // already durable), but the mtime must still be touched.
+                self.touch(&path).await?;
                 return Ok(hash);
             }
         }
@@ -61,6 +71,19 @@ impl ObjectStore {
         let dir = tokio::fs::File::open(&self.dir).await?;
         dir.sync_all().await?;
         Ok(hash)
+    }
+
+    /// Set `path`'s mtime to now. `std::fs::File::set_modified` has no
+    /// tokio-native equivalent, so this hands the (already-open, already
+    /// I/O-completed) file handle to a blocking thread rather than calling
+    /// the blocking API directly on the async task.
+    async fn touch(&self, path: &Path) -> Result<()> {
+        let file = tokio::fs::OpenOptions::new().write(true).open(path).await?;
+        let std_file = file.into_std().await;
+        tokio::task::spawn_blocking(move || std_file.set_modified(std::time::SystemTime::now()))
+            .await
+            .map_err(|e| Error::Io(std::io::Error::other(e)))??;
+        Ok(())
     }
 
     pub async fn read(&self, hash: &blake3::Hash) -> Result<Vec<u8>> {
@@ -137,5 +160,52 @@ impl ObjectStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(Error::Io(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: `write`'s early-return for already-stored bytes
+    /// used to skip touching the object's mtime, so a genuine re-write of
+    /// live content (e.g. `VersionStoreBackend::open` re-deriving the
+    /// empty tree on every startup) wouldn't refresh the "written
+    /// concurrently with a gc pass" freshness signal `Backend::gc`'s
+    /// `keep_newer` contract relies on.
+    #[tokio::test]
+    async fn write_refreshes_mtime_even_when_bytes_are_already_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ObjectStore::open(dir.path()).await.unwrap();
+        let bytes = b"same content, written twice";
+
+        let hash = store.write(bytes).await.unwrap();
+        let (_, first_mtime) = store
+            .list_with_mtime()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|(h, _)| *h == hash)
+            .unwrap();
+
+        // Filesystem mtime resolution can be coarse (1s on some setups) —
+        // sleep past it so a refreshed mtime is observably later, not just
+        // not-earlier.
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+        let hash_again = store.write(bytes).await.unwrap();
+        assert_eq!(hash, hash_again);
+        let (_, second_mtime) = store
+            .list_with_mtime()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|(h, _)| *h == hash)
+            .unwrap();
+
+        assert!(
+            second_mtime > first_mtime,
+            "re-writing already-stored bytes must refresh mtime: {first_mtime:?} -> {second_mtime:?}"
+        );
     }
 }

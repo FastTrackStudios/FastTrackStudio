@@ -12,13 +12,14 @@
 //! of copy records ships early because retrofitting it after history exists
 //! is a bad migration").
 
+use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
 use jj_lib::backend::{CommitId, TreeValue};
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
-use jj_lib::repo_path::RepoPathBuf;
+use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use jj_lib::tree_builder::TreeBuilder;
 
 use crate::backend::VersionStoreBackend;
@@ -52,6 +53,27 @@ fn backend_of(repo: &Arc<ReadonlyRepo>) -> Result<&VersionStoreBackend> {
         .ok_or_else(|| Error::Repo("repo's store is not a VersionStoreBackend".into()))
 }
 
+/// Resolves `path` against the checkpoint's *accumulated* state — every
+/// earlier `Change` in this same call, not just the parent commit's tree —
+/// so a `Write` followed by a `Rename` of that same path (or a `Rename`
+/// followed by a further `Write` to its destination) sees what the prior
+/// change actually produced, not what was there before the checkpoint
+/// started. `overrides` mirrors exactly what's been staged on the
+/// `TreeBuilder` so far: `Some(value)` for a set path, `None` for a
+/// removed one, absent for anything this checkpoint hasn't touched yet
+/// (which falls through to the parent's base tree).
+async fn resolve(
+    backend: &VersionStoreBackend,
+    base_tree: &jj_lib::backend::Tree,
+    overrides: &BTreeMap<RepoPathBuf, Option<TreeValue>>,
+    path: &RepoPath,
+) -> Result<Option<TreeValue>> {
+    if let Some(value) = overrides.get(path) {
+        return Ok(value.clone());
+    }
+    lookup(backend, base_tree, path).await
+}
+
 /// Write one checkpoint commit on top of `parent_id`, applying `changes` in
 /// order, and publish it (a real jj transaction/operation — this is what
 /// makes op-log semantics, including divergence, apply through this
@@ -80,6 +102,7 @@ pub async fn checkpoint(
     let base_tree = backend.tree(&base_tree_id).await?;
 
     let mut builder = TreeBuilder::new(store.clone(), base_tree_id);
+    let mut overrides: BTreeMap<RepoPathBuf, Option<TreeValue>> = BTreeMap::new();
 
     for change in changes {
         match change {
@@ -89,7 +112,7 @@ pub async fn checkpoint(
                     .write_stream(Cursor::new(content))
                     .await
                     .map_err(Error::from)?;
-                let copy_id = match lookup(backend, &base_tree, &path).await? {
+                let copy_id = match resolve(backend, &base_tree, &overrides, &path).await? {
                     Some(TreeValue::File { copy_id, .. }) => copy_id,
                     _ => {
                         backend
@@ -97,16 +120,16 @@ pub async fn checkpoint(
                             .await?
                     }
                 };
-                builder.set(
-                    path,
-                    TreeValue::File {
-                        id: jj_lib::backend::FileId::from_bytes(file_id.as_bytes()),
-                        executable: false,
-                        copy_id,
-                    },
-                );
+                let value = TreeValue::File {
+                    id: jj_lib::backend::FileId::from_bytes(file_id.as_bytes()),
+                    executable: false,
+                    copy_id,
+                };
+                overrides.insert(path.clone(), Some(value.clone()));
+                builder.set(path, value);
             }
             Change::Remove { path } => {
+                overrides.insert(path.clone(), None);
                 builder.remove(path);
             }
             Change::Rename {
@@ -118,10 +141,10 @@ pub async fn checkpoint(
                     id: old_file_id,
                     executable,
                     copy_id: old_copy_id,
-                }) = lookup(backend, &base_tree, &from).await?
+                }) = resolve(backend, &base_tree, &overrides, &from).await?
                 else {
                     return Err(Error::Object(format!(
-                        "rename source {from:?} is not a file in the checkpoint's base tree"
+                        "rename source {from:?} is not a file in the checkpoint's accumulated state"
                     )));
                 };
                 let new_copy_id = backend.write_copy_from(&to, old_copy_id).await?;
@@ -136,15 +159,15 @@ pub async fn checkpoint(
                     ),
                     None => old_file_id,
                 };
+                let value = TreeValue::File {
+                    id: new_file_id,
+                    executable,
+                    copy_id: new_copy_id,
+                };
+                overrides.insert(from.clone(), None);
+                overrides.insert(to.clone(), Some(value.clone()));
                 builder.remove(from);
-                builder.set(
-                    to,
-                    TreeValue::File {
-                        id: new_file_id,
-                        executable,
-                        copy_id: new_copy_id,
-                    },
-                );
+                builder.set(to, value);
             }
         }
     }

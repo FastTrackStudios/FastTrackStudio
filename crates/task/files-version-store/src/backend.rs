@@ -31,16 +31,39 @@ use crate::objects::ObjectStore;
 const COMMIT_ID_LEN: usize = 32;
 const CHANGE_ID_LEN: usize = 16;
 
-/// Every field this trait needs internally to reproduce a
-/// `jj_lib::backend::BackendError` from our own [`Error`]. `Unsupported`
-/// and object-not-found map onto jj-lib's own variants; everything else is
-/// `Other`.
+/// Reproduces a `jj_lib::backend::BackendError` from our own [`Error`].
+/// Object-not-found maps onto jj-lib's own `ObjectNotFound` variant (with a
+/// generic `"object"` type — use [`not_found`] instead at call sites that
+/// know the specific kind); everything else is `Other`.
 fn to_backend_err(err: Error) -> BackendError {
     match err {
-        Error::UnknownObject(hash) => {
-            BackendError::Other(format!("unknown version-store object {hash}").into())
-        }
+        Error::UnknownObject(hash) => object_not_found("object", hash),
         other => BackendError::Other(other.into()),
+    }
+}
+
+/// `BackendError::ObjectNotFound` for a specific object kind ("tree",
+/// "commit", "copy") — jj-lib surfaces this string to users and to its own
+/// missing-object handling, so callers that know what they were reading
+/// (`read_tree`/`read_commit`/`read_copy`) report it precisely rather than
+/// through the generic [`to_backend_err`].
+fn object_not_found(object_type: &str, hash: String) -> BackendError {
+    BackendError::ObjectNotFound {
+        object_type: object_type.to_string(),
+        hash,
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "version-store object not found",
+        )),
+    }
+}
+
+/// Maps `Error::UnknownObject` to a typed [`object_not_found`] and
+/// everything else through [`to_backend_err`].
+fn not_found(object_type: &'static str) -> impl Fn(Error) -> BackendError {
+    move |err| match err {
+        Error::UnknownObject(hash) => object_not_found(object_type, hash),
+        other => to_backend_err(other),
     }
 }
 
@@ -60,6 +83,20 @@ pub struct VersionStoreBackend {
     root_commit_id: CommitId,
     root_change_id: ChangeId,
     empty_tree_id: TreeId,
+    /// Captured at [`VersionStoreBackend::open`] so the two *sync* `Backend`
+    /// methods (`get_copy_records`, `gc`) — whose implementations bottom
+    /// out in `tokio::fs` — have an explicit runtime to drive rather than
+    /// relying on `pollster::block_on`'s ambient `Handle::current()`, which
+    /// panics with an opaque "there is no reactor running" deep inside a
+    /// tokio::fs call when there's no runtime on the calling thread.
+    /// `Handle::block_on` still cannot be called from a thread already
+    /// inside *this* runtime's own task (jj-lib calling these sync methods
+    /// directly from async code, rather than via `spawn_blocking`, will
+    /// still panic — that tension is inherent to a sync method needing
+    /// async I/O, not something this backend can paper over) — but calling
+    /// from any other thread, with or without its own ambient runtime, now
+    /// works instead of panicking.
+    runtime: tokio::runtime::Handle,
 }
 
 impl std::fmt::Debug for VersionStoreBackend {
@@ -91,6 +128,7 @@ impl VersionStoreBackend {
             root_commit_id: CommitId::new(vec![0u8; COMMIT_ID_LEN]),
             root_change_id: ChangeId::new(vec![0u8; CHANGE_ID_LEN]),
             empty_tree_id: TreeId::from_bytes(empty_tree_hash.as_bytes()),
+            runtime: tokio::runtime::Handle::current(),
         })
     }
 
@@ -98,6 +136,35 @@ impl VersionStoreBackend {
     /// backend via [`jj_lib::backend::BackendInitializer`] /
     /// `StoreFactories::add_backend`.
     pub const NAME: &'static str = "fts-files-cas";
+
+    /// Drives `fut` to completion from a *sync* context — the seam
+    /// `get_copy_records`/`gc` need, since both are sync `Backend` methods
+    /// whose implementations do `tokio::fs` I/O. Two cases, handled
+    /// differently because `tokio::runtime::Handle::block_on` and
+    /// `pollster::block_on` fail in opposite circumstances:
+    ///
+    /// - Called from a thread that already has an ambient tokio runtime
+    ///   (including this backend's own — e.g. jj-lib invoking `gc`
+    ///   directly from async code, or from inside `spawn_blocking`, or a
+    ///   test calling `get_copy_records` inline): `Handle::block_on` would
+    ///   panic ("Cannot start a runtime from within a runtime") if that
+    ///   ambient runtime happens to be this one, so use `pollster::block_on`
+    ///   instead — it's a plain poll loop, not a runtime entry, so
+    ///   `tokio::fs`'s internal `Handle::current()` calls resolve against
+    ///   whatever runtime is already ambient with no nesting conflict.
+    /// - Called from a plain thread with no ambient runtime at all (a
+    ///   non-async caller): `pollster::block_on` would panic deep inside
+    ///   `tokio::fs` ("there is no reactor running"), so drive the handle
+    ///   captured at `open()` instead — `Handle::block_on` from an
+    ///   otherwise-bare thread is exactly tokio's supported pattern for
+    ///   this.
+    fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            pollster::block_on(fut)
+        } else {
+            self.runtime.block_on(fut)
+        }
+    }
 
     fn object_hash(id: &[u8]) -> Result<blake3::Hash> {
         let bytes: [u8; 32] = id.try_into().map_err(|_| {
@@ -130,11 +197,12 @@ impl VersionStoreBackend {
         &self.objects
     }
 
-    /// `root_commit_id()` without going through the `Backend` trait (kept
-    /// out of scope in a couple of internal helpers to avoid ambiguity with
-    /// inherent methods of the same name).
-    pub(crate) fn root_commit_id_for_gc(&self) -> &CommitId {
-        &self.root_commit_id
+    /// `empty_tree_id()` without going through the `Backend` trait, for
+    /// `gc.rs`'s sweep — it must pin this tree unconditionally (see that
+    /// module's doc on why the root commit's own walk can't be relied on
+    /// for it).
+    pub(crate) fn empty_tree_id_for_gc(&self) -> &TreeId {
+        &self.empty_tree_id
     }
 
     /// Read one directory level of a tree, exposed for `chain.rs`'s own
@@ -194,18 +262,30 @@ impl VersionStoreBackend {
         Ok(id)
     }
 
+    /// Children of `id` per the `copy-children` index. The index is a hint
+    /// written alongside every `write_copy_history` call, not an authority
+    /// (see `ObjectStore::append_index_line`'s doc): `gc` can sweep a
+    /// child's own copy-history object without knowing (or needing to know)
+    /// which parents' index files still name it. So a line naming an object
+    /// that no longer exists is skipped here rather than erroring — it's
+    /// unreachable by definition once its own object is gone, exactly the
+    /// case `get_related_copies` should treat as absent.
     async fn copy_children(&self, id: &CopyId) -> Result<Vec<CopyId>> {
         let lines = self
             .objects
             .read_index_lines("copy-children", &id.hex())
             .await?;
-        lines
-            .into_iter()
-            .map(|hex| {
-                CopyId::try_from_hex(&hex)
-                    .ok_or_else(|| Error::Object(format!("bad copy-children hex {hex:?}")))
-            })
-            .collect()
+        let mut children = Vec::with_capacity(lines.len());
+        for hex in lines {
+            let child = CopyId::try_from_hex(&hex)
+                .ok_or_else(|| Error::Object(format!("bad copy-children hex {hex:?}")))?;
+            match self.copy_history(&child).await {
+                Ok(_) => children.push(child),
+                Err(Error::UnknownObject(_)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(children)
     }
 }
 
@@ -254,16 +334,20 @@ impl Backend for VersionStoreBackend {
         // write half and the caller reads the other end. This is what
         // makes reads bounded-memory in both directions, matching
         // `write_file` (which already streams the caller's reader straight
-        // into the chunker).
+        // into the chunker). `StreamingRead` below is what turns the
+        // background task's failure into an `io::Error` on the caller's
+        // reader instead of a silently-truncated clean EOF.
         let (reader, mut writer) = tokio::io::duplex(64 * 1024);
-        tokio::spawn(async move {
-            if let Err(err) = chunks.read_to(file_id, &mut writer).await {
-                tracing_or_eprintln(&format!(
-                    "version-store: streaming read of {path:?} failed: {err}"
-                ));
-            }
+        let task = tokio::spawn(async move {
+            chunks
+                .read_to(file_id, &mut writer)
+                .await
+                .map_err(|err| format!("streaming read of {path:?} failed: {err}"))
         });
-        Ok(Box::pin(reader.compat()))
+        Ok(Box::pin(StreamingRead {
+            reader: reader.compat(),
+            task: Some(task),
+        }))
     }
 
     async fn write_file(
@@ -298,7 +382,7 @@ impl Backend for VersionStoreBackend {
     }
 
     async fn read_copy(&self, id: &CopyId) -> BackendResult<CopyHistory> {
-        self.copy_history(id).await.map_err(to_backend_err)
+        self.copy_history(id).await.map_err(not_found("copy"))
     }
 
     async fn write_copy(&self, contents: &CopyHistory) -> BackendResult<CopyId> {
@@ -364,7 +448,7 @@ impl Backend for VersionStoreBackend {
     }
 
     async fn read_tree(&self, _path: &RepoPath, id: &TreeId) -> BackendResult<Tree> {
-        self.tree(id).await.map_err(to_backend_err)
+        self.tree(id).await.map_err(not_found("tree"))
     }
 
     async fn write_tree(&self, _path: &RepoPath, contents: &Tree) -> BackendResult<TreeId> {
@@ -374,7 +458,7 @@ impl Backend for VersionStoreBackend {
     }
 
     async fn read_commit(&self, id: &CommitId) -> BackendResult<Commit> {
-        self.commit(id).await.map_err(to_backend_err)
+        self.commit(id).await.map_err(not_found("commit"))
     }
 
     async fn write_commit(
@@ -409,18 +493,20 @@ impl Backend for VersionStoreBackend {
         let paths = paths.map(<[RepoPathBuf]>::to_vec);
         let root = root.clone();
         let head = head.clone();
-        let records = pollster::block_on(crate::chain::copy_records_between(
-            self,
-            paths.as_deref(),
-            &root,
-            &head,
-        ))
-        .map_err(to_backend_err)?;
+        let records = self
+            .block_on(crate::chain::copy_records_between(
+                self,
+                paths.as_deref(),
+                &root,
+                &head,
+            ))
+            .map_err(to_backend_err)?;
         Ok(stream::iter(records.into_iter().map(Ok)).boxed())
     }
 
     fn gc(&self, index: &dyn Index, keep_newer: SystemTime) -> BackendResult<()> {
-        pollster::block_on(crate::gc::sweep(self, index, keep_newer)).map_err(to_backend_err)
+        self.block_on(crate::gc::sweep(self, index, keep_newer))
+            .map_err(to_backend_err)
     }
 }
 
@@ -447,6 +533,89 @@ fn depth_from_roots(id: &CopyId, histories: &[(CopyId, CopyHistory)]) -> usize {
     depth(id, histories, &mut Vec::new())
 }
 
-fn tracing_or_eprintln(message: &str) {
-    eprintln!("{message}");
+/// Wraps the reader half of `read_file`'s streaming duplex pipe so that a
+/// failure in the background task feeding it (see `read_file`) surfaces as
+/// an `io::Error` on the caller's reader instead of a silently-truncated
+/// clean EOF. Only consulted at true EOF (0 bytes read from the duplex):
+/// any bytes already buffered are always returned first.
+struct StreamingRead {
+    reader: tokio_util::compat::Compat<tokio::io::DuplexStream>,
+    task: Option<tokio::task::JoinHandle<std::result::Result<(), String>>>,
+}
+
+impl AsyncRead for StreamingRead {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        use std::future::Future as _;
+        use std::task::Poll;
+
+        let this = self.get_mut();
+        match Pin::new(&mut this.reader).poll_read(cx, buf) {
+            Poll::Ready(Ok(0)) => {
+                let Some(task) = this.task.as_mut() else {
+                    return Poll::Ready(Ok(0));
+                };
+                match Pin::new(task).poll(cx) {
+                    Poll::Ready(Ok(Ok(()))) => {
+                        this.task = None;
+                        Poll::Ready(Ok(0))
+                    }
+                    Poll::Ready(Ok(Err(message))) => {
+                        this.task = None;
+                        Poll::Ready(Err(std::io::Error::other(message)))
+                    }
+                    Poll::Ready(Err(join_err)) => {
+                        this.task = None;
+                        Poll::Ready(Err(std::io::Error::other(join_err)))
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+            other => other,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test: `gc` can sweep a copy-history object without
+    /// pruning the `copy-children` index entries that name it under its
+    /// parent (see `gc.rs`'s doc — the index is a hint, not an authority).
+    /// `get_related_copies` must skip a dangling entry rather than
+    /// erroring on the resulting `UnknownObject`.
+    #[tokio::test]
+    async fn get_related_copies_tolerates_a_swept_child_in_the_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = VersionStoreBackend::open(dir.path()).await.unwrap();
+
+        let path = RepoPath::from_internal_string("a").unwrap();
+        let origin = backend
+            .write_origin_copy(path, vec![1, 2, 3])
+            .await
+            .unwrap();
+
+        // A child hex that names no real object — simulating one whose own
+        // copy-history object `gc` already removed.
+        let swept_child_hex = "deadbeef".repeat(8);
+        backend
+            .objects
+            .append_index_line("copy-children", &origin.hex(), &swept_child_hex)
+            .await
+            .unwrap();
+
+        let related = Backend::get_related_copies(&backend, &origin)
+            .await
+            .unwrap();
+        assert_eq!(
+            related.len(),
+            1,
+            "the dangling child entry must be skipped, not surfaced as an error: {related:?}"
+        );
+        assert_eq!(related[0].id, origin);
+    }
 }

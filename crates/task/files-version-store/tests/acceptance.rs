@@ -266,3 +266,137 @@ async fn file_content_streams_through_the_backend_both_directions() {
     let round_tripped = read_file_content(backend, &file_id).await;
     assert_eq!(round_tripped, content);
 }
+
+/// Regression test: `gc`'s mark phase used to skip the root commit
+/// entirely, so the empty tree it points at was never marked live and
+/// aged out of a later sweep — bricking the repo (`read_tree` of the empty
+/// tree, needed to checkpoint from a fresh root, would fail with
+/// `UnknownObject`).
+#[tokio::test]
+async fn gc_does_not_brick_a_fresh_repo_by_sweeping_the_empty_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path().join("repo").as_path()).await.unwrap();
+
+    // gc before anything has ever been checkpointed — the only tree that
+    // exists yet is the root commit's own (empty) tree.
+    repo.store()
+        .gc(
+            repo.readonly_index().as_index(),
+            std::time::SystemTime::now(),
+        )
+        .unwrap();
+
+    // A checkpoint from the root must still work: it starts from the root
+    // commit's tree, which gc must not have swept.
+    let root_id = repo.store().root_commit_id().clone();
+    let repo = checkpoint(
+        &repo,
+        root_id,
+        vec![Change::Write {
+            path: path("a"),
+            content: b"hi".to_vec(),
+        }],
+        "first checkpoint after gc",
+    )
+    .await
+    .unwrap();
+    let head = repo.view().heads().iter().next().unwrap().clone();
+    let backend = backend_of(&repo);
+    let chain = version_chain(backend, &head, &path("a")).await.unwrap();
+    assert_eq!(
+        chain.len(),
+        1,
+        "checkpoint after gc should still work: {chain:?}"
+    );
+}
+
+/// Regression test: `read_file`'s background pump used to swallow a
+/// `ChunkStore` read failure (missing manifest) and just drop the writer,
+/// which the caller's reader observed as a clean, silently-truncated EOF
+/// instead of an error.
+#[tokio::test]
+async fn read_file_surfaces_a_missing_file_as_an_error_not_truncated_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path().join("repo").as_path()).await.unwrap();
+    let backend = backend_of(&repo);
+    let path = path("missing.wav");
+
+    // A FileId whose manifest was never written to the chunk store.
+    let bogus = JjFileId::from_bytes(&[0xAB; 32]);
+    let mut reader = backend.read_file(&path, &bogus).await.unwrap();
+    let mut buf = Vec::new();
+    let result = futures::AsyncReadExt::read_to_end(&mut reader, &mut buf).await;
+    assert!(
+        result.is_err(),
+        "expected an io error for a missing file id, got Ok({buf:?})"
+    );
+}
+
+/// Regression test: `checkpoint` used to resolve every `Change` against the
+/// parent commit's base tree rather than the checkpoint's own accumulated
+/// state, so a `Write` immediately followed by a `Rename` of that same path
+/// in one call would fail (the rename source "didn't exist" in the base
+/// tree) and a `Write` to a just-renamed-to path would sever its lineage
+/// (minting a fresh origin instead of reusing the rename's copy id).
+#[tokio::test]
+async fn checkpoint_resolves_changes_against_accumulated_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path().join("repo").as_path()).await.unwrap();
+    let root_id = repo.store().root_commit_id().clone();
+    let a = path("a.txt");
+    let b = path("b.txt");
+
+    // Write then, in the SAME checkpoint, rename what was just written.
+    let repo = checkpoint(
+        &repo,
+        root_id,
+        vec![
+            Change::Write {
+                path: a.clone(),
+                content: b"v1".to_vec(),
+            },
+            Change::Rename {
+                from: a.clone(),
+                to: b.clone(),
+                new_content: None,
+            },
+        ],
+        "write then rename in one checkpoint",
+    )
+    .await
+    .unwrap();
+    let head = repo.view().heads().iter().next().unwrap().clone();
+    let backend = backend_of(&repo);
+    let chain = version_chain(backend, &head, &b).await.unwrap();
+    assert_eq!(
+        chain.len(),
+        1,
+        "expected one saved state at b, got {chain:?}"
+    );
+    assert_eq!(read_file_content(backend, &chain[0].file_id).await, b"v1");
+
+    // A further checkpoint editing the renamed-to path must see it as the
+    // SAME lineage (not a fresh origin) — proof it's the accumulated
+    // state's copy id being reused, not a stale base-tree lookup.
+    let repo = checkpoint(
+        &repo,
+        head.clone(),
+        vec![Change::Write {
+            path: b.clone(),
+            content: b"v2".to_vec(),
+        }],
+        "edit after the same-checkpoint rename",
+    )
+    .await
+    .unwrap();
+    let head2 = repo.view().heads().iter().next().unwrap().clone();
+    let backend = backend_of(&repo);
+    let chain = version_chain(backend, &head2, &b).await.unwrap();
+    assert_eq!(
+        chain.len(),
+        2,
+        "expected the rename + the later edit as one unbroken chain, got {chain:?}"
+    );
+    assert_eq!(read_file_content(backend, &chain[0].file_id).await, b"v2");
+    assert_eq!(read_file_content(backend, &chain[1].file_id).await, b"v1");
+}

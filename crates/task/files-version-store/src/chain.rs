@@ -294,12 +294,18 @@ pub async fn copy_records_between(
                 for source_copy_id in &history.parents {
                     let source_history = backend.copy_history(source_copy_id).await?;
                     let source_path = source_history.current_path.clone();
-                    let source_file = match lookup(backend, &parent_tree, &source_path).await? {
-                        Some(TreeValue::File { id, .. }) => id,
-                        _ => match &new_value {
-                            Some(TreeValue::File { id, .. }) => id.clone(),
-                            _ => continue,
-                        },
+                    // The source must actually be a file in the parent
+                    // commit's tree — anything else (absent, a directory)
+                    // means there is no real file content to report as
+                    // "copied from" in this commit, and substituting the
+                    // *target's* new file id would fabricate content that
+                    // never existed at `source_path`. Skip the record
+                    // rather than inventing one.
+                    let Some(TreeValue::File {
+                        id: source_file, ..
+                    }) = lookup(backend, &parent_tree, &source_path).await?
+                    else {
+                        continue;
                     };
                     records.push(CopyRecord {
                         target: path.clone(),
@@ -314,4 +320,133 @@ pub async fn copy_records_between(
     }
 
     Ok(records)
+}
+
+#[cfg(test)]
+mod tests {
+    use jj_lib::backend::TreeValue;
+    use jj_lib::merged_tree::MergedTree;
+    use jj_lib::repo::Repo as _;
+    use jj_lib::repo_path::RepoPathBuf;
+    use jj_lib::tree_builder::TreeBuilder;
+
+    use super::copy_records_between;
+    use super::lookup;
+    use crate::backend::VersionStoreBackend;
+    use crate::checkpoint::{Change, checkpoint};
+    use crate::repo::init_repo;
+
+    fn path(s: &str) -> RepoPathBuf {
+        RepoPathBuf::from_internal_string(s).unwrap()
+    }
+
+    /// Regression test for a defect where a copy-history record naming a
+    /// source path that's absent from the immediate parent tree (e.g. the
+    /// source was deleted in an intermediate commit) caused
+    /// `copy_records_between` to fabricate `source_file` from the
+    /// *target's own* new content. `checkpoint::checkpoint`'s own
+    /// accumulated-state validation can't produce this — `Change::Rename`
+    /// always requires the source to currently exist — so this test builds
+    /// the scenario directly against the `Backend` trait, the way any other
+    /// caller writing commits straight through `write_tree`/`write_commit`
+    /// legitimately could.
+    #[tokio::test]
+    async fn copy_record_is_skipped_not_fabricated_when_source_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = init_repo(dir.path().join("repo").as_path()).await.unwrap();
+        let root_id = repo.store().root_commit_id().clone();
+        let a = path("a");
+        let c = path("c");
+
+        // commit1: create `a`.
+        let repo = checkpoint(
+            &repo,
+            root_id,
+            vec![Change::Write {
+                path: a.clone(),
+                content: b"hello".to_vec(),
+            }],
+            "create a",
+        )
+        .await
+        .unwrap();
+        let commit1 = repo.view().heads().iter().next().unwrap().clone();
+
+        let backend = repo.store().backend_impl::<VersionStoreBackend>().unwrap();
+        let commit1_tree_id = repo
+            .store()
+            .get_commit_async(&commit1)
+            .await
+            .unwrap()
+            .tree()
+            .tree_ids()
+            .as_resolved()
+            .cloned()
+            .unwrap();
+        let commit1_tree = backend.tree(&commit1_tree_id).await.unwrap();
+        let Some(TreeValue::File {
+            copy_id: a_copy_id, ..
+        }) = lookup(backend, &commit1_tree, &a).await.unwrap()
+        else {
+            panic!("a should be a file in commit1's tree");
+        };
+
+        // commit2: remove `a` (the source genuinely stops existing here).
+        let repo = checkpoint(
+            &repo,
+            commit1.clone(),
+            vec![Change::Remove { path: a.clone() }],
+            "remove a",
+        )
+        .await
+        .unwrap();
+        let commit2 = repo.view().heads().iter().next().unwrap().clone();
+
+        // commit3: planted directly through the `Backend` trait (bypassing
+        // `checkpoint`'s own validation) — a file at `c` whose copy history
+        // claims descent from `a`, even though `a` is absent from commit3's
+        // real parent (commit2).
+        let backend = repo.store().backend_impl::<VersionStoreBackend>().unwrap();
+        let phantom_copy_id = backend.write_copy_from(&c, a_copy_id).await.unwrap();
+        let store = repo.store().clone();
+        let commit2_tree_id = repo
+            .store()
+            .get_commit_async(&commit2)
+            .await
+            .unwrap()
+            .tree()
+            .tree_ids()
+            .as_resolved()
+            .cloned()
+            .unwrap();
+        let mut builder = TreeBuilder::new(store.clone(), commit2_tree_id);
+        builder.set(
+            c.clone(),
+            TreeValue::File {
+                id: jj_lib::backend::FileId::from_bytes(b"phantom-content-id-000000000000"),
+                executable: false,
+                copy_id: phantom_copy_id,
+            },
+        );
+        let commit3_tree_id = builder.write_tree().await.unwrap();
+        let merged_tree = MergedTree::resolved(store, commit3_tree_id);
+        let mut tx = repo.start_transaction();
+        tx.repo_mut()
+            .new_commit(vec![commit2.clone()], merged_tree)
+            .set_description("plant phantom copy record")
+            .write()
+            .await
+            .unwrap();
+        let repo = tx.commit("plant").await.unwrap();
+        let commit3 = repo.view().heads().iter().next().unwrap().clone();
+
+        let backend = repo.store().backend_impl::<VersionStoreBackend>().unwrap();
+        let records = copy_records_between(backend, None, &commit2, &commit3)
+            .await
+            .unwrap();
+        assert!(
+            records.is_empty(),
+            "a copy record with an absent source must be skipped, not fabricated: {records:?}"
+        );
+    }
 }
