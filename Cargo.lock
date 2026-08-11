@@ -9083,7 +9083,9 @@ dependencies = [
 name = "expression-editor-demo"
 version = "0.1.0"
 dependencies = [
+ "daw",
  "daw-proto",
+ "dawfile-reaper",
  "dawfile-standalone",
  "expression-editor-audio",
  "expression-editor-core",
@@ -9091,6 +9093,8 @@ dependencies = [
  "expression-editor-daw",
  "expression-editor-guitarpro",
  "expression-editor-tools",
+ "hound",
+ "midly",
 ]
 
 [[package]]
