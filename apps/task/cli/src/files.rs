@@ -4,7 +4,7 @@
 //! vox — remote server or embedded in-process backend alike, exactly
 //! like `task timer …` (see `establish_for_url`).
 
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 use files_proto::{FilesServiceClient, RootFlavor};
 
 use crate::establish_for_url;
@@ -52,6 +52,26 @@ pub(crate) enum FilesCmd {
     },
 }
 
+/// A root's versioning flavor, chosen at creation (ADR 0001). `media`
+/// is the default; `software` makes the root a colocated git repository
+/// (issue #273) so git, CI, and IDEs see an ordinary checkout while
+/// Files versions the same history.
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+pub(crate) enum FlavorArg {
+    #[default]
+    Media,
+    Software,
+}
+
+impl From<FlavorArg> for RootFlavor {
+    fn from(arg: FlavorArg) -> Self {
+        match arg {
+            FlavorArg::Media => Self::Media,
+            FlavorArg::Software => Self::Software,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 pub(crate) enum FilesRootCmd {
     /// Turn an existing folder into a File Root.
@@ -60,6 +80,10 @@ pub(crate) enum FilesRootCmd {
         /// Defaults to the folder's own name.
         #[arg(long)]
         name: Option<String>,
+        /// Versioning flavor. `software` adopts (or creates) a real git
+        /// repo in the folder — colocated, so git tooling is unaffected.
+        #[arg(long, value_enum, default_value_t = FlavorArg::Media)]
+        flavor: FlavorArg,
         #[arg(long)]
         json: bool,
     },
@@ -82,7 +106,12 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
     let client: FilesServiceClient = establish_for_url(&vox_url).await?;
 
     match cmd {
-        FilesCmd::Root(FilesRootCmd::Create { path, name, json }) => {
+        FilesCmd::Root(FilesRootCmd::Create {
+            path,
+            name,
+            flavor,
+            json,
+        }) => {
             let name = name.unwrap_or_else(|| {
                 std::path::Path::new(&path)
                     .file_name()
@@ -90,7 +119,7 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                     .unwrap_or_else(|| path.clone())
             });
             let root = client
-                .create_root(path, name, RootFlavor::Media)
+                .create_root(path, name, flavor.into())
                 .await
                 .map_err(|e| eyre::eyre!("create_root: {e}"))?;
             if json {
@@ -108,7 +137,7 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                 println!("{}", serde_json::to_string_pretty(&roots)?);
             } else {
                 for r in roots {
-                    println!("{}  {}  {}", r.id, r.name, r.path);
+                    println!("{}  {:?}  {}  {}", r.id, r.flavor, r.name, r.path);
                 }
             }
         }
@@ -120,7 +149,7 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
             if json {
                 println!("{}", serde_json::to_string_pretty(&root)?);
             } else {
-                println!("{} ({})", root.name, root.path);
+                println!("{} [{:?}] ({})", root.name, root.flavor, root.path);
             }
         }
         FilesCmd::Browse {

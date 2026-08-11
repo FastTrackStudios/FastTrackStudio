@@ -692,6 +692,15 @@ blake3 = { version = "1.8" }
 # implemented over the chunk store above. Pinned (jj-lib is pre-1.0 per the
 # ADR); vendor-patch here if/when we need to carry a local fix.
 jj-lib = { version = "=0.44.0" }
+# Software File Roots (issue #273) are colocated git: the `files` feature
+# talks to the root's real `.git` directly (branch refs, index) alongside
+# jj-lib's `GitBackend`. Same version jj-lib itself pins, so there is one
+# gix in the tree; features are a subset of jj-lib's own.
+gix = { version = "0.85", default-features = false, features = [
+    "index",
+    "max-performance-safe",
+    "sha1",
+] }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
 # Embeds the staged fasttrackstudio web bundle into the native binary

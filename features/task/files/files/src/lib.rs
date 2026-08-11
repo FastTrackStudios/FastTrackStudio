@@ -15,6 +15,8 @@ mod backend;
 mod checkpoint;
 mod consts;
 mod error;
+mod git_root;
+mod ignore;
 mod registry;
 mod repo_open;
 mod scan;

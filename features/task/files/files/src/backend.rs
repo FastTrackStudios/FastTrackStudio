@@ -51,8 +51,9 @@ use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use task_files_version_store::VersionStoreBackend;
 use uuid::Uuid;
 
-use crate::consts::{MARKER_FILE, STORE_DIR};
+use crate::consts::{GIT_DIR, MARKER_FILE, STORE_DIR};
 use crate::error::Error;
+use crate::git_root;
 use crate::registry::Registry;
 use crate::repo_open;
 use crate::scan;
@@ -108,6 +109,7 @@ fn to_files_error(err: Error) -> FilesError {
         Error::Json(e) => FilesError::Io(format!("registry json: {e}")),
         Error::VersionStore(e) => FilesError::Io(format!("version store: {e}")),
         Error::Repo(m) => FilesError::Io(format!("jj repo: {m}")),
+        Error::JjBackend(e) => FilesError::Io(format!("jj backend: {e}")),
     }
 }
 
@@ -182,10 +184,6 @@ impl FilesBackend {
             .ok_or_else(|| Error::NotFound(id.to_string()))
     }
 
-    fn store_dir(root_path: &Path) -> PathBuf {
-        root_path.join(STORE_DIR)
-    }
-
     /// Canonicalize `requested` and confirm it resolves inside
     /// [`FilesBackend::confine_root`] — the org-scoping check for
     /// `create_root` (a not-yet-existing marker means `requested`
@@ -205,13 +203,22 @@ impl FilesBackend {
         Ok(canonical)
     }
 
-    fn head_of(repo: &Arc<ReadonlyRepo>) -> CommitId {
-        repo.view()
-            .heads()
-            .iter()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| repo.store().root_commit_id().clone())
+    /// The commit a checkpoint on this root builds on. Media roots read
+    /// jj's own view head; software roots follow git's checked-out
+    /// branch instead, so checkpoints continue the branch a developer
+    /// (or CI) is actually on rather than an arbitrary head of a repo
+    /// that may carry many (see [`git_root::head_commit`]).
+    fn head_of(repo: &Arc<ReadonlyRepo>, flavor: RootFlavor) -> Result<CommitId, Error> {
+        match flavor {
+            RootFlavor::Software => git_root::head_commit(repo),
+            RootFlavor::Media => Ok(repo
+                .view()
+                .heads()
+                .iter()
+                .next()
+                .cloned()
+                .unwrap_or_else(|| repo.store().root_commit_id().clone())),
+        }
     }
 
     /// Backend + current head for `root`, opening (and caching) the
@@ -223,9 +230,8 @@ impl FilesBackend {
                 return Ok((rt.repo.clone(), rt.head.clone()));
             }
         }
-        let store_dir = Self::store_dir(Path::new(&root.path));
-        let repo = repo_open::open_or_init_repo(&store_dir)?;
-        let head = Self::head_of(&repo);
+        let repo = repo_open::open_or_init_repo(Path::new(&root.path), root.flavor)?;
+        let head = Self::head_of(&repo, root.flavor)?;
         self.repos.lock().expect("repo cache lock poisoned").insert(
             root.id,
             RootRuntime {
@@ -258,13 +264,6 @@ impl FilesBackend {
         name: String,
         flavor: RootFlavor,
     ) -> Result<FileRootInfo, Error> {
-        if flavor != RootFlavor::Media {
-            return Err(Error::BadRequest(
-                "only RootFlavor::Media is implemented in v1 (issue #259); Software roots are \
-                 colocated git, a distinct build (ADR 0001)"
-                    .into(),
-            ));
-        }
         let requested = PathBuf::from(&path);
         let metadata =
             std::fs::metadata(&requested).map_err(|e| Error::BadRequest(format!("{path}: {e}")))?;
@@ -295,9 +294,8 @@ impl FilesBackend {
             )));
         }
 
-        let store_dir = Self::store_dir(&canonical);
-        let repo = repo_open::open_or_init_repo(&store_dir)?;
-        let head = Self::head_of(&repo);
+        let repo = repo_open::open_or_init_repo(&canonical, flavor)?;
+        let head = Self::head_of(&repo, flavor)?;
 
         let id = Uuid::new_v4();
         let created_at = Utc::now();
@@ -320,7 +318,17 @@ impl FilesBackend {
         Ok(root)
     }
 
-    fn list_dir(dir: &Path, hide_internals: bool) -> Result<Vec<BrowseEntry>, Error> {
+    /// `hide_internals` hides the root's own bookkeeping (the marker
+    /// file and the version store) — set only when listing a root's top
+    /// level through `browse`, never through `drive_browse`, which shows
+    /// the raw tree. `hide_git` additionally hides `.git`, which is a
+    /// root's own object store on the software flavor but ordinary
+    /// content on a media one.
+    fn list_dir(
+        dir: &Path,
+        hide_internals: bool,
+        hide_git: bool,
+    ) -> Result<Vec<BrowseEntry>, Error> {
         let mut out = Vec::new();
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
@@ -329,6 +337,9 @@ impl FilesBackend {
                 continue; // non-UTF8 names are out of scope for v1
             };
             if hide_internals && (name == MARKER_FILE || name == STORE_DIR) {
+                continue;
+            }
+            if hide_git && name == GIT_DIR {
                 continue;
             }
             let file_type = entry.file_type()?;
@@ -377,7 +388,12 @@ impl FilesBackend {
         if !metadata.is_dir() {
             return Err(Error::BadRequest(format!("{subpath}: not a directory")));
         }
-        Self::list_dir(&canonical_target, canonical_target == root_path)
+        let at_root = canonical_target == root_path;
+        Self::list_dir(
+            &canonical_target,
+            at_root,
+            at_root && root.flavor == RootFlavor::Software,
+        )
     }
 
     fn drive_browse_inner(&self, path: String) -> Result<Vec<BrowseEntry>, Error> {
@@ -386,16 +402,17 @@ impl FilesBackend {
         if !metadata.is_dir() {
             return Err(Error::BadRequest(format!("{path}: not a directory")));
         }
-        Self::list_dir(&confined, false)
+        Self::list_dir(&confined, false, false)
     }
 
     fn chain_inner(&self, root_id: Uuid, path: String) -> Result<Vec<ChainEntry>, Error> {
         let root = self.get_root_info(root_id)?;
         let (repo, head) = self.ensure_repo(&root)?;
-        let backend = repo
-            .store()
-            .backend_impl::<VersionStoreBackend>()
-            .ok_or_else(|| Error::Repo("root's repo is not a VersionStoreBackend".into()))?;
+        // Both flavors derive chains through the same DAG walk, against
+        // jj's `Backend` trait rather than either concrete backend —
+        // that is what "the chain/history RPC works identically on a
+        // software root" means in code (issue #273).
+        let backend = repo.store().backend();
         let repo_path = RepoPathBuf::from_internal_string(&path)
             .map_err(|e| Error::BadRequest(format!("{path:?}: {e}")))?;
         let entries = pollster::block_on(task_files_version_store::chain::version_chain(
@@ -429,16 +446,13 @@ impl FilesBackend {
         let _guard = lock.lock().expect("checkpoint lock poisoned");
 
         let (repo, head) = self.ensure_repo(&root)?;
-        let backend = repo
-            .store()
-            .backend_impl::<VersionStoreBackend>()
-            .ok_or_else(|| Error::Repo("root's repo is not a VersionStoreBackend".into()))?;
+        let backend = repo.store().backend();
 
-        let head_commit = pollster::block_on(backend.commit(&head))?;
+        let head_commit = pollster::block_on(backend.read_commit(&head))?;
         let head_tree_id = head_commit.root_tree.clone().into_resolved().map_err(|_| {
             Error::Repo("checkpoint onto a conflicted tree is unsupported (v1)".into())
         })?;
-        let head_tree = pollster::block_on(backend.tree(&head_tree_id))?;
+        let head_tree = pollster::block_on(backend.read_tree(RepoPath::root(), &head_tree_id))?;
         let mut head_paths: BTreeSet<RepoPathBuf> = BTreeSet::new();
         pollster::block_on(scan::walk_tree_paths(
             backend,
@@ -447,7 +461,7 @@ impl FilesBackend {
             &mut head_paths,
         ))?;
 
-        let disk_files = scan::walk_live_tree(Path::new(&root.path))?;
+        let disk_files = scan::walk_live_tree(Path::new(&root.path), root.flavor)?;
         let description = description.unwrap_or_else(|| "checkpoint now".to_string());
         let result = crate::checkpoint::write_checkpoint(
             &repo,
@@ -459,7 +473,14 @@ impl FilesBackend {
             &head_paths,
             description.clone(),
         )?;
-        self.set_head(root_id, result.repo, result.commit_id.clone());
+        // Software roots are colocated git: move the checked-out branch
+        // and rewrite the index so the commit we just wrote is what
+        // `git log` / `git status` / `git push` see (issue #273).
+        let repo = match root.flavor {
+            RootFlavor::Software => git_root::publish_checkpoint(result.repo, &result.commit_id)?,
+            RootFlavor::Media => result.repo,
+        };
+        self.set_head(root_id, repo, result.commit_id.clone());
 
         let info = CheckpointInfo {
             root_id,
