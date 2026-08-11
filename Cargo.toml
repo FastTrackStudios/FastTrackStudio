@@ -688,6 +688,10 @@ iroh = { version = "1" }
 fastcdc = { version = "4", features = ["tokio"] }
 iroh-blobs = { version = "0.103", default-features = false, features = ["fs-store"] }
 blake3 = { version = "1.8" }
+# Files version-store engine (issue #257/ADR 0001): jj-lib's `Backend` trait,
+# implemented over the chunk store above. Pinned (jj-lib is pre-1.0 per the
+# ADR); vendor-patch here if/when we need to carry a local fix.
+jj-lib = { version = "=0.44.0" }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
 # Embeds the staged fasttrackstudio web bundle into the native binary
@@ -848,6 +852,7 @@ objc = "0.2.7"
 
 # ── Async runtime ─────────────────────────────────────────────────────
 tokio = { version = "1.48", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 
 # ── Serialization ─────────────────────────────────────────────────────
@@ -963,6 +968,10 @@ ui = { path = "crates/task/ui" }
 # substrate for media File Roots — fastcdc + blake3 + iroh-blobs, with
 # Files-owned manifests kept outside the blob store (issue #256).
 task-files-chunk-store = { path = "crates/task/files-chunk-store" }
+# Files version-store (issue #257/ADR 0001): the jj-lib `Backend` over the
+# chunk store above — per-file version chains, recorded renames, divergent
+# concurrent writes.
+task-files-version-store = { path = "crates/task/files-version-store" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }
