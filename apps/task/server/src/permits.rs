@@ -342,6 +342,12 @@ table!(WORKSTREAM_STREAM, "workstream-stream", "workstreams/**", [rd "events"]);
 table!(FILES, "files", "files/**", [
     wr "create_root", rd "list_roots", rd "get_root", rd "browse", rd "drive_browse",
     rd "chain", wr "checkpoint_now",
+    // Curation (issue #261). Naming and starting an iteration are
+    // ordinary writes; dropping a name and running GC are admin-tier
+    // because both can end an object's protection.
+    wr "name_version", rd "list_named_versions", rd "resolve_named_version",
+    wa "unname_version", wr "start_project_version", rd "list_project_versions",
+    wa "gc_root",
 ]);
 table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
 table!(TASK, "task", "tasks/**", [

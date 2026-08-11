@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::model::{BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo};
+use crate::model::{
+    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, NamedVersion, ProjectVersion,
+    VersionRef,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
 #[repr(u8)]
@@ -38,6 +41,10 @@ pub enum FilesEvent {
     RootCreated(FileRootInfo),
     /// A root's session ended in a certified checkpoint.
     Checkpointed(CheckpointInfo),
+    /// A version was curated with a name (issue #261).
+    VersionNamed(NamedVersion),
+    /// A new Project Version of a root was started.
+    ProjectVersionStarted(ProjectVersion),
 }
 
 #[architect::rpc]
@@ -92,7 +99,68 @@ pub trait FilesService {
         description: Option<String>,
     ) -> Result<CheckpointInfo, FilesError>;
 
-    /// Every root-creation / checkpoint event, as it happens.
+    /// Curate `commit_id` in `root_id` as a [`NamedVersion`] — writes
+    /// the Vault entity that references `(root id, change id)`. The
+    /// version store is not touched: naming is Vault-side curation
+    /// (ADR 0001). Fails with [`FilesError::NotFound`] when `root_id`
+    /// is unknown or `commit_id` names no commit in that root's store,
+    /// and with [`FilesError::AlreadyExists`] when this root already
+    /// has a Named Version by that name.
+    async fn name_version(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        name: String,
+    ) -> Result<NamedVersion, FilesError>;
+
+    /// Every Named Version the Vault holds, newest first. `root_id`
+    /// filters to one root; `None` lists the whole org's.
+    async fn list_named_versions(
+        &self,
+        root_id: Option<Uuid>,
+    ) -> Result<Vec<NamedVersion>, FilesError>;
+
+    /// What a Named Version points at in the store *right now* — the
+    /// resolution step a share link targeting it performs before
+    /// streaming (glossary "Share link"). Fails with
+    /// [`FilesError::NotFound`] when the entity is gone or its change
+    /// resolves to nothing in the root's store.
+    async fn resolve_named_version(&self, id: Uuid) -> Result<VersionRef, FilesError>;
+
+    /// Drop a Named Version's curation (the Vault entity), leaving the
+    /// automatic chain untouched. Its content stops being immortal at
+    /// the next [`FilesService::gc_root`].
+    async fn unname_version(&self, id: Uuid) -> Result<(), FilesError>;
+
+    /// Start a new [`ProjectVersion`] of `root_id` from its current
+    /// checkpoint head: writes the Vault entity with the next
+    /// auto-assigned number and an optional `label`. The live tree is
+    /// untouched — the restart flow that carries files forward is
+    /// #268.
+    async fn start_project_version(
+        &self,
+        root_id: Uuid,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, FilesError>;
+
+    /// Every Project Version of `root_id`, oldest number first.
+    async fn list_project_versions(&self, root_id: Uuid)
+    -> Result<Vec<ProjectVersion>, FilesError>;
+
+    /// Run one GC pass over `root_id`'s version store with the protect
+    /// set resolved from the Vault: everything Named/Project Versions
+    /// reference is immortal regardless of age, on top of jj's own
+    /// index reachability. `keep_newer_secs` guards concurrent writers
+    /// by refusing to sweep anything written within that many seconds
+    /// (default 60).
+    async fn gc_root(
+        &self,
+        root_id: Uuid,
+        keep_newer_secs: Option<u64>,
+    ) -> Result<GcReport, FilesError>;
+
+    /// Every root-creation / checkpoint / version-curation event, as it
+    /// happens.
     #[subscribe]
     fn events(&self) -> FilesEvent;
 }

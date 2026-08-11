@@ -1,0 +1,629 @@
+//! Issue #261 — Named Versions and Project Versions as Vault entities,
+//! end to end over an in-process `architect::LocalServer` (the spec's
+//! Testing Decisions primary seam), one test per acceptance criterion:
+//!
+//! 1. name a version over RPC; it appears in the chain as curated metadata
+//! 2. GC sweeps an unnamed old checkpoint but never a Named Version's content
+//! 3. the entities replicate with the Vault and re-resolve on any device
+//! 4. share-link targeting of a Named Version resolves to the exact change id
+//!
+//! Criterion 2 is the one place this file reaches past the RPC surface:
+//! chunk-level survival is invisible at the service boundary, so it uses
+//! the spec's named "secondary harness" (`FilesBackend::with_version_store`)
+//! to build the two commits and then to observe what survived. The GC pass
+//! itself, and the naming that protects it, still go over RPC.
+
+use std::io::Cursor;
+use std::time::Duration;
+
+use architect::{LayerRouter, LocalServer, Scope};
+use files::{FilesBackend, FilesServiceClient, RootFlavor, files_service_layer};
+use jj_lib::backend::{
+    Backend as _, ChangeId, Commit, CommitId, FileId, MillisSinceEpoch, Signature, Timestamp, Tree,
+    TreeValue,
+};
+use jj_lib::merge::Merge;
+use jj_lib::object_id::ObjectId as _;
+use jj_lib::repo_path::{RepoPath, RepoPathComponentBuf};
+use task_files_version_store::VersionStoreBackend;
+
+/// A backend plus the two directories it straddles: the org's files
+/// area (root content + version stores) and the org vault (the curated
+/// version entities).
+struct Fixture {
+    _data: tempfile::TempDir,
+    _vault: tempfile::TempDir,
+    data_dir: std::path::PathBuf,
+    vault_dir: std::path::PathBuf,
+    root_dir: std::path::PathBuf,
+    backend: FilesBackend,
+    scope: std::sync::Arc<Scope>,
+    _local: LocalServer,
+    client: FilesServiceClient,
+}
+
+async fn fixture(root_name: &str) -> Fixture {
+    let data = tempfile::tempdir().expect("data tempdir");
+    let vault = tempfile::tempdir().expect("vault tempdir");
+    let root_dir = data.path().join("mix-session");
+    std::fs::create_dir(&root_dir).unwrap();
+
+    let backend = FilesBackend::new(data.path(), vault.path()).expect("backend");
+    let scope = Scope::new();
+    let local = LocalServer::serve(
+        LayerRouter::new().merge(files_service_layer(backend.clone())),
+        scope.clone(),
+    );
+    let client: FilesServiceClient = local.establish().await.expect("establish client");
+
+    client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            root_name.to_string(),
+            RootFlavor::Media,
+        )
+        .await
+        .expect("create_root rpc");
+
+    Fixture {
+        data_dir: data.path().to_path_buf(),
+        vault_dir: vault.path().to_path_buf(),
+        _data: data,
+        _vault: vault,
+        root_dir,
+        backend,
+        scope,
+        _local: local,
+        client,
+    }
+}
+
+impl Fixture {
+    async fn root_id(&self) -> uuid::Uuid {
+        self.client.list_roots().await.expect("list_roots")[0].id
+    }
+
+    /// Tear the backend all the way down — flush its chunk stores,
+    /// close the RPC scope, drop every handle — and hand back the two
+    /// temp directories, so a caller that wants to open a *second*
+    /// backend over the same on-disk store can keep them alive while
+    /// the first one is genuinely gone (two `FsStore`s over one store
+    /// in a process is the shape that hangs — see `rpc_surface.rs`).
+    async fn finish(self) -> (tempfile::TempDir, tempfile::TempDir) {
+        let Self {
+            _data,
+            _vault,
+            backend,
+            scope,
+            _local,
+            client,
+            ..
+        } = self;
+        backend.shutdown().await;
+        drop(client);
+        scope.close().await;
+        drop(_local);
+        drop(backend);
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        (_data, _vault)
+    }
+}
+
+/// Every `.md` page under `dir`, relative-path → contents.
+fn vault_pages(dir: &std::path::Path) -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, prefix: &str, out: &mut Vec<(String, String)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let rel = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            if entry.path().is_dir() {
+                walk(&entry.path(), &rel, out);
+            } else if rel.ends_with(".md") {
+                out.push((
+                    rel,
+                    std::fs::read_to_string(entry.path()).unwrap_or_default(),
+                ));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, "", &mut out);
+    out.sort();
+    out
+}
+
+/// AC 1: "Name a version over RPC; it appears in the chain as curated
+/// metadata." And the entity really is a Vault page — plain markdown
+/// with frontmatter, which is what makes AC 3 true for free.
+#[tokio::test(flavor = "multi_thread")]
+async fn naming_a_version_shows_up_in_the_chain_as_curated_metadata() {
+    let fx = fixture("Mix Session").await;
+    let root_id = fx.root_id().await;
+
+    std::fs::write(fx.root_dir.join("mix.wav"), b"take one").unwrap();
+    let cp1 = fx
+        .client
+        .checkpoint_now(root_id, Some("first save".into()))
+        .await
+        .expect("checkpoint_now rpc");
+    std::fs::write(fx.root_dir.join("mix.wav"), b"take two, brighter").unwrap();
+    let cp2 = fx
+        .client
+        .checkpoint_now(root_id, None)
+        .await
+        .expect("checkpoint_now rpc");
+
+    // Before naming, the chain is uncurated.
+    let chain = fx
+        .client
+        .chain(root_id, "mix.wav".into())
+        .await
+        .expect("chain rpc");
+    assert!(
+        chain.iter().all(|e| e.names.is_empty()),
+        "an automatic chain carries no names until someone curates one: {chain:?}"
+    );
+
+    let named = fx
+        .client
+        .name_version(root_id, cp1.commit_id.clone(), "v3 for client".into())
+        .await
+        .expect("name_version rpc");
+    assert_eq!(named.name, "v3 for client");
+    assert_eq!(named.commit_id, cp1.commit_id);
+    assert!(
+        !named.change_id.is_empty(),
+        "the entity references (root id, change id), not just a commit"
+    );
+
+    let chain = fx
+        .client
+        .chain(root_id, "mix.wav".into())
+        .await
+        .expect("chain rpc");
+    let curated: Vec<_> = chain
+        .iter()
+        .filter(|e| !e.names.is_empty())
+        .map(|e| (e.commit_id.as_str(), e.names.clone()))
+        .collect();
+    assert_eq!(
+        curated,
+        vec![(cp1.commit_id.as_str(), vec!["v3 for client".to_string()])],
+        "only the named checkpoint carries the label: {chain:?}"
+    );
+    assert!(
+        chain
+            .iter()
+            .find(|e| e.commit_id == cp2.commit_id)
+            .is_some_and(|e| e.names.is_empty()),
+        "the newer, uncurated save stays uncurated"
+    );
+
+    // Naming twice under one name is a conflict, not a silent second page.
+    assert!(
+        fx.client
+            .name_version(root_id, cp2.commit_id.clone(), "v3 for client".into())
+            .await
+            .is_err(),
+        "a root's Named Version names are unique"
+    );
+
+    // Naming a commit that isn't in this root's store is rejected.
+    assert!(
+        fx.client
+            .name_version(root_id, "ab".repeat(32), "bogus".into())
+            .await
+            .is_err(),
+        "a Named Version can't reference a commit the store doesn't have"
+    );
+
+    // The entity is an ordinary vault page.
+    let pages = vault_pages(&fx.vault_dir);
+    let (path, body) = pages
+        .iter()
+        .find(|(p, _)| p.contains("versions/"))
+        .expect("the Named Version was written into the vault");
+    assert!(
+        path.starts_with("Files/mix-session/versions/"),
+        "versions live under their root's own vault folder: {path}"
+    );
+    assert!(body.starts_with("---\n"), "frontmatter page: {body}");
+    assert!(body.contains("type: files-named-version"));
+    assert!(body.contains(&format!("rootId: {root_id}")));
+    assert!(body.contains(&format!("commitId: {}", cp1.commit_id)));
+
+    // `unname_version` drops the curation and leaves the chain alone.
+    fx.client
+        .unname_version(named.id)
+        .await
+        .expect("unname_version rpc");
+    let chain = fx
+        .client
+        .chain(root_id, "mix.wav".into())
+        .await
+        .expect("chain rpc");
+    assert_eq!(chain.len(), 2, "the automatic chain is untouched");
+    assert!(chain.iter().all(|e| e.names.is_empty()));
+
+    fx.finish().await;
+}
+
+/// Writes `content` at `name` and wraps it in a commit written straight
+/// through the `Backend` trait rather than a jj transaction — so, like an
+/// expired auto-snapshot or a checkpoint no current view head descends
+/// from, it is never reachable from `index.all_heads_for_gc()`. That is
+/// the shape that distinguishes "protected because the Vault says so"
+/// from "protected because jj can still see it".
+async fn write_unreachable_commit(
+    vs: &VersionStoreBackend,
+    name: &str,
+    content: &[u8],
+) -> (CommitId, task_files_chunk_store::FileId) {
+    let path = RepoPath::from_internal_string(name).unwrap();
+    let chunk_id = vs
+        .chunks()
+        .write_stream(Cursor::new(content.to_vec()))
+        .await
+        .unwrap();
+    let copy_id = vs
+        .write_origin_copy(path, chunk_id.as_bytes().to_vec())
+        .await
+        .unwrap();
+
+    let tree = Tree::from_sorted_entries(vec![(
+        RepoPathComponentBuf::new(name).unwrap(),
+        TreeValue::File {
+            id: FileId::from_bytes(chunk_id.as_bytes()),
+            executable: false,
+            copy_id,
+        },
+    )]);
+    let tree_id = vs.write_tree(RepoPath::root(), &tree).await.unwrap();
+
+    let empty_signature = Signature {
+        name: String::new(),
+        email: String::new(),
+        timestamp: Timestamp {
+            timestamp: MillisSinceEpoch(0),
+            tz_offset: 0,
+        },
+    };
+    let commit = Commit {
+        parents: vec![vs.root_commit_id().clone()],
+        predecessors: vec![],
+        root_tree: Merge::from_vec(vec![tree_id]),
+        conflict_labels: Merge::from_vec(vec![String::new()]),
+        change_id: ChangeId::new(name.bytes().cycle().take(16).collect()),
+        description: format!("unreachable: {name}"),
+        author: empty_signature.clone(),
+        committer: empty_signature,
+        secure_sig: None,
+    };
+    let (commit_id, _) = vs.write_commit(commit, None).await.unwrap();
+    (commit_id, chunk_id)
+}
+
+/// AC 2: "GC sweeps an unnamed old checkpoint but never a Named
+/// Version's content."
+///
+/// Both commits below are the same age and the same shape — old,
+/// index-unreachable, with one chunk each. The *only* difference is
+/// that the Vault holds a Named Version pointing at one of them, which
+/// is exactly ADR 0001's "the Vault is the authority on immortality".
+#[tokio::test(flavor = "multi_thread")]
+async fn gc_sweeps_the_unnamed_old_checkpoint_and_never_the_named_one() {
+    let fx = fixture("Retention").await;
+    let root_id = fx.root_id().await;
+
+    let (kept_commit, kept_chunk, swept_chunk) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    let (kept, kept_chunk) =
+                        write_unreachable_commit(vs, "v3-for-client.wav", b"the deliverable").await;
+                    let (_swept, swept_chunk) =
+                        write_unreachable_commit(vs, "scratch.wav", b"an expired auto-snapshot")
+                            .await;
+                    (kept, kept_chunk, swept_chunk)
+                })
+            })
+            .expect("with_version_store")
+    });
+
+    fx.client
+        .name_version(root_id, kept_commit.hex(), "v3 for client".into())
+        .await
+        .expect("name_version rpc");
+
+    // Both commits are older than this pass's concurrent-writer guard.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let report = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("gc_root rpc");
+    assert_eq!(
+        report.protected_commits, 1,
+        "the Vault contributed exactly the Named Version to the protect set"
+    );
+    assert_eq!(
+        report.manifests_swept, 1,
+        "only the unnamed commit's content was swept: {report:?}"
+    );
+
+    let (kept_present, swept_present) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    (
+                        vs.chunks().has(kept_chunk).await,
+                        vs.chunks().has(swept_chunk).await,
+                    )
+                })
+            })
+            .expect("with_version_store")
+    });
+    assert!(
+        kept_present,
+        "a Named Version's content is immortal regardless of age or index reachability"
+    );
+    assert!(
+        !swept_present,
+        "the unnamed old checkpoint's content is gone"
+    );
+
+    // The named content is still readable, not merely present.
+    let bytes = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(vs.chunks().read_to_vec(kept_chunk))
+            })
+            .expect("with_version_store")
+    })
+    .expect("read the protected content back");
+    assert_eq!(bytes, b"the deliverable");
+
+    // Drop the curation and the same pass now sweeps it: the protect
+    // set really is read from the Vault every time, not baked in.
+    let named = fx
+        .client
+        .list_named_versions(Some(root_id))
+        .await
+        .expect("list_named_versions rpc");
+    fx.client
+        .unname_version(named[0].id)
+        .await
+        .expect("unname_version rpc");
+    let report = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("gc_root rpc");
+    assert_eq!(report.protected_commits, 0);
+    assert_eq!(report.manifests_swept, 1, "{report:?}");
+
+    fx.finish().await;
+}
+
+/// AC 3: "Named/Project Version entities replicate with the Vault
+/// (offline-first) and re-resolve on any device."
+///
+/// The proof is in two halves. First: another device's copy of the
+/// vault — a byte-for-byte copy of the pages, which is all vault
+/// replication delivers — re-resolves both entities against the same
+/// root with no shared state whatsoever, because a fresh backend rebuilt
+/// them from the markdown alone. Second: a page dropped into the vault
+/// after the backend was already running is picked up on the very next
+/// call (live FS scan, no reindex), which is what an inbound sync looks
+/// like.
+#[tokio::test(flavor = "multi_thread")]
+async fn version_entities_replicate_with_the_vault_and_re_resolve_elsewhere() {
+    let fx = fixture("Album").await;
+    let root_id = fx.root_id().await;
+
+    std::fs::write(fx.root_dir.join("master.wav"), b"master v1").unwrap();
+    let cp1 = fx
+        .client
+        .checkpoint_now(root_id, Some("master".into()))
+        .await
+        .expect("checkpoint_now rpc");
+
+    let named = fx
+        .client
+        .name_version(root_id, cp1.commit_id.clone(), "v1 approved".into())
+        .await
+        .expect("name_version rpc");
+    let pv1 = fx
+        .client
+        .start_project_version(root_id, None)
+        .await
+        .expect("start_project_version rpc");
+    let pv2 = fx
+        .client
+        .start_project_version(root_id, Some("Client remix".into()))
+        .await
+        .expect("start_project_version rpc");
+    assert_eq!((pv1.number, pv2.number), (1, 2), "auto-numbered from 1");
+    assert_eq!(pv2.label.as_deref(), Some("Client remix"));
+    assert_eq!(
+        pv1.commit_id, cp1.commit_id,
+        "started from the current head"
+    );
+
+    // What replication actually carries: markdown pages.
+    let pages = vault_pages(&fx.vault_dir);
+    assert_eq!(
+        pages.len(),
+        3,
+        "one page per entity, nothing else: {:?}",
+        pages.iter().map(|(p, _)| p).collect::<Vec<_>>()
+    );
+
+    let data_dir = fx.data_dir.clone();
+    let root_dir = fx.root_dir.clone();
+    // Hold the temp dirs: the root's content and version store outlive
+    // the device that made them, which is the whole point.
+    let _dirs = fx.finish().await;
+
+    // "Another device": a fresh backend over a *different* vault
+    // directory holding only the replicated pages.
+    let other_vault = tempfile::tempdir().expect("other vault");
+    for (rel, body) in &pages {
+        let abs = other_vault.path().join(rel);
+        std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+        std::fs::write(abs, body).unwrap();
+    }
+
+    let backend = FilesBackend::new(&data_dir, other_vault.path()).expect("backend");
+    let scope = Scope::new();
+    let local = LocalServer::serve(
+        LayerRouter::new().merge(files_service_layer(backend.clone())),
+        scope.clone(),
+    );
+    let client: FilesServiceClient = local.establish().await.expect("establish client");
+
+    let replicated = client
+        .list_named_versions(Some(root_id))
+        .await
+        .expect("list_named_versions rpc");
+    assert_eq!(replicated.len(), 1);
+    assert_eq!(replicated[0].id, named.id, "same entity identity");
+    assert_eq!(replicated[0].name, "v1 approved");
+
+    let resolved = client
+        .resolve_named_version(named.id)
+        .await
+        .expect("resolve_named_version rpc");
+    assert_eq!(resolved.root_id, root_id);
+    assert_eq!(resolved.commit_id, cp1.commit_id);
+    assert_eq!(resolved.change_id, named.change_id);
+
+    let project_versions = client
+        .list_project_versions(root_id)
+        .await
+        .expect("list_project_versions rpc");
+    assert_eq!(
+        project_versions
+            .iter()
+            .map(|v| v.number)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(project_versions[1].label.as_deref(), Some("Client remix"));
+
+    // An inbound sync while the backend is live: numbering and listing
+    // both see it on the next call, with no reindex step anywhere.
+    let (rel, body) = pages
+        .iter()
+        .find(|(p, _)| p.contains("project-versions/"))
+        .expect("a project-version page");
+    let arrived = other_vault
+        .path()
+        .join(rel.replace("v1.md", "v9-from-the-laptop.md"));
+    std::fs::create_dir_all(arrived.parent().unwrap()).unwrap();
+    std::fs::write(
+        &arrived,
+        body.replace("number: 1", "number: 9")
+            .replace(&named.id.to_string(), &uuid::Uuid::new_v4().to_string())
+            .replace(&pv1.id.to_string(), &uuid::Uuid::new_v4().to_string()),
+    )
+    .unwrap();
+
+    let after_sync = client
+        .list_project_versions(root_id)
+        .await
+        .expect("list_project_versions rpc");
+    assert_eq!(
+        after_sync.iter().map(|v| v.number).collect::<Vec<_>>(),
+        vec![1, 2, 9],
+        "a page that arrived by replication is visible on the next scan"
+    );
+    let pv3 = client
+        .start_project_version(root_id, None)
+        .await
+        .expect("start_project_version rpc");
+    assert_eq!(
+        pv3.number, 10,
+        "numbering counts what replication delivered, so two devices don't collide on v3"
+    );
+
+    // Leave the root untouched on disk for the tempdirs to clean up.
+    assert!(root_dir.join(".fts-root.json").exists());
+    backend.shutdown().await;
+    scope.close().await;
+}
+
+/// AC 4: "Share-link targeting of a Named Version resolves to the exact
+/// change id" — the resolution a share link performs before it streams
+/// anything, still exact after the chain has moved on.
+#[tokio::test(flavor = "multi_thread")]
+async fn share_link_targeting_resolves_to_the_exact_change() {
+    let fx = fixture("Cut").await;
+    let root_id = fx.root_id().await;
+
+    std::fs::write(fx.root_dir.join("cut.mov"), b"rough cut").unwrap();
+    let cp1 = fx
+        .client
+        .checkpoint_now(root_id, Some("rough cut".into()))
+        .await
+        .expect("checkpoint_now rpc");
+    let named = fx
+        .client
+        .name_version(root_id, cp1.commit_id.clone(), "v2 for client".into())
+        .await
+        .expect("name_version rpc");
+
+    // The chain moves on: two more saves after the shared one.
+    for take in ["fine cut", "final"] {
+        std::fs::write(fx.root_dir.join("cut.mov"), take).unwrap();
+        fx.client
+            .checkpoint_now(root_id, None)
+            .await
+            .expect("checkpoint_now rpc");
+    }
+
+    let resolved = fx
+        .client
+        .resolve_named_version(named.id)
+        .await
+        .expect("resolve_named_version rpc");
+    assert_eq!(resolved.root_id, root_id);
+    assert_eq!(
+        resolved.commit_id, cp1.commit_id,
+        "the link still points at the exact change that was shared, not at the head"
+    );
+    assert_eq!(resolved.change_id, named.change_id);
+    assert!(!resolved.change_id.is_empty());
+
+    // The resolved change is the one the chain attributes the name to.
+    let chain = fx
+        .client
+        .chain(root_id, "cut.mov".into())
+        .await
+        .expect("chain rpc");
+    let entry = chain
+        .iter()
+        .find(|e| e.commit_id == resolved.commit_id)
+        .expect("the resolved commit is in the chain");
+    assert_eq!(entry.names, vec!["v2 for client".to_string()]);
+
+    // A link whose target was un-named no longer resolves.
+    fx.client
+        .unname_version(named.id)
+        .await
+        .expect("unname_version rpc");
+    assert!(
+        fx.client.resolve_named_version(named.id).await.is_err(),
+        "a revoked Named Version resolves to nothing"
+    );
+
+    fx.finish().await;
+}

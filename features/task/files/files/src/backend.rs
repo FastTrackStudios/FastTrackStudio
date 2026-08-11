@@ -42,9 +42,9 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    RootFlavor,
+    GcReport, NamedVersion, ProjectVersion, RootFlavor, VersionRef,
 };
-use jj_lib::backend::CommitId;
+use jj_lib::backend::{ChangeId, CommitId};
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
@@ -56,6 +56,13 @@ use crate::error::Error;
 use crate::registry::Registry;
 use crate::repo_open;
 use crate::scan;
+use crate::versions::VaultVersions;
+
+/// Default `keep_newer` window for [`FilesService::gc_root`]: nothing
+/// written in the last minute is ever swept, so a sweep can't race a
+/// checkpoint that is mid-write on another connection (the
+/// concurrent-writer guard `Backend::gc`'s own contract describes).
+const DEFAULT_GC_KEEP_NEWER_SECS: u64 = 60;
 
 /// One root's live jj state: the repo handle (reassigned after every
 /// `checkpoint_now`) and its current checkpoint head. `head` is tracked
@@ -76,6 +83,12 @@ pub struct FilesBackend {
     /// module doc's "Filesystem confinement" section).
     confine_root: PathBuf,
     registry: Arc<Registry>,
+    /// The org vault holding the curated version entities (issue
+    /// #261). Separate from `data_dir`: a File Root's *content* is
+    /// never vault-replicated, but the Named / Project Version pages
+    /// that reference it are ordinary vault files, and that is exactly
+    /// what carries them offline-first to every device.
+    versions: VaultVersions,
     repos: Arc<Mutex<HashMap<Uuid, RootRuntime>>>,
     /// One lock per root, serializing `checkpoint_now` calls on that
     /// root so two concurrent checkpoints can't both read the same
@@ -128,7 +141,15 @@ where
 }
 
 impl FilesBackend {
-    pub fn new(data_dir: impl Into<PathBuf>) -> Result<Self, FilesError> {
+    /// `data_dir` holds the root registry and (for roots the server
+    /// hosts) their version stores; `vault_root` is the org vault the
+    /// Named / Project Version entities are written into and scanned
+    /// from. They are deliberately two directories: root *content* is
+    /// never vault-replicated, curation always is.
+    pub fn new(
+        data_dir: impl Into<PathBuf>,
+        vault_root: impl Into<PathBuf>,
+    ) -> Result<Self, FilesError> {
         let data_dir = data_dir.into();
         let registry = Registry::open(&data_dir).map_err(to_files_error)?;
         let confine_root = data_dir
@@ -138,6 +159,7 @@ impl FilesBackend {
             data_dir,
             confine_root,
             registry: Arc::new(registry),
+            versions: VaultVersions::new(vault_root),
             repos: Arc::new(Mutex::new(HashMap::new())),
             checkpoint_locks: Arc::new(Mutex::new(HashMap::new())),
             events: architect::PubSub::sliding(256),
@@ -147,6 +169,41 @@ impl FilesBackend {
     #[must_use]
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    /// The org vault the curated version entities live in.
+    #[must_use]
+    pub fn vault_root(&self) -> &Path {
+        self.versions.vault_root()
+    }
+
+    /// Run `f` against one root's live version-store backend — the
+    /// spec's "secondary harness" seam (Testing Decisions), for the
+    /// store-level properties that are invisible at the RPC surface:
+    /// chunk presence after a GC pass, dedup ratios, streaming.
+    ///
+    /// It hands out the *cached* repo's backend rather than opening a
+    /// second one, which matters: two `FsStore`s over one on-disk
+    /// chunk store in a single process is the shape that used to hang
+    /// (see `tests/rpc_surface.rs`). `f` is synchronous; drive any
+    /// async work in it with `pollster::block_on`, as this crate does
+    /// everywhere it touches jj-lib.
+    pub fn with_version_store<R>(
+        &self,
+        root_id: Uuid,
+        f: impl FnOnce(&VersionStoreBackend) -> R,
+    ) -> Result<R, FilesError> {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        let (repo, _head) = self.ensure_repo(&root).map_err(to_files_error)?;
+        let backend = repo
+            .store()
+            .backend_impl::<VersionStoreBackend>()
+            .ok_or_else(|| {
+                to_files_error(Error::Repo(
+                    "root's repo is not a VersionStoreBackend".into(),
+                ))
+            })?;
+        Ok(f(backend))
     }
 
     fn publish(&self, event: FilesEvent) {
@@ -401,17 +458,197 @@ impl FilesBackend {
         let entries = pollster::block_on(task_files_version_store::chain::version_chain(
             backend, &head, &repo_path,
         ))?;
+        // Curated metadata (issue #261): the Vault, not the store, is
+        // where names live — so every chain read resolves them fresh
+        // from the vault pages rather than caching a projection.
+        let mut names_by_commit: HashMap<String, Vec<String>> = HashMap::new();
+        for named in self.versions.named_versions(Some(root_id))? {
+            names_by_commit
+                .entry(named.commit_id)
+                .or_default()
+                .push(named.name);
+        }
         Ok(entries
             .into_iter()
-            .map(|e| ChainEntry {
-                commit_id: e.commit_id.hex(),
-                path: e.path.as_internal_file_string().to_string(),
-                file_id: e.file_id.hex(),
-                renamed_from: e
-                    .renamed_from
-                    .map(|p| p.as_internal_file_string().to_string()),
+            .map(|e| {
+                let commit_id = e.commit_id.hex();
+                let mut names = names_by_commit.get(&commit_id).cloned().unwrap_or_default();
+                names.sort();
+                ChainEntry {
+                    commit_id,
+                    path: e.path.as_internal_file_string().to_string(),
+                    file_id: e.file_id.hex(),
+                    renamed_from: e
+                        .renamed_from
+                        .map(|p| p.as_internal_file_string().to_string()),
+                    names,
+                }
             })
             .collect())
+    }
+
+    /// The `(commit, change)` pair `commit_id_hex` names in `root`'s
+    /// store — the validation every curation write does before writing
+    /// a Vault entity, so a reference can never name a commit that
+    /// isn't there.
+    fn resolve_commit(
+        &self,
+        root: &FileRootInfo,
+        commit_id_hex: &str,
+    ) -> Result<(CommitId, ChangeId), Error> {
+        let (repo, _head) = self.ensure_repo(root)?;
+        let backend = repo
+            .store()
+            .backend_impl::<VersionStoreBackend>()
+            .ok_or_else(|| Error::Repo("root's repo is not a VersionStoreBackend".into()))?;
+        let commit_id = CommitId::try_from_hex(commit_id_hex)
+            .ok_or_else(|| Error::BadRequest(format!("{commit_id_hex:?}: not a commit id")))?;
+        let commit = pollster::block_on(backend.commit(&commit_id))
+            .map_err(|_| Error::NotFound(format!("commit {commit_id_hex} in root {}", root.id)))?;
+        Ok((commit_id, commit.change_id))
+    }
+
+    fn name_version_inner(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        name: String,
+    ) -> Result<NamedVersion, Error> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err(Error::BadRequest("a Named Version needs a name".into()));
+        }
+        let root = self.get_root_info(root_id)?;
+        let (commit_id, change_id) = self.resolve_commit(&root, &commit_id)?;
+        self.versions.create_named_version(
+            root_id,
+            &root.name,
+            name,
+            change_id.hex(),
+            commit_id.hex(),
+        )
+    }
+
+    /// Resolve a Named Version the way a share link must: prefer the
+    /// stable `change_id` (so a rewritten change still lands on its
+    /// current commit) and fall back to the recorded `commit_id`.
+    /// Either way the answer is one exact change in this root's store,
+    /// or [`Error::NotFound`].
+    fn resolve_named_version_inner(&self, id: Uuid) -> Result<VersionRef, Error> {
+        let named = self.versions.named_version(id)?;
+        let root = self.get_root_info(named.root_id)?;
+        let (repo, _head) = self.ensure_repo(&root)?;
+
+        let by_change = ChangeId::try_from_hex(&named.change_id).and_then(|change_id| {
+            repo.resolve_change_id(&change_id)
+                .ok()
+                .flatten()
+                .and_then(|targets| {
+                    targets
+                        .visible_with_offsets()
+                        .next()
+                        .map(|(_, id)| id.clone())
+                })
+        });
+        let commit_id = match by_change {
+            Some(commit_id) => commit_id,
+            // The change isn't in the current index (a Named Version
+            // pointing at a commit no view head descends from is a
+            // normal, supported shape — that's exactly what the GC
+            // protect set exists for), so fall back to the exact
+            // commit the entity recorded, validated against the store.
+            None => self.resolve_commit(&root, &named.commit_id)?.0,
+        };
+        let change_id = if named.change_id.is_empty() {
+            self.resolve_commit(&root, &commit_id.hex())?.1.hex()
+        } else {
+            named.change_id.clone()
+        };
+        Ok(VersionRef {
+            root_id: named.root_id,
+            change_id,
+            commit_id: commit_id.hex(),
+        })
+    }
+
+    fn start_project_version_inner(
+        &self,
+        root_id: Uuid,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, Error> {
+        let root = self.get_root_info(root_id)?;
+        let (_repo, head) = self.ensure_repo(&root)?;
+        let (commit_id, change_id) = self.resolve_commit(&root, &head.hex())?;
+        let label = label
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty());
+        self.versions.create_project_version(
+            root_id,
+            &root.name,
+            label,
+            change_id.hex(),
+            commit_id.hex(),
+        )
+    }
+
+    /// Every commit in `root_id`'s store the Vault currently
+    /// references — the protect set ADR 0001 calls "Vault-referenced",
+    /// resolved live from the vault pages on every pass so a name
+    /// deleted (or replicated in) since the last one is honored.
+    fn protected_commits(&self, root_id: Uuid) -> Result<Vec<CommitId>, Error> {
+        let mut out = Vec::new();
+        let mut push = |hex: &str| {
+            if let Some(id) = CommitId::try_from_hex(hex) {
+                if !out.contains(&id) {
+                    out.push(id);
+                }
+            }
+        };
+        for named in self.versions.named_versions(Some(root_id))? {
+            push(&named.commit_id);
+        }
+        for pv in self.versions.project_versions(root_id)? {
+            push(&pv.commit_id);
+        }
+        Ok(out)
+    }
+
+    fn gc_root_inner(
+        &self,
+        root_id: Uuid,
+        keep_newer_secs: Option<u64>,
+    ) -> Result<GcReport, Error> {
+        let root = self.get_root_info(root_id)?;
+        // Hold the root's checkpoint lock: a sweep that raced a
+        // checkpoint could read a head the checkpoint is still
+        // building on top of.
+        let lock = self.checkpoint_lock(root_id);
+        let _guard = lock.lock().expect("checkpoint lock poisoned");
+
+        let protected = self.protected_commits(root_id)?;
+        let (repo, _head) = self.ensure_repo(&root)?;
+        let backend = repo
+            .store()
+            .backend_impl::<VersionStoreBackend>()
+            .ok_or_else(|| Error::Repo("root's repo is not a VersionStoreBackend".into()))?;
+
+        let keep_newer = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(
+                keep_newer_secs.unwrap_or(DEFAULT_GC_KEEP_NEWER_SECS),
+            ))
+            .unwrap_or(std::time::UNIX_EPOCH);
+
+        let stats = pollster::block_on(task_files_version_store::gc::sweep(
+            backend,
+            repo.readonly_index().as_index(),
+            keep_newer,
+            &protected,
+        ))?;
+        Ok(GcReport {
+            objects_swept: stats.objects_swept as u64,
+            manifests_swept: stats.chunks.manifests_swept as u64,
+            protected_commits: protected.len() as u32,
+        })
     }
 
     fn checkpoint_now_inner(
@@ -514,6 +751,64 @@ impl FilesService for FilesBackend {
     ) -> Result<CheckpointInfo, FilesError> {
         let this = self.clone();
         blocking(move || this.checkpoint_now_inner(root_id, description)).await
+    }
+
+    async fn name_version(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        name: String,
+    ) -> Result<NamedVersion, FilesError> {
+        let this = self.clone();
+        let named = blocking(move || this.name_version_inner(root_id, commit_id, name)).await?;
+        self.publish(FilesEvent::VersionNamed(named.clone()));
+        Ok(named)
+    }
+
+    async fn list_named_versions(
+        &self,
+        root_id: Option<Uuid>,
+    ) -> Result<Vec<NamedVersion>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.named_versions(root_id)).await
+    }
+
+    async fn resolve_named_version(&self, id: Uuid) -> Result<VersionRef, FilesError> {
+        let this = self.clone();
+        blocking(move || this.resolve_named_version_inner(id)).await
+    }
+
+    async fn unname_version(&self, id: Uuid) -> Result<(), FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.delete_named_version(id)).await
+    }
+
+    async fn start_project_version(
+        &self,
+        root_id: Uuid,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, FilesError> {
+        let this = self.clone();
+        let pv = blocking(move || this.start_project_version_inner(root_id, label)).await?;
+        self.publish(FilesEvent::ProjectVersionStarted(pv.clone()));
+        Ok(pv)
+    }
+
+    async fn list_project_versions(
+        &self,
+        root_id: Uuid,
+    ) -> Result<Vec<ProjectVersion>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.project_versions(root_id)).await
+    }
+
+    async fn gc_root(
+        &self,
+        root_id: Uuid,
+        keep_newer_secs: Option<u64>,
+    ) -> Result<GcReport, FilesError> {
+        let this = self.clone();
+        blocking(move || this.gc_root_inner(root_id, keep_newer_secs)).await
     }
 }
 
