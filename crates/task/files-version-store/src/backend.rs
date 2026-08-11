@@ -115,7 +115,10 @@ impl std::fmt::Debug for VersionStoreBackend {
 /// there is no latency pressure on iroh-blobs' own background sweep; a test
 /// that needs to observe reclamation within its own runtime should use
 /// [`VersionStoreBackend::open_with_gc_interval`] with a much shorter one.
-pub const DEFAULT_GC_INTERVAL: Duration = Duration::from_secs(15 * 60);
+/// Re-exports `task_files_chunk_store::gc::DEFAULT_INTERVAL` rather than
+/// hardcoding its own copy, so the two layers' production cadence can't
+/// silently diverge.
+pub const DEFAULT_GC_INTERVAL: Duration = task_files_chunk_store::gc::DEFAULT_INTERVAL;
 
 impl VersionStoreBackend {
     /// Open (creating if absent) a version store rooted at `root`: a
@@ -531,13 +534,18 @@ impl Backend for VersionStoreBackend {
 
     fn gc(&self, index: &dyn Index, keep_newer: SystemTime) -> BackendResult<()> {
         // `Backend::gc`'s trait signature has no room for a protect
-        // callback (see `gc.rs`'s module doc) — this is jj-lib's own entry
-        // point, which only ever knows about index-reachable heads. The
-        // Vault-facing entry point (future RPC work) calls
-        // `crate::gc::sweep` directly with its own resolved protected-
-        // commit set.
-        self.block_on(crate::gc::sweep(self, index, keep_newer, &[]))
-            .map(|_stats| ())
+        // callback (see `gc.rs`'s module doc), and this is jj-lib's own
+        // generic entry point — reachable by any jj-lib-native caller, not
+        // just ones that know about Vault-referenced protection. Rather
+        // than sweeping the chunk store with an implicit, always-empty
+        // `protected_commits` (which would durably delete manifests for
+        // any commit that's Vault-referenced but not currently
+        // index-reachable), this calls the structural-only sweep, which
+        // never touches the chunk store. The Vault-facing entry point
+        // (future RPC work) calls `crate::gc::sweep` directly with its own
+        // resolved protected-commit set.
+        self.block_on(crate::gc::sweep_objects_only(self, index, keep_newer))
+            .map(|_objects_swept| ())
             .map_err(to_backend_err)
     }
 }

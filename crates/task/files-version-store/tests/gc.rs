@@ -164,7 +164,6 @@ async fn unreferenced_expired_file_is_swept_and_its_chunk_reclaimed() {
         .await
         .unwrap();
     assert_eq!(stats.chunks.manifests_swept, 1);
-    assert!(stats.chunks.chunks_marked_for_reclamation > 0);
 
     // The manifest is gone immediately (the mark phase is synchronous).
     assert!(!backend.chunks().has(chunk_id).await);
@@ -213,6 +212,55 @@ async fn protected_commit_survives_gc_regardless_of_age() {
     );
     assert!(!backend.chunks().has(unprotected_chunk).await);
     wait_until_chunk_absent(backend, unprotected_chunk).await;
+}
+
+/// Regression test (data-loss finding): `Backend::gc` — jj-lib's own
+/// generic trait-method entry point, reachable by any jj-lib-native caller,
+/// not just this crate's Vault-aware one — used to call `crate::gc::sweep`
+/// with a hardcoded empty `protected_commits`, so a commit that's real and
+/// Vault-referenced but not currently `index`-reachable (exactly the shape
+/// `write_orphan_commit` builds: a Named Version pointing at a commit that
+/// isn't a current view head) had its manifest durably swept the moment
+/// anything called the trait method — even though nothing in the tree
+/// resolves Vault references yet to supply a real `protected_commits`.
+/// `Backend::gc` now never touches the chunk store at all (see `gc.rs`'s
+/// module doc), so this must survive it regardless.
+#[tokio::test]
+async fn backend_gc_trait_method_never_sweeps_the_chunk_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init(dir.path()).await;
+    let backend = backend_of(&repo);
+
+    let (_vault_only_commit, vault_only_file) = write_orphan_commit(
+        &repo,
+        &path("v3-for-client.wav"),
+        b"a Named Version, index-unreachable, not passed to Backend::gc",
+    )
+    .await;
+    let vault_only_chunk = chunk_id_of(&vault_only_file);
+
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    // The trait method itself — `jj_lib::backend::Backend::gc`, not
+    // `crate::gc::sweep` — is what a generic jj-lib caller (e.g. `jj util
+    // gc`) would actually reach.
+    backend
+        .gc(repo.readonly_index().as_index(), SystemTime::now())
+        .unwrap();
+
+    assert!(
+        backend.chunks().has(vault_only_chunk).await,
+        "Backend::gc must never sweep the chunk store — a Vault-only-referenced \
+         commit's manifest must survive it regardless of index reachability"
+    );
+    assert_eq!(
+        backend
+            .chunks()
+            .read_to_vec(vault_only_chunk)
+            .await
+            .unwrap(),
+        b"a Named Version, index-unreachable, not passed to Backend::gc"
+    );
 }
 
 /// "keep_newer guards concurrent writers (nothing newer is swept)."

@@ -61,7 +61,6 @@ async fn unreferenced_expired_manifest_is_swept_and_its_chunk_reclaimed() {
 
     let stats = store.gc(&BTreeSet::new(), keep_newer).await.unwrap();
     assert_eq!(stats.manifests_swept, 1);
-    assert!(stats.chunks_marked_for_reclamation > 0);
 
     // The manifest is gone immediately (gc's mark phase is synchronous).
     assert!(!store.has(file_id).await);
@@ -119,6 +118,92 @@ async fn keep_newer_protects_a_manifest_written_after_the_cutoff() {
         "a manifest newer than keep_newer must never be swept"
     );
     assert!(store.has(file_id).await);
+}
+
+/// Regression test (data-loss finding): the protect callback used to read a
+/// snapshot published once per `ChunkStore::gc` call, while iroh-blobs'
+/// background sweep runs on its own independent interval — so a manifest
+/// written *after* the last `gc()` call (and therefore absent from that
+/// stale snapshot) would be reclaimed by the very next background tick,
+/// before anything ever called `gc()` again. The callback now derives
+/// liveness live from the manifests directory on every sweep, so a file
+/// written after the *only* `gc()` call this test ever makes must still
+/// survive many background sweep intervals with no further `gc()` call.
+#[tokio::test]
+async fn a_file_written_after_the_only_gc_call_survives_later_background_sweeps() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open_gc_store(dir.path()).await;
+
+    // One gc() call, before the file in question even exists — the stale
+    // snapshot this regression guards against would have no idea it will
+    // ever exist.
+    store.gc(&BTreeSet::new(), SystemTime::now()).await.unwrap();
+
+    let file_id = store
+        .write_stream(&b"written after the only gc() call"[..])
+        .await
+        .unwrap();
+    assert!(store.has(file_id).await);
+
+    // Give iroh-blobs' background task (30ms interval) several chances to
+    // run without ever calling gc() again.
+    tokio::time::sleep(POLL_INTERVAL * 10).await;
+
+    assert!(
+        store.has(file_id).await,
+        "a file written after the only gc() call must survive later background sweeps \
+         even though gc() was never called again"
+    );
+    assert_eq!(
+        store.read_to_vec(file_id).await.unwrap(),
+        b"written after the only gc() call"
+    );
+}
+
+/// Regression test: a corrupt *kept* manifest (protected or fresh) used to
+/// abort `gc()` via `?` on a failed decode read, wedging every other
+/// manifest's removal decision along with it — and the same corrupt file
+/// would re-trigger the error on every later pass, since its mtime never
+/// changes. `gc()` no longer decodes kept manifests at all (only their
+/// `FileId`/mtime), so it can no longer be wedged this way.
+#[tokio::test]
+async fn a_corrupt_kept_manifest_does_not_wedge_gc() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open_gc_store(dir.path()).await;
+
+    let protected_id = store
+        .write_stream(&b"protected but corrupt on disk"[..])
+        .await
+        .unwrap();
+    let expired_id = store
+        .write_stream(&b"an ordinary expired file"[..])
+        .await
+        .unwrap();
+
+    // Corrupt the protected manifest's bytes directly, as if it survived a
+    // torn write (the exact scenario `write_manifest`'s own doc describes).
+    // `manifests/<file id hex>.manifest` is this crate's documented,
+    // stable on-disk layout.
+    let manifest_path = dir
+        .path()
+        .join("manifests")
+        .join(format!("{}.manifest", protected_id.to_hex()));
+    tokio::fs::write(&manifest_path, b"not a valid manifest")
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let keep_newer = SystemTime::now();
+
+    let mut protected = BTreeSet::new();
+    protected.insert(protected_id);
+
+    let stats = store.gc(&protected, keep_newer).await.unwrap();
+    assert_eq!(
+        stats.manifests_swept, 1,
+        "the ordinary expired manifest must still be swept despite the corrupt protected one"
+    );
+    assert!(!store.has(expired_id).await);
 }
 
 /// `ChunkStore::gc` on a store opened without GC enabled has nothing that

@@ -4,16 +4,23 @@
 //!
 //! Two protect inputs feed the mark phase, matching ADR 0001's
 //! "index-reachable ∪ Vault-referenced" doctrine:
-//! - `index.all_heads_for_gc()` — jj-lib's own reachability, always honored
-//!   (this is what `Backend::gc`'s fixed trait signature can pass through).
+//! - `index.all_heads_for_gc()` — jj-lib's own reachability, always honored.
 //! - `protected_commits` — externally-referenced versions (Named Versions,
 //!   Project Version starts, share-link targets, review pins) the Vault
-//!   resolves to commit ids and supplies directly. `Backend::gc`'s trait
-//!   signature has no room for this (jj-lib calls it with exactly
-//!   `(index, keep_newer)`), so it's threaded through [`sweep`] — the
-//!   `Backend::gc` impl in `backend.rs` calls `sweep` with an empty slice;
-//!   the Vault-facing layer (future RPC work) calls `sweep` directly with
-//!   its own resolved set.
+//!   resolves to commit ids and supplies directly.
+//!
+//! `Backend::gc`'s trait signature has no room for `protected_commits`
+//! (jj-lib calls it with exactly `(index, keep_newer)`) — worse, it has no
+//! way to know whether a caller reaching it (jj-lib's own generic tooling,
+//! not just this crate's tests) has *any* Vault awareness at all. Rather
+//! than silently sweeping chunk-store manifests for commits that are
+//! `index`-unreachable only because they're Vault-referenced (a real
+//! version, just not a current view head), `backend.rs`'s `Backend::gc`
+//! impl calls [`sweep_objects_only`] — the structural sweep alone, which
+//! only ever trusts `index`'s own jj-lib-native reachability and never
+//! touches the chunk store. [`sweep`] (structural *and* chunk-level) is the
+//! Vault-facing entry point: only a caller that has actually resolved its
+//! own `protected_commits` should reach it.
 //!
 //! Every `TreeValue::File` encountered while marking trees also records its
 //! chunk-store `FileId` into `live_files`, so the chunk store's own
@@ -37,7 +44,8 @@ pub struct GcStats {
     pub objects_swept: usize,
     /// The underlying chunk store's own mark-phase result (see
     /// `task_files_chunk_store::ChunkStore::gc`): manifests removed now,
-    /// chunks marked for iroh-blobs' own background sweep to reclaim.
+    /// their now-unreferenced chunks left to iroh-blobs' own background
+    /// sweep to reclaim.
     pub chunks: task_files_chunk_store::GcStats,
 }
 
@@ -91,14 +99,16 @@ async fn mark_copy_ancestry(
 /// Mark every tree/commit/copy-history object reachable from `index`'s GC
 /// heads or `protected_commits` (or newer than `keep_newer`, protecting
 /// concurrent writers per the `Backend::gc` contract), then sweep
-/// everything else — including, since #258, the chunk store underneath
-/// this backend (see the module doc).
-pub async fn sweep(
+/// everything else. Returns the count of objects swept plus every
+/// chunk-store `FileId` this pass found live — [`sweep`] feeds that
+/// straight into `ChunkStore::gc`; [`sweep_objects_only`] discards it,
+/// since it never touches the chunk store at all (see the module doc).
+async fn mark_and_sweep_objects(
     backend: &VersionStoreBackend,
     index: &dyn Index,
     keep_newer: SystemTime,
     protected_commits: &[CommitId],
-) -> Result<GcStats> {
+) -> Result<(usize, BTreeSet<task_files_chunk_store::FileId>)> {
     let heads: Vec<CommitId> = index
         .all_heads_for_gc()
         .map_err(|e| crate::error::Error::Repo(e.to_string()))?
@@ -130,26 +140,18 @@ pub async fn sweep(
             continue;
         }
         let commit = backend.commit(&id).await?;
-        if let Ok(tree_id) = commit.root_tree.clone().into_resolved() {
+        // `root_tree` (`Merge<TreeId>`) yields exactly its one resolved id
+        // through `iter()` when it has one, and every term when conflicted
+        // — no need to special-case the resolved path via `into_resolved`.
+        for tree_id in commit.root_tree.iter() {
             mark_tree(
                 backend,
-                &tree_id,
+                tree_id,
                 &mut live_trees,
                 &mut live_copies,
                 &mut live_files,
             )
             .await?;
-        } else {
-            for tree_id in commit.root_tree.iter() {
-                mark_tree(
-                    backend,
-                    tree_id,
-                    &mut live_trees,
-                    &mut live_copies,
-                    &mut live_files,
-                )
-                .await?;
-            }
         }
         frontier.extend(commit.parents);
     }
@@ -181,10 +183,40 @@ pub async fn sweep(
     // copy_children` tolerates a missing child object directly: it's
     // unreachable by definition once its own object is gone.
 
-    let chunks = backend.chunks().gc(&live_files, keep_newer).await?;
+    Ok((objects_swept, live_files))
+}
 
+/// The Vault-facing entry point (structural sweep *and* chunk-store sweep):
+/// only call this with a `protected_commits` you have actually resolved
+/// against the Vault's own "index-reachable ∪ Vault-referenced" doctrine —
+/// see the module doc for why `Backend::gc`'s trait impl calls
+/// [`sweep_objects_only`] instead.
+pub async fn sweep(
+    backend: &VersionStoreBackend,
+    index: &dyn Index,
+    keep_newer: SystemTime,
+    protected_commits: &[CommitId],
+) -> Result<GcStats> {
+    let (objects_swept, live_files) =
+        mark_and_sweep_objects(backend, index, keep_newer, protected_commits).await?;
+    let chunks = backend.chunks().gc(&live_files, keep_newer).await?;
     Ok(GcStats {
         objects_swept,
         chunks,
     })
+}
+
+/// Structural sweep only (trees/commits/copy-history) — never touches the
+/// chunk store. Safe for any caller, including jj-lib's own generic
+/// `Backend::gc` entry point, since it only ever trusts `index`'s own
+/// reachability (jj-lib's concept) and carries no `protected_commits` of
+/// its own. See the module doc.
+pub async fn sweep_objects_only(
+    backend: &VersionStoreBackend,
+    index: &dyn Index,
+    keep_newer: SystemTime,
+) -> Result<usize> {
+    let (objects_swept, _live_files) =
+        mark_and_sweep_objects(backend, index, keep_newer, &[]).await?;
+    Ok(objects_swept)
 }
