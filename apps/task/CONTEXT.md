@@ -78,6 +78,22 @@ on their tickets.
   versioned by the end of a working session. High-frequency writes
   during a session (a recording pass creating files every few minutes)
   need not each become a version.
+- **Share link** — the one link entity for everything shared outward:
+  tracked, retroactively editable, disable-not-delete. Targets a note,
+  a root slice, a Named Version, or a Review page. Carries capability
+  axes (view / comment / download / file request) plus optional
+  password and expiry. Edit is never link-based.
+- **File request** — a share link capability letting anonymous
+  visitors *add* files into the target slice; never overwrite or
+  delete. Uploads land in a per-link incoming area the owner promotes
+  from, attributed to the link.
+- **View-only** — a share link without the download capability:
+  no download affordance, media reachable only as streamed proxy
+  renditions (originals are never sent). Deterrence, not DRM.
+- **Review page** — a thin first-class entity presenting a media file
+  (via root slice) for review: player plus timecoded comments and
+  frame annotations. A review survives new versions of its file;
+  every comment records the file version it was made on.
 - **Migration source** — a legacy store (e.g. `nextcloud-data`) that
   content is imported *from*; never written back to. NextCloud runs
   alongside indefinitely; it is not decommissioned by this effort.
