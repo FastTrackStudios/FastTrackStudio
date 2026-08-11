@@ -115,6 +115,7 @@ members = [
     "features/dawfile/dawfile-protools",
     "features/dawfile/dawfile-reaper",
     "features/dawfile/dawfile-standalone",
+    "features/expression-editor/expression-editor-demo",
     # ── features/reaper ───────────────────────────────────────────────
     "features/reaper/daw-reaper",
     "features/reaper/daw-bridge",
@@ -638,6 +639,7 @@ expression-editor-audio = { path = "features/expression-editor/expression-editor
 expression-editor-core = { path = "features/expression-editor/expression-editor-core" }
 expression-editor-corpus = { path = "features/expression-editor/expression-editor-corpus" }
 expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
+expression-editor-demo = { path = "features/expression-editor/expression-editor-demo" }
 expression-editor-guitarpro = { path = "features/expression-editor/expression-editor-guitarpro" }
 expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
 expression-editor-standalone = { path = "features/expression-editor/expression-editor-standalone" }
