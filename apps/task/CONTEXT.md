@@ -28,7 +28,10 @@ on their tickets.
   deliverable ("v3 for client"). Curated on top of automatic chains.
 - **Project Version** — a whole-project iteration. Restarting a project
   creates a new Project Version of the same project, replacing the
-  "Project Title old" / "Project Title NEW" folder idiom.
+  "Project Title old" / "Project Title NEW" folder idiom: the folder
+  name never changes. Auto-numbered (v1, v2, …) with an optional label;
+  old iterations stay browsable read-only and files can be copied
+  forward into the current one.
 - **Divergent versions** — when two machines save the same file
   concurrently, both saves survive as sibling versions to be merged or
   chosen later. There is no locking and no lost data.
