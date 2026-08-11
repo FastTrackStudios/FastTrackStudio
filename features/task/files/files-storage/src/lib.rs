@@ -52,18 +52,21 @@
 //! let data_root = std::path::Path::new("/var/lib/task");
 //! let core = StorageCore::open(registry_dir(data_root))?;
 //!
-//! // The server speaks for its own volumes through an ordinary agent.
+//! // The server speaks for its own volumes through an ordinary agent —
+//! // enrolling like any other, and keeping the secret it is handed.
 //! let agent_id = Uuid::new_v4();
-//! let agent = Arc::new(InServerAgent::new(agent_id));
-//! core.register_local_agent(agent);
-//! core.announce(in_server_announcement(
+//! core.register_local_agent(Arc::new(InServerAgent::new(agent_id)));
+//! let enrollment = core.announce(in_server_announcement(
 //!     agent_id,
 //!     "task-server",
+//!     None,
 //!     vec![server_volume("primary", "Server primary", &data_root.join("files-volumes/primary"))],
 //! ))?;
+//! let _agent_token = enrollment.token.expect("first enrollment mints the secret");
 //!
-//! // Operator lane on the server router; org lane on each org's.
-//! let admin = StorageAdminBackend::new(core.clone());
+//! // Operator lane on the server router (authorized; `new_local_trusted`
+//! // for the in-process transport); org lane on each org's.
+//! let admin = StorageAdminBackend::new_local_trusted(core.clone());
 //! let agents = StorageAgentBackend::new(core.clone());
 //! let org = StorageBackend::new(core.clone(), "acme");
 //! # let _ = (admin, agents, org);
@@ -74,26 +77,25 @@
 pub mod admin;
 pub mod agent;
 pub mod agent_lane;
-mod blocking;
 pub mod core;
 pub mod error;
 pub mod org;
-mod paths;
 mod state;
 
-pub use admin::StorageAdminBackend;
+pub use admin::{AuthorizeFuture, LocalTrusted, OperatorAuth, StorageAdminBackend};
 pub use agent::{InServerAgent, LocalAgent, Measured};
 pub use agent_lane::StorageAgentBackend;
 pub use core::StorageCore;
-pub use error::{Error, Result};
+pub use error::Result;
 pub use org::StorageBackend;
 
 pub use files_storage_proto as proto;
 pub use files_storage_proto::{
-    AgentAnnouncement, AgentDirective, AgentHosting, AgentInfo, AgentStatus, AnnouncedVolume,
-    BlobReplica, CapabilityClass, DirectiveKind, DirectiveOutcome, GrantSpec, GrantUsage,
-    LiveTreeBinding, LocationHealth, LocationKind, PlacementStatus, RootPlacement, StorageError,
-    StorageEvent, StorageGrantInfo, StorageLocationInfo, VolumeHealth,
+    AgentAnnouncement, AgentCredential, AgentDirective, AgentEnrollment, AgentHosting, AgentInfo,
+    AgentStatus, AnnouncedVolume, BlobReplica, CapabilityClass, ConfinedPath, DirectiveKind,
+    DirectiveOutcome, GrantSpec, GrantUsage, LiveTreeBinding, LocationHealth, LocationKind,
+    PlacementStatus, RootPlacement, StorageError, StorageEvent, StorageGrantInfo,
+    StorageLocationInfo, VolumeHealth,
 };
 
 // architect-emitted vox bits, re-exported so mount sites need only this

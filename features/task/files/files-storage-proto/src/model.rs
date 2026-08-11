@@ -105,13 +105,41 @@ pub struct AnnouncedVolume {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 #[repr(C)]
 pub struct AgentAnnouncement {
-    /// Stable per-agent id (the device key's identity for remote
-    /// hostings — issue #265). Re-announcing under the same id updates
-    /// the existing record and never resets an approval.
+    /// Stable per-agent id. Re-announcing under the same id updates the
+    /// existing record and never resets an approval — which is exactly
+    /// why it cannot be the only thing a re-announcement presents: ids
+    /// are published by `list_agents` and ride every
+    /// `StorageLocationInfo`, so an id alone would let anyone rewrite an
+    /// approved agent's volume list (PR #284 review).
     pub agent_id: Uuid,
+    /// The agent's enrollment secret, required whenever `agent_id` is
+    /// already known. `None` enrolls a NEW agent, and the coordinator
+    /// mints the secret in its [`AgentEnrollment`] reply — the one time
+    /// it is ever transmitted.
+    pub token: Option<String>,
     pub hosting: AgentHosting,
     pub label: String,
     pub volumes: Vec<AnnouncedVolume>,
+}
+
+/// What an agent proves it is on every call after enrollment. The token
+/// is a per-agent secret; the id alone is public.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct AgentCredential {
+    pub agent_id: Uuid,
+    pub token: String,
+}
+
+/// The reply to an announcement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct AgentEnrollment {
+    pub agent: AgentInfo,
+    /// Set only when this announcement enrolled a NEW agent: the secret
+    /// it must present from now on. The coordinator keeps only a hash,
+    /// so an agent that loses this must be re-enrolled by the operator.
+    pub token: Option<String>,
 }
 
 /// A known storage agent, as the coordinator sees it.
@@ -262,6 +290,26 @@ pub struct VolumeHealth {
     pub health: LocationHealth,
 }
 
+/// A path an agent is asked to create, expressed as the boundary it may
+/// not leave plus the path inside it.
+///
+/// Both halves travel together because confinement has to happen where
+/// the filesystem is — at the agent, before the first `mkdir`. A
+/// directive carrying only a resolved absolute path would leave a remote
+/// hosting no way to enforce the grant's prefix at all, and would leave
+/// the coordinator checking after the writes had already landed (PR #284
+/// review).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct ConfinedPath {
+    /// The org's granted subtree on this location: `<location
+    /// root>/<grant prefix>`. The agent creates it if missing and must
+    /// refuse anything that resolves outside it.
+    pub boundary: String,
+    /// Path under `boundary`, relative and `..`-free.
+    pub relative: String,
+}
+
 /// Work the coordinator hands to an agent. Directives carry their
 /// `agent_id` and subscribers filter client-side — the monorepo's
 /// `#[subscribe]`-stream idiom (root CLAUDE.md), not a per-agent channel.
@@ -279,20 +327,22 @@ pub struct AgentDirective {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 #[repr(u8)]
 pub enum DirectiveKind {
-    /// Create `absolute_path` and initialize the authoritative
-    /// version-store repo inside it.
+    /// Create `target` — confined to its boundary — and initialize the
+    /// authoritative version-store repo inside it.
     HostLiveTree {
         root_id: Uuid,
         org: String,
-        absolute_path: String,
+        target: ConfinedPath,
     },
     /// Copy every version-store blob the root's live tree references
-    /// from `source_path` (a live tree) into `dest_path` (a blob store).
+    /// from `source_path` (a live tree the agent already hosts) into
+    /// `dest` (a blob store, confined to the destination grant's
+    /// prefix).
     ReplicateBlobs {
         root_id: Uuid,
         org: String,
         source_path: String,
-        dest_path: String,
+        dest: ConfinedPath,
     },
     /// Re-measure the logical bytes the root's live tree references.
     /// Quota is charged in logical bytes, and only the agent holding the
@@ -310,10 +360,15 @@ pub enum DirectiveKind {
 pub enum DirectiveOutcome {
     Hosted {
         repo_initialized: bool,
+        /// The path the agent actually created, after its own
+        /// confinement check — this, not the coordinator's guess, is
+        /// what the placement records.
+        absolute_path: String,
     },
     Replicated {
         files_present: u64,
         logical_bytes: u64,
+        absolute_path: String,
     },
     Measured {
         files: u64,

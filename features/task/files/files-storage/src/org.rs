@@ -13,8 +13,8 @@ use files_storage_proto::{
 };
 use uuid::Uuid;
 
-use crate::blocking::blocking;
 use crate::core::StorageCore;
+use crate::error::panicked;
 
 #[derive(Clone, architect::HasDispatcher)]
 pub struct StorageBackend {
@@ -48,19 +48,29 @@ impl StorageBackend {
         &self.org
     }
 
-    #[must_use]
-    pub fn core(&self) -> &Arc<StorageCore> {
-        &self.core
+    /// Authorize-free (the org IS the backend) blocking-pool hop. Every
+    /// method goes through it, reads included: the registry is an
+    /// in-memory structure behind a `std::sync::Mutex`, and taking that
+    /// lock inline on a runtime worker is exactly the stall this seam
+    /// exists to prevent (PR #284 review).
+    async fn run<T, F>(&self, f: F) -> Result<T, StorageError>
+    where
+        F: FnOnce(Arc<StorageCore>, String) -> Result<T, StorageError> + Send + 'static,
+        T: Send + 'static,
+    {
+        let core = self.core.clone();
+        let org = self.org.clone();
+        task_files_util::blocking(move || f(core, org), panicked).await
     }
 }
 
 impl StorageService for StorageBackend {
     async fn list_locations(&self) -> Result<Vec<StorageLocationInfo>, StorageError> {
-        Ok(self.core.locations_for(&self.org))
+        self.run(|core, org| Ok(core.locations_for(&org))).await
     }
 
     async fn list_grants(&self) -> Result<Vec<StorageGrantInfo>, StorageError> {
-        Ok(self.core.list_grants(Some(&self.org)))
+        self.run(|core, org| Ok(core.list_grants(Some(&org)))).await
     }
 
     async fn place_root(
@@ -69,19 +79,17 @@ impl StorageService for StorageBackend {
         location_id: Uuid,
         relative_path: String,
     ) -> Result<RootPlacement, StorageError> {
-        let core = self.core.clone();
-        let org = self.org.clone();
-        blocking(move || core.place_root(&org, root_id, location_id, &relative_path)).await
+        self.run(move |core, org| core.place_root(&org, root_id, location_id, &relative_path))
+            .await
     }
 
     async fn placement(&self, root_id: Uuid) -> Result<RootPlacement, StorageError> {
-        self.core
-            .placement(&self.org, root_id)
-            .map_err(crate::error::to_storage_error)
+        self.run(move |core, org| core.placement(&org, root_id))
+            .await
     }
 
     async fn list_placements(&self) -> Result<Vec<RootPlacement>, StorageError> {
-        Ok(self.core.list_placements(&self.org))
+        self.run(|core, org| Ok(core.list_placements(&org))).await
     }
 
     async fn add_blob_replica(
@@ -89,21 +97,18 @@ impl StorageService for StorageBackend {
         root_id: Uuid,
         location_id: Uuid,
     ) -> Result<RootPlacement, StorageError> {
-        let core = self.core.clone();
-        let org = self.org.clone();
-        blocking(move || core.add_blob_replica(&org, root_id, location_id)).await
+        self.run(move |core, org| core.add_blob_replica(&org, root_id, location_id))
+            .await
     }
 
     async fn refresh_usage(&self, root_id: Uuid) -> Result<RootPlacement, StorageError> {
-        let core = self.core.clone();
-        let org = self.org.clone();
-        blocking(move || core.refresh_usage(&org, root_id)).await
+        self.run(move |core, org| core.refresh_usage(&org, root_id))
+            .await
     }
 
     async fn usage(&self, location_id: Uuid) -> Result<GrantUsage, StorageError> {
-        self.core
-            .usage(&self.org, location_id)
-            .map_err(crate::error::to_storage_error)
+        self.run(move |core, org| core.usage(&org, location_id))
+            .await
     }
 }
 

@@ -1,5 +1,5 @@
 //! The agent lane's backend: the coordinator's side of the storage-agent
-//! protocol. An agent — whichever of the three hostings it is — announces
+//! protocol. An agent — whichever of the three hostings it is — enrolls
 //! here, heartbeats here, reads its outstanding directives here,
 //! subscribes to new ones here, and reports outcomes here.
 //!
@@ -8,17 +8,22 @@
 //! [`StorageCore::register_local_agent`](crate::StorageCore::register_local_agent)),
 //! which is exactly why a desktop or standalone agent can be added later
 //! without the coordinator learning a second vocabulary.
+//!
+//! Identity is proved, not asserted: every method after enrollment takes
+//! an [`AgentCredential`] whose secret the coordinator only ever stored a
+//! hash of. See the trait's own module doc for why the id alone could
+//! never do the job.
 
 use std::sync::Arc;
 
 use files_storage_proto::{
-    AgentAnnouncement, AgentDirective, AgentInfo, DirectiveOutcome, StorageAgentService,
-    StorageError, VolumeHealth,
+    AgentAnnouncement, AgentCredential, AgentDirective, AgentEnrollment, AgentInfo,
+    DirectiveOutcome, StorageAgentService, StorageError, VolumeHealth,
 };
 use uuid::Uuid;
 
-use crate::blocking::blocking;
 use crate::core::StorageCore;
+use crate::error::panicked;
 
 #[derive(Clone, architect::HasDispatcher)]
 pub struct StorageAgentBackend {
@@ -38,42 +43,49 @@ impl StorageAgentBackend {
         Self { core }
     }
 
-    #[must_use]
-    pub fn core(&self) -> &Arc<StorageCore> {
-        &self.core
+    async fn run<T, F>(&self, f: F) -> Result<T, StorageError>
+    where
+        F: FnOnce(Arc<StorageCore>) -> Result<T, StorageError> + Send + 'static,
+        T: Send + 'static,
+    {
+        let core = self.core.clone();
+        task_files_util::blocking(move || f(core), panicked).await
     }
 }
 
 impl StorageAgentService for StorageAgentBackend {
-    async fn announce(&self, announcement: AgentAnnouncement) -> Result<AgentInfo, StorageError> {
-        let core = self.core.clone();
-        blocking(move || core.announce(announcement)).await
+    async fn announce(
+        &self,
+        announcement: AgentAnnouncement,
+    ) -> Result<AgentEnrollment, StorageError> {
+        self.run(move |core| core.announce(announcement)).await
     }
 
     async fn heartbeat(
         &self,
-        agent_id: Uuid,
+        credential: AgentCredential,
         volumes: Vec<VolumeHealth>,
     ) -> Result<AgentInfo, StorageError> {
-        let core = self.core.clone();
-        blocking(move || core.heartbeat(agent_id, volumes)).await
+        self.run(move |core| core.heartbeat(&credential, volumes))
+            .await
     }
 
     async fn pending_directives(
         &self,
-        agent_id: Uuid,
+        credential: AgentCredential,
     ) -> Result<Vec<AgentDirective>, StorageError> {
-        Ok(self.core.pending_directives(agent_id))
+        self.run(move |core| core.pending_directives(&credential))
+            .await
     }
 
     async fn complete_directive(
         &self,
-        agent_id: Uuid,
+        credential: AgentCredential,
         directive_id: Uuid,
         outcome: DirectiveOutcome,
     ) -> Result<(), StorageError> {
-        let core = self.core.clone();
-        blocking(move || core.complete_directive(agent_id, directive_id, outcome)).await
+        self.run(move |core| core.complete_directive(&credential, directive_id, outcome))
+            .await
     }
 }
 

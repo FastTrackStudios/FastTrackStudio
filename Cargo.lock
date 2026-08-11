@@ -9918,6 +9918,7 @@ dependencies = [
  "pollster 0.4.0",
  "serde",
  "serde_json",
+ "task-files-util",
  "task-files-version-store",
  "tempfile",
  "thiserror 2.0.18",
@@ -9949,6 +9950,7 @@ name = "files-storage"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "blake3",
  "chrono",
  "files-proto",
  "files-storage-proto",
@@ -9957,6 +9959,7 @@ dependencies = [
  "serde",
  "serde_json",
  "task-files-chunk-store",
+ "task-files-util",
  "task-files-version-store",
  "tempfile",
  "thiserror 2.0.18",
@@ -28079,6 +28082,14 @@ dependencies = [
  "proptest",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "task-files-util"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
  "tokio",
 ]
 

@@ -30,12 +30,26 @@ async fn boot_server() -> eyre::Result<(String, tempfile::TempDir)> {
     // SAFETY: held under `ENV_LOCK` for the duration of `AppState::new`,
     // which reads both vars exactly once (captured into `OrgAppState`).
     unsafe {
+        // Sandbox the DATA root too, not just the vault root: without
+        // it `DataRoot::from_env` falls back to `$HOME/.task` — the
+        // developer's (and on this fleet, production's) real data root —
+        // and the server writes its storage registry, in-server agent
+        // identity and volume directory straight into it (PR #284
+        // review).
+        std::env::set_var("TASK_DATA_ROOT", tmp.path().join("data"));
         std::env::set_var("TASK_SERVER_VAULT_ROOT", tmp.path());
         std::env::set_var(
             "TASK_SERVER_COLLECTIONS_PATH",
             tmp.path().join("collections.jsonl"),
         );
     }
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    data_root
+        .ensure()
+        .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
+    data_root
+        .init_org("home", "Home", true)
+        .map_err(|e| eyre::eyre!("scaffold home org: {e}"))?;
     let state = task_server::AppState::new(None).await?;
     drop(guard);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;

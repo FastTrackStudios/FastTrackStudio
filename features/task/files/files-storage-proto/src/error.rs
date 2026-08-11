@@ -29,6 +29,14 @@ pub enum StorageError {
     /// approved it, so its volumes are not registered locations.
     #[error("agent not approved: {0}")]
     AgentNotApproved(String),
+    /// The caller did not prove it may do this: an operator call with no
+    /// valid session, or an agent call whose credential does not match
+    /// the agent it names. Agent ids and location ids are not secrets —
+    /// they are handed out by `list_agents` / `list_locations` — so
+    /// naming one is never, on its own, authorization to act as it
+    /// (PR #284 review).
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
     #[error("io: {0}")]
     Io(String),
 }

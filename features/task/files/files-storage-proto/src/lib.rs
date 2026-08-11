@@ -32,10 +32,10 @@ pub mod service;
 
 pub use error::StorageError;
 pub use model::{
-    AgentAnnouncement, AgentDirective, AgentHosting, AgentInfo, AgentStatus, AnnouncedVolume,
-    BlobReplica, CapabilityClass, DirectiveKind, DirectiveOutcome, GrantSpec, GrantUsage,
-    LiveTreeBinding, LocationHealth, LocationKind, PlacementStatus, RootPlacement,
-    StorageGrantInfo, StorageLocationInfo, VolumeHealth,
+    AgentAnnouncement, AgentCredential, AgentDirective, AgentEnrollment, AgentHosting, AgentInfo,
+    AgentStatus, AnnouncedVolume, BlobReplica, CapabilityClass, ConfinedPath, DirectiveKind,
+    DirectiveOutcome, GrantSpec, GrantUsage, LiveTreeBinding, LocationHealth, LocationKind,
+    PlacementStatus, RootPlacement, StorageGrantInfo, StorageLocationInfo, VolumeHealth,
 };
 pub use service::org::StorageEvent;
 pub use service::{StorageAdminService, StorageAgentService, StorageService};
