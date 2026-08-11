@@ -1164,7 +1164,7 @@ pub(crate) async fn build_org_state(
         // activity hints. The interval only bounds how promptly a due
         // capture happens — the cadence itself (10-minute auto-
         // snapshots, 30-minute quiescence) is the engine's.
-        files.enable_watching();
+        files.enable_watching().await;
         files.spawn_cadence_driver(std::time::Duration::from_secs(30));
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own

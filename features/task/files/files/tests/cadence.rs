@@ -16,7 +16,7 @@ use chrono::TimeDelta;
 use files::service::FilesServiceStreamSource as _;
 use files::{
     CadenceConfig, FileRootInfo, FilesBackend, FilesEvent, FilesServiceClient,
-    FilesServiceStreamClient, RootFlavor, TestClock, files_service_layer,
+    FilesServiceStreamClient, IgnoreSet, RootFlavor, TestClock, files_service_layer,
     files_service_stream_layer,
 };
 use uuid::Uuid;
@@ -386,6 +386,29 @@ async fn ignored_patterns_never_enter_the_store() {
         after.changed_paths
     );
 
+    // ...and, critically, does *not* reach back and delete what it
+    // already versioned. `gtr.wav` was captured before `*.wav` was
+    // ignored; the scan no longer enumerates it, but that means
+    // "invisible to versioning", not "the user deleted it" (PR #283
+    // review — `set_ignore_set`'s own contract).
+    assert!(
+        !after
+            .changed_paths
+            .contains(&"Audio Files/gtr.wav".to_string()),
+        "an already-versioned file must not be removed by a new ignore pattern: {:?}",
+        after.changed_paths
+    );
+    let survivor = harness
+        .client
+        .chain(root.id, "Audio Files/gtr.wav".to_string())
+        .await
+        .expect("chain rpc");
+    assert_eq!(
+        survivor.len(),
+        1,
+        "the already-versioned file keeps its last versioned state: {survivor:?}"
+    );
+
     // A bad glob is rejected rather than silently ignoring nothing.
     assert!(
         harness
@@ -529,5 +552,209 @@ async fn the_watcher_hints_activity_into_the_cadence() {
     );
 
     harness.backend.unwatch_root(root.id);
+    harness.shutdown().await;
+}
+
+/// PR #283 review finding 2: an explicit `checkpoint_now` takes the
+/// session out of the cadence engine *before* writing the capture that
+/// needs its save points. If that capture fails, the session has to go
+/// back — otherwise the root loses both its save points and its pending
+/// quiescence checkpoint, and simply goes silent with uncaptured work.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_checkpoint_preserves_the_session() {
+    let harness = Harness::start(CadenceConfig::default()).await;
+    let root = harness.create_root().await;
+
+    harness
+        .write_and_hint(root.id, "Audio Files/gtr.wav", b"take 1")
+        .await;
+    harness
+        .write_and_hint(root.id, "El Artisa.rpp", b"<REAPER_PROJECT>")
+        .await;
+    assert!(harness.backend.cadence().session_open(root.id));
+
+    // Make the capture fail for real: the file vanishes between the
+    // scan that enumerated it and the read that would hash it, so the
+    // open errors and the whole capture is abandoned.
+    let doomed = harness.root_dir.join("Audio Files/gtr.wav");
+    harness
+        .backend
+        .set_mid_hash_hook(Some(Arc::new(move |path: &std::path::Path| {
+            if path == doomed {
+                let _ = std::fs::remove_file(path);
+            }
+        })));
+    let failed = harness.client.checkpoint_now(root.id, None).await;
+    assert!(
+        failed.is_err(),
+        "the capture should have failed: {failed:?}"
+    );
+
+    // The session survived the failure, save points and all.
+    assert!(
+        harness.backend.cadence().session_open(root.id),
+        "a failed checkpoint must not end the session"
+    );
+
+    // The bounce recovers; quiescence still mints the session's
+    // checkpoint, still carrying the save point marked before the
+    // failure.
+    harness.backend.set_mid_hash_hook(None);
+    harness.write("Audio Files/gtr.wav", b"take 1");
+    harness.clock.advance(TimeDelta::minutes(31));
+    harness.backend.tick().await;
+
+    let chain = harness
+        .client
+        .chain(root.id, "El Artisa.rpp".to_string())
+        .await
+        .expect("chain rpc");
+    assert_eq!(chain.len(), 1, "quiescence still checkpointed: {chain:?}");
+    assert_eq!(
+        chain[0]
+            .save_points
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect::<Vec<_>>(),
+        ["El Artisa.rpp"],
+        "the save points marked before the failed checkpoint survived it"
+    );
+
+    harness.shutdown().await;
+}
+
+/// PR #283 review finding 3: a write hinted *while* a checkpoint's
+/// certifying scan is running is in no capture — the scan enumerated the
+/// tree before it. Ending the session anyway would strand that write
+/// with no future checkpoint ever falling due for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_during_a_capture_keeps_the_session_alive() {
+    let harness = Harness::start(CadenceConfig::default()).await;
+    let root = harness.create_root().await;
+
+    harness
+        .write_and_hint(root.id, "Audio Files/gtr.wav", b"take 1")
+        .await;
+    harness.clock.advance(TimeDelta::minutes(31));
+
+    // The last save of the day lands mid-capture: the hook fires inside
+    // the checkpoint, after its scan enumerated the tree.
+    let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = fired.clone();
+    let root_dir = harness.root_dir.clone();
+    let cadence = harness.backend.cadence().clone();
+    let clock = harness.clock.clone();
+    let root_id = root.id;
+    harness
+        .backend
+        .set_mid_hash_hook(Some(Arc::new(move |_: &std::path::Path| {
+            if once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            std::fs::write(root_dir.join("Audio Files/vox.wav"), b"the last take").unwrap();
+            clock.advance(TimeDelta::minutes(1));
+            cadence.note_activity(
+                root_id,
+                &["Audio Files/vox.wav".to_string()],
+                &IgnoreSet::seed(RootFlavor::Media),
+                RootFlavor::Media,
+            );
+        })));
+
+    harness.backend.tick().await;
+    assert!(
+        fired.load(std::sync::atomic::Ordering::SeqCst),
+        "the mid-capture write never happened — the test proves nothing"
+    );
+    harness.backend.set_mid_hash_hook(None);
+
+    assert!(
+        harness.backend.cadence().session_open(root.id),
+        "a write the capture could not have seen must keep the session open"
+    );
+    assert!(
+        harness
+            .client
+            .chain(root.id, "Audio Files/vox.wav".to_string())
+            .await
+            .expect("chain rpc")
+            .is_empty(),
+        "…precisely because that capture did not include it"
+    );
+
+    // And quiescence, measured from the mid-capture write, checkpoints
+    // it — rather than the change staying unversioned indefinitely.
+    harness.clock.advance(TimeDelta::minutes(31));
+    harness.backend.tick().await;
+    let chain = harness
+        .client
+        .chain(root.id, "Audio Files/vox.wav".to_string())
+        .await
+        .expect("chain rpc");
+    assert_eq!(
+        chain.len(),
+        1,
+        "the orphaned write is checkpointed by the session that stayed open: {chain:?}"
+    );
+
+    harness.shutdown().await;
+}
+
+/// PR #283 review finding 4: the cadence journal holds labels, not
+/// content. A corrupt one costs a root its save points and snapshot
+/// listing — never its ability to checkpoint, browse, or derive a chain.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_corrupt_journal_costs_labels_not_the_root() {
+    let harness = Harness::start(CadenceConfig::default()).await;
+    let root = harness.create_root().await;
+
+    harness.write("El Artisa.rpp", b"<REAPER_PROJECT>");
+    harness
+        .client
+        .checkpoint_now(root.id, Some("v1".to_string()))
+        .await
+        .expect("checkpoint_now rpc");
+
+    // Truncated mid-write by a crash or a full disk.
+    let journal = harness.root_dir.join(".fts-files/cadence.json");
+    assert!(journal.exists(), "the capture wrote a journal");
+    std::fs::write(&journal, b"{\"checkpoint_head\": \"deadbe").unwrap();
+
+    // Every RPC still works.
+    let chain = harness
+        .client
+        .chain(root.id, "El Artisa.rpp".to_string())
+        .await
+        .expect("chain must survive a corrupt journal");
+    assert_eq!(chain.len(), 1);
+    assert!(
+        chain[0].save_points.is_empty(),
+        "the labels are what was lost"
+    );
+    assert!(
+        harness
+            .client
+            .snapshots(root.id)
+            .await
+            .expect("snapshots must survive a corrupt journal")
+            .is_empty()
+    );
+
+    harness.write("El Artisa.rpp", b"<REAPER_PROJECT> v2");
+    let recovered = harness
+        .client
+        .checkpoint_now(root.id, Some("v2".to_string()))
+        .await
+        .expect("checkpoint must survive a corrupt journal");
+    assert_eq!(recovered.changed_paths, vec!["El Artisa.rpp".to_string()]);
+
+    // …and the next capture leaves a valid journal behind.
+    let bytes = std::fs::read(&journal).unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&bytes).expect("journal is valid again");
+    assert_eq!(
+        parsed["checkpoint_head"].as_str(),
+        Some(recovered.commit_id.as_str())
+    );
+
     harness.shutdown().await;
 }

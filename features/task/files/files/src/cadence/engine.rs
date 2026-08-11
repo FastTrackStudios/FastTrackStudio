@@ -79,11 +79,38 @@ pub enum DueKind {
 pub struct Due {
     pub root_id: Uuid,
     pub kind: DueKind,
+    /// When this capture was taken — the instant its certifying scan
+    /// will enumerate the live tree *from*. Activity hinted after it
+    /// cannot be in this capture, which is what
+    /// [`CadenceEngine::completed`] uses to decide whether the session
+    /// really ended (see its doc).
+    pub taken_at: DateTime<Utc>,
     /// The save points this capture carries: for a snapshot, the
     /// project-file saves since the last capture ("the nearest
     /// auto-snapshot"); for a checkpoint, every save point of the
     /// session it closes.
     pub save_points: Vec<SavePoint>,
+}
+
+/// A session [`CadenceEngine::end_session`] took out of the engine,
+/// carried by the caller across the capture it was ended for so a
+/// failure can put it back.
+#[derive(Debug)]
+pub struct EndedSession {
+    root_id: Uuid,
+    state: Option<RootCadence>,
+}
+
+impl EndedSession {
+    /// The save points the ended session accumulated — what the capture
+    /// records on the checkpoint it writes.
+    #[must_use]
+    pub fn save_points(&self) -> Vec<SavePoint> {
+        self.state
+            .as_ref()
+            .map(RootCadence::all_save_points)
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Debug)]
@@ -215,6 +242,7 @@ impl CadenceEngine {
             due.push(Due {
                 root_id: *root_id,
                 kind,
+                taken_at: now,
                 save_points: match kind {
                     DueKind::Snapshot => state.pending_save_points.clone(),
                     DueKind::Checkpoint => state.all_save_points(),
@@ -226,27 +254,61 @@ impl CadenceEngine {
 
     /// A capture succeeded. A snapshot restarts the debounce window and
     /// carries its save points into the session's history; a checkpoint
-    /// ends the session outright — the root goes quiet until someone
-    /// writes to it again.
+    /// ends the session — *unless* someone wrote while the capture was
+    /// running.
+    ///
+    /// That exception is the subtlety here. A capture's certifying scan
+    /// enumerates the live tree once, at [`Due::taken_at`]; a multi-GB
+    /// root's scan and commit take minutes, and a hint arriving inside
+    /// that window describes a write no capture has seen (the
+    /// certification retries in [`crate::certify`] cover a file moving
+    /// mid-hash, not a file written after enumeration). Ending the
+    /// session anyway would drop the root's cadence state, and with it
+    /// any chance of a quiescence checkpoint ever falling due for that
+    /// write — if it was the last save of the day it would stay
+    /// unversioned indefinitely (PR #283 review). So activity newer than
+    /// `taken_at` keeps the session alive with its work still marked
+    /// uncaptured, and the same test keeps a snapshot from clearing a
+    /// flag it did not earn.
     pub fn completed(&self, due: &Due) {
         let now = self.clock.now();
         let mut roots = self.roots.lock().expect("cadence state poisoned");
+        let Some(state) = roots.get_mut(&due.root_id) else {
+            return;
+        };
+        let missed_activity = state.last_activity_at > due.taken_at;
+        state.in_flight = false;
+        state.last_capture_at = now;
+        if !missed_activity {
+            state.uncaptured_activity = false;
+        }
+
+        // Save points this capture actually recorded are consumed;
+        // anything marked while it was in flight stays pending for the
+        // next one. `due.save_points` was built from the session list
+        // plus a prefix of the pending list, so its length says how much
+        // of `pending` went in.
+        let from_pending = due
+            .save_points
+            .len()
+            .saturating_sub(state.session_save_points.len())
+            .min(state.pending_save_points.len());
+
         match due.kind {
-            DueKind::Checkpoint => {
+            DueKind::Checkpoint if !missed_activity => {
                 roots.remove(&due.root_id);
             }
+            DueKind::Checkpoint => {
+                // The session continues from the write this checkpoint
+                // could not have seen; everything it did record is now
+                // durable on the commit, so none of it carries forward.
+                state.pending_save_points.drain(..from_pending);
+                state.session_save_points.clear();
+            }
             DueKind::Snapshot => {
-                if let Some(state) = roots.get_mut(&due.root_id) {
-                    state.in_flight = false;
-                    state.last_capture_at = now;
-                    state.uncaptured_activity = false;
-                    let carried = due.save_points.len();
-                    state
-                        .session_save_points
-                        .extend(state.pending_save_points.drain(..carried));
-                    // Anything marked while the snapshot was in flight
-                    // stays pending for the next capture.
-                }
+                state
+                    .session_save_points
+                    .extend(state.pending_save_points.drain(..from_pending));
             }
         }
     }
@@ -262,15 +324,50 @@ impl CadenceEngine {
 
     /// End `root_id`'s session out of band — what an explicit
     /// "checkpoint now" does, since it certifies the same live tree the
-    /// quiescence checkpoint would have. Returns the session's save
-    /// points so the caller can record them on the checkpoint it just
-    /// wrote.
-    pub fn end_session(&self, root_id: Uuid) -> Vec<SavePoint> {
+    /// quiescence checkpoint would have.
+    ///
+    /// The session is removed *optimistically*, before the capture it
+    /// belongs to has been written, because the capture needs its save
+    /// points to record them. If that capture then fails, the caller
+    /// must hand the returned [`EndedSession`] back to
+    /// [`CadenceEngine::restore_session`] — the out-of-band counterpart
+    /// of [`CadenceEngine::failed`]. Dropping it instead would lose the
+    /// session's save points *and* its accumulated activity, so a root
+    /// whose explicit checkpoint failed would never checkpoint at
+    /// quiescence either (PR #283 review).
+    #[must_use]
+    pub fn end_session(&self, root_id: Uuid) -> EndedSession {
         let mut roots = self.roots.lock().expect("cadence state poisoned");
-        roots
-            .remove(&root_id)
-            .map(|state| state.all_save_points())
-            .unwrap_or_default()
+        EndedSession {
+            root_id,
+            state: roots.remove(&root_id),
+        }
+    }
+
+    /// Put back a session [`CadenceEngine::end_session`] removed, after
+    /// the capture it was ended for failed. If activity has reopened a
+    /// session in the meantime, the two are merged: the restored save
+    /// points go back in front of the new ones, and the newer activity
+    /// timestamps win.
+    pub fn restore_session(&self, ended: EndedSession) {
+        let Some(old) = ended.state else {
+            return;
+        };
+        let mut roots = self.roots.lock().expect("cadence state poisoned");
+        match roots.get_mut(&ended.root_id) {
+            Some(current) => {
+                let mut restored = old.all_save_points();
+                restored.append(&mut current.pending_save_points);
+                current.pending_save_points = restored;
+                current.session_save_points.clear();
+                current.uncaptured_activity = true;
+                current.last_activity_at = current.last_activity_at.max(old.last_activity_at);
+                current.last_capture_at = current.last_capture_at.min(old.last_capture_at);
+            }
+            None => {
+                roots.insert(ended.root_id, old);
+            }
+        }
     }
 
     /// Is a session open on `root_id`?

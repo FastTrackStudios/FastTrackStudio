@@ -98,6 +98,70 @@ impl From<DueKind> for CaptureKind {
     }
 }
 
+/// Exactly the state a watcher hint needs: which roots exist, their
+/// Ignore sets, and the cadence engine to report into.
+///
+/// This is a *slice* of [`FilesBackend`] rather than a clone of it, and
+/// deliberately so. A watcher lives in the backend's `watchers` map and
+/// its callback holds this sink; handing it a whole backend clone would
+/// close a reference cycle (watchers map → watcher → callback → backend
+/// clone → the same watchers map `Arc`) that no drop could ever break,
+/// so a released org would leak its backend and keep watching (PR #283
+/// review). `Hints` holds no watcher map and no driver handle, so the
+/// cycle simply does not exist.
+struct Hints {
+    registry: Arc<Registry>,
+    ignores: Arc<Mutex<HashMap<Uuid, IgnoreSet>>>,
+    cadence: Arc<CadenceEngine>,
+}
+
+impl Hints {
+    /// The root's Ignore set, loaded from its store dir (and seeded from
+    /// its flavor on first touch) then cached in `ignores`.
+    fn ignore_of(
+        ignores: &Mutex<HashMap<Uuid, IgnoreSet>>,
+        root: &FileRootInfo,
+    ) -> Result<IgnoreSet, Error> {
+        if let Some(set) = ignores
+            .lock()
+            .expect("ignore cache lock poisoned")
+            .get(&root.id)
+        {
+            return Ok(set.clone());
+        }
+        let set = IgnoreSet::load_or_seed(&Path::new(&root.path).join(STORE_DIR), root.flavor)?;
+        ignores
+            .lock()
+            .expect("ignore cache lock poisoned")
+            .insert(root.id, set.clone());
+        Ok(set)
+    }
+
+    /// Note `paths` as activity on `root_id`, returning how many
+    /// survived the root's Ignore set.
+    fn note(&self, root_id: Uuid, paths: &[String]) -> Result<u32, Error> {
+        let root = self
+            .registry
+            .get(root_id)
+            .ok_or_else(|| Error::NotFound(root_id.to_string()))?;
+        let ignore = Self::ignore_of(&self.ignores, &root)?;
+        Ok(self
+            .cadence
+            .note_activity(root_id, paths, &ignore, root.flavor))
+    }
+}
+
+/// Watcher hints land here (see [`crate::cadence::watcher`]): the
+/// backend is what knows a root's flavor and Ignore set, so it is what
+/// turns a raw path list into cadence activity.
+impl ActivitySink for Hints {
+    fn note_activity(&self, root_id: Uuid, paths: Vec<String>) {
+        if let Err(err) = self.note(root_id, &paths) {
+            tracing::debug!(%root_id, %err, "files watcher hint dropped");
+        }
+    }
+}
+
 /// What one performed capture produced — the wire payload plus which
 /// kind it was, so [`FilesBackend::tick`] can report a cadence pass.
 #[derive(Debug, Clone)]
@@ -131,6 +195,9 @@ pub struct FilesBackend {
     /// Set by [`FilesBackend::enable_watching`]: newly created roots
     /// start watched too, rather than only on the next restart.
     watch_new_roots: Arc<std::sync::atomic::AtomicBool>,
+    /// The cadence driver task, kept so it can be stopped — see
+    /// [`FilesBackend::spawn_cadence_driver`].
+    driver: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Test seam — see [`FilesBackend::set_mid_hash_hook`].
     hook: Arc<Mutex<Option<MidHashHook>>>,
     /// Fan-out hub behind `#[subscribe] fn events` — every successful
@@ -209,6 +276,7 @@ impl FilesBackend {
             ignores: Arc::new(Mutex::new(HashMap::new())),
             watchers: Arc::new(Mutex::new(HashMap::new())),
             watch_new_roots: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            driver: Arc::new(Mutex::new(None)),
             hook: Arc::new(Mutex::new(None)),
             events: architect::PubSub::sliding(256),
         })
@@ -247,7 +315,15 @@ impl FilesBackend {
     /// already durable — but iroh-blobs' `FsStore` may hold buffered
     /// writes / file-backed resources open until this (or the process)
     /// actually exits; see `ChunkStore::shutdown`'s own doc.
+    /// Also stops the cadence: the driver task is aborted and every
+    /// watcher dropped, so a backend that has been shut down is inert
+    /// rather than still ticking against a store the next backend is
+    /// about to open (PR #283 review).
     pub async fn shutdown(&self) {
+        if let Some(driver) = self.driver.lock().expect("driver lock poisoned").take() {
+            driver.abort();
+        }
+        self.watchers.lock().expect("watcher map poisoned").clear();
         let repos: Vec<Arc<ReadonlyRepo>> = self
             .repos
             .lock()
@@ -363,23 +439,20 @@ impl FilesBackend {
         );
     }
 
+    /// The registry + Ignore-set + cadence slice of this backend, as an
+    /// [`ActivitySink`] a watcher can hold.
+    fn hints(&self) -> Arc<Hints> {
+        Arc::new(Hints {
+            registry: self.registry.clone(),
+            ignores: self.ignores.clone(),
+            cadence: self.cadence.clone(),
+        })
+    }
+
     /// The root's Ignore set, loaded from its store dir (and seeded
     /// from its flavor on first touch) then cached.
     fn ignore_of(&self, root: &FileRootInfo) -> Result<IgnoreSet, Error> {
-        if let Some(set) = self
-            .ignores
-            .lock()
-            .expect("ignore cache lock poisoned")
-            .get(&root.id)
-        {
-            return Ok(set.clone());
-        }
-        let set = IgnoreSet::load_or_seed(&Self::store_dir(Path::new(&root.path)), root.flavor)?;
-        self.ignores
-            .lock()
-            .expect("ignore cache lock poisoned")
-            .insert(root.id, set.clone());
-        Ok(set)
+        Hints::ignore_of(&self.ignores, root)
     }
 
     fn journal_of(root: &FileRootInfo) -> Result<Journal, Error> {
@@ -629,6 +702,7 @@ impl FilesBackend {
             base_tree: &base_tree,
             disk_files: &disk_files,
             base_paths: &base_paths,
+            ignore: &ignore,
             description: description.clone(),
             attempts: self.cadence.config().certify_attempts,
             hook,
@@ -718,9 +792,25 @@ impl FilesBackend {
         // quiescence checkpoint would, so it ends the session: the save
         // points it collected ride onto this checkpoint, and the root
         // goes quiet until someone writes again.
-        let save_points = self.cadence.end_session(root_id);
+        //
+        // The session comes out of the engine *before* the capture that
+        // needs its save points, so a failed capture has to put it back
+        // — the out-of-band twin of `tick`'s `cadence.failed`. Without
+        // this, a transient I/O error would silently cost the root both
+        // its save points and its pending quiescence checkpoint (PR
+        // #283 review).
+        let ended = self.cadence.end_session(root_id);
+        let save_points = ended.save_points();
         let description = description.unwrap_or_else(|| "checkpoint now".to_string());
-        match self.capture_inner(root_id, CaptureKind::Checkpoint, description, save_points)? {
+        let captured =
+            match self.capture_inner(root_id, CaptureKind::Checkpoint, description, save_points) {
+                Ok(captured) => captured,
+                Err(err) => {
+                    self.cadence.restore_session(ended);
+                    return Err(err);
+                }
+            };
+        match captured {
             Captured::Checkpoint(info) => Ok(info),
             Captured::Snapshot(_) => unreachable!("a checkpoint capture returns a checkpoint"),
         }
@@ -732,11 +822,7 @@ impl FilesBackend {
     }
 
     fn hint_activity_inner(&self, root_id: Uuid, paths: Vec<String>) -> Result<u32, Error> {
-        let root = self.get_root_info(root_id)?;
-        let ignore = self.ignore_of(&root)?;
-        Ok(self
-            .cadence
-            .note_activity(root_id, &paths, &ignore, root.flavor))
+        self.hints().note(root_id, &paths)
     }
 
     fn set_ignore_set_inner(
@@ -797,31 +883,60 @@ impl FilesBackend {
     /// [`FilesBackend::tick`] by hand. The interval only bounds how
     /// promptly a due capture happens; the cadence itself is the
     /// engine's, so a coarse interval is cheap.
-    pub fn spawn_cadence_driver(
-        &self,
-        interval: std::time::Duration,
-    ) -> tokio::task::JoinHandle<()> {
+    /// The handle is kept on the backend (and aborted by
+    /// [`FilesBackend::shutdown`], or by a second call to this) rather
+    /// than left to the caller: two drivers ticking one on-disk store
+    /// would resurrect exactly the dual-capture race PR #280 closed, and
+    /// a driver nobody holds is a driver nobody can stop (PR #283
+    /// review).
+    pub fn spawn_cadence_driver(&self, interval: std::time::Duration) {
         let this = self.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(interval).await;
                 let _ = this.tick().await;
             }
-        })
+        });
+        if let Some(previous) = self
+            .driver
+            .lock()
+            .expect("driver lock poisoned")
+            .replace(handle)
+        {
+            previous.abort();
+        }
     }
 
     /// Start the server-side watcher for `root_id` — activity hints
     /// into the cadence engine (see [`crate::cadence::watcher`]).
     /// Idempotent: watching an already-watched root is a no-op.
+    /// Blocking: establishing a recursive watch walks the whole tree
+    /// (inotify is per-directory, so one watch per directory), which on
+    /// a multi-GB media root with thousands of directories is real
+    /// filesystem work. Callers on an async runtime must reach it
+    /// through [`FilesBackend::enable_watching`] or their own
+    /// `spawn_blocking` (PR #283 review). The watchers map is locked
+    /// only around the lookup and the insert, never across that walk.
     pub fn watch_root(&self, root_id: Uuid) -> Result<(), FilesError> {
         let root = self.get_root_info(root_id).map_err(to_files_error)?;
-        let mut watchers = self.watchers.lock().expect("watcher map poisoned");
-        if watchers.contains_key(&root_id) {
+        if self
+            .watchers
+            .lock()
+            .expect("watcher map poisoned")
+            .contains_key(&root_id)
+        {
             return Ok(());
         }
-        let watcher = RootWatcher::spawn(root_id, Path::new(&root.path), Arc::new(self.clone()))
+        let watcher = RootWatcher::spawn(root_id, Path::new(&root.path), self.hints())
             .map_err(to_files_error)?;
-        watchers.insert(root_id, watcher);
+        // Another caller may have won the race while the walk ran; the
+        // first watch installed wins and ours is dropped (which stops
+        // it), so a root never ends up with two.
+        self.watchers
+            .lock()
+            .expect("watcher map poisoned")
+            .entry(root_id)
+            .or_insert(watcher);
         Ok(())
     }
 
@@ -832,14 +947,22 @@ impl FilesBackend {
     /// offline removable location, a platform limit) is logged and
     /// skipped: it still checkpoints on an explicit trigger, which is
     /// the whole reason watchers are hints.
-    pub fn enable_watching(&self) {
-        self.watch_new_roots
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        for root in self.registry.list() {
-            if let Err(err) = self.watch_root(root.id) {
-                tracing::warn!(root_id = %root.id, path = %root.path, %err, "files: root not watched");
+    /// Async because [`FilesBackend::watch_root`] is blocking work: the
+    /// whole sweep runs on `spawn_blocking` so establishing watches over
+    /// a NAS full of media roots cannot stall an async worker during org
+    /// startup (PR #283 review).
+    pub async fn enable_watching(&self) {
+        let this = self.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            this.watch_new_roots
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            for root in this.registry.list() {
+                if let Err(err) = this.watch_root(root.id) {
+                    tracing::warn!(root_id = %root.id, path = %root.path, %err, "files: root not watched");
+                }
             }
-        }
+        })
+        .await;
     }
 
     /// Stop watching `root_id`.
@@ -848,17 +971,6 @@ impl FilesBackend {
             .lock()
             .expect("watcher map poisoned")
             .remove(&root_id);
-    }
-}
-
-/// Watcher hints land here (see [`crate::cadence::watcher`]): the
-/// backend is what knows the root's flavor and Ignore set, so it is
-/// what turns a raw path list into cadence activity.
-impl ActivitySink for FilesBackend {
-    fn note_activity(&self, root_id: Uuid, paths: Vec<String>) {
-        if let Err(err) = self.hint_activity_inner(root_id, paths) {
-            tracing::debug!(%root_id, %err, "files watcher hint dropped");
-        }
     }
 }
 
@@ -906,8 +1018,10 @@ impl FilesService for FilesBackend {
     }
 
     async fn hint_activity(&self, root_id: Uuid, paths: Vec<String>) -> Result<u32, FilesError> {
-        self.hint_activity_inner(root_id, paths)
-            .map_err(to_files_error)
+        // On the blocking pool like its neighbours: the first hint for a
+        // root loads (and may seed + write) its Ignore set.
+        let this = self.clone();
+        blocking(move || this.hint_activity_inner(root_id, paths)).await
     }
 
     async fn snapshots(&self, root_id: Uuid) -> Result<Vec<SnapshotInfo>, FilesError> {
@@ -916,12 +1030,12 @@ impl FilesService for FilesBackend {
     }
 
     async fn ignore_set(&self, root_id: Uuid) -> Result<Vec<String>, FilesError> {
-        let root = self.get_root_info(root_id).map_err(to_files_error)?;
-        Ok(self
-            .ignore_of(&root)
-            .map_err(to_files_error)?
-            .patterns()
-            .to_vec())
+        let this = self.clone();
+        blocking(move || {
+            let root = this.get_root_info(root_id)?;
+            Ok(this.ignore_of(&root)?.patterns().to_vec())
+        })
+        .await
     }
 
     async fn set_ignore_set(

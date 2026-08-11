@@ -78,18 +78,49 @@ impl Journal {
 
     /// Read the journal for the root whose store dir is `store_dir`;
     /// a root that has never checkpointed simply has none yet.
+    ///
+    /// **An unreadable journal is an empty journal, never an error.**
+    /// This file holds labels, not content (see the module doc), so a
+    /// truncated or hand-mangled `cadence.json` must cost a root its
+    /// save points and its snapshot listing — not its ability to
+    /// checkpoint, browse, or derive a chain. Hard-failing here would
+    /// wedge every one of those RPCs permanently until somebody deleted
+    /// the file by hand (PR #283 review). The heads degrade to the
+    /// repo's own view heads, and the next capture writes a fresh,
+    /// valid journal.
     pub fn load(store_dir: &Path) -> Result<Self> {
         let path = Self::path(store_dir);
         if !path.exists() {
             return Ok(Self::default());
         }
-        let bytes = std::fs::read(&path)?;
-        Ok(serde_json::from_slice(&bytes)?)
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                tracing::warn!(path = %path.display(), %err, "files: cadence journal unreadable, continuing without its labels");
+                return Ok(Self::default());
+            }
+        };
+        match serde_json::from_slice(&bytes) {
+            Ok(journal) => Ok(journal),
+            Err(err) => {
+                tracing::warn!(path = %path.display(), %err, "files: cadence journal corrupt, continuing without its labels");
+                Ok(Self::default())
+            }
+        }
     }
 
+    /// Write the journal, atomically: a temp file in the same directory
+    /// (so `rename` stays within one filesystem) replaced over the real
+    /// one. A crash or ENOSPC then leaves either the old journal or the
+    /// new one, never a half-written file — and a reader that takes no
+    /// lock (`chain` derives save points concurrently with a capture)
+    /// always observes one complete version.
     pub fn save(&self, store_dir: &Path) -> Result<()> {
         std::fs::create_dir_all(store_dir)?;
-        std::fs::write(Self::path(store_dir), serde_json::to_vec_pretty(self)?)?;
+        let path = Self::path(store_dir);
+        let temp = path.with_extension("json.tmp");
+        std::fs::write(&temp, serde_json::to_vec_pretty(self)?)?;
+        std::fs::rename(&temp, &path)?;
         Ok(())
     }
 

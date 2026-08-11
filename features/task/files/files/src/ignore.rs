@@ -17,6 +17,7 @@
 //! prefix (`peaks/` ignores everything under any `peaks` directory).
 
 use std::path::Path;
+use std::sync::LazyLock;
 
 use files_proto::RootFlavor;
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -70,6 +71,18 @@ pub const MEDIA_PROJECT_FILES: &[&str] = &[
     "*.logicx",
     "*.dawproject",
 ];
+
+/// [`MEDIA_PROJECT_FILES`], compiled once. `is_project_file` runs per
+/// surviving hint path, and hints arrive per watcher event during
+/// exactly the write storms this engine exists for — recompiling
+/// eleven globs on each one is work with no purpose.
+static MEDIA_PROJECT_GLOBS: LazyLock<GlobSet> = LazyLock::new(|| {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in MEDIA_PROJECT_FILES {
+        builder.add(Glob::new(pattern).expect("project-file patterns are valid globs"));
+    }
+    builder.build().expect("project-file glob set builds")
+});
 
 /// A compiled Ignore set: the patterns as authored (round-tripped over
 /// RPC verbatim) plus the [`GlobSet`]s they compile to.
@@ -194,17 +207,11 @@ impl IgnoreSet {
     #[must_use]
     pub fn is_project_file(rel_path: &str, flavor: RootFlavor) -> bool {
         let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
-        let globs = match flavor {
-            RootFlavor::Media => MEDIA_PROJECT_FILES,
+        match flavor {
+            RootFlavor::Media => MEDIA_PROJECT_GLOBS.is_match(name),
             // Software roots have no single session document.
-            RootFlavor::Software => return false,
-        };
-        globs.iter().any(|pattern| {
-            Glob::new(pattern)
-                .expect("project-file patterns are valid globs")
-                .compile_matcher()
-                .is_match(name)
-        })
+            RootFlavor::Software => false,
+        }
     }
 
     /// Load the set stored for the root whose store directory is

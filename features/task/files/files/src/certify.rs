@@ -9,14 +9,35 @@
 //! perfectly valid-looking version of a file that never existed.
 //!
 //! The guard is a stat sandwich: `stat` the file, stream it into the
-//! chunk store, `stat` it again. If size or mtime moved, the bytes we
-//! hashed were a moving target — retry, and after
+//! chunk store, `stat` it again. If anything moved, the bytes we hashed
+//! were a moving target — retry, and after
 //! [`CadenceConfig::certify_attempts`](crate::cadence::CadenceConfig::certify_attempts)
 //! attempts give up on *this* file only. Giving up means the file keeps
 //! whatever state it already had in the store and rides into the next
 //! capture; the capture in progress still succeeds for everything else.
 //! A writer that never pauses would otherwise be able to block a whole
 //! root's history indefinitely.
+//!
+//! # What "anything moved" has to mean on a NAS
+//!
+//! Length plus mtime is not enough, and this deployment is precisely
+//! where that bites (PR #283 review): several DAW and media writers
+//! rewrite blocks *in place*, so the length never changes, and mtime
+//! granularity on FAT/exFAT, some NAS appliances, and NFSv3-visible
+//! attributes is one to two seconds. A same-length in-place rewrite
+//! landing inside the pre-stat's granule would leave `before == after`
+//! and certify a torn read — exactly what this module exists to stop.
+//!
+//! So [`FileStat`] carries every cheap identity signal the platform
+//! offers — length, mtime, and on unix the inode and ctime (ns-granular
+//! in the kernel even where a filesystem's mtime is displayed coarse) —
+//! and when *none* of them can prove sub-second resolution
+//! ([`FileStat::is_coarse`]), certification stops trusting timestamps
+//! and re-reads the file: two independent streaming passes that hash to
+//! the same content address did not have a write between them. That
+//! costs a second read only on the filesystems that cannot prove
+//! otherwise. A file whose metadata cannot be read at all is requeued
+//! rather than certified on length alone.
 //!
 //! An abandoned attempt does leave its chunks (and a manifest) behind in
 //! the CAS. That is exactly what `ChunkStore::gc`'s manifest sweep is
@@ -25,7 +46,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use task_files_chunk_store::{ChunkStore, FileId};
 
@@ -39,26 +60,72 @@ pub type MidHashHook = Arc<dyn Fn(&Path) + Send + Sync>;
 
 /// The identity a stat sandwich compares. Deliberately not a content
 /// hash — the point is to detect that the file moved under us without
-/// reading it a second time.
+/// reading it a second time (and when this evidence is too coarse to
+/// settle it, [`stream_certified`] does read it a second time).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FileStat {
+pub(crate) struct FileStat {
     len: u64,
+    /// `None` only when the platform cannot report it — which is itself
+    /// disqualifying (see [`FileStat::is_coarse`]).
     modified: Option<SystemTime>,
+    /// Inode, and ctime as (seconds, nanoseconds). Unix only; a rename-
+    /// over-the-top write changes the inode without necessarily moving
+    /// length or mtime, and ctime moves on every write.
+    #[cfg(unix)]
+    unix: Option<(u64, i64, i64)>,
 }
 
-fn stat(path: &Path) -> Result<FileStat> {
-    let metadata = std::fs::metadata(path)?;
-    Ok(FileStat {
-        len: metadata.len(),
-        modified: metadata.modified().ok(),
-    })
+/// Sub-second components of `time`, or `None` when it predates the
+/// epoch (in which case we simply have no resolution evidence).
+fn subsec_nanos(time: SystemTime) -> Option<u32> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.subsec_nanos())
+}
+
+impl FileStat {
+    fn read(path: &Path) -> Result<Self> {
+        let metadata = std::fs::metadata(path)?;
+        Ok(Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            unix: {
+                use std::os::unix::fs::MetadataExt as _;
+                Some((metadata.ino(), metadata.ctime(), metadata.ctime_nsec()))
+            },
+        })
+    }
+
+    /// Can this stat pair rule out a same-length in-place rewrite on its
+    /// own? It can only do so if *some* timestamp it carries has
+    /// sub-second resolution — a non-zero nanosecond component is proof
+    /// that the filesystem records finer than a granule. All-zero
+    /// nanoseconds means either a coarse filesystem or a
+    /// one-in-a-billion coincidence, and both are handled the same way:
+    /// verify by re-reading, which is correct in either case and rare in
+    /// the second.
+    pub(crate) fn is_coarse(&self) -> bool {
+        #[cfg(unix)]
+        if let Some((_, _, ctime_nsec)) = self.unix {
+            if ctime_nsec != 0 {
+                return false;
+            }
+        }
+        match self.modified.and_then(subsec_nanos) {
+            Some(nanos) => nanos == 0,
+            // No usable mtime at all: never certify on length alone.
+            None => true,
+        }
+    }
 }
 
 /// Stream `path` into `chunks`, certified stable.
 ///
-/// `Ok(Some(id))` — the file was identical before and after the read;
-/// `id` is its content address. `Ok(None)` — the file was still being
-/// written after `attempts` tries: requeue it.
+/// `Ok(Some(id))` — the file was provably identical before and after the
+/// read; `id` is its content address. `Ok(None)` — the file was still
+/// being written (or its metadata was too coarse to settle and a second
+/// read disagreed) after `attempts` tries: requeue it.
 pub async fn stream_certified(
     chunks: &ChunkStore,
     path: &Path,
@@ -66,19 +133,75 @@ pub async fn stream_certified(
     hook: Option<&MidHashHook>,
 ) -> Result<Option<FileId>> {
     for _ in 0..attempts.max(1) {
-        let before = stat(path)?;
+        let before = FileStat::read(path)?;
         if let Some(hook) = hook {
             hook(path);
         }
-        let file = tokio::fs::File::open(path).await?;
-        let file_id = chunks
-            .write_stream(file)
-            .await
-            .map_err(|e| Error::Repo(format!("chunk store: {e}")))?;
-        let after = stat(path)?;
-        if before == after {
+        let file_id = stream_once(chunks, path).await?;
+        let after = FileStat::read(path)?;
+        if before != after {
+            continue;
+        }
+        if !after.is_coarse() {
+            return Ok(Some(file_id));
+        }
+        // Coarse (or absent) timestamps: the stats agreeing proves
+        // nothing, so prove it by content. Two independent reads
+        // hashing alike means no write landed between them.
+        let second = stream_once(chunks, path).await?;
+        if second == file_id && FileStat::read(path)? == after {
             return Ok(Some(file_id));
         }
     }
     Ok(None)
+}
+
+async fn stream_once(chunks: &ChunkStore, path: &Path) -> Result<FileId> {
+    let file = tokio::fs::File::open(path).await?;
+    chunks
+        .write_stream(file)
+        .await
+        .map_err(|e| Error::Repo(format!("chunk store: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn stat(modified: Option<SystemTime>, ctime_nsec: i64) -> FileStat {
+        FileStat {
+            len: 42,
+            modified,
+            #[cfg(unix)]
+            unix: Some((7, 1_700_000_000, ctime_nsec)),
+        }
+    }
+
+    #[test]
+    fn sub_second_resolution_settles_certification_on_stats_alone() {
+        let ns = UNIX_EPOCH + Duration::new(1_700_000_000, 123_456_789);
+        assert!(!stat(Some(ns), 0).is_coarse());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_nanosecond_ctime_is_enough_even_when_mtime_reads_whole_seconds() {
+        let coarse = UNIX_EPOCH + Duration::new(1_700_000_000, 0);
+        assert!(!stat(Some(coarse), 456).is_coarse());
+    }
+
+    #[test]
+    fn whole_second_timestamps_force_a_content_re_read() {
+        let coarse = UNIX_EPOCH + Duration::new(1_700_000_000, 0);
+        assert!(
+            stat(Some(coarse), 0).is_coarse(),
+            "a 1-2s mtime granule cannot rule out a same-length in-place rewrite"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_mtime_never_certifies_on_length_alone() {
+        assert!(stat(None, 0).is_coarse());
+    }
 }

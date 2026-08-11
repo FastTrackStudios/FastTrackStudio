@@ -34,6 +34,7 @@ use task_files_version_store::VersionStoreBackend;
 
 use crate::certify::{MidHashHook, stream_certified};
 use crate::error::{Error, Result};
+use crate::ignore::IgnoreSet;
 use crate::scan::lookup;
 
 /// Everything one capture commit needs: what it is parented on, what
@@ -53,6 +54,9 @@ pub struct Capture<'a> {
     /// Every path tracked in the base tree — the set a capture removes
     /// from when a file has disappeared from the live tree.
     pub base_paths: &'a BTreeSet<RepoPathBuf>,
+    /// The root's Ignore set. `disk_files` is already filtered by it;
+    /// this is here for the *removal* half — see the removal loop.
+    pub ignore: &'a IgnoreSet,
     pub description: String,
     /// How many times to re-read a file that changed while being
     /// hashed before requeueing it.
@@ -91,6 +95,7 @@ async fn write_capture_async(capture: Capture<'_>) -> Result<CaptureResult> {
         base_tree,
         disk_files,
         base_paths,
+        ignore,
         description,
         attempts,
         hook,
@@ -150,11 +155,24 @@ async fn write_capture_async(capture: Capture<'_>) -> Result<CaptureResult> {
         changed_paths.push(repo_path.as_internal_file_string().to_string());
     }
 
+    // Removals. A base path missing from `disk_files` has two very
+    // different causes, and conflating them destroys work: the user
+    // deleted the file, or the file is still there but the Ignore set
+    // now covers it (a pattern added after it was already versioned).
+    // The scan cannot tell them apart, because an ignored path is never
+    // enumerated — so ask the set directly. A now-ignored path keeps its
+    // last versioned state in the tree untouched, which is exactly what
+    // `set_ignore_set` promises ("already-versioned paths that a new
+    // pattern now covers are not retroactively removed from history").
     for path in base_paths {
-        if !present.contains(path) {
-            builder.remove(path.clone());
-            changed_paths.push(path.as_internal_file_string().to_string());
+        if present.contains(path) {
+            continue;
         }
+        if ignore.is_ignored(path.as_internal_file_string()) {
+            continue;
+        }
+        builder.remove(path.clone());
+        changed_paths.push(path.as_internal_file_string().to_string());
     }
     changed_paths.sort();
     requeued_paths.sort();
