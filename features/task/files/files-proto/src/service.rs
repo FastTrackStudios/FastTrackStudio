@@ -46,10 +46,14 @@ pub trait FilesService {
     /// file, mints a stable id, and initializes its version store.
     /// Fails with [`FilesError::AlreadyExists`] if `path` is already a
     /// root, and with [`FilesError::BadRequest`] if `path` doesn't
-    /// exist or isn't a directory. `flavor` is accepted for wire
-    /// stability but only `RootFlavor::Media` is implemented in v1 —
-    /// `RootFlavor::Software` fails with [`FilesError::BadRequest`]
-    /// (ADR 0001: software roots are colocated git, a distinct build).
+    /// exist or isn't a directory.
+    ///
+    /// `flavor` picks the versioning engine and is fixed for the root's
+    /// life (see [`crate::model::RootFlavor`]).
+    /// [`RootFlavor::Software`](crate::model::RootFlavor::Software)
+    /// initializes a colocated git repository in the folder — or
+    /// *adopts* the one already there, keeping its history and remotes
+    /// (issue #273).
     async fn create_root(
         &self,
         path: String,
