@@ -32,6 +32,7 @@ mod auth;
 #[cfg(feature = "plugin-fitness")]
 mod body;
 mod brief;
+mod bulk_journal;
 mod code;
 #[cfg(feature = "plugin-fasttrackstudio")]
 mod collection;
