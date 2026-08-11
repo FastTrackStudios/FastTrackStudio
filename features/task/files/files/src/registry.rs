@@ -73,15 +73,23 @@ impl Registry {
         v
     }
 
-    /// Whether `path` is already registered as a root's live tree — the
-    /// registry-side half of "already a root" (the marker-file check
-    /// on disk is the other half, and is authoritative for roots this
-    /// registry hasn't seen yet).
-    pub fn path_taken(&self, path: &Path) -> bool {
+    /// A registered root that would conflict with a new root at
+    /// `path` — exact match, an existing root nested inside `path`, or
+    /// `path` nested inside an existing root, checked both directions
+    /// since containment is symmetric-in-effect for versioning:
+    /// "roots never overlap on disk" (glossary "File Root"). The
+    /// marker-file check on disk covers the exact-match case for a
+    /// root this registry hasn't seen yet; this covers the ancestor/
+    /// descendant cases, which no marker file can detect.
+    pub fn conflicting_root(&self, path: &Path) -> Option<FileRootInfo> {
         self.roots
             .lock()
             .expect("registry lock poisoned")
             .values()
-            .any(|r| Path::new(&r.path) == path)
+            .find(|r| {
+                let existing = Path::new(&r.path);
+                path == existing || path.starts_with(existing) || existing.starts_with(path)
+            })
+            .cloned()
     }
 }

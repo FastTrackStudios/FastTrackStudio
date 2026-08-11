@@ -77,10 +77,7 @@ pub(crate) enum FilesRootCmd {
 }
 
 pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre::Result<()> {
-    let slug = match crate::resolve_active_org(org_override.map(str::to_owned)) {
-        Ok(s) => s,
-        Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
-    };
+    let slug = crate::resolve_slug(org_override)?;
     let vox_url = resolve_org_vox_url(None, &slug);
     let client: FilesServiceClient = establish_for_url(&vox_url).await?;
 
@@ -126,7 +123,11 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                 println!("{} ({})", root.name, root.path);
             }
         }
-        FilesCmd::Browse { root_id, subpath, json } => {
+        FilesCmd::Browse {
+            root_id,
+            subpath,
+            json,
+        } => {
             let entries = client
                 .browse(root_id, subpath)
                 .await
@@ -140,7 +141,11 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                 .map_err(|e| eyre::eyre!("drive_browse: {e}"))?;
             print_entries(&entries, json)?;
         }
-        FilesCmd::Chain { root_id, path, json } => {
+        FilesCmd::Chain {
+            root_id,
+            path,
+            json,
+        } => {
             let chain = client
                 .chain(root_id, path)
                 .await
@@ -153,11 +158,20 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                         .renamed_from
                         .map(|p| format!(" (renamed from {p})"))
                         .unwrap_or_default();
-                    println!("{}  {}{}", &entry.commit_id[..12.min(entry.commit_id.len())], entry.path, renamed);
+                    println!(
+                        "{}  {}{}",
+                        &entry.commit_id[..12.min(entry.commit_id.len())],
+                        entry.path,
+                        renamed
+                    );
                 }
             }
         }
-        FilesCmd::Checkpoint { root_id, message, json } => {
+        FilesCmd::Checkpoint {
+            root_id,
+            message,
+            json,
+        } => {
             let info = client
                 .checkpoint_now(root_id, message)
                 .await

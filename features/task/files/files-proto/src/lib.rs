@@ -25,8 +25,9 @@ pub use service::{FilesError, FilesEvent, FilesService};
 #[cfg(feature = "vox")]
 pub use service::{
     FilesServiceClient, FilesServiceRpcDispatcher as FilesDispatcher,
-    Service as FilesServiceBridge, files_service_rpc_service_descriptor as files_service_descriptor,
-    layer as files_service_layer, serve as serve_files_service,
+    Service as FilesServiceBridge,
+    files_service_rpc_service_descriptor as files_service_descriptor, layer as files_service_layer,
+    serve as serve_files_service,
 };
 
 // `#[subscribe] fn events` stream sibling — live root/checkpoint

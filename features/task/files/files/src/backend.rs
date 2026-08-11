@@ -10,9 +10,30 @@
 //! async fns aren't `Send` on every path (see `repo_open`'s module
 //! doc), and `#[architect::rpc]` methods must return a `Send` future —
 //! so none of this crate's logic can `.await` jj-lib directly from
-//! inside an `async fn` without poisoning the RPC method's future. Each
-//! `FilesService` method below is `async fn` only because the trait
-//! requires it; its body never actually awaits anything.
+//! inside an `async fn` without poisoning the RPC method's future.
+//! Every `FilesService` method below runs its sync `*_inner` body on
+//! `tokio::task::spawn_blocking` (same convention as `task-server`'s
+//! `notifier.rs`/`mcp.rs`) rather than inline on the calling async
+//! task — a full-tree scan or a multi-GB checkpoint must not stall the
+//! shared runtime's other org RPCs (PR #280 review).
+//!
+//! **Filesystem confinement.** `create_root` and `drive_browse` accept
+//! a caller-supplied path; both are confined to [`FilesBackend::confine_root`]
+//! (this org's `<data_root>/orgs/<slug>/files/` — see
+//! [`FilesBackend::new`]) rather than the whole server filesystem.
+//! `permits.rs` mounts `create_root`/`drive_browse` at plain member
+//! tier, same as every other CRUD verb on this router — the intended
+//! authorization boundary is "any member of *this* org", not "root on
+//! the box", so path arguments must never reach outside this org's own
+//! subtree (they could otherwise read/ingest another org's data, since
+//! every org's `OrgAppState` shares one `data_root`). A full Storage
+//! Location grant model (ADR 0001, out of scope for #259) will
+//! eventually make placement an explicit, operator-governed axis; this
+//! confinement is the minimum viable stopgap until then. `browse`
+//! (root-scoped) is confined the same way, against the *root's own*
+//! canonicalized path rather than the whole org tree — see
+//! `browse_inner`'s doc for how that also closes the absolute-subpath
+//! and symlink-escape holes.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -28,7 +49,6 @@ use jj_lib::object_id::ObjectId as _;
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use task_files_version_store::VersionStoreBackend;
-use task_files_version_store::checkpoint::Change;
 use uuid::Uuid;
 
 use crate::consts::{MARKER_FILE, STORE_DIR};
@@ -51,8 +71,17 @@ struct RootRuntime {
 #[derive(Clone, architect::HasDispatcher)]
 pub struct FilesBackend {
     data_dir: PathBuf,
+    /// Canonicalized once at construction — the boundary `create_root`
+    /// / `drive_browse` path arguments must resolve inside (see the
+    /// module doc's "Filesystem confinement" section).
+    confine_root: PathBuf,
     registry: Arc<Registry>,
     repos: Arc<Mutex<HashMap<Uuid, RootRuntime>>>,
+    /// One lock per root, serializing `checkpoint_now` calls on that
+    /// root so two concurrent checkpoints can't both read the same
+    /// head and silently orphan one commit (PR #280 review) — created
+    /// lazily, never removed (roots are not deleted in v1).
+    checkpoint_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
     /// Fan-out hub behind `#[subscribe] fn events` — every successful
     /// root creation / checkpoint publishes here. Sliding mailbox: a
     /// slow subscriber loses its *oldest* queued events, correct for
@@ -82,14 +111,35 @@ fn to_files_error(err: Error) -> FilesError {
     }
 }
 
+/// Run a sync `*_inner` call on the blocking thread pool — the seam
+/// every `FilesService` method below uses (see the module doc). The
+/// closure captures a cheap `Clone` of `self` (every field is an
+/// `Arc`/`PathBuf`), never `self` by reference, so it satisfies
+/// `spawn_blocking`'s `'static` bound.
+async fn blocking<T, F>(f: F) -> Result<T, FilesError>
+where
+    F: FnOnce() -> Result<T, Error> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| FilesError::Io(format!("blocking task panicked: {e}")))?
+        .map_err(to_files_error)
+}
+
 impl FilesBackend {
     pub fn new(data_dir: impl Into<PathBuf>) -> Result<Self, FilesError> {
         let data_dir = data_dir.into();
         let registry = Registry::open(&data_dir).map_err(to_files_error)?;
+        let confine_root = data_dir
+            .canonicalize()
+            .map_err(|e| to_files_error(Error::Io(e)))?;
         Ok(Self {
             data_dir,
+            confine_root,
             registry: Arc::new(registry),
             repos: Arc::new(Mutex::new(HashMap::new())),
+            checkpoint_locks: Arc::new(Mutex::new(HashMap::new())),
             events: architect::PubSub::sliding(256),
         })
     }
@@ -103,6 +153,29 @@ impl FilesBackend {
         self.events.publish(event);
     }
 
+    /// Best-effort flush of every cached root's chunk store
+    /// (`ChunkStore::shutdown`) — call before dropping a `FilesBackend`
+    /// whose process is about to reopen the same roots (a real server
+    /// exit, or a test simulating a restart). Not required for the
+    /// correctness of any RPC method — jj-lib's own commit path is
+    /// already durable — but iroh-blobs' `FsStore` may hold buffered
+    /// writes / file-backed resources open until this (or the process)
+    /// actually exits; see `ChunkStore::shutdown`'s own doc.
+    pub async fn shutdown(&self) {
+        let repos: Vec<Arc<ReadonlyRepo>> = self
+            .repos
+            .lock()
+            .expect("repo cache lock poisoned")
+            .values()
+            .map(|rt| rt.repo.clone())
+            .collect();
+        for repo in repos {
+            if let Some(backend) = repo.store().backend_impl::<VersionStoreBackend>() {
+                let _ = backend.chunks().shutdown().await;
+            }
+        }
+    }
+
     fn get_root_info(&self, id: Uuid) -> Result<FileRootInfo, Error> {
         self.registry
             .get(id)
@@ -111,6 +184,25 @@ impl FilesBackend {
 
     fn store_dir(root_path: &Path) -> PathBuf {
         root_path.join(STORE_DIR)
+    }
+
+    /// Canonicalize `requested` and confirm it resolves inside
+    /// [`FilesBackend::confine_root`] — the org-scoping check for
+    /// `create_root` (a not-yet-existing marker means `requested`
+    /// itself must exist as a directory, checked by the caller first)
+    /// and `drive_browse`.
+    fn confine(&self, requested: &Path) -> Result<PathBuf, Error> {
+        let canonical = requested
+            .canonicalize()
+            .map_err(|e| Error::BadRequest(format!("{}: {e}", requested.display())))?;
+        if canonical != self.confine_root && !canonical.starts_with(&self.confine_root) {
+            return Err(Error::BadRequest(format!(
+                "{}: outside this org's files area ({})",
+                requested.display(),
+                self.confine_root.display()
+            )));
+        }
+        Ok(canonical)
     }
 
     fn head_of(repo: &Arc<ReadonlyRepo>) -> CommitId {
@@ -151,6 +243,15 @@ impl FilesBackend {
             .insert(root_id, RootRuntime { repo, head });
     }
 
+    fn checkpoint_lock(&self, root_id: Uuid) -> Arc<Mutex<()>> {
+        self.checkpoint_locks
+            .lock()
+            .expect("checkpoint lock map poisoned")
+            .entry(root_id)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
     fn create_root_inner(
         &self,
         path: String,
@@ -170,9 +271,10 @@ impl FilesBackend {
         if !metadata.is_dir() {
             return Err(Error::BadRequest(format!("{path}: not a directory")));
         }
-        let canonical = requested
-            .canonicalize()
-            .map_err(|e| Error::BadRequest(format!("{path}: {e}")))?;
+        // Org confinement (see module doc) — before anything else, so
+        // a rejected path never even reaches the marker/registry
+        // checks below.
+        let canonical = self.confine(&requested)?;
         let canonical_str = canonical
             .to_str()
             .ok_or_else(|| Error::BadRequest(format!("{path}: not valid UTF-8")))?
@@ -181,8 +283,16 @@ impl FilesBackend {
         if canonical.join(MARKER_FILE).exists() {
             return Err(Error::AlreadyExists(canonical_str));
         }
-        if self.registry.path_taken(&canonical) {
-            return Err(Error::AlreadyExists(canonical_str));
+        // Ancestor/descendant containment, not just exact-path — roots
+        // never overlap on disk (glossary "File Root"); an outer root
+        // whose live tree contains an inner root's `.fts-files` would
+        // otherwise ingest that inner root's entire version store as
+        // ordinary content on every checkpoint.
+        if let Some(existing) = self.registry.conflicting_root(&canonical) {
+            return Err(Error::AlreadyExists(format!(
+                "{canonical_str} overlaps existing root {} ({})",
+                existing.id, existing.path
+            )));
         }
 
         let store_dir = Self::store_dir(&canonical);
@@ -192,7 +302,10 @@ impl FilesBackend {
         let id = Uuid::new_v4();
         let created_at = Utc::now();
         let marker = serde_json::json!({ "id": id, "name": name });
-        std::fs::write(canonical.join(MARKER_FILE), serde_json::to_vec_pretty(&marker)?)?;
+        std::fs::write(
+            canonical.join(MARKER_FILE),
+            serde_json::to_vec_pretty(&marker)?,
+        )?;
 
         let root = FileRootInfo {
             id,
@@ -234,31 +347,46 @@ impl FilesBackend {
         Ok(out)
     }
 
+    /// Root-scoped browse. The escape guard is canonicalize-then-
+    /// prefix-check against the root's own (already-canonical)
+    /// `path`, not a component-string scan: `root_path.join(subpath)`
+    /// with an ABSOLUTE `subpath` replaces the base entirely (std
+    /// `PathBuf::join` semantics), so a `..`-free string like `/etc`
+    /// would otherwise sail through. Canonicalizing the resolved
+    /// target also follows symlinks to their real location, so a
+    /// symlink inside the root pointing outside it is caught by the
+    /// same prefix check — resolving the true escape, not just the
+    /// textual one.
     fn browse_inner(&self, root_id: Uuid, subpath: String) -> Result<Vec<BrowseEntry>, Error> {
         let root = self.get_root_info(root_id)?;
-        if subpath.split('/').any(|c| c == "..") {
-            return Err(Error::BadRequest(format!("subpath escapes the root: {subpath}")));
-        }
         let root_path = PathBuf::from(&root.path);
-        let target = if subpath.is_empty() {
+        let requested = if subpath.is_empty() {
             root_path.clone()
         } else {
             root_path.join(&subpath)
         };
-        let metadata = std::fs::metadata(&target).map_err(|_| Error::NotFound(format!("{root_id}:{subpath}")))?;
+        let canonical_target = requested
+            .canonicalize()
+            .map_err(|_| Error::NotFound(format!("{root_id}:{subpath}")))?;
+        if canonical_target != root_path && !canonical_target.starts_with(&root_path) {
+            return Err(Error::BadRequest(format!(
+                "subpath escapes the root: {subpath}"
+            )));
+        }
+        let metadata = std::fs::metadata(&canonical_target)?;
         if !metadata.is_dir() {
             return Err(Error::BadRequest(format!("{subpath}: not a directory")));
         }
-        Self::list_dir(&target, target == root_path)
+        Self::list_dir(&canonical_target, canonical_target == root_path)
     }
 
     fn drive_browse_inner(&self, path: String) -> Result<Vec<BrowseEntry>, Error> {
-        let target = PathBuf::from(&path);
-        let metadata = std::fs::metadata(&target).map_err(|e| Error::BadRequest(format!("{path}: {e}")))?;
+        let confined = self.confine(Path::new(&path))?;
+        let metadata = std::fs::metadata(&confined)?;
         if !metadata.is_dir() {
             return Err(Error::BadRequest(format!("{path}: not a directory")));
         }
-        Self::list_dir(&target, false)
+        Self::list_dir(&confined, false)
     }
 
     fn chain_inner(&self, root_id: Uuid, path: String) -> Result<Vec<ChainEntry>, Error> {
@@ -271,9 +399,7 @@ impl FilesBackend {
         let repo_path = RepoPathBuf::from_internal_string(&path)
             .map_err(|e| Error::BadRequest(format!("{path:?}: {e}")))?;
         let entries = pollster::block_on(task_files_version_store::chain::version_chain(
-            backend,
-            &head,
-            &repo_path,
+            backend, &head, &repo_path,
         ))?;
         Ok(entries
             .into_iter()
@@ -294,6 +420,14 @@ impl FilesBackend {
         description: Option<String>,
     ) -> Result<CheckpointInfo, Error> {
         let root = self.get_root_info(root_id)?;
+        // Serialize checkpoints on this root: held across the whole
+        // read-diff-commit-publish sequence so two concurrent callers
+        // can't both read the same head and each commit on top of it
+        // (PR #280 review) — the second one now genuinely observes the
+        // first's result as its parent instead of racing it.
+        let lock = self.checkpoint_lock(root_id);
+        let _guard = lock.lock().expect("checkpoint lock poisoned");
+
         let (repo, head) = self.ensure_repo(&root)?;
         let backend = repo
             .store()
@@ -301,11 +435,9 @@ impl FilesBackend {
             .ok_or_else(|| Error::Repo("root's repo is not a VersionStoreBackend".into()))?;
 
         let head_commit = pollster::block_on(backend.commit(&head))?;
-        let head_tree_id = head_commit
-            .root_tree
-            .clone()
-            .into_resolved()
-            .map_err(|_| Error::Repo("checkpoint onto a conflicted tree is unsupported (v1)".into()))?;
+        let head_tree_id = head_commit.root_tree.clone().into_resolved().map_err(|_| {
+            Error::Repo("checkpoint onto a conflicted tree is unsupported (v1)".into())
+        })?;
         let head_tree = pollster::block_on(backend.tree(&head_tree_id))?;
         let mut head_paths: BTreeSet<RepoPathBuf> = BTreeSet::new();
         pollster::block_on(scan::walk_tree_paths(
@@ -316,40 +448,25 @@ impl FilesBackend {
         ))?;
 
         let disk_files = scan::walk_live_tree(Path::new(&root.path))?;
-        let changes = scan::diff_to_changes(&disk_files, &head_paths)?;
-        let mut changed_paths: Vec<String> = changes
-            .iter()
-            .map(|c| match c {
-                Change::Write { path, .. } | Change::Remove { path } => {
-                    path.as_internal_file_string().to_string()
-                }
-                Change::Rename { to, .. } => to.as_internal_file_string().to_string(),
-            })
-            .collect();
-        changed_paths.sort();
-
         let description = description.unwrap_or_else(|| "checkpoint now".to_string());
-        let new_repo = pollster::block_on(task_files_version_store::checkpoint::checkpoint(
+        let result = crate::checkpoint::write_checkpoint(
             &repo,
+            backend,
             head,
-            changes,
+            head_tree_id,
+            &head_tree,
+            &disk_files,
+            &head_paths,
             description.clone(),
-        ))?;
-        let new_head = new_repo
-            .view()
-            .heads()
-            .iter()
-            .next()
-            .cloned()
-            .ok_or_else(|| Error::Repo("checkpoint produced no head".into()))?;
-        self.set_head(root_id, new_repo, new_head.clone());
+        )?;
+        self.set_head(root_id, result.repo, result.commit_id.clone());
 
         let info = CheckpointInfo {
             root_id,
-            commit_id: new_head.hex(),
+            commit_id: result.commit_id.hex(),
             description,
             at: Utc::now(),
-            changed_paths,
+            changed_paths: result.changed_paths,
         };
         self.publish(FilesEvent::Checkpointed(info.clone()));
         Ok(info)
@@ -363,7 +480,8 @@ impl FilesService for FilesBackend {
         name: String,
         flavor: RootFlavor,
     ) -> Result<FileRootInfo, FilesError> {
-        self.create_root_inner(path, name, flavor).map_err(to_files_error)
+        let this = self.clone();
+        blocking(move || this.create_root_inner(path, name, flavor)).await
     }
 
     async fn list_roots(&self) -> Result<Vec<FileRootInfo>, FilesError> {
@@ -375,15 +493,18 @@ impl FilesService for FilesBackend {
     }
 
     async fn browse(&self, root_id: Uuid, subpath: String) -> Result<Vec<BrowseEntry>, FilesError> {
-        self.browse_inner(root_id, subpath).map_err(to_files_error)
+        let this = self.clone();
+        blocking(move || this.browse_inner(root_id, subpath)).await
     }
 
     async fn drive_browse(&self, path: String) -> Result<Vec<BrowseEntry>, FilesError> {
-        self.drive_browse_inner(path).map_err(to_files_error)
+        let this = self.clone();
+        blocking(move || this.drive_browse_inner(path)).await
     }
 
     async fn chain(&self, root_id: Uuid, path: String) -> Result<Vec<ChainEntry>, FilesError> {
-        self.chain_inner(root_id, path).map_err(to_files_error)
+        let this = self.clone();
+        blocking(move || this.chain_inner(root_id, path)).await
     }
 
     async fn checkpoint_now(
@@ -391,8 +512,8 @@ impl FilesService for FilesBackend {
         root_id: Uuid,
         description: Option<String>,
     ) -> Result<CheckpointInfo, FilesError> {
-        self.checkpoint_now_inner(root_id, description)
-            .map_err(to_files_error)
+        let this = self.clone();
+        blocking(move || this.checkpoint_now_inner(root_id, description)).await
     }
 }
 

@@ -315,13 +315,7 @@ pub(crate) async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre
     // server or embedded in-process backend alike (the localhost
     // default falls back to embedded when no server is running; see
     // `establish_for_url`). The CLI no longer opens timer.sqlite.
-    let slug = match crate::resolve_active_org(org_override.map(str::to_owned)) {
-        Ok(s) => s,
-        // No --org and no session: fall back to the local resolver's
-        // single-org disambiguation / fresh-install auto-bootstrap of
-        // `default`, exactly as the old direct-disk path did.
-        Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
-    };
+    let slug = crate::resolve_slug(org_override)?;
     forward_timer_db_override();
     // Local org tree — OPTIONAL now. When present (co-resident org)
     // it supplies the manifest org-id, the vault root for

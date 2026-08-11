@@ -46,13 +46,14 @@ pub fn open_or_init_repo(repo_path: &Path) -> Result<Arc<ReadonlyRepo>> {
     if already_initialized(repo_path) {
         open_existing(repo_path)
     } else {
-        pollster::block_on(task_files_version_store::repo::init_repo(repo_path)).map_err(Error::from)
+        pollster::block_on(task_files_version_store::repo::init_repo(repo_path))
+            .map_err(Error::from)
     }
 }
 
 fn open_existing(repo_path: &Path) -> Result<Arc<ReadonlyRepo>> {
-    let settings =
-        task_files_version_store::repo::default_settings().map_err(|e| Error::Repo(e.to_string()))?;
+    let settings = task_files_version_store::repo::default_settings()
+        .map_err(|e| Error::Repo(e.to_string()))?;
 
     let mut factories = default_backend_factories();
     factories.add_backend(

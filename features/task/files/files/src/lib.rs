@@ -12,6 +12,7 @@
 //! a root's jj repo).
 
 mod backend;
+mod checkpoint;
 mod consts;
 mod error;
 mod registry;
