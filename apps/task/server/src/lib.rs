@@ -1159,6 +1159,13 @@ pub(crate) async fn build_org_state(
         let workstreams = workstream::WorkstreamBackend::new(vault_root.clone());
         let files = files::FilesBackend::new(org_root.path().join("files"))
             .map_err(|e| eyre::eyre!("files backend: {e}"))?;
+        // The Files cadence engine (issue #260): one driver task ticks
+        // the engine, and every root gets an inotify watch feeding it
+        // activity hints. The interval only bounds how promptly a due
+        // capture happens — the cadence itself (10-minute auto-
+        // snapshots, 30-minute quiescence) is the engine's.
+        files.enable_watching();
+        files.spawn_cadence_driver(std::time::Duration::from_secs(30));
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.

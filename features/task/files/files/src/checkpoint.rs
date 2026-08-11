@@ -1,20 +1,23 @@
-//! Streaming Session checkpoint commit — replaces
+//! Streaming capture commit — the one write path behind both kinds of
+//! capture the cadence engine drives (an ephemeral auto-snapshot and a
+//! certified Session checkpoint) and behind the explicit
+//! `checkpoint_now` RPC. It replaces
 //! `task_files_version_store::checkpoint::checkpoint`'s in-memory
-//! `Change::Write { content: Vec<u8> }` shape for `checkpoint_now`'s
-//! full-scan write (PR #280 review finding: reading every file into a
-//! `Vec<u8>` before handing it to `checkpoint()` peaks RSS at the
-//! whole root's size — a 40 GB media root OOMs the shared
-//! `task-server`). Each disk file streams straight into the CAS chunk
-//! store via `ChunkStore::write_stream` (already bounded-memory); a
-//! file whose content is unchanged from the checkpoint head is
-//! skipped entirely — both to avoid the wasted read/hash/CAS-write and
-//! so `CheckpointInfo::changed_paths` reflects only what actually
-//! changed, honoring its own doc contract.
+//! `Change::Write { content: Vec<u8> }` shape (PR #280 review finding:
+//! reading every file into a `Vec<u8>` before handing it to
+//! `checkpoint()` peaks RSS at the whole root's size — a 40 GB media
+//! root OOMs the shared `task-server`). Each disk file streams straight
+//! into the CAS chunk store through [`crate::certify`] (bounded memory,
+//! and stat-sandwiched so a file being written right now is requeued
+//! rather than committed torn); a file whose content is unchanged from
+//! the base tree is skipped entirely — both to avoid the wasted
+//! read/hash/CAS-write and so `changed_paths` reflects only what
+//! actually changed.
 //!
 //! This bypasses `checkpoint::checkpoint` (the version-store crate's
 //! own convenience helper) and builds the commit directly via jj-lib's
 //! `TreeBuilder` + `Transaction`, mirroring that helper's own
-//! internals — the ticket's "consume the version-store API as-is"
+//! internals — issue #259's "consume the version-store API as-is"
 //! boundary means duplicating this small amount of logic rather than
 //! widening that crate's visibility.
 
@@ -29,74 +32,92 @@ use jj_lib::repo_path::RepoPathBuf;
 use jj_lib::tree_builder::TreeBuilder;
 use task_files_version_store::VersionStoreBackend;
 
+use crate::certify::{MidHashHook, stream_certified};
 use crate::error::{Error, Result};
 use crate::scan::lookup;
 
-pub struct CheckpointResult {
+/// Everything one capture commit needs: what it is parented on, what
+/// the live tree currently holds, and how hard to try certifying a file
+/// that is moving under the scan.
+pub struct Capture<'a> {
+    pub repo: &'a Arc<ReadonlyRepo>,
+    pub backend: &'a VersionStoreBackend,
+    /// Commit this capture is parented on: the checkpoint head for a
+    /// checkpoint, the snapshot branch's tip for a snapshot.
+    pub parent_id: CommitId,
+    pub base_tree_id: TreeId,
+    pub base_tree: &'a Tree,
+    /// (root-relative path, absolute disk path) for every live-tree
+    /// file the Ignore set lets through.
+    pub disk_files: &'a [(RepoPathBuf, PathBuf)],
+    /// Every path tracked in the base tree — the set a capture removes
+    /// from when a file has disappeared from the live tree.
+    pub base_paths: &'a BTreeSet<RepoPathBuf>,
+    pub description: String,
+    /// How many times to re-read a file that changed while being
+    /// hashed before requeueing it.
+    pub attempts: u32,
+    /// Test seam only — see [`crate::certify::MidHashHook`].
+    pub hook: Option<MidHashHook>,
+}
+
+pub struct CaptureResult {
     pub repo: Arc<ReadonlyRepo>,
     pub commit_id: CommitId,
     /// Root-relative paths actually written or removed, sorted. Empty
-    /// when the live tree was already identical to the previous
-    /// checkpoint (a file whose streamed content hashes to the same
-    /// `FileId` as the head's is never written).
+    /// when the live tree was already identical to the base (a file
+    /// whose streamed content hashes to the same `FileId` as the base's
+    /// is never written).
     pub changed_paths: Vec<String>,
+    /// Paths still being written after `attempts` certification tries.
+    /// They keep their base state in this capture and ride into the
+    /// next one, sorted.
+    pub requeued_paths: Vec<String>,
 }
 
-/// Streams every file in `disk_files` into the CAS, skipping any whose
-/// content is unchanged from `head_tree`, removes any `head_paths`
-/// entry absent from `disk_files`, and commits the result on top of
-/// `parent_id`. v1 detects no renames: a moved file surfaces as a
-/// remove+write pair rather than a recorded `CopyHistory` link (ADR
-/// 0001: "detection may start simple").
-pub fn write_checkpoint(
-    repo: &Arc<ReadonlyRepo>,
-    backend: &VersionStoreBackend,
-    parent_id: CommitId,
-    base_tree_id: TreeId,
-    head_tree: &Tree,
-    disk_files: &[(RepoPathBuf, PathBuf)],
-    head_paths: &BTreeSet<RepoPathBuf>,
-    description: String,
-) -> Result<CheckpointResult> {
-    pollster::block_on(write_checkpoint_async(
+/// Write one capture commit. Blocking wrapper — see `backend.rs`'s
+/// module doc for why nothing in this crate `.await`s jj-lib from
+/// inside an `async fn`.
+pub fn write_capture(capture: Capture<'_>) -> Result<CaptureResult> {
+    pollster::block_on(write_capture_async(capture))
+}
+
+async fn write_capture_async(capture: Capture<'_>) -> Result<CaptureResult> {
+    let Capture {
         repo,
         backend,
         parent_id,
         base_tree_id,
-        head_tree,
+        base_tree,
         disk_files,
-        head_paths,
+        base_paths,
         description,
-    ))
-}
+        attempts,
+        hook,
+    } = capture;
 
-async fn write_checkpoint_async(
-    repo: &Arc<ReadonlyRepo>,
-    backend: &VersionStoreBackend,
-    parent_id: CommitId,
-    base_tree_id: TreeId,
-    head_tree: &Tree,
-    disk_files: &[(RepoPathBuf, PathBuf)],
-    head_paths: &BTreeSet<RepoPathBuf>,
-    description: String,
-) -> Result<CheckpointResult> {
     let store = repo.store().clone();
     let mut builder = TreeBuilder::new(store.clone(), base_tree_id);
     let mut changed_paths = Vec::new();
+    let mut requeued_paths = Vec::new();
     let mut present: BTreeSet<RepoPathBuf> = BTreeSet::new();
 
     for (repo_path, disk_path) in disk_files {
+        // Recorded as present *before* the read: a requeued file must
+        // keep its existing versioned state, not be removed as if it
+        // had vanished from the live tree.
         present.insert(repo_path.clone());
-        let existing = lookup(backend, head_tree, repo_path).await?;
+        let existing = lookup(backend, base_tree, repo_path).await?;
 
-        // Bounded-memory streaming write straight from disk — never a
-        // `std::fs::read` into a `Vec<u8>` (see module doc).
-        let file = tokio::fs::File::open(disk_path).await?;
-        let file_id = backend
-            .chunks()
-            .write_stream(file)
-            .await
-            .map_err(|e| Error::Repo(format!("chunk store: {e}")))?;
+        // Bounded-memory streaming write straight from disk, certified
+        // stable by a stat sandwich (see `certify`) — never a
+        // `std::fs::read` into a `Vec<u8>`.
+        let Some(file_id) =
+            stream_certified(backend.chunks(), disk_path, attempts, hook.as_ref()).await?
+        else {
+            requeued_paths.push(repo_path.as_internal_file_string().to_string());
+            continue;
+        };
         let jj_file_id = FileId::from_bytes(file_id.as_bytes());
 
         let copy_id = match &existing {
@@ -107,9 +128,9 @@ async fn write_checkpoint_async(
             }) => {
                 if *old_id == jj_file_id {
                     // Unchanged: no builder mutation, no changed_paths
-                    // entry — this is what keeps a no-op checkpoint a
-                    // true no-op in both the commit tree and the
-                    // reported diff.
+                    // entry — this is what keeps a no-op capture a true
+                    // no-op in both the commit tree and the reported
+                    // diff.
                     continue;
                 }
                 copy_id.clone()
@@ -129,13 +150,14 @@ async fn write_checkpoint_async(
         changed_paths.push(repo_path.as_internal_file_string().to_string());
     }
 
-    for path in head_paths {
+    for path in base_paths {
         if !present.contains(path) {
             builder.remove(path.clone());
             changed_paths.push(path.as_internal_file_string().to_string());
         }
     }
     changed_paths.sort();
+    requeued_paths.sort();
 
     let new_tree_id = builder
         .write_tree()
@@ -144,27 +166,27 @@ async fn write_checkpoint_async(
     let merged_tree = MergedTree::resolved(store, new_tree_id);
 
     let mut tx = repo.start_transaction();
-    tx.repo_mut()
+    let commit = tx
+        .repo_mut()
         .new_commit(vec![parent_id], merged_tree)
         .set_description(description)
         .write()
         .await
         .map_err(|e| Error::Repo(format!("write commit: {e}")))?;
+    // The commit's own id, never `view().heads()` — a root that has
+    // taken auto-snapshots legitimately has more than one head (the
+    // snapshot branch alongside the checkpoint line), so "the first
+    // head" names the wrong commit exactly when it matters.
+    let commit_id = commit.id().clone();
     let new_repo = tx
         .commit("checkpoint")
         .await
         .map_err(|e| Error::Repo(e.to_string()))?;
-    let commit_id = new_repo
-        .view()
-        .heads()
-        .iter()
-        .next()
-        .cloned()
-        .ok_or_else(|| Error::Repo("checkpoint produced no head".into()))?;
 
-    Ok(CheckpointResult {
+    Ok(CaptureResult {
         repo: new_repo,
         commit_id,
         changed_paths,
+        requeued_paths,
     })
 }

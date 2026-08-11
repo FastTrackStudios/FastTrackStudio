@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::model::{BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo};
+use crate::model::{BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, SnapshotInfo};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
 #[repr(u8)]
@@ -38,6 +38,9 @@ pub enum FilesEvent {
     RootCreated(FileRootInfo),
     /// A root's session ended in a certified checkpoint.
     Checkpointed(CheckpointInfo),
+    /// The cadence engine took an ephemeral auto-snapshot during
+    /// activity (issue #260). Not a version — see [`SnapshotInfo`].
+    Snapshotted(SnapshotInfo),
 }
 
 #[architect::rpc]
@@ -81,18 +84,55 @@ pub trait FilesService {
     async fn chain(&self, root_id: Uuid, path: String) -> Result<Vec<ChainEntry>, FilesError>;
 
     /// Scan-certify a Session checkpoint right now (glossary: the
-    /// explicit-trigger half of "Session checkpoint" — the
-    /// quiescence/debounce cadence engine is future work): full-scan
-    /// the root's live tree, diff against the current head, and write
-    /// one commit. `description` defaults to `"checkpoint now"` when
-    /// `None`.
+    /// explicit-trigger half of "Session checkpoint" — the other half
+    /// is per-root quiescence, driven by the cadence engine of issue
+    /// #260): full-scan the root's live tree, diff against the current
+    /// head, and write one commit. `description` defaults to
+    /// `"checkpoint now"` when `None`. Ends the root's open session, so
+    /// a quiescence checkpoint never lands straight on top of an
+    /// explicit one.
     async fn checkpoint_now(
         &self,
         root_id: Uuid,
         description: Option<String>,
     ) -> Result<CheckpointInfo, FilesError>;
 
-    /// Every root-creation / checkpoint event, as it happens.
+    /// Feed the cadence engine activity hints for `root_id` — the
+    /// root-relative paths a watcher saw written (issue #260). Hints
+    /// are exactly that: they open/extend a session and mark save
+    /// points, but nothing they claim is trusted as content — a full
+    /// stat-scan certifies every capture. The server-side watcher calls
+    /// the same engine path; this method exists so a sync daemon (or a
+    /// DAW-side integration that knows it just saved) can report
+    /// activity the server can't see. Paths matching the root's Ignore
+    /// set are dropped; the return value is how many hints survived
+    /// that filter.
+    async fn hint_activity(&self, root_id: Uuid, paths: Vec<String>) -> Result<u32, FilesError>;
+
+    /// The root's auto-snapshots (glossary), newest first — the
+    /// ephemeral captures a mid-session mistake is recovered from.
+    /// Never version-chain entries.
+    async fn snapshots(&self, root_id: Uuid) -> Result<Vec<SnapshotInfo>, FilesError>;
+
+    /// The root's Ignore set (glossary): the patterns that are neither
+    /// versioned nor synced, seeded from the root's flavor at creation.
+    /// Glob syntax, matched against the root-relative path and against
+    /// the basename alone (so `*.rpp-bak` catches one at any depth).
+    async fn ignore_set(&self, root_id: Uuid) -> Result<Vec<String>, FilesError>;
+
+    /// Replace the root's Ignore set, returning the stored result
+    /// (normalized: trimmed, deduplicated, sorted). Fails with
+    /// [`FilesError::BadRequest`] if any pattern is not a valid glob.
+    /// Already-versioned paths that a new pattern now covers are not
+    /// retroactively removed from history — the set governs what enters
+    /// the store from here on.
+    async fn set_ignore_set(
+        &self,
+        root_id: Uuid,
+        patterns: Vec<String>,
+    ) -> Result<Vec<String>, FilesError>;
+
+    /// Every root-creation / checkpoint / snapshot event, as it happens.
     #[subscribe]
     fn events(&self) -> FilesEvent;
 }

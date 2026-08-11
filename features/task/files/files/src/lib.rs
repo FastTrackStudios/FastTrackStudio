@@ -7,25 +7,37 @@
 //! wasm-clean wire surface ([`files_proto::FilesService`] + its model
 //! types) lives in the sibling `files-proto` crate; this crate is
 //! [`FilesBackend`] — the version-store-backed implementation — plus
-//! the plumbing it needs: [`registry`] (root identity, persisted
-//! alongside the version stores) and [`repo_open`] (opening/reopening
+//! the plumbing it needs: `registry` (root identity, persisted
+//! alongside the version stores) and `repo_open` (opening/reopening
 //! a root's jj repo).
+//!
+//! Issue #260 added the **cadence engine** on top: [`cadence`] decides
+//! when a root's session takes an auto-snapshot and when it ends in a
+//! Session checkpoint, [`ignore`] holds the per-root Ignore set that
+//! keeps junk out of the store entirely, and [`certify`] is the stat
+//! sandwich that stops a file being written right now from entering a
+//! version torn.
 
 mod backend;
+pub mod cadence;
+pub mod certify;
 mod checkpoint;
 mod consts;
 mod error;
+pub mod ignore;
 mod registry;
 mod repo_open;
 mod scan;
 
-pub use backend::FilesBackend;
+pub use backend::{Captured, FilesBackend};
+pub use cadence::{CadenceConfig, CadenceEngine, Clock, SystemClock, TestClock};
 pub use error::{Error, Result};
 pub use files_proto::service;
+pub use ignore::IgnoreSet;
 
 pub use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    RootFlavor,
+    RootFlavor, SavePoint, SnapshotInfo,
 };
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor

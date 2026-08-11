@@ -12,23 +12,47 @@ use task_files_version_store::VersionStoreBackend;
 
 use crate::consts::{MARKER_FILE, STORE_DIR};
 use crate::error::{Error, Result};
+use crate::ignore::IgnoreSet;
 
-/// Recursively list every regular file under `root_path`, as
-/// (root-relative jj path, absolute disk path) pairs. Skips
-/// [`STORE_DIR`] / [`MARKER_FILE`] at *every* depth, not just the
+/// Recursively list every regular file under `root_path` that the
+/// root's Ignore set lets through, as (root-relative jj path, absolute
+/// disk path) pairs.
+///
+/// This is the one gate between a live tree and the store, which is
+/// why the Ignore set is applied *here* rather than downstream: a
+/// pattern the set covers is never enumerated, so it can never be
+/// hashed, never enter the CAS, and never appear in a commit tree
+/// (glossary "Ignore set" — "neither versioned nor synced"). Ignored
+/// directories are not descended into at all.
+///
+/// Skips [`STORE_DIR`] / [`MARKER_FILE`] at *every* depth, not just the
 /// root's own top level — a File Root's internals must never be
 /// ingested as ordinary content even if they show up nested (e.g. a
 /// rejected-but-still-on-disk nested root, or a manually copied
 /// `.fts-files` directory; see PR #280 review finding on nested
 /// roots). Symlinks are skipped (v1 has no symlink writer wired
 /// through yet).
-pub fn walk_live_tree(root_path: &Path) -> Result<Vec<(RepoPathBuf, PathBuf)>> {
+pub fn walk_live_tree(root_path: &Path, ignore: &IgnoreSet) -> Result<Vec<(RepoPathBuf, PathBuf)>> {
     let mut out = Vec::new();
-    walk_dir(root_path, root_path, &mut out)?;
+    walk_dir(root_path, root_path, ignore, &mut out)?;
     Ok(out)
 }
 
-fn walk_dir(root_path: &Path, dir: &Path, out: &mut Vec<(RepoPathBuf, PathBuf)>) -> Result<()> {
+/// `path`'s root-relative, `/`-separated form, or `None` when it isn't
+/// representable (non-UTF8 names are out of scope for v1).
+fn relative(root_path: &Path, path: &Path) -> Option<String> {
+    let rel = path
+        .strip_prefix(root_path)
+        .expect("walked path is under root_path");
+    Some(rel.to_str()?.replace(std::path::MAIN_SEPARATOR, "/"))
+}
+
+fn walk_dir(
+    root_path: &Path,
+    dir: &Path,
+    ignore: &IgnoreSet,
+    out: &mut Vec<(RepoPathBuf, PathBuf)>,
+) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
@@ -37,18 +61,20 @@ fn walk_dir(root_path: &Path, dir: &Path, out: &mut Vec<(RepoPathBuf, PathBuf)>)
         if name == MARKER_FILE || name == STORE_DIR {
             continue;
         }
+        let Some(rel) = relative(root_path, &path) else {
+            continue;
+        };
         if file_type.is_dir() {
-            walk_dir(root_path, &path, out)?;
+            if ignore.is_ignored_dir(&rel) {
+                continue;
+            }
+            walk_dir(root_path, &path, ignore, out)?;
         } else if file_type.is_file() {
-            let rel = path
-                .strip_prefix(root_path)
-                .expect("walked path is under root_path");
-            let Some(rel_str) = rel.to_str() else {
-                continue; // non-UTF8 paths are out of scope for v1
-            };
-            let normalized = rel_str.replace(std::path::MAIN_SEPARATOR, "/");
-            let repo_path = RepoPathBuf::from_internal_string(&normalized)
-                .map_err(|e| Error::BadRequest(format!("{normalized:?}: {e}")))?;
+            if ignore.is_ignored(&rel) {
+                continue;
+            }
+            let repo_path = RepoPathBuf::from_internal_string(&rel)
+                .map_err(|e| Error::BadRequest(format!("{rel:?}: {e}")))?;
             out.push((repo_path, path));
         }
         // symlinks: skipped (see doc comment).

@@ -51,6 +51,38 @@ pub struct BrowseEntry {
     pub size: Option<u64>,
 }
 
+/// A project-file save observed during a session (glossary
+/// "Auto-snapshot": "a project-file save marks the nearest
+/// auto-snapshot as a **save point** (display metadata, not a
+/// version)"). A save point is never itself a version — it is a label
+/// riding the capture that followed it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct SavePoint {
+    /// Root-relative path of the project file that was saved.
+    pub path: String,
+    /// When the save was observed.
+    pub at: DateTime<Utc>,
+}
+
+/// An **auto-snapshot** (glossary): the ephemeral safety capture the
+/// cadence engine takes during activity. Never a chain entry — snapshot
+/// commits branch off the checkpoint line rather than sitting on it, so
+/// [`crate::service::FilesService::chain`] walks straight past them —
+/// and expirable, so a tracking day doesn't drown the history in noise.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct SnapshotInfo {
+    pub root_id: Uuid,
+    /// Hex-encoded jj `CommitId` of the snapshot commit.
+    pub snapshot_id: String,
+    pub at: DateTime<Utc>,
+    /// Root-relative paths written or removed by this snapshot, sorted.
+    pub changed_paths: Vec<String>,
+    /// Project-file saves this snapshot is the nearest capture for.
+    pub save_points: Vec<SavePoint>,
+}
+
 /// One entry in a file's version chain (glossary "File version
 /// chain"), newest first — the wire projection of
 /// `task_files_version_store::chain::VersionEntry`.
@@ -67,6 +99,11 @@ pub struct ChainEntry {
     /// Set when this entry is the commit where the file arrived at
     /// `path` via a recorded rename.
     pub renamed_from: Option<String>,
+    /// Project-file saves recorded during the session this checkpoint
+    /// closed — the save-point markers, surfaced as chain metadata
+    /// (issue #260). Empty for a checkpoint minted with no observed
+    /// project-file save (including every explicit "checkpoint now").
+    pub save_points: Vec<SavePoint>,
 }
 
 /// Result of [`crate::service::FilesService::checkpoint_now`] (glossary
@@ -83,4 +120,14 @@ pub struct CheckpointInfo {
     /// sorted. Empty when the live tree was already identical to the
     /// previous checkpoint (still a valid, if uneventful, checkpoint).
     pub changed_paths: Vec<String>,
+    /// Project-file saves observed during the session this checkpoint
+    /// closed (issue #260). Empty for an explicit "checkpoint now" on
+    /// a root with no observed saves.
+    pub save_points: Vec<SavePoint>,
+    /// Paths the certifying scan found still being written — the file
+    /// changed between the stat taken before hashing it and the one
+    /// taken after, on every attempt. They keep their previous
+    /// versioned state in this checkpoint and ride into the next
+    /// capture rather than being committed torn (issue #260).
+    pub requeued_paths: Vec<String>,
 }
