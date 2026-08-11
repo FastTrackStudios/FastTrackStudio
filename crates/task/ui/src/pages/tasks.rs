@@ -26,7 +26,7 @@ use fts_ui::prelude::*;
 use task_ui::{QuickAdd, TaskInfo as UiTask, TaskMutation, TasksApp};
 
 use crate::chrome::{
-    fmt_hms, owner_id, req_from_session, resolve_org, use_resume_hint, use_second_tick, PausedTimer,
+    PausedTimer, fmt_hms, owner_id, req_from_session, resolve_org, use_resume_hint, use_second_tick,
 };
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::prefs::PrefsCtx;
@@ -46,9 +46,16 @@ const LOCATIONS: &[&str] = &["home", "studio", "out"];
 struct BoardData {
     ui_tasks: Vec<UiTask>,
     /// Condensation leftovers: `(representative task id, the rest of
-    /// that project's queue)` — the list renders them behind an
-    /// inline "N more in {project}" expander.
+    /// that anchor's queue)` — the list renders them behind an
+    /// inline "N more in {group}" expander.
     more: Vec<(uuid::Uuid, Vec<UiTask>)>,
+    /// Non-project belonging per task id — the chip that keeps a
+    /// project-less row from reading as a bare title.
+    anchors: Vec<(uuid::Uuid, task_ui::AnchorChip)>,
+    /// Open tasks anchored to nothing at all. Not mixed into the
+    /// list: they render in the triage strip, where the only useful
+    /// action is filing them.
+    triage: Vec<UiTask>,
     /// `(id, title)` of every known project — chip resolution + the
     /// quick-add `[[Project]]` picker.
     projects: Vec<(uuid::Uuid, String)>,
@@ -139,7 +146,8 @@ pub fn TasksView() -> Element {
             device: None,
             active_project,
         };
-        let mut domain: Vec<&task_proto::TaskInfo> = rows.iter().map(|(_, r)| &r.task).collect();
+        let all: Vec<&task_proto::TaskInfo> = rows.iter().map(|(_, r)| &r.task).collect();
+        let mut domain = all.clone();
         let total = domain.len();
         if active_only {
             domain.retain(|t| task_proto::status_is_open(&t.status));
@@ -147,7 +155,6 @@ pub fn TasksView() -> Element {
         if relevant_only {
             domain.retain(|t| task_proto::is_relevant(t, &ctx));
         }
-        let hidden = total - domain.len();
         // Project indication: resolve the authoritative project_id
         // to its title when the frontmatter wikilink array is empty,
         // so every project task carries its #project chip.
@@ -156,19 +163,16 @@ pub fn TasksView() -> Element {
             .iter()
             .map(|r| (r.project.id, r.project.title.clone()))
             .collect();
-
-        // One row per project (`task_proto::condense_next_per_project`
-        // semantics, extended to wikilink-only membership): the flat
-        // list keeps each project's next action; the rest of the
-        // project's queue folds behind the row's inline expander.
-        // Unlike the domain condense this keeps the leftovers, so the
-        // list can reveal them without a navigation.
         let title_to_id: std::collections::HashMap<String, uuid::Uuid> = project_names
             .iter()
             .map(|(id, title)| (title.to_lowercase(), *id))
             .collect();
-        let resolve_pid = |t: &task_proto::TaskInfo| -> Option<uuid::Uuid> {
-            t.project_id.or_else(|| {
+        // The domain's structural anchor, widened with this layer's
+        // extra knowledge: a `projects: [[Name]]` wikilink that
+        // matches a real project counts as project membership even
+        // before `projectId` is backfilled.
+        let resolve_anchor = |t: &task_proto::TaskInfo| -> Option<task_proto::Anchor> {
+            let by_wikilink = || {
                 t.projects.0.iter().find_map(|s| {
                     let name = s
                         .trim()
@@ -177,43 +181,64 @@ pub fn TasksView() -> Element {
                         .trim();
                     title_to_id.get(&name.to_lowercase()).copied()
                 })
-            })
+            };
+            match task_proto::anchor(t) {
+                Some(a) => Some(a),
+                None => by_wikilink().map(task_proto::Anchor::Project),
+            }
         };
-        // The pick mirrors the domain condense: in-progress wins,
-        // then soonest due (undated last), priority, title.
-        let next_key = |t: &task_proto::TaskInfo| {
-            (
-                t.status != "in-progress",
-                t.due.is_none(),
-                t.due.clone().unwrap_or_default(),
-                crate::task_sort::priority_rank(&t.priority),
-                t.title.to_lowercase(),
-            )
-        };
-        let mut winner: std::collections::HashMap<uuid::Uuid, usize> =
+
+        // Unfiled work is triage, not list content — it goes above
+        // the board with a picker instead of sitting in the queue
+        // saying nothing. Wikilink-only membership counts as filed,
+        // so this uses the widened resolver, not the raw domain
+        // predicate.
+        let mut triage: Vec<&task_proto::TaskInfo> = Vec::new();
+        domain.retain(|t| {
+            let unfiled = resolve_anchor(t).is_none() && t.contexts.is_empty();
+            if unfiled && task_proto::status_is_open(&t.status) {
+                triage.push(t);
+                false
+            } else {
+                true
+            }
+        });
+        triage.sort_by(|a, b| {
+            a.date_created
+                .cmp(&b.date_created)
+                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        });
+        let hidden = total - domain.len() - triage.len();
+
+        // One row per anchor: the flat list keeps each group's next
+        // action; the rest folds behind the row's inline expander.
+        // Unlike the domain condense this keeps the leftovers, so the
+        // list can reveal them without a navigation.
+        let next_key = task_proto::next_action_key;
+        let mut winner: std::collections::HashMap<task_proto::Anchor, usize> =
             std::collections::HashMap::new();
         for (i, t) in domain.iter().enumerate() {
-            let Some(pid) = resolve_pid(t) else { continue };
-            match winner.get(&pid) {
+            let Some(a) = resolve_anchor(t) else { continue };
+            match winner.get(&a) {
                 Some(&best) if next_key(domain[best]) <= next_key(t) => {}
                 _ => {
-                    winner.insert(pid, i);
+                    winner.insert(a, i);
                 }
             }
         }
         let keep: std::collections::HashSet<usize> = winner.values().copied().collect();
-        // pid → the winning task's id, for pairing leftovers to the
-        // representative row after the sort below reorders it.
-        let winner_task: std::collections::HashMap<uuid::Uuid, uuid::Uuid> = winner
-            .iter()
-            .map(|(pid, &i)| (*pid, domain[i].id))
-            .collect();
-        let mut rest_by_pid: std::collections::HashMap<uuid::Uuid, Vec<&task_proto::TaskInfo>> =
-            std::collections::HashMap::new();
+        // anchor → the winning task's id, for pairing leftovers to
+        // the representative row after the sort below reorders it.
+        let winner_task: std::collections::HashMap<task_proto::Anchor, uuid::Uuid> =
+            winner.iter().map(|(a, &i)| (*a, domain[i].id)).collect();
+        let mut rest_by_anchor: std::collections::HashMap<
+            task_proto::Anchor,
+            Vec<&task_proto::TaskInfo>,
+        > = std::collections::HashMap::new();
         let mut condensed: Vec<&task_proto::TaskInfo> = Vec::with_capacity(domain.len());
         for (i, t) in domain.iter().enumerate() {
-            match resolve_pid(t) {
-                Some(pid) if !keep.contains(&i) => rest_by_pid.entry(pid).or_default().push(t),
+            match resolve_anchor(t) {
+                Some(a) if !keep.contains(&i) => rest_by_anchor.entry(a).or_default().push(t),
                 _ => condensed.push(t),
             }
         }
@@ -231,11 +256,49 @@ pub fn TasksView() -> Element {
             }
             row
         };
+        // Chips for rows whose belonging isn't a project. A parent
+        // resolves to its title out of the full task list (the parent
+        // itself is often filtered out of the board); workstreams and
+        // milestones have no client store yet, so they name their
+        // kind — less than ideal, still not nothing.
+        let task_titles: std::collections::HashMap<uuid::Uuid, &str> =
+            all.iter().map(|t| (t.id, t.title.as_str())).collect();
+        let chip_for = |t: &task_proto::TaskInfo| -> Option<task_ui::AnchorChip> {
+            let a = resolve_anchor(t)?;
+            match a {
+                // Projects already speak through the `projects` chip
+                // that `to_ui` backfills.
+                task_proto::Anchor::Project(_) => None,
+                task_proto::Anchor::Parent(id) => Some(task_ui::AnchorChip {
+                    kind: "parent".into(),
+                    label: task_titles
+                        .get(&id)
+                        .map_or_else(|| "parent task".to_owned(), |s| (*s).to_owned()),
+                }),
+                task_proto::Anchor::Workstream(_) => Some(task_ui::AnchorChip {
+                    kind: "workstream".into(),
+                    label: "Workstream".into(),
+                }),
+                task_proto::Anchor::Milestone(_) => Some(task_ui::AnchorChip {
+                    kind: "milestone".into(),
+                    label: "Milestone".into(),
+                }),
+            }
+        };
+        // Every row the list can show — the condensed board plus the
+        // leftovers its expanders reveal.
+        let anchors: Vec<(uuid::Uuid, task_ui::AnchorChip)> = domain
+            .iter()
+            .chain(rest_by_anchor.values().flatten())
+            .filter_map(|t| chip_for(t).map(|c| (t.id, c)))
+            .collect();
+
         let ui_tasks: Vec<UiTask> = domain.iter().map(|t| to_ui(t)).collect();
+        let triage: Vec<UiTask> = triage.iter().map(|t| to_ui(t)).collect();
         let more: Vec<(uuid::Uuid, Vec<UiTask>)> = winner_task
             .iter()
-            .filter_map(|(pid, &task_id)| {
-                let mut rest = rest_by_pid.remove(pid)?;
+            .filter_map(|(a, &task_id)| {
+                let mut rest = rest_by_anchor.remove(a)?;
                 rest.sort_by_key(|t| next_key(t));
                 Some((task_id, rest.iter().map(|t| to_ui(t)).collect()))
             })
@@ -245,16 +308,14 @@ pub fn TasksView() -> Element {
         // source) for the active org + owner — not task markdown — so a
         // running clock started anywhere (widget, /timer, here) is never
         // invisible and never disagrees with the top-bar widget.
-        let now: Option<NowInfo> = resolve_org(&selection.read(), &org_list.read()).and_then(
-            |(slug, org_id)| {
+        let now: Option<NowInfo> =
+            resolve_org(&selection.read(), &org_list.read()).and_then(|(slug, org_id)| {
                 let owner = owner_id(org_id);
                 session_store
                     .list()
                     .into_iter()
                     .find(|r| {
-                        r.slug == slug
-                            && r.session.user_id == owner
-                            && r.session.end_time.is_none()
+                        r.slug == slug && r.session.user_id == owner && r.session.end_time.is_none()
                     })
                     .map(|r| {
                         let s = &r.session;
@@ -282,12 +343,13 @@ pub fn TasksView() -> Element {
                             req: req_from_session(org_id, s),
                         }
                     })
-            },
-        );
+            });
 
         Some(BoardData {
             ui_tasks,
             more,
+            anchors,
+            triage,
             projects: project_names.into_iter().collect(),
             hidden,
             now,
@@ -299,6 +361,8 @@ pub fn TasksView() -> Element {
             let BoardData {
                 ui_tasks,
                 more,
+                anchors,
+                triage,
                 projects: project_choices,
                 hidden,
                 now,
@@ -360,6 +424,8 @@ pub fn TasksView() -> Element {
                         TasksApp {
                             tasks: ui_tasks,
                             more,
+                            anchors,
+                            triage,
                             header_extra: chips,
                             projects: project_choices,
                             on_event: move |mu: TaskMutation| {

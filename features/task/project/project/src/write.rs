@@ -122,6 +122,31 @@ mod tests {
         assert_eq!(back.id, p.id);
     }
 
+    /// The project-level verify command survives a serialize → parse
+    /// round-trip, and a project that declares none stays byte-stable
+    /// (no stray `verifyCommand:` key appears in existing vaults).
+    #[test]
+    fn verify_command_round_trips_through_frontmatter() {
+        let mut p = crate::parse_str(
+            "Projects/demo.md",
+            "demo",
+            "---\ntype: project\ntitle: Demo\n---\n",
+        )
+        .expect("minimal project parses");
+        assert_eq!(p.verify_command, "", "absent key parses as no default");
+
+        let plain = serialize_project(&p).expect("serialize");
+        assert!(
+            !plain.contains("verifyCommand"),
+            "a project with no verify command must not grow the key"
+        );
+
+        p.verify_command = "cargo check -p task-proto".into();
+        let raw = serialize_project(&p).expect("serialize");
+        let back = crate::parse_str("Projects/demo.md", "demo", &raw).expect("re-parse");
+        assert_eq!(back.verify_command, "cargo check -p task-proto");
+    }
+
     /// The slug rule, and the fallback for a title that slugifies to
     /// nothing — which lands under `Projects/` like every other title.
     /// It used to drop the folder and write to the vault root.

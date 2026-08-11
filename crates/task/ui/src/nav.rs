@@ -288,6 +288,12 @@ pub fn nav_tabs() -> Vec<NavTab> {
             },
         },
         NavTab {
+            label: "Runners",
+            plugin: "agent",
+            icon: icon_agents,
+            route: Route::RunnersRoute {},
+        },
+        NavTab {
             label: "Agents",
             plugin: "agent",
             icon: icon_agents,
@@ -421,6 +427,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::WikiSourcesRoute {} => "Archived sources",
         Route::WikiSourceRoute { .. } => "Source",
         Route::AgentsRoute { .. } => "Agents",
+        Route::RunnersRoute {} => "Runners",
         Route::ReposRoute {} => "Repos",
         Route::SettingsRoute {} => "Settings",
     }

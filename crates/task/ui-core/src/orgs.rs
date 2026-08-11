@@ -75,13 +75,39 @@ pub struct OrgMeta {
 ///   empty span rather than a fan-out that the permission gate will
 ///   refuse call by call — an empty state is a better answer than a wall
 ///   of errors, and it is the truthful one.
+///
+/// Note on where linked orgs enter this: NOT here. The app root folds
+/// the identity locker's answer into each `OrgMeta::member` as the org
+/// list resolves, because `org_list` is the Signal every consumer
+/// reads. Consulting a global from inside this function instead looked
+/// simpler and was wrong — Dioxus cannot see a static change, so the
+/// switcher kept rendering a stale single org until something unrelated
+/// forced a re-render. Keep this a pure function of its argument.
 #[must_use]
 pub fn my_orgs(orgs: &[OrgMeta]) -> Vec<OrgMeta> {
+    my_orgs_with_links(orgs, &[])
+}
+
+/// [`my_orgs`], plus the orgs the identity locker holds a credential
+/// for.
+///
+/// Discovery can only answer `member` for the ONE token it presented,
+/// so on a server hosting several orgs it reports `false` for every org
+/// that didn't issue that token — even ones this account is a full
+/// member of. The locker is the other half of the answer: a link means
+/// we hold a working credential for that org, which is the same claim
+/// `member: true` makes.
+///
+/// Split out from [`my_orgs`] so the rule stays a pure function over
+/// its inputs and can be tested without touching global session state.
+#[must_use]
+pub fn my_orgs_with_links(orgs: &[OrgMeta], linked: &[String]) -> Vec<OrgMeta> {
+    let linked_here = |o: &OrgMeta| linked.iter().any(|s| s == &o.slug);
     if orgs.iter().all(|o| o.member.is_none()) {
         return orgs.to_vec();
     }
     orgs.iter()
-        .filter(|o| o.member.unwrap_or(false))
+        .filter(|o| o.member.unwrap_or(false) || linked_here(o))
         .cloned()
         .collect()
 }
@@ -250,6 +276,36 @@ mod my_orgs_tests {
         // refusals once the gate enforces.
         let orgs = [org("a", Some(false)), org("b", Some(false))];
         assert!(my_orgs(&orgs).is_empty());
+    }
+
+    #[test]
+    fn a_linked_org_is_mine_even_when_discovery_says_otherwise() {
+        // The production shape: one token, six orgs. Discovery can only
+        // vouch for the org that issued it, so the other five come back
+        // `member: false` despite the account being a full member —
+        // holding a working credential for them is the same claim.
+        let orgs = [
+            org("codywright", Some(true)),
+            org("fasttrackstudios", Some(false)),
+            org("someone-elses", Some(false)),
+        ];
+        let linked = ["fasttrackstudios".to_owned()];
+        assert_eq!(
+            slugs(&my_orgs_with_links(&orgs, &linked)),
+            ["codywright", "fasttrackstudios"],
+            "a link is a credential; an org we hold none for stays hidden"
+        );
+    }
+
+    #[test]
+    fn links_do_not_resurrect_orgs_when_signed_out() {
+        // No token sent → every entry `None` → show everything, and the
+        // link list must not change that shape.
+        let orgs = [org("a", None), org("b", None)];
+        assert_eq!(
+            slugs(&my_orgs_with_links(&orgs, &["a".to_owned()])),
+            ["a", "b"]
+        );
     }
 
     #[test]

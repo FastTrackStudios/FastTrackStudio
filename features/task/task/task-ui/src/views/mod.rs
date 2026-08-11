@@ -8,11 +8,13 @@ mod list;
 mod palette;
 mod quick_add;
 mod row;
-pub use row::CheckboxButton;
+pub use row::{AnchorChip, CheckboxButton};
 mod session_history;
 mod subtasks;
 mod tasks_app;
 mod time;
+mod triage;
+pub use triage::{TriageStrip, TriageStripProps};
 mod workflow;
 
 pub use detail_full::{
@@ -20,11 +22,11 @@ pub use detail_full::{
     short_id,
 };
 pub use links::{LinkChips, LinkChipsProps};
+pub use quick_add::{QuickAdd, QuickAddProps};
 pub use session_history::{
     SessionEvent, SessionHistory, SessionHistoryProps, activity_label, merge_session_events,
     payload_preview,
 };
-pub use quick_add::{QuickAdd, QuickAddProps};
 pub use subtasks::{SubtasksBoard, SubtasksBoardProps, subtask_summary};
 pub use tasks_app::{TasksApp, TasksAppProps};
 pub use time::{

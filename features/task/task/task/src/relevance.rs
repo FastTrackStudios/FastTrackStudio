@@ -5,5 +5,6 @@
 //! the existing `task::relevance::*` paths keep working.
 
 pub use task_proto::relevance::{
-    RelevanceContext, condense_next_per_project, filter_relevant, is_relevant, relevance_rank,
+    RelevanceContext, condense_next_per_anchor, condense_next_per_project, filter_relevant,
+    is_relevant, next_action_key, partition_triage, relevance_rank,
 };

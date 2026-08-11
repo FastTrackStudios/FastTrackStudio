@@ -297,6 +297,17 @@ pub fn ProjectDetailView(id: String) -> Element {
                 // filtered from the org-wide channel by project id.
                 crate::presence::ProjectPresenceStrip { project_id: p.id }
 
+                // The agent lane for this project: questions waiting
+                // on a human, runs in flight, branches ready to
+                // review. Same component the fleet view at /runners
+                // mounts, scoped here — sharing it is what stops the
+                // two drifting into different answers.
+                crate::pages::agent_surface::AgentSurfaceView {
+                    slug: forge_slug.clone(),
+                    project: Some(p.id),
+                    heading: true,
+                }
+
                 // ── Stat tiles ──────────────────────────────────────────
                 div { class: "grid grid-cols-2 gap-3 sm:grid-cols-5",
                     StatTile { label: "Tasks", value: "{total}" }

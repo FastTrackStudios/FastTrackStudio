@@ -201,6 +201,13 @@ pub struct OrgAppState {
     pub intake: intake::Store,
     #[cfg(feature = "plugin-agent")]
     pub agent_tasks: agent_tasks::Store,
+    /// The runner registry — who can execute agent work, what they
+    /// can do, and whether they are still alive.
+    pub agent_runners: agent_runners::Store,
+    /// Run records — every attempt at every ticket.
+    pub agent_runs: agent_runners::RunStore,
+    /// The grill queue — questions agents are waiting on.
+    pub agent_questions: agent_runners::QuestionStore,
     /// Codex agent backend — in-process session registry + turn
     /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
     /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
@@ -765,6 +772,31 @@ pub(crate) async fn build_org_state(
         .await?;
         #[cfg(feature = "plugin-agent")]
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
+
+        // Runner registry. Its OWN sqlite file, like every other
+        // slice — two SeaORM migrators sharing one database share
+        // one `seaql_migrations` table, and the second one silently
+        // applies nothing. There is a regression test for that in
+        // `agent-runners`; do not co-locate this with agent-tasks.
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners_url = std::env::var("TASK_SERVER_AGENT_RUNNERS_URL").unwrap_or_else(|_| {
+            format!(
+                "sqlite://{}?mode=rwc",
+                org_root.path().join("agent-runners.sqlite").display()
+            )
+        });
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners_conn =
+            open_sqlite_pool(scope, agent_runners_url, "agent-runners", |db| {
+                Box::pin(async move { agent_runners::Migrator::up(&db, None).await.map(|()| db) })
+            })
+            .await?;
+        #[cfg(feature = "plugin-agent")]
+        let agent_runs = agent_runners::RunStore::new(agent_runners_conn.clone());
+        #[cfg(feature = "plugin-agent")]
+        let agent_questions = agent_runners::QuestionStore::new(agent_runners_conn.clone());
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners = agent_runners::Store::new(agent_runners_conn);
 
         // Codex agent backend. In-process, in-memory session
         // registry + turn dispatch — hosts the `Sessions` +
@@ -1369,6 +1401,12 @@ pub(crate) async fn build_org_state(
             #[cfg(feature = "plugin-agent")]
             agent_tasks,
             #[cfg(feature = "plugin-agent")]
+            agent_runners,
+            #[cfg(feature = "plugin-agent")]
+            agent_runs,
+            #[cfg(feature = "plugin-agent")]
+            agent_questions,
+            #[cfg(feature = "plugin-agent")]
             agent_codex,
             #[cfg(feature = "plugin-agent")]
             agent_router,
@@ -1943,6 +1981,9 @@ pub fn router(state: AppState) -> Router {
         // MCP — Task as a tool surface for agents (Hermes gateway,
         // Claude Code, any MCP client). See `mcp`.
         .route("/org/{slug}/mcp", axum::routing::post(mcp::mcp_handler))
+        // Account-scoped MCP: one endpoint for every org the caller
+        // can reach, instead of one registration per org.
+        .route("/mcp", axum::routing::post(mcp::mcp_account_handler))
         .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
         .with_state(state.clone());
 
@@ -2539,7 +2580,35 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 agent_proto::service::routines::routines_rpc_service_descriptor(),
                 agent_proto::service::routines::serve(org.agent_router.clone()),
-            );
+            )
+            // Runner registry — who can execute agent work, what they
+            // can do, and whether they have heartbeated recently
+            // enough to be offered any.
+            .with(
+                agent_proto::service::backends::backends_rpc_service_descriptor(),
+                agent_proto::service::backends::serve(org.agent_runners.clone()),
+            )
+            // Run records — every attempt at every ticket, so retry
+            // history and leftover worktrees are both answerable.
+            .with(
+                agent_proto::service::runs::runs_rpc_service_descriptor(),
+                agent_proto::service::runs::serve(org.agent_runs.clone()),
+            )
+            // The grill queue — questions agents are blocked on, and
+            // the answers that unblock them.
+            .with(
+                agent_proto::service::questions::questions_rpc_service_descriptor(),
+                agent_proto::service::questions::serve(org.agent_questions.clone()),
+            )
+            // Live run state — the snapshot half…
+            .with(
+                agent_proto::service::run_stream::run_stream_rpc_service_descriptor(),
+                agent_proto::service::run_stream::serve(org.agent_runs.clone()),
+            )
+            // …and the stream half, off the hub the run store owns.
+            .merge(agent_proto::service::run_stream::stream_layer(
+                org.agent_runs.clone(),
+            ));
     }
 
     router = router

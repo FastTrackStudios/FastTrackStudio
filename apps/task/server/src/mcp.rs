@@ -50,6 +50,22 @@ const LATEST_PROTOCOL: &str = "2025-06-18";
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
 
+/// Per-task body cap in `list_untriaged_tasks`. The body is where a
+/// bare title's missing context usually hides, so it's worth sending
+/// — but a batch of 50 full notes is not.
+const TRIAGE_BODY_CAP: usize = 800;
+
+/// Head-truncate on a char boundary, marking the cut so the agent
+/// knows it's reading a fragment and doesn't conclude from silence.
+fn truncate_body(body: &str, cap: usize) -> String {
+    let body = body.trim();
+    if body.chars().count() <= cap {
+        return body.to_string();
+    }
+    let head: String = body.chars().take(cap).collect();
+    format!("{head}\n…[truncated]")
+}
+
 /// Vault id the org's `VaultSync` backend is keyed by (single-vault
 /// per org today, same constant the UI passes).
 const VAULT_ID: &str = "default";
@@ -220,6 +236,48 @@ pub fn tool_catalog() -> Vec<ToolDef> {
                         "scheduled": s_("New scheduled date (ISO YYYY-MM-DD); empty string clears."),
                         "priority": s_("'none' | 'low' | 'normal' | 'high' | 'critical'."),
                         "assignees": a_("Replace who owns the task: 'agent:NAME' or 'human:USER_ID' entries (bare names mean agent:). Empty array unclaims. Prefer claim_task to take a task for yourself."),
+                    }),
+                    &["id"],
+                )
+            },
+        },
+        ToolDef {
+            name: "list_untriaged_tasks",
+            plugin: "core",
+            description: "List open tasks that belong to nothing — no project, no parent task, \
+                          no workstream, no @context. These are hidden from the user's \
+                          'Relevant' view because a bare title like 'Telemetry: Sentry' says \
+                          nothing about what it's for. Returns each task's title, body and \
+                          age, plus the org's projects and open tasks that could be its home, \
+                          so one call gives you everything needed to decide. Follow with \
+                          file_task for each one you can place confidently.",
+            schema: || {
+                obj(
+                    json!({
+                        "limit": i_("Max tasks to triage this pass (default 50, max 200). Oldest first."),
+                    }),
+                    &[],
+                )
+            },
+        },
+        ToolDef {
+            name: "file_task",
+            plugin: "core",
+            description: "File a task under what it belongs to: a project, a parent task, a \
+                          workstream, or GTD @contexts. This is the write that ends triage — \
+                          a filed task rejoins the user's working list. Pass only what you're \
+                          confident about; one correct anchor beats three guesses. If nothing \
+                          fits, leave the task alone and say so rather than inventing a home \
+                          for it.",
+            schema: || {
+                obj(
+                    json!({
+                        "id": s_("Task UUID from list_untriaged_tasks."),
+                        "project": s_("Project UUID it belongs to (from list_projects)."),
+                        "parent": s_("Task UUID this is a subtask of — use when the task is one slice of a bigger tracked item."),
+                        "workstream": s_("Workstream UUID this rolls up into."),
+                        "contexts": a_("GTD contexts like '@studio', '@phone' — the right answer for standalone errands that have no project."),
+                        "reason": s_("One line on why it belongs there. Recorded in the response so the user can audit your filing."),
                     }),
                     &["id"],
                 )
@@ -889,10 +947,37 @@ don't need a confirmation round-trip.",
 
 // ── HTTP surface ─────────────────────────────────────────────────
 
-/// `POST /org/{slug}/mcp`.
+/// `POST /mcp` — the ACCOUNT-scoped lane.
+///
+/// One endpoint per account rather than one per org. Every per-org
+/// tool grows an optional `org` argument (defaulting to the caller's
+/// home), and `list_orgs` reports what's reachable. Registering six
+/// MCP servers for six orgs was the wrong shape: the client had to
+/// know the topology, and adding an org meant editing client config.
+pub async fn mcp_account_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    mcp_dispatch(state, None, headers, body).await
+}
+
+/// `POST /org/{slug}/mcp` — the org-scoped lane, unchanged.
 pub async fn mcp_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    mcp_dispatch(state, Some(slug), headers, body).await
+}
+
+/// Shared JSON-RPC dispatch. `pinned` is `Some(slug)` on the org lane
+/// and `None` on the account lane, where each `tools/call` names its
+/// own org.
+async fn mcp_dispatch(
+    state: AppState,
+    pinned: Option<String>,
     headers: HeaderMap,
     body: String,
 ) -> Response {
@@ -941,24 +1026,93 @@ pub async fn mcp_handler(
             } else {
                 LATEST_PROTOCOL
             };
+            let (name, instructions) = match &pinned {
+                Some(s) => (
+                    format!("task/{s}"),
+                    server_instructions(s, chrono::Local::now()),
+                ),
+                None => (
+                    "task".to_string(),
+                    account_instructions(&state, &headers, chrono::Local::now()).await,
+                ),
+            };
             Json(rpc_result(
                 id,
                 json!({
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false } },
-                    "serverInfo": { "name": format!("task/{slug}"), "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": server_instructions(&slug, chrono::Local::now()),
+                    "serverInfo": { "name": name, "version": env!("CARGO_PKG_VERSION") },
+                    "instructions": instructions,
                 }),
             ))
             .into_response()
         }
         "ping" => Json(rpc_result(id, json!({}))).into_response(),
-        "tools/list" => match authenticate(&state, &slug, &headers).await {
-            Ok(org) => Json(rpc_result(id, tools_list_payload(&org.plugins))).into_response(),
-            Err(e) => Json(rpc_error(id, code::INVALID_REQUEST, e)).into_response(),
-        },
+        "tools/list" => {
+            let Some(target) = default_slug(&state, &pinned, &headers).await else {
+                return Json(rpc_error(
+                    id,
+                    code::INVALID_REQUEST,
+                    "no reachable org for this token",
+                ))
+                .into_response();
+            };
+            match authenticate_for(&state, &target, &headers).await {
+                Ok(org) => {
+                    let mut payload = tools_list_payload(&org.plugins);
+                    if pinned.is_none() {
+                        payload = account_tools_payload(payload, &target);
+                    }
+                    Json(rpc_result(id, payload)).into_response()
+                }
+                Err(e) => Json(rpc_error(id, code::INVALID_REQUEST, e)).into_response(),
+            }
+        }
         "tools/call" => {
-            let org = match authenticate(&state, &slug, &headers).await {
+            let args_peek = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            // Account lane: the call names its org, else the default.
+            let target = match &pinned {
+                Some(s) => s.clone(),
+                None => match arg_str(&args_peek, "org") {
+                    Some(s) => s,
+                    None => match default_slug(&state, &pinned, &headers).await {
+                        Some(s) => s,
+                        None => {
+                            return Json(rpc_error(
+                                id,
+                                code::INVALID_REQUEST,
+                                "no reachable org — pass `org`, or check `list_orgs`",
+                            ))
+                            .into_response();
+                        }
+                    },
+                },
+            };
+            // `list_orgs` is account-lane only and spans orgs, so it
+            // answers before any single-org authentication.
+            if pinned.is_none() && params.get("name").and_then(Value::as_str) == Some("list_orgs") {
+                let orgs = reachable_orgs(&state, &headers).await;
+                let home = state.home_slug();
+                let out: Vec<Value> = orgs
+                    .iter()
+                    .map(|s| json!({ "slug": s, "is_home": Some(s) == home.as_ref() }))
+                    .collect();
+                return Json(rpc_result(
+                    id,
+                    tool_ok(&json!({
+                        "count": out.len(),
+                        "orgs": out,
+                        "default": target,
+                        "note": "Each org has its OWN vault. Pass `org` on any tool to act in \
+                                 one; omitting it uses the default.",
+                    })),
+                ))
+                .into_response();
+            }
+            let org = match authenticate_for(&state, &target, &headers).await {
                 Ok(org) => org,
                 Err(e) => return Json(rpc_error(id, code::INVALID_REQUEST, e)).into_response(),
             };
@@ -1029,10 +1183,164 @@ pub async fn mcp_handler(
     }
 }
 
-/// Bearer check → the org's backend state. Mirrors
-/// [`crate::watch_bridge`]'s rule with `TASK_MCP_TOKEN` as the static
-/// device token.
-async fn authenticate(
+/// The org a call lands in when it doesn't name one: the pinned slug
+/// on the org lane, else the caller's home, else the first org they
+/// can reach.
+async fn default_slug(
+    state: &AppState,
+    pinned: &Option<String>,
+    headers: &HeaderMap,
+) -> Option<String> {
+    if let Some(s) = pinned {
+        return Some(s.clone());
+    }
+    let reachable = reachable_orgs(state, headers).await;
+    if reachable.is_empty() {
+        return None;
+    }
+    match state.home_slug() {
+        Some(home) if reachable.contains(&home) => Some(home),
+        _ => reachable.first().cloned(),
+    }
+}
+
+/// Rewrite a per-org tools payload for the account lane: every tool
+/// gains `org`, and `list_orgs` is prepended so a client can discover
+/// the topology before it guesses at slugs.
+fn account_tools_payload(payload: Value, default_slug: &str) -> Value {
+    let mut tools: Vec<Value> = payload
+        .get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut t| {
+            if let Some(schema) = t.get("inputSchema").cloned() {
+                t["inputSchema"] = with_org_param(schema, default_slug);
+            }
+            t
+        })
+        .collect();
+    tools.insert(
+        0,
+        json!({
+            "name": "list_orgs",
+            "description": "The organizations this account can reach, and which one tools \
+                            default to. Each org is a SEPARATE vault — tasks, projects and \
+                            notes do not cross between them. Call this before assuming where \
+                            something lives.",
+            "inputSchema": obj(json!({}), &[]),
+        }),
+    );
+    json!({ "tools": tools })
+}
+
+/// Account-lane orientation: the org-lane text for the default org,
+/// plus the list of everything else this account can act in.
+async fn account_instructions(
+    state: &AppState,
+    headers: &HeaderMap,
+    now: chrono::DateTime<chrono::Local>,
+) -> String {
+    let reachable = reachable_orgs(state, headers).await;
+    let default = default_slug(state, &None, headers)
+        .await
+        .unwrap_or_else(|| "(none)".into());
+    let base = server_instructions(&default, now);
+    if reachable.len() <= 1 {
+        return base;
+    }
+    format!(
+        "{base}\n\nThis connection is ACCOUNT-scoped, not org-scoped. Reachable orgs: {}. \
+Every tool takes an optional `org` argument; omitting it acts in `{default}`. The orgs have \
+SEPARATE vaults — a task in one is invisible in another, so when the user names a project or \
+song you don't recognise, check `list_orgs` rather than assuming it is missing.",
+        reachable.join(", ")
+    )
+}
+
+/// Which orgs this caller can reach, and how.
+///
+/// The static `TASK_MCP_TOKEN` reaches every hosted org — that is what
+/// it is for, and how the cluster agent works today. A *session* token
+/// reaches the org that issued it, plus every org that account has
+/// linked into its home identity locker. The locker is the whole point:
+/// auth stores are per-org, so without it a session is a credential in
+/// exactly one place.
+pub async fn reachable_orgs(state: &AppState, headers: &HeaderMap) -> Vec<String> {
+    let Some(token) = crate::watch_bridge::bearer(headers) else {
+        return Vec::new();
+    };
+    let hosted = state.org_slugs();
+    let static_token = std::env::var("TASK_MCP_TOKEN").unwrap_or_default();
+    if !static_token.is_empty() && token == static_token {
+        return hosted;
+    }
+    let mut reachable = Vec::new();
+    // The issuing org, found by asking each hosted org whether the
+    // token validates there. Cheap (one indexed lookup per org) and it
+    // needs no guess about which org the caller came from.
+    for slug in &hosted {
+        if let Some(org) = state.org(slug)
+            && org
+                .auth
+                .auth
+                .current_session(architect_auth::CurrentSession {
+                    token: token.clone(),
+                })
+                .await
+                .is_ok()
+        {
+            reachable.push(slug.clone());
+        }
+    }
+    // Plus everything the locker holds a credential for.
+    for slug in linked_slugs(state, &token).await {
+        if !reachable.contains(&slug) && hosted.contains(&slug) {
+            reachable.push(slug);
+        }
+    }
+    reachable.sort();
+    reachable
+}
+
+/// Org slugs the caller's home identity locker holds a link for.
+/// Empty when the token isn't a home session, or the server hosts no
+/// home org — both normal, neither an error.
+async fn linked_slugs(state: &AppState, token: &str) -> Vec<String> {
+    let Some(home_slug) = state.home_slug() else {
+        return Vec::new();
+    };
+    let Some(home) = state.org(&home_slug) else {
+        return Vec::new();
+    };
+    let Ok(bundle) = home
+        .auth
+        .auth
+        .current_session(architect_auth::CurrentSession {
+            token: token.to_owned(),
+        })
+        .await
+    else {
+        return Vec::new();
+    };
+    let Some(store) = home.identity else {
+        return Vec::new();
+    };
+    store
+        .list_links(bundle.user.id)
+        .await
+        .map(|links| links.into_iter().map(|l| l.remote_slug).collect())
+        .unwrap_or_default()
+}
+
+/// Authenticate for ONE org on the account-scoped lane.
+///
+/// Three ways in, tried in order: the static token; the presented
+/// token validating against this org directly; or a locker link whose
+/// stored token does. The third is what lets one sign-in reach six
+/// orgs without the client holding six credentials.
+async fn authenticate_for(
     state: &AppState,
     slug: &str,
     headers: &HeaderMap,
@@ -1046,15 +1354,65 @@ async fn authenticate(
     if !static_token.is_empty() && token == static_token {
         return Ok(org);
     }
-    match org
+    if org
         .auth
         .auth
-        .current_session(architect_auth::CurrentSession { token })
+        .current_session(architect_auth::CurrentSession {
+            token: token.clone(),
+        })
         .await
+        .is_ok()
     {
-        Ok(_) => Ok(org),
-        Err(_) => Err("invalid token".to_string()),
+        return Ok(org);
     }
+    // Fall back to the locker's credential for this org.
+    if let Some(home_slug) = state.home_slug()
+        && let Some(home) = state.org(&home_slug)
+        && let Ok(bundle) = home
+            .auth
+            .auth
+            .current_session(architect_auth::CurrentSession {
+                token: token.clone(),
+            })
+            .await
+        && let Some(store) = home.identity
+        && let Ok(links) = store.list_links(bundle.user.id).await
+        && let Some(link) = links.into_iter().find(|l| l.remote_slug == slug)
+        && let Some(linked) = link.token
+        && org
+            .auth
+            .auth
+            .current_session(architect_auth::CurrentSession { token: linked })
+            .await
+            .is_ok()
+    {
+        return Ok(org);
+    }
+    Err(format!(
+        "not authorized for org `{slug}` — sign in there, or link it with `task auth link --org {slug}`"
+    ))
+}
+
+/// Add the account-lane `org` argument to a per-org tool's schema.
+///
+/// The catalog is shared with `/org/{slug}/mcp`, where the org is in
+/// the URL and the argument would be meaningless. Injecting it here
+/// keeps one catalog rather than two that drift.
+fn with_org_param(mut schema: Value, default_slug: &str) -> Value {
+    if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        props.insert(
+            "org".into(),
+            json!({
+                "type": "string",
+                "description": format!(
+                    "Org slug to act in. Defaults to `{default_slug}`. Call list_orgs to see \
+                     which orgs you can reach — they have SEPARATE vaults, so a task in one is \
+                     invisible in another."
+                ),
+            }),
+        );
+    }
+    schema
 }
 
 /// Why a tool call didn't produce a result.
@@ -1396,6 +1754,151 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             Ok(task_json(&saved))
         }
 
+        "list_untriaged_tasks" => {
+            let rows = org
+                .tasks
+                .query(task::TaskListFilter {
+                    open_only: true,
+                    ..Default::default()
+                })
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
+            let mut unfiled: Vec<&task::TaskInfo> =
+                rows.iter().filter(|t| task::is_unfiled(t)).collect();
+            // Oldest capture first: the thing that's been sitting
+            // longest is the thing most worth naming.
+            unfiled.sort_by(|a, b| {
+                a.date_created
+                    .cmp(&b.date_created)
+                    .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+            });
+            let total = unfiled.len();
+            let out: Vec<Value> = unfiled
+                .iter()
+                .take(arg_limit(args))
+                .map(|t| {
+                    let mut v = task_json(t);
+                    // The body is where the "what is this for" answer
+                    // usually hides — a bare title rarely carries it.
+                    if let Some(map) = v.as_object_mut() {
+                        map.insert(
+                            "details".into(),
+                            json!(truncate_body(&t.details, TRIAGE_BODY_CAP)),
+                        );
+                        map.insert("created".into(), json!(t.date_created));
+                    }
+                    v
+                })
+                .collect();
+
+            // The candidate homes, inline. Triage that needs three
+            // round-trips before it can think is triage nobody runs.
+            let projects: Vec<Value> = org
+                .projects
+                .list()
+                .map_err(|e| ToolFailure::Message(format!("{e:?}")))?
+                .iter()
+                .filter(|p| project::Status::from_str(&p.status).is_none_or(|s| !s.is_closed()))
+                .map(project_json)
+                .collect();
+            let parents: Vec<Value> = rows
+                .iter()
+                .filter(|t| task::is_filed(t))
+                .map(|t| json!({ "id": t.id.to_string(), "title": t.title }))
+                .collect();
+            Ok(json!({
+                "count": out.len(),
+                "total_untriaged": total,
+                "tasks": out,
+                "projects": projects,
+                "filed_tasks": parents,
+                "note": "File each task with file_task. Leave anything you can't place \
+                         confidently — an unfiled task is recoverable, a wrongly filed one \
+                         is invisible.",
+            }))
+        }
+
+        "file_task" => {
+            let id = required_str(args, "id")?;
+            let uuid = parse_uuid(&id, "task")?;
+            let mut current = org
+                .tasks
+                .get(uuid)
+                .map_err(|e| backend_err("task", &id, &e))?;
+
+            let mut filed_as: Vec<String> = Vec::new();
+            if let Some(p) = arg_str(args, "project") {
+                let pid = parse_uuid(&p, "project")?;
+                // Resolve the title so the markdown page keeps its
+                // human-readable `projects:` wikilink — the vault is
+                // the source of truth, not just the DB column.
+                let title = org
+                    .projects
+                    .list()
+                    .ok()
+                    .and_then(|ps| ps.iter().find(|x| x.id == pid).map(|x| x.title.clone()));
+                let Some(title) = title else {
+                    return Err(ToolFailure::Message(format!(
+                        "no project with id `{p}` — call list_projects first"
+                    )));
+                };
+                current.project_id = Some(pid);
+                current.projects = vec![format!("[[{title}]]")].into();
+                filed_as.push(format!("project {title}"));
+            }
+            if let Some(p) = arg_str(args, "parent") {
+                let parent = parse_uuid(&p, "task")?;
+                if parent == uuid {
+                    return Err(ToolFailure::Message(
+                        "a task cannot be its own parent".into(),
+                    ));
+                }
+                // A parent that doesn't exist would orphan the task
+                // in a way no view can show.
+                org.tasks
+                    .get(parent)
+                    .map_err(|_| ToolFailure::Message(format!("no task with id `{p}`")))?;
+                current.workflow.get_or_insert_with(Default::default).parent = Some(parent);
+                filed_as.push("parent task".to_string());
+            }
+            if let Some(w) = arg_str(args, "workstream") {
+                current
+                    .workflow
+                    .get_or_insert_with(Default::default)
+                    .workstream = Some(parse_uuid(&w, "workstream")?);
+                filed_as.push("workstream".to_string());
+            }
+            if let Some(cs) = arg_str_list(args, "contexts")? {
+                current.contexts = cs
+                    .iter()
+                    .map(|c| {
+                        let c = c.trim().trim_start_matches('@');
+                        format!("@{c}")
+                    })
+                    .collect::<Vec<_>>()
+                    .into();
+                filed_as.push("contexts".to_string());
+            }
+            if filed_as.is_empty() {
+                return Err(ToolFailure::Message(
+                    "nothing to file by — pass at least one of project, parent, workstream, \
+                     or contexts"
+                        .into(),
+                ));
+            }
+            let saved = org
+                .tasks
+                .update(current)
+                .map_err(|e| backend_err("task", &id, &e))?;
+            let mut out = task_json(&saved);
+            if let Some(map) = out.as_object_mut() {
+                map.insert("filed_as".into(), json!(filed_as.join(", ")));
+                if let Some(reason) = arg_str(args, "reason") {
+                    map.insert("reason".into(), json!(reason));
+                }
+            }
+            Ok(out)
+        }
+
         "claim_task" => {
             let id = required_str(args, "id")?;
             let uuid = parse_uuid(&id, "task")?;
@@ -1695,6 +2198,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                 default_rate_cents: 0,
                 estimated_seconds: 0,
                 agent_profile: String::new(),
+                verify_command: arg_str(args, "verify_command").unwrap_or_default(),
                 color: String::new(),
                 image: String::new(),
                 archived: false,
@@ -2351,6 +2855,7 @@ fn email_err(e: email_proto::EmailSyncError) -> ToolFailure {
 /// carries time entries, recurrence anchors, and relation graphs that
 /// would only burn context.
 fn task_json(t: &task::TaskInfo) -> Value {
+    let workflow = t.workflow.as_ref();
     json!({
         "id": t.id.to_string(),
         "title": t.title,
@@ -2361,7 +2866,15 @@ fn task_json(t: &task::TaskInfo) -> Value {
         "tags": t.tags.0,
         "contexts": t.contexts.0,
         "projects": t.projects.0,
-        "assignees": t.workflow.as_ref().map(|w| {
+        // Filing, spelled out: without these an agent can't tell a
+        // task that belongs somewhere from one that doesn't, and
+        // "which of my tasks need sorting" is unanswerable.
+        "project_id": t.project_id.map(|id| id.to_string()),
+        "parent": workflow.and_then(|w| w.parent).map(|id| id.to_string()),
+        "workstream": workflow.and_then(|w| w.workstream).map(|id| id.to_string()),
+        "milestone_id": t.milestone_id.map(|id| id.to_string()),
+        "filed": task::is_filed(t),
+        "assignees": workflow.map(|w| {
             w.assignees.0.iter().map(|a| a.short_label()).collect::<Vec<_>>()
         }),
         "path": t.path,

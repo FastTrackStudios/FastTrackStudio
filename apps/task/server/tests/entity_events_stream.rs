@@ -97,6 +97,7 @@ async fn entity_streams_deliver_mutations_end_to_end() {
         default_rate_cents: 0,
         estimated_seconds: 0,
         agent_profile: String::new(),
+        verify_command: String::new(),
         color: String::new(),
         image: String::new(),
         archived: false,

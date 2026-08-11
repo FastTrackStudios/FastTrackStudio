@@ -81,13 +81,26 @@ pub mod profile;
 pub mod project;
 pub mod question;
 pub mod reasoning;
+pub mod routing;
+pub mod run;
+pub mod run_event;
+pub mod runner;
 pub mod service;
 pub mod session;
+pub mod supervisor;
 pub mod tasks;
 pub mod tool;
 
 pub use error::AgentError;
 pub use event::{AgentEvent, AgentEventEnvelope};
+pub use run::{FinishRun, Run, RunFilter, RunStatus, StartRun};
+pub use run_event::{RunEvent, RunEventEnvelope, RunSnapshot, append_tail};
+pub use supervisor::{MAX_RESTARTS, NO_PROGRESS_AFTER, Recovery};
+pub use routing::{Refusal, TicketRef, malformed, requirements, takeable, unroutable};
+pub use runner::{
+    Capability, CapabilityError, RunnerProfile, RunnerScope, TicketRequirements, Unroutable,
+    parse_capabilities, unsatisfiable_capability,
+};
 
 // Convenience re-exports of the per-capability traits.
 // Concrete RPC scaffolding (per-trait `Rpc` mirror,
