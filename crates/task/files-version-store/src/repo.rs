@@ -6,6 +6,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use jj_lib::backend::Backend;
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
@@ -13,7 +14,7 @@ use jj_lib::repo::{ReadonlyRepo, RepoInitError};
 use jj_lib::settings::UserSettings;
 use jj_lib::signing::Signer;
 
-use crate::backend::VersionStoreBackend;
+use crate::backend::{DEFAULT_GC_INTERVAL, VersionStoreBackend};
 use crate::error::{Error, Result};
 
 /// Default settings: jj-lib's own baked-in config (`config/misc.toml`) is
@@ -43,6 +44,16 @@ pub fn default_settings() -> Result<UserSettings> {
 /// metadata directory; the backend's own chunk/object stores live under
 /// `repo_path/store` (jj's own convention — see `ReadonlyRepo::init`).
 pub async fn init_repo(repo_path: &Path) -> Result<Arc<ReadonlyRepo>> {
+    init_repo_with_gc_interval(repo_path, DEFAULT_GC_INTERVAL).await
+}
+
+/// [`init_repo`] with a non-default chunk-level GC interval — the seam
+/// tests use to observe iroh-blobs' background chunk reclamation within
+/// their own runtime rather than waiting on [`DEFAULT_GC_INTERVAL`].
+pub async fn init_repo_with_gc_interval(
+    repo_path: &Path,
+    gc_interval: Duration,
+) -> Result<Arc<ReadonlyRepo>> {
     let settings = default_settings()?;
     tokio::fs::create_dir_all(repo_path).await?;
 
@@ -51,9 +62,12 @@ pub async fn init_repo(repo_path: &Path) -> Result<Arc<ReadonlyRepo>> {
          store_path: &Path|
          -> std::result::Result<Box<dyn Backend>, jj_lib::backend::BackendInitError> {
             let store_path = store_path.to_path_buf();
-            pollster::block_on(VersionStoreBackend::open(&store_path))
-                .map(|backend| Box::new(backend) as Box<dyn Backend>)
-                .map_err(|e| jj_lib::backend::BackendInitError(e.into()))
+            pollster::block_on(VersionStoreBackend::open_with_gc_interval(
+                &store_path,
+                gc_interval,
+            ))
+            .map(|backend| Box::new(backend) as Box<dyn Backend>)
+            .map_err(|e| jj_lib::backend::BackendInitError(e.into()))
         };
 
     ReadonlyRepo::init(

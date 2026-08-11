@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use futures::AsyncRead;
@@ -110,13 +110,41 @@ impl std::fmt::Debug for VersionStoreBackend {
     }
 }
 
+/// Chunk-level GC interval [`VersionStoreBackend::open`] uses by default —
+/// a File Root's backend is server-hosted and long-lived (ADR 0001), so
+/// there is no latency pressure on iroh-blobs' own background sweep; a test
+/// that needs to observe reclamation within its own runtime should use
+/// [`VersionStoreBackend::open_with_gc_interval`] with a much shorter one.
+/// Re-exports `task_files_chunk_store::gc::DEFAULT_INTERVAL` rather than
+/// hardcoding its own copy, so the two layers' production cadence can't
+/// silently diverge.
+pub const DEFAULT_GC_INTERVAL: Duration = task_files_chunk_store::gc::DEFAULT_INTERVAL;
+
 impl VersionStoreBackend {
     /// Open (creating if absent) a version store rooted at `root`: a
-    /// `chunks/` chunk store (file content) beside an `objects/` tree/
-    /// commit/copy-history store.
+    /// `chunks/` chunk store (file content, GC-enabled at
+    /// [`DEFAULT_GC_INTERVAL`]) beside an `objects/` tree/commit/
+    /// copy-history store.
     pub async fn open(root: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_gc_interval(root, DEFAULT_GC_INTERVAL).await
+    }
+
+    /// Open with a non-default chunk-level GC interval (see
+    /// [`DEFAULT_GC_INTERVAL`]) — the seam tests use to observe iroh-blobs'
+    /// background chunk reclamation without a multi-minute wait.
+    pub async fn open_with_gc_interval(
+        root: impl AsRef<Path>,
+        gc_interval: Duration,
+    ) -> Result<Self> {
         let root = root.as_ref();
-        let chunks = task_files_chunk_store::ChunkStore::open(root.join("chunks")).await?;
+        let chunks = task_files_chunk_store::ChunkStore::open_with_gc(
+            root.join("chunks"),
+            task_files_chunk_store::ChunkerConfig::default(),
+            task_files_chunk_store::GcConfig {
+                interval: gc_interval,
+            },
+        )
+        .await?;
         let objects = ObjectStore::open(root.join("objects")).await?;
 
         let empty_tree_bytes = codec::encode_tree(&Tree::default());
@@ -505,7 +533,19 @@ impl Backend for VersionStoreBackend {
     }
 
     fn gc(&self, index: &dyn Index, keep_newer: SystemTime) -> BackendResult<()> {
-        self.block_on(crate::gc::sweep(self, index, keep_newer))
+        // `Backend::gc`'s trait signature has no room for a protect
+        // callback (see `gc.rs`'s module doc), and this is jj-lib's own
+        // generic entry point — reachable by any jj-lib-native caller, not
+        // just ones that know about Vault-referenced protection. Rather
+        // than sweeping the chunk store with an implicit, always-empty
+        // `protected_commits` (which would durably delete manifests for
+        // any commit that's Vault-referenced but not currently
+        // index-reachable), this calls the structural-only sweep, which
+        // never touches the chunk store. The Vault-facing entry point
+        // (future RPC work) calls `crate::gc::sweep` directly with its own
+        // resolved protected-commit set.
+        self.block_on(crate::gc::sweep_objects_only(self, index, keep_newer))
+            .map(|_objects_swept| ())
             .map_err(to_backend_err)
     }
 }
