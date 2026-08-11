@@ -26,7 +26,8 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-/// Cached grants, keyed by `(org, song slug)`.
+/// Cached grants, keyed by `(org, media prefix)` — the prefix the
+/// grant was minted over, e.g. `songs/going-home` or `projects`.
 /// Value is `(query suffix, expires_unix)`.
 type Grants = HashMap<(String, String), (String, i64)>;
 
@@ -54,58 +55,80 @@ fn now_unix() -> i64 {
     }
 }
 
+/// The prefix a song's media lives under. One grant over this covers
+/// the song's whole load — manifest, chart, and every stem.
+fn song_prefix(slug: &str) -> String {
+    format!("songs/{slug}")
+}
+
 /// Look up a cached, still-valid suffix without minting.
-fn cached(org: &str, slug: &str) -> Option<String> {
-    let key = (org.to_owned(), slug.to_owned());
+fn cached(org: &str, prefix: &str) -> Option<String> {
+    let key = (org.to_owned(), prefix.to_owned());
     let g = grants().lock().ok()?;
     let (suffix, expires) = g.get(&key)?;
     (*expires - REFRESH_MARGIN_SECONDS > now_unix()).then(|| suffix.clone())
 }
 
-/// The query suffix to append to any `/org/{org}/media/songs/{slug}/…`
-/// URL — `?token=…`, or `""` when no grant could be obtained.
+/// The query suffix for any `/org/{org}/media/{prefix}/…` URL —
+/// `?token=…`, or `""` when no grant could be obtained.
+///
+/// The prefix is the caller's, not this crate's: songs are the busiest
+/// consumer but not the only one — project covers live under
+/// `projects/`, and a grant minted over one prefix must not be handed
+/// to a URL under another, or the server rejects it.
 ///
 /// Mints on a miss and caches for the grant's lifetime; concurrent
 /// callers may briefly mint twice, which is harmless (grants are
 /// stateless and the later one simply replaces the earlier).
-pub async fn suffix(org: &str, slug: &str) -> String {
-    if let Some(hit) = cached(org, slug) {
+pub async fn suffix_for_prefix(org: &str, prefix: &str) -> String {
+    if let Some(hit) = cached(org, prefix) {
         return hit;
     }
-    let Some(grant) = mint(org, slug).await else {
+    let Some(grant) = mint(org, prefix).await else {
         return String::new();
     };
     let suffix = format!("?token={}", grant.token);
     if let Ok(mut g) = grants().lock() {
         g.insert(
-            (org.to_owned(), slug.to_owned()),
+            (org.to_owned(), prefix.to_owned()),
             (suffix.clone(), grant.expires_unix),
         );
     }
     suffix
 }
 
-/// The suffix for a grant already minted by an earlier [`suffix`] call —
-/// for synchronous sites (`<audio>.set_src`) that cannot await.
+/// [`suffix_for_prefix`] over a song's own prefix.
+pub async fn suffix(org: &str, slug: &str) -> String {
+    suffix_for_prefix(org, &song_prefix(slug)).await
+}
+
+/// The suffix for a grant already minted by an earlier
+/// [`suffix_for_prefix`] call — for synchronous sites
+/// (`<audio>.set_src`) that cannot await.
 ///
 /// Empty when nothing is cached, which yields the pre-change URL.
 #[must_use]
-pub fn cached_suffix(org: &str, slug: &str) -> String {
-    cached(org, slug).unwrap_or_default()
+pub fn cached_suffix_for_prefix(org: &str, prefix: &str) -> String {
+    cached(org, prefix).unwrap_or_default()
 }
 
-async fn mint(org: &str, slug: &str) -> Option<media_proto::MediaGrant> {
+/// [`cached_suffix_for_prefix`] over a song's own prefix.
+#[must_use]
+pub fn cached_suffix(org: &str, slug: &str) -> String {
+    cached_suffix_for_prefix(org, &song_prefix(slug))
+}
+
+async fn mint(org: &str, prefix: &str) -> Option<media_proto::MediaGrant> {
     use media_proto::MediaServiceClient;
     use task_ui_core::vox_clients::establish_for;
 
     let client: MediaServiceClient = establish_for(org).await.ok()?;
-    // The prefix mirrors the URL shape every caller in this crate builds.
-    match client.media_grant(format!("songs/{slug}")).await {
+    match client.media_grant(prefix.to_owned()).await {
         Ok(grant) => Some(grant),
         Err(e) => {
             // Not fatal: without a grant the URL is what it always was,
             // which still serves until the server flag is flipped.
-            tracing::warn!(org, slug, "media grant unavailable: {e:?}");
+            tracing::warn!(org, prefix, "media grant unavailable: {e:?}");
             None
         }
     }
@@ -125,7 +148,7 @@ mod tests {
     #[test]
     fn an_expired_grant_is_not_reused() {
         grants().lock().unwrap().insert(
-            ("org".into(), "song".into()),
+            ("org".into(), song_prefix("song")),
             ("?token=stale".into(), now_unix() - 1),
         );
         assert_eq!(cached_suffix("org", "song"), "");
@@ -136,7 +159,7 @@ mod tests {
         // Handing back a token about to expire would strand a stem
         // mid-song; re-mint instead.
         grants().lock().unwrap().insert(
-            ("org".into(), "soon".into()),
+            ("org".into(), song_prefix("soon")),
             ("?token=soon".into(), now_unix() + REFRESH_MARGIN_SECONDS / 2),
         );
         assert_eq!(cached_suffix("org", "soon"), "");
@@ -145,9 +168,22 @@ mod tests {
     #[test]
     fn a_fresh_grant_is_reused() {
         grants().lock().unwrap().insert(
-            ("org".into(), "fresh".into()),
+            ("org".into(), song_prefix("fresh")),
             ("?token=good".into(), now_unix() + 3600),
         );
         assert_eq!(cached_suffix("org", "fresh"), "?token=good");
+    }
+
+    #[test]
+    fn prefixes_do_not_share_a_grant() {
+        // A token minted over `songs/x` is invalid for `projects` — the
+        // server checks the prefix, so the cache must not conflate two
+        // prefixes that happen to share an org.
+        grants().lock().unwrap().insert(
+            ("org".into(), "projects".into()),
+            ("?token=covers".into(), now_unix() + 3600),
+        );
+        assert_eq!(cached_suffix_for_prefix("org", "projects"), "?token=covers");
+        assert_eq!(cached_suffix("org", "projects"), "");
     }
 }
