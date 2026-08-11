@@ -208,6 +208,22 @@ pub struct ProjectInfo {
     )]
     pub agent_profile: String,
 
+    /// Shell command whose **exit code is the verdict** on whether
+    /// an agent's work on this project is done — `cargo check -p x`,
+    /// `pnpm test`. Empty = inherit from the parent project; see
+    /// [`crate::verify::resolve`].
+    ///
+    /// This exists so most tickets carry no verify command of their
+    /// own. A ticket may still override it, and a ticket that
+    /// resolves to nothing cannot be marked ready for an agent —
+    /// otherwise "done" is an opinion rather than a fact.
+    #[serde(
+        skip_serializing_if = "String::is_empty",
+        default,
+        rename = "verifyCommand"
+    )]
+    pub verify_command: String,
+
     // ── UI ──────────────────────────────────────────────────
     /// Hex `#RRGGBB`. Empty = UI auto-picks from title hash.
     /// Used by the kanban + timer reports for column / pill
@@ -286,6 +302,19 @@ pub enum Status {
     Done,
     /// Cancelled without delivery.
     Cancelled,
+    /// Dormant — nobody has touched it and nobody decided to stop.
+    ///
+    /// Distinct from [`Self::OnHold`], which is a *decision* to pause
+    /// with an intent to resume, and from [`Self::Done`] /
+    /// [`Self::Cancelled`], which are outcomes. Stale is the absence
+    /// of any of those: an imported archive, a finished session nobody
+    /// closed out, a project that quietly stopped.
+    ///
+    /// Not terminal ([`Self::is_closed`] stays false) — a stale
+    /// project is one decision away from being any of the others. It
+    /// exists so the default list can show what is genuinely current
+    /// without pretending the rest were cancelled.
+    Stale,
 }
 
 impl Status {
@@ -296,6 +325,7 @@ impl Status {
             Self::OnHold => "on_hold",
             Self::Done => "done",
             Self::Cancelled => "cancelled",
+            Self::Stale => "stale",
         }
     }
 
@@ -307,6 +337,7 @@ impl Status {
             "on_hold" | "on-hold" | "paused" | "waiting" => Self::OnHold,
             "done" | "complete" | "completed" | "shipped" => Self::Done,
             "cancelled" | "canceled" | "abandoned" => Self::Cancelled,
+            "stale" | "dormant" | "archived" | "inactive" => Self::Stale,
             _ => return None,
         })
     }
@@ -315,5 +346,60 @@ impl Status {
     #[must_use]
     pub fn is_closed(self) -> bool {
         matches!(self, Self::Done | Self::Cancelled)
+    }
+
+    /// Should this project appear in the default project list?
+    ///
+    /// `Active` and `OnHold` only. A paused project is still current —
+    /// you decided to pause it and you mean to come back. Stale is
+    /// not: nobody decided anything, which is exactly why showing it
+    /// alongside live work makes the list useless.
+    ///
+    /// Separate from [`Self::is_closed`] on purpose. "Is this
+    /// finished?" and "should I be looking at this?" are different
+    /// questions, and a stale project answers no to the first and no
+    /// to the second without being either.
+    #[must_use]
+    pub fn is_current(self) -> bool {
+        matches!(self, Self::Active | Self::OnHold)
+    }
+}
+
+#[cfg(test)]
+mod stale_status_tests {
+    use super::Status;
+
+    #[test]
+    fn stale_is_neither_closed_nor_current() {
+        // The whole reason it exists: a project nobody decided about
+        // is not finished, and not something to look at either.
+        assert!(!Status::Stale.is_closed());
+        assert!(!Status::Stale.is_current());
+    }
+
+    #[test]
+    fn on_hold_is_current_because_pausing_was_a_decision() {
+        assert!(Status::OnHold.is_current());
+        assert!(!Status::OnHold.is_closed());
+    }
+
+    #[test]
+    fn outcomes_are_closed_and_not_current() {
+        for s in [Status::Done, Status::Cancelled] {
+            assert!(s.is_closed());
+            assert!(!s.is_current());
+        }
+    }
+
+    #[test]
+    fn stale_round_trips_and_accepts_the_words_people_actually_write() {
+        assert_eq!(Status::from_str("stale"), Some(Status::Stale));
+        for alias in ["dormant", "archived", "inactive", "STALE"] {
+            assert_eq!(Status::from_str(alias), Some(Status::Stale), "{alias}");
+        }
+        assert_eq!(
+            Status::from_str(Status::Stale.as_str()),
+            Some(Status::Stale)
+        );
     }
 }

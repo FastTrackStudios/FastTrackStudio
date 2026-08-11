@@ -11,6 +11,22 @@ server:
     tag: latest
   publicUrl: https://tasks.starcommand.live
   env:
+    # Permission enforcement (issue #109). Until this is set, the gate
+    # evaluates every call, records the decision, and then dispatches
+    # anyway — which is how this server came to serve every org's data to
+    # anonymous visitors while the audit log said `would_deny` 229 times
+    # in 30 minutes.
+    #
+    # DO NOT set this before confirming that signed-in clients actually
+    # present their identity. The token rides the WebSocket upgrade
+    # (browser: `vox.bearer.<token>` subprotocol; native:
+    # `Authorization: Bearer`), and if that is not reaching the server,
+    # enforcing denies EVERY caller including the owner — not just the
+    # anonymous ones. Check first:
+    #   Tempo: {resource.service.name="task-server" && span.auth.outcome="resolved"}
+    #   or devtools → the /vox request → Sec-WebSocket-Protocol should
+    #   list a `vox.bearer.…` entry when signed in.
+    TASK_ENFORCE_PERMISSIONS: "1"
     # Hermes agent gateway (hermes-agent's OpenAI-compatible API) —
     # setting this makes Hermes the DEFAULT chat backend for the
     # /agents page. Points at the in-cluster gateway Service

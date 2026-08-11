@@ -53,6 +53,7 @@
 
 pub mod context;
 pub mod keyflow_chart_editor;
+pub mod media_grant;
 pub mod now_playing;
 pub mod session_chart_pane;
 pub mod session_engine;

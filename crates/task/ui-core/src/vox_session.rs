@@ -28,6 +28,103 @@ pub struct ActiveServer {
 
 static ACTIVE: LazyLock<RwLock<Option<ActiveServer>>> = LazyLock::new(|| RwLock::new(None));
 
+/// The session token for the DEFAULT (same-origin / env) server — the one
+/// [`vox_url`] resolves when no registry entry is selected, which is the
+/// deployed case (`task.starcommand.live` serves the app and vox from one
+/// origin, and nothing is "selected").
+///
+/// Multi-server tokens live on the registry entry and reach us through
+/// [`ActiveServer::token`]; this holder is what the *unselected* default
+/// server has instead. [`bearer`] picks between them.
+static SESSION_TOKEN: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
+
+/// Publish (or clear) the default server's session token. Called by the
+/// auth root whenever the active account resolves or is signed out.
+///
+/// Returns `true` when the token actually CHANGED — the caller uses that
+/// to tear down connections established under the previous identity
+/// ([`crate::vox_clients::drop_cached_connections`]); a socket presents
+/// its identity once, at establish, so an already-open anonymous socket
+/// stays anonymous no matter what this holder says afterwards.
+pub fn set_session_token(token: Option<String>) -> bool {
+    let token = token.filter(|t| !t.trim().is_empty());
+    match SESSION_TOKEN.write() {
+        Ok(mut w) if *w != token => {
+            *w = token;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Per-org session tokens from the home identity locker, keyed by org
+/// slug.
+///
+/// Auth stores are per-org: a token issued by `codywright` is not a
+/// credential anywhere else, and presenting it to another org resolves
+/// to `anonymous`. That is why one global bearer can only ever make you
+/// a member of ONE org, and why the org switcher could never show more.
+///
+/// `IdentityService::list_links` hands back the token for every org this
+/// account has linked, so the client can present the RIGHT credential
+/// per org instead of the same wrong one everywhere.
+static LINKED_TOKENS: LazyLock<RwLock<std::collections::HashMap<String, String>>> =
+    LazyLock::new(|| RwLock::new(std::collections::HashMap::new()));
+
+/// Publish the locker's tokens. Returns `true` when the set changed —
+/// callers tear down cached connections on a change, since a socket
+/// presents its identity once, at establish.
+pub fn set_linked_tokens(tokens: std::collections::HashMap<String, String>) -> bool {
+    match LINKED_TOKENS.write() {
+        Ok(mut w) if *w != tokens => {
+            *w = tokens;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Every org slug the locker gave us a token for.
+#[must_use]
+pub fn linked_slugs() -> Vec<String> {
+    LINKED_TOKENS
+        .read()
+        .map(|r| r.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// The bearer to present when dialing vox.
+///
+/// A user-selected server carries its OWN token on the registry entry, and
+/// only that one: falling back to the default server's token there would
+/// present one server's credential to another. With nothing selected
+/// (the same-origin default) the holder above is the identity.
+#[must_use]
+pub fn bearer() -> Option<String> {
+    if let Some(server) = active_server() {
+        return server.token.filter(|t| !t.trim().is_empty());
+    }
+    SESSION_TOKEN.read().ok().and_then(|r| r.clone())
+}
+
+/// The bearer for a SPECIFIC org — the locker's token when we hold one,
+/// otherwise the ambient identity.
+///
+/// The fallback matters: the org that issued the ambient token is
+/// normally not in the locker (you don't link your home to itself), so
+/// falling back is what keeps home working, and any org we have no link
+/// for behaves exactly as it did before.
+#[must_use]
+pub fn bearer_for(slug: &str) -> Option<String> {
+    if let Ok(map) = LINKED_TOKENS.read()
+        && let Some(token) = map.get(slug)
+        && !token.trim().is_empty()
+    {
+        return Some(token.clone());
+    }
+    bearer()
+}
+
 /// Set (or clear) the active server. Called from the app root whenever
 /// the active registry entry changes.
 pub fn set_active_server(server: Option<ActiveServer>) {

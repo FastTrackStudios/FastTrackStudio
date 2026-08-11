@@ -111,3 +111,80 @@ async fn signup_signin_current_session_roundtrip() -> eyre::Result<()> {
 
     Ok(())
 }
+
+/// `list_org_members` must not answer callers without a session.
+///
+/// `AuthService` is deliberately PUBLIC on the org lane — the permission
+/// gate can't cover it or signing in would be impossible (see
+/// `permits.rs`). That is fine for methods which take the session token as
+/// an argument and validate it themselves, which was the stated premise
+/// for making the whole service public.
+///
+/// `list_org_members` broke that premise: on an absent or foreign token it
+/// fell through to enumerating every user in the org store. Net effect on
+/// a networked server: anyone could read every user's name, email and id,
+/// for every org, WITH permission enforcement on. Verified against
+/// production 2026-08-08 using a CLI with no credentials, which is how it
+/// was found.
+#[tokio::test(flavor = "multi_thread")]
+async fn member_listing_requires_a_session() -> eyre::Result<()> {
+    let (url, auth_state, _data_root) = boot_server().await?;
+
+    auth_state
+        .auth
+        .create_email_password_user(CreateEmailPasswordUser {
+            email: "bob@example.test".into(),
+            password: "correct-horse-battery-staple".into(),
+            name: Some("Bob".into()),
+            username: None,
+            image: None,
+            metadata_json: None,
+            ip_address: None,
+            user_agent: None,
+        })
+        .await
+        .map_err(|e| eyre::eyre!("seed user: {e:?}"))?;
+
+    let client: architect_auth::proto::AuthServiceClient = vox::connect_lane(&url)
+        .establish()
+        .await
+        .map_err(|e| eyre::eyre!("connect: {e:?}"))?;
+
+    // No token at all — the anonymous case that was leaking.
+    let anon = client.list_org_members(String::new()).await;
+    assert!(
+        anon.is_err(),
+        "an anonymous caller must not be able to enumerate org users, got: {anon:?}"
+    );
+
+    // A token that doesn't validate here is the same as none. On a
+    // multi-org server this is also another org's token: each org has its
+    // own auth store, so a foreign session must not read these members.
+    let foreign = client.list_org_members("not-a-real-token".into()).await;
+    assert!(
+        foreign.is_err(),
+        "a foreign/invalid token must not enumerate org users, got: {foreign:?}"
+    );
+
+    // A real session still works — the fallback for orgs that keep no
+    // membership rows is preserved, just put behind a session.
+    let signed_in = client
+        .sign_in_email_password(SignInEmailPassword {
+            email: "bob@example.test".into(),
+            password: "correct-horse-battery-staple".into(),
+            ip_address: None,
+            user_agent: None,
+        })
+        .await
+        .map_err(|e| eyre::eyre!("sign in: {e:?}"))?;
+    let members = client
+        .list_org_members(signed_in.token)
+        .await
+        .map_err(|e| eyre::eyre!("a validated session must still list members: {e:?}"))?;
+    assert!(
+        members.iter().any(|m| m.email == "bob@example.test"),
+        "expected the seeded user in the listing, got: {members:?}"
+    );
+
+    Ok(())
+}

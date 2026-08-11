@@ -32,6 +32,7 @@ mod auth;
 #[cfg(feature = "plugin-fitness")]
 mod body;
 mod brief;
+mod bulk_journal;
 mod code;
 #[cfg(feature = "plugin-fasttrackstudio")]
 mod collection;
@@ -74,6 +75,8 @@ mod project;
 mod recipe;
 #[cfg(feature = "plugin-mealplan")]
 mod recipe_import;
+mod runner;
+mod skills;
 mod session_store;
 mod setup;
 mod shared;
@@ -201,6 +204,17 @@ enum Commands {
     #[cfg(not(feature = "plugin-agent"))]
     #[command(hide = true)]
     Agent(NotCompiled),
+    /// Runners — machines that execute agent work. Register this
+    /// box, list the registry, heartbeat, deregister.
+    #[cfg(feature = "plugin-agent")]
+    #[command(subcommand)]
+    Runner(runner::RunnerCmd),
+    #[cfg(not(feature = "plugin-agent"))]
+    #[command(hide = true)]
+    Runner(NotCompiled),
+    /// The agent-lane skills — install them into a working copy.
+    #[command(subcommand)]
+    Skills(skills::SkillsCmd),
     /// Mail accounts for this org (add / list / remove / test).
     #[cfg(feature = "plugin-email")]
     #[command(subcommand)]
@@ -743,6 +757,17 @@ async fn run(cli: Cli) -> eyre::Result<()> {
         Commands::Agent(cmd) => {
             return run_agent(cmd).await;
         }
+        #[cfg(feature = "plugin-agent")]
+        Commands::Runner(cmd) => {
+            return runner::run_runner(cmd).await;
+        }
+        Commands::Skills(cmd) => {
+            return skills::run_skills(cmd).await;
+        }
+        #[cfg(not(feature = "plugin-agent"))]
+        Commands::Runner(_) => {
+            return Err(not_compiled("runner"));
+        }
         #[cfg(not(feature = "plugin-agent"))]
         Commands::Agent(_) => {
             return Err(not_compiled("agent"));
@@ -1068,6 +1093,103 @@ where
     establish_for_url(&url).await
 }
 
+/// `wss://host:port/anything` → `wss://host:port`. Everything past the
+/// authority is per-org routing, not identity scope — two orgs on one
+/// server share a session, two servers never do.
+fn origin(u: &str) -> &str {
+    let (scheme, rest) = u.split_once("://").unwrap_or(("", u));
+    let prefix = if scheme.is_empty() { 0 } else { scheme.len() + 3 };
+    let authority_len = rest.find('/').unwrap_or(rest.len());
+    &u[..prefix + authority_len]
+}
+
+/// The stored session token to present when dialing `url`, if any.
+///
+/// Scoped to the target twice over:
+///
+/// - **by server** — a token is only offered to the same scheme+authority
+///   that issued it, so pointing the CLI at another host with `--server`
+///   never hands that host the credential for the one we're signed into;
+/// - **by org** — auth stores are per-org, so a token from `codywright`
+///   is not a credential in `cbu`; it resolves to `anonymous` there. The
+///   entry whose slug matches the URL's `/org/<slug>/vox` wins, and only
+///   if none matches do we fall back to the active entry.
+///
+/// Without the org half, `task --org cbu …` would present whichever
+/// session happened to be active — right host, wrong org, refused — and
+/// the refusal reads identically to being signed out.
+fn session_bearer_for(url: &str) -> Option<String> {
+    let session = crate::session_store::load().ok().flatten()?;
+    let same_server = |e: &crate::session_store::ServerEntry| {
+        origin(&e.url) == origin(url) && !e.token.is_empty()
+    };
+    if let Some(slug) = url
+        .rsplit_once("/org/")
+        .and_then(|(_, rest)| rest.strip_suffix("/vox"))
+        && let Some(entry) = session
+            .servers
+            .values()
+            .find(|e| e.slug == slug && same_server(e))
+    {
+        return Some(entry.token.clone());
+    }
+    let entry = session.active_server()?;
+    same_server(entry).then(|| entry.token.clone())
+}
+
+/// Dial `url` and establish `C`, presenting the stored session identity on
+/// the handshake.
+///
+/// `vox::connect_lane` takes only a URL, and vox middleware is per typed
+/// client (keyed to a service descriptor) rather than per connection — so
+/// there is no choke point on the call path to hang a token on. The
+/// identity therefore rides the WebSocket upgrade, as the web client does
+/// it (`task_ui_core::vox_clients`), and the server applies it to every
+/// call on the connection. Without this the CLI reaches the permission
+/// gate as `principal=anonymous` on every RPC — fine while the gate is
+/// observe-only, refused the moment `TASK_ENFORCE_PERMISSIONS=1`.
+///
+/// The token goes in `Authorization`, NOT the `vox.bearer.…` subprotocol
+/// the browser uses: tungstenite fails the handshake outright when it
+/// offers a subprotocol the peer doesn't echo, which would make the CLI
+/// unable to reach an older server or anything behind a proxy that drops
+/// the header. See `dial_ws_native` in task-ui-core.
+async fn dial_authenticated<C>(url: &str) -> Result<C, vox_core::ConnectionError>
+where
+    C: vox_core::FromVoxLane,
+{
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    // A tokenless dial stays on the stock path — identical behaviour to
+    // before, including its error shapes.
+    let Some(token) = session_bearer_for(url) else {
+        return vox::connect_lane(url).establish().await;
+    };
+    let request = async {
+        let mut request = url.into_client_request().ok()?;
+        request
+            .headers_mut()
+            .insert("authorization", format!("Bearer {token}").parse().ok()?);
+        Some(request)
+    }
+    .await;
+    // An unrepresentable URL or header is not an auth problem; let the
+    // stock path produce its usual error for it.
+    let Some(request) = request else {
+        return vox::connect_lane(url).establish().await;
+    };
+    match tokio_tungstenite::connect_async(request).await {
+        Ok((stream, _response)) => {
+            vox_core::initiator_on(vox_websocket::WsLink::new(stream))
+                .establish::<C>()
+                .await
+        }
+        // Report through the stock path so the caller's `connect_error`
+        // hint (and the embedded-server fallback above it) still applies.
+        Err(_) => vox::connect_lane(url).establish().await,
+    }
+}
+
 /// Tag a vox connect/establish failure with the `Connection` exit
 /// class (6) and a "how do I point this somewhere else" hint.
 fn connect_error<E: std::fmt::Debug>(url: &str, e: &E) -> eyre::Report {
@@ -1103,7 +1225,7 @@ where
         })?;
         return establish_embedded(slug).await;
     }
-    match Box::pin(vox::connect_lane(url).establish()).await {
+    match Box::pin(dial_authenticated(url)).await {
         Ok(client) => Ok(client),
         Err(e) => {
             if let Some(slug) = slug {
@@ -1231,6 +1353,38 @@ fn normalize_server_vox(raw: &str) -> String {
     // server-mgmt path.
     let trimmed = ws.trim_end_matches('/').trim_end_matches("/vox");
     format!("{trimmed}/server/vox")
+}
+
+#[cfg(test)]
+mod bearer_scope_tests {
+    use super::origin;
+
+    #[test]
+    fn org_path_is_not_part_of_identity_scope() {
+        // Every org on one server shares the session, so the per-org
+        // routing suffix must not make the token look out-of-scope.
+        assert_eq!(
+            origin("wss://task.starcommand.live/org/codywright/vox"),
+            "wss://task.starcommand.live"
+        );
+        assert_eq!(
+            origin("wss://task.starcommand.live"),
+            "wss://task.starcommand.live"
+        );
+    }
+
+    #[test]
+    fn a_different_server_is_a_different_scope() {
+        // The point of the check: `--server elsewhere` must never hand
+        // that host the credential we hold for this one.
+        assert_ne!(
+            origin("wss://task.starcommand.live/org/x/vox"),
+            origin("wss://evil.example/org/x/vox"),
+        );
+        // Port and scheme are part of the authority, not decoration.
+        assert_ne!(origin("ws://127.0.0.1:18080/vox"), origin("ws://127.0.0.1:9/vox"));
+        assert_ne!(origin("ws://host/vox"), origin("wss://host/vox"));
+    }
 }
 
 #[cfg(test)]

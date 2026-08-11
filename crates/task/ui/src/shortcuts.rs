@@ -452,7 +452,7 @@ fn perform_intent(
     omni: &mut Signal<bool>,
     fleeting: &mut Signal<bool>,
     search: &mut Signal<bool>,
-    mut pending_title: Signal<Option<String>>,
+    pending_title: Signal<Option<String>>,
     explorer: &mut Signal<crate::chrome::ExplorerOpen>,
     right_panel: &mut Signal<crate::chrome::RightPanelOpen>,
     zen: &mut Signal<bool>,

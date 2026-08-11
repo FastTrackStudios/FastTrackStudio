@@ -68,6 +68,13 @@ pub(crate) enum ProjectCmd {
         /// Comma-separated tag list.
         #[arg(long, value_delimiter = ',')]
         tags: Vec<String>,
+        /// Default verify command for this project's tickets — the
+        /// shell command whose exit code decides whether an agent's
+        /// work is done. Subprojects inherit it; a ticket may
+        /// override it. Without one, no ticket here can be tagged
+        /// `ready-for-agent`.
+        #[arg(long = "verify", value_name = "COMMAND")]
+        verify: Option<String>,
         /// Body / details (markdown). Reads stdin when `-`.
         #[arg(long)]
         details: Option<String>,
@@ -77,6 +84,75 @@ pub(crate) enum ProjectCmd {
         server: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    /// Set the status on MANY projects at once.
+    ///
+    /// Built for the case `set-status` cannot serve: a vault where a
+    /// hundred projects were imported at defaults and every one reads
+    /// `active`, so the list is useless and fixing it by hand is a
+    /// hundred invocations.
+    ///
+    /// **Dry run by default.** Prints exactly what would change and
+    /// stops; `--yes` performs the writes. A bulk mutation you cannot
+    /// preview is a bulk mistake you cannot see coming.
+    ///
+    /// Selection is AND across the filters:
+    ///
+    ///   task project bulk-status stale --all
+    ///   task project bulk-status stale --from-status active --exclude Album
+    ///   task project bulk-status cancelled --match "test" --match "throwaw"
+    BulkStatus {
+        /// The status to set (`active`, `on_hold`, `stale`, `done`,
+        /// `cancelled` — aliases accepted).
+        status: String,
+        /// Every project in the org. Still needs `--yes` to write.
+        #[arg(long)]
+        all: bool,
+        /// Title contains this (case-insensitive). Repeatable; a
+        /// project matching ANY is selected.
+        #[arg(long)]
+        r#match: Vec<String>,
+        /// Title contains this → skip it. Repeatable, applied after
+        /// `--match`, and it always wins.
+        #[arg(long)]
+        exclude: Vec<String>,
+        /// Only projects currently in this status.
+        #[arg(long)]
+        from_status: Option<String>,
+        /// Actually write. Without it this only reports.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Reverse a journalled batch, restoring each project's prior
+    /// status.
+    ///
+    /// The undo is itself a batch and is journalled the same way,
+    /// pointing at what it reversed — an unlogged undo is just another
+    /// unlogged mutation.
+    ///
+    /// Only rows whose status still matches what the batch set are
+    /// restored. Anything changed since is left alone and reported,
+    /// because clobbering a newer deliberate edit is exactly the harm
+    /// undo is supposed to prevent.
+    BulkUndo {
+        /// Batch id (from the journal page or the apply output).
+        /// Omit to target the most recent batch.
+        #[arg(long)]
+        batch: Option<String>,
+        /// List the journal instead of undoing anything.
+        #[arg(long)]
+        list: bool,
+        /// Actually write. Without it this only reports.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
     },
     /// Set the project status. Convenience over `update`.
     SetStatus {
@@ -162,6 +238,30 @@ pub(crate) enum ProjectCmd {
     SetPriority {
         target: String,
         priority: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit the resulting project as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set or clear the project's cover image.
+    ///
+    /// Two kinds of value are accepted, and they behave
+    /// differently in the app:
+    ///
+    /// - an absolute `http(s)://` URL, used verbatim;
+    /// - anything else, treated as a path inside the org's own
+    ///   media tree (served from `/org/<slug>/media/<path>`),
+    ///   which the app signs before loading.
+    ///
+    /// Pass `none` / `null` / `""` to clear it.
+    SetImage {
+        target: String,
+        /// URL, org-media path (`projects/cover.jpg`), or
+        /// `none` to clear.
+        image: String,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -312,6 +412,7 @@ pub(crate) async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             priority,
             project_type,
             tags,
+            verify,
             details,
             org,
             server,
@@ -346,6 +447,7 @@ pub(crate) async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 default_rate_cents: 0,
                 estimated_seconds: 0,
                 agent_profile: String::new(),
+                verify_command: verify.unwrap_or_default(),
                 color: String::new(),
                 image: String::new(),
                 archived: false,
@@ -365,6 +467,246 @@ pub(crate) async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             } else {
                 println!("created {} ({})", created.title, created.path);
                 println!("  id: {}", created.id);
+            }
+        }
+        ProjectCmd::BulkStatus {
+            status,
+            all,
+            r#match,
+            exclude,
+            from_status,
+            yes,
+            org,
+            server,
+        } => {
+            // Reject an unknown status up front. Statuses are free
+            // strings on the wire, so a typo would otherwise be
+            // written to a hundred projects before anyone noticed.
+            let canonical = project::Status::from_str(&status).ok_or_else(|| {
+                eyre::eyre!(
+                    "`{status}` is not a status — use active, on_hold, stale, done or cancelled"
+                )
+            })?;
+            if !all && r#match.is_empty() && from_status.is_none() {
+                return Err(eyre::eyre!(
+                    "refusing to select every project implicitly — pass --all, --match or --from-status"
+                ));
+            }
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let client = connect_project_client(&url).await?;
+            let all_projects = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list projects: {e:?}"))?;
+
+            let lower = |s: &str| s.to_lowercase();
+            let from = from_status.as_deref().and_then(project::Status::from_str);
+            let selected: Vec<_> = all_projects
+                .iter()
+                .filter(|p| {
+                    from.is_none_or(|want| project::Status::from_str(&p.status) == Some(want))
+                })
+                .filter(|p| {
+                    r#match.is_empty()
+                        || r#match.iter().any(|m| lower(&p.title).contains(&lower(m)))
+                })
+                .filter(|p| !exclude.iter().any(|x| lower(&p.title).contains(&lower(x))))
+                // Setting a status it already has is not a change.
+                .filter(|p| project::Status::from_str(&p.status) != Some(canonical))
+                .collect();
+
+            println!(
+                "{} of {} project(s) in `{slug}` would become `{}`",
+                selected.len(),
+                all_projects.len(),
+                canonical.as_str()
+            );
+            for p in &selected {
+                println!("  {:<12} {}", p.status, p.title);
+            }
+            if selected.is_empty() {
+                return Ok(());
+            }
+            if !yes {
+                println!("\ndry run — nothing written. Re-run with --yes to apply.");
+                return Ok(());
+            }
+
+            let (mut applied, mut failed) = (Vec::new(), Vec::new());
+            for p in &selected {
+                let mut next = (*p).clone();
+                next.status = canonical.as_str().to_string();
+                match client.update(next).await {
+                    // Capture the PRIOR value here, from the row we
+                    // actually wrote — this is the only moment it
+                    // still exists anywhere.
+                    Ok(_) => applied.push(crate::bulk_journal::Change {
+                        id: p.id,
+                        title: p.title.clone(),
+                        before: p.status.clone(),
+                        after: canonical.as_str().to_string(),
+                    }),
+                    Err(e) => failed.push(format!("{}: {e:?}", p.title)),
+                }
+            }
+            let ok = applied.len();
+            println!("\nupdated {ok}");
+            if !applied.is_empty() {
+                let selector = format!(
+                    "status={} all={all} match={:?} exclude={:?} from={:?}",
+                    canonical.as_str(),
+                    r#match,
+                    exclude,
+                    from_status
+                );
+                let rec = crate::bulk_journal::build("project.status", &slug, selector, applied);
+                let batch = rec.batch;
+                match crate::bulk_journal::record(&url, &rec).await {
+                    Ok(path) => {
+                        println!("  journal: {path}");
+                        println!("  undo:    task project bulk-undo --batch {batch}");
+                    }
+                    // The writes already landed; a silent journal
+                    // failure would leave them unrevertable, so hand
+                    // the record to the operator instead.
+                    Err(e) => {
+                        println!("!! the changes applied but the journal did NOT write: {e}");
+                        println!("!! keep this to undo by hand:");
+                        println!("{}", serde_json::to_string_pretty(&rec).unwrap_or_default());
+                    }
+                }
+            }
+            if !failed.is_empty() {
+                // Named, not counted: a partial bulk write you can't
+                // see the shape of is worse than none at all.
+                println!("FAILED {}:", failed.len());
+                for f in &failed {
+                    println!("  {f}");
+                }
+                return Err(eyre::eyre!("{} project(s) did not update", failed.len()));
+            }
+        }
+        ProjectCmd::BulkUndo {
+            batch,
+            list,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let journal = crate::bulk_journal::list(&url).await?;
+            if journal.is_empty() {
+                println!("no journalled batches in `{slug}`");
+                return Ok(());
+            }
+            if list {
+                println!("{} batch(es) in `{slug}`, newest first:", journal.len());
+                for (path, r) in &journal {
+                    let undone = r
+                        .undoes
+                        .map_or(String::new(), |u| format!("  (undoes {u})"));
+                    println!(
+                        "  {}  {:<16} {:>3} change(s)  {}{undone}",
+                        r.batch,
+                        r.op,
+                        r.changes.len(),
+                        r.applied_at
+                    );
+                    println!("      {path}");
+                }
+                return Ok(());
+            }
+
+            let (_, target) = match &batch {
+                Some(want) => journal
+                    .iter()
+                    .find(|(_, r)| r.batch.to_string().starts_with(want.trim()))
+                    .ok_or_else(|| eyre::eyre!("no batch matching `{want}`"))?,
+                None => &journal[0],
+            };
+            println!(
+                "undoing batch {} ({}, {} change(s), applied {})",
+                target.batch,
+                target.op,
+                target.changes.len(),
+                target.applied_at
+            );
+
+            let client = connect_project_client(&url).await?;
+            let current = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list projects: {e:?}"))?;
+
+            let (mut restorable, mut skipped, mut missing) = (Vec::new(), Vec::new(), Vec::new());
+            for c in &target.changes {
+                match current.iter().find(|p| p.id == c.id) {
+                    None => missing.push(c.title.clone()),
+                    // Only revert what still holds the value we set.
+                    Some(p) if p.status == c.after => restorable.push((p.clone(), c.clone())),
+                    Some(p) => skipped.push(format!("{} (now `{}`)", c.title, p.status)),
+                }
+            }
+            for (p, c) in &restorable {
+                println!("  {} → {}", p.title, c.before);
+            }
+            if !skipped.is_empty() {
+                println!("\nchanged since the batch, leaving alone:");
+                for s in &skipped {
+                    println!("  {s}");
+                }
+            }
+            if !missing.is_empty() {
+                println!("\nno longer present:");
+                for m in &missing {
+                    println!("  {m}");
+                }
+            }
+            if restorable.is_empty() {
+                println!("\nnothing to restore");
+                return Ok(());
+            }
+            if !yes {
+                println!("\ndry run — nothing written. Re-run with --yes to apply.");
+                return Ok(());
+            }
+
+            let (mut applied, mut failed) = (Vec::new(), Vec::new());
+            for (p, c) in &restorable {
+                let mut next = p.clone();
+                next.status = c.before.clone();
+                match client.update(next).await {
+                    Ok(_) => applied.push(crate::bulk_journal::Change {
+                        id: p.id,
+                        title: p.title.clone(),
+                        before: c.after.clone(),
+                        after: c.before.clone(),
+                    }),
+                    Err(e) => failed.push(format!("{}: {e:?}", p.title)),
+                }
+            }
+            println!("\nrestored {}", applied.len());
+            if !applied.is_empty() {
+                let mut rec = crate::bulk_journal::build(
+                    &target.op,
+                    &slug,
+                    format!("undo of {}", target.batch),
+                    applied,
+                );
+                rec.undoes = Some(target.batch);
+                match crate::bulk_journal::record(&url, &rec).await {
+                    Ok(path) => println!("  journal: {path}"),
+                    Err(e) => println!("!! restored, but the journal did NOT write: {e}"),
+                }
+            }
+            if !failed.is_empty() {
+                println!("FAILED {}:", failed.len());
+                for f in &failed {
+                    println!("  {f}");
+                }
+                return Err(eyre::eyre!("{} project(s) did not restore", failed.len()));
             }
         }
         ProjectCmd::SetStatus {
@@ -602,6 +944,19 @@ pub(crate) async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             json,
         } => {
             mutate_project(target, org, server, json, |p| p.priority = priority).await?;
+        }
+        ProjectCmd::SetImage {
+            target,
+            image,
+            org,
+            server,
+            json,
+        } => {
+            let image = match image.as_str() {
+                "none" | "null" | "" => String::new(),
+                other => other.to_owned(),
+            };
+            mutate_project(target, org, server, json, |p| p.image = image).await?;
         }
         ProjectCmd::SetParent {
             target,

@@ -122,12 +122,60 @@ pub const PUBLIC_GLOB: &str = "public/**";
 
 // ── Platform lane ────────────────────────────────────────────────────────
 
-// Self-guarding: every method validates the token it is handed. See the
-// module docs on `public/**`.
-table!(AUTH, "auth", "public/auth", [
-    rd "sign_up_email_password", rd "sign_in_email_password", rd "current_session",
-    rd "refresh_session", rd "whoami", rd "sign_out", rd "list_org_members",
-]);
+/// Self-guarding: every method validates the token it is handed. See the
+/// module docs on `public/**`.
+///
+/// **`sign_up_email_password` is deliberately NOT public.** architect-auth
+/// has no email/password signup toggle — `email_password_enabled` gates
+/// sign-IN too, and `disable_signup` / `signup_enabled` are OneTap- and
+/// SIWE-specific — so open self-registration was on, reachable by anyone,
+/// and the org lane hands every validated user the `member` role
+/// (`DEFAULT_ORG_ROLE`). That made enforcement bypassable in a single
+/// call: sign up, become a member, read the org. Verified reachable on
+/// production 2026-08-08 (the only error was password length).
+///
+/// Pointing it at `auth/signup` instead means the gate refuses anonymous
+/// callers while leaving sign-in, whoami and session refresh public — so
+/// existing members can still provision accounts, and nobody who isn't
+/// one can. Removing it from the table entirely would fail closed for
+/// everyone (tabled-but-unlisted is a deny), which would also block the
+/// operator.
+const AUTH: ServicePermits = ServicePermits {
+    service: "auth",
+    methods: &[
+        MethodPermit::new("sign_up_email_password", Action::WRITE, "auth/signup").audited(),
+        MethodPermit::new("sign_in_email_password", Action::READ, "public/auth"),
+        MethodPermit::new("current_session", Action::READ, "public/auth"),
+        MethodPermit::new("refresh_session", Action::READ, "public/auth"),
+        MethodPermit::new("whoami", Action::READ, "public/auth"),
+        MethodPermit::new("sign_out", Action::READ, "public/auth"),
+        MethodPermit::new("list_org_members", Action::READ, "public/auth"),
+        // Changing someone's login identifier is an operator action, so
+        // it sits outside `public/**` for the same reason signup does —
+        // an anonymous caller must never reach it. The impl also requires
+        // a session that validates against THIS org and records it as
+        // `changed_by`, so the gate and the flow agree.
+        MethodPermit::new("migrate_user_email", Action::WRITE, "auth/migrate").audited(),
+        // Reading the trail exposes former addresses of real people;
+        // members only, and audited so the read itself is on the record.
+        MethodPermit::new("list_email_history", Action::READ, "auth/migrate").audited(),
+        // Self-service, but NOT public: you need a session to change your
+        // own password, so gating costs nothing and keeps the anonymous
+        // surface as small as the sign-in path requires. Audited — a
+        // credential change is worth a line even when allowed.
+        MethodPermit::new("change_password", Action::WRITE, "auth/self").audited(),
+        // Same tier as the password change: it alters your login
+        // identifier, needs a session regardless, and is worth an audit
+        // line even on allow.
+        MethodPermit::new("change_email", Action::WRITE, "auth/self").audited(),
+        // Display name / avatar. Same self-service tier — the session
+        // names the account, so there is no target to widen. Not
+        // audited: unlike a credential or login identifier, changing
+        // your display name is not a security event, and the identity
+        // fan-out writes it once per linked org.
+        MethodPermit::new("update_profile", Action::WRITE, "auth/self"),
+    ],
+};
 
 // The capability oracle — answers about the caller only.
 table!(PERMISSIONS, "permissions", "public/permissions", [rd "can", rd "capabilities"]);
@@ -142,6 +190,12 @@ const MEDIA: ServicePermits = ServicePermits {
     methods: &[
         MethodPermit::new("stat", Action::READ, "media/{content_hash}"),
         MethodPermit::new("read", Action::READ, "media/{content_hash}").audited(),
+        // Minting a signed URL for the filesystem media route. THIS call
+        // is the authorization point for `/org/{slug}/media/…` — the HTTP
+        // route only verifies the signature — so it is audited even on
+        // allow: a grant is bulk content leaving the server, and knowing
+        // who minted one is the whole audit trail for that path.
+        MethodPermit::new("media_grant", Action::DOWNLOAD, "media/**").audited(),
     ],
 };
 
@@ -216,6 +270,54 @@ table!(AGENT_DISCOVERY, "agent-discovery", "agent/discovery/**", [
 table!(AGENT_ROUTINES, "agent-routines", "agent/routines/**", [
     rd "list_routines", wr "create_routine", wr "set_routine_paused",
     wa "run_routine", wa "delete_routine",
+]);
+
+// The runner registry. Reads are ordinary — anyone who can see the
+// org can see which machines serve it. Registering and deregistering
+// are administrative: a runner declares what it may execute, so being
+// able to write here is being able to grant yourself the right to run
+// code for this org.
+//
+// `heartbeat_backend` is a write rather than a read because it is the
+// liveness signal routing depends on — a caller who could forge it
+// could keep a dead machine in the routing pool.
+// Run records. Reads are ordinary; writes are the runner reporting
+// its own progress, which is a member action, not an admin one — a
+// runner that cannot say what it did is useless.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUNS, "agent-runs", "agent/runs/**", [
+    rd "get_run", rd "list_runs",
+    wr "start_run", wr "beat_run", wr "finish_run",
+    wr "archive_run", wr "sweep_stale_runs",
+]);
+
+// The grill queue. Asking is a runner write; answering is the human
+// half of a human-in-the-loop decision, so both are member writes
+// rather than admin.
+// Live run state. Reading is ordinary; publishing is the runner
+// narrating its own work.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUN_STREAM, "agent-run-stream", "agent/runs/**", [
+    rd "snapshot", wr "publish",
+]);
+
+// The subscribe half is its own vox service with its own descriptor.
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_RUN_EVENTS, "agent-run-events", "agent/runs/**", [
+    rd "run_events",
+]);
+
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_QUESTIONS, "agent-questions", "agent/questions/**", [
+    rd "unresolved_questions", rd "questions_for_ticket",
+    rd "list_pending_questions", rd "question_ticket",
+    wr "ask_question", wr "answer_question",
+]);
+
+#[cfg(feature = "plugin-agent")]
+table!(AGENT_BACKENDS, "agent-backends", "agent/runners/**", [
+    rd "list_backends", rd "backend_health", rd "backends_by_kind",
+    wr "heartbeat_backend", wa "upsert_backend", wa "remove_backend",
 ]);
 
 // ── Work lane (projects / goals / milestones / workstreams / tasks) ──────
@@ -628,6 +730,31 @@ pub fn mounts() -> Vec<Mount> {
             "agent",
             agent_proto::service::routines::routines_rpc_service_descriptor(),
             AGENT_ROUTINES,
+        ),
+        m(
+            "agent",
+            agent_proto::service::backends::backends_rpc_service_descriptor(),
+            AGENT_BACKENDS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::runs::runs_rpc_service_descriptor(),
+            AGENT_RUNS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::questions::questions_rpc_service_descriptor(),
+            AGENT_QUESTIONS,
+        ),
+        m(
+            "agent",
+            agent_proto::service::run_stream::run_stream_rpc_service_descriptor(),
+            AGENT_RUN_STREAM,
+        ),
+        m(
+            "agent",
+            agent_proto::service::run_stream::run_stream_stream_service_descriptor(),
+            AGENT_RUN_EVENTS,
         ),
     ]);
     v.extend([

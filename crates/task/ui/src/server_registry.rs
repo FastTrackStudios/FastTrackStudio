@@ -334,34 +334,85 @@ fn save_active(id: Option<Uuid>) {
 // Native (desktop/mobile): persist to `$XDG_DATA_HOME/task/servers.json`
 // (stays inside the iOS/macOS app container). Mirrors the token store's
 // data-dir choice in `auth.rs`.
+/// Where the registry lives on a native target.
+///
+/// Apple platforms get `Library/Application Support`, not
+/// `~/.local/share`. That is not cosmetic: it is the sanctioned location
+/// for app data on iOS/macOS, it is preserved across app updates, and it
+/// is included in backups. A dotted XDG-style directory at the container
+/// root is a Linux convention that iOS makes no promises about — which
+/// is the most likely reason the app kept forgetting its server URL
+/// between launches.
+///
+/// `XDG_DATA_HOME` still wins when explicitly set, so a Linux desktop or
+/// a test harness can point this wherever it likes.
 #[cfg(not(target_arch = "wasm32"))]
-fn servers_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
+fn data_dir() -> Option<std::path::PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .map(|h| std::path::PathBuf::from(h).join(".local").join("share"))
-        })?;
-    Some(base.join("task").join("servers.json"))
+    {
+        return Some(xdg.join("task"));
+    }
+    let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    if cfg!(target_vendor = "apple") {
+        Some(home.join("Library").join("Application Support").join("task"))
+    } else {
+        Some(home.join(".local").join("share").join("task"))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn servers_path() -> Option<std::path::PathBuf> {
+    Some(data_dir()?.join("servers.json"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_from_storage() -> Option<BTreeMap<Uuid, ServerEntry>> {
-    let json = std::fs::read_to_string(servers_path()?).ok()?;
-    serde_json::from_str(&json).ok()
+    let path = servers_path()?;
+    match std::fs::read_to_string(&path) {
+        Ok(json) => match serde_json::from_str(&json) {
+            Ok(map) => Some(map),
+            // A corrupt file is worth saying out loud: it silently
+            // resets the app to "no servers configured".
+            Err(e) => {
+                tracing::warn!(path = %path.display(), "server registry: unreadable, ignoring: {e}");
+                None
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            tracing::warn!(path = %path.display(), "server registry: read failed: {e}");
+            None
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn save_to_storage(snapshot: &BTreeMap<Uuid, ServerEntry>) {
+    // Failures are LOGGED, not swallowed. Every write here used to be
+    // `let _ = …`, so a registry that never persisted looked exactly like
+    // one that did — the app simply forgot its server on next launch with
+    // nothing anywhere to say why.
     let Some(path) = servers_path() else {
+        tracing::warn!("server registry: no data dir (no HOME/XDG_DATA_HOME) — not persisting");
         return;
     };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        tracing::warn!(dir = %parent.display(), "server registry: mkdir failed: {e}");
+        return;
     }
-    if let Ok(json) = serde_json::to_string_pretty(snapshot) {
-        let _ = std::fs::write(path, json);
+    match serde_json::to_string_pretty(snapshot) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                tracing::warn!(path = %path.display(), "server registry: write failed: {e}");
+            } else {
+                tracing::debug!(path = %path.display(), servers = snapshot.len(), "server registry saved");
+            }
+        }
+        Err(e) => tracing::warn!("server registry: encode failed: {e}"),
     }
 }
 

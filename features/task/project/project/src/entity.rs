@@ -152,6 +152,7 @@ pub(crate) fn from_parts(
         default_rate_cents: yaml::i64_at(&map, "defaultRateCents").unwrap_or(0),
         estimated_seconds: yaml::i64_at(&map, "estimatedSeconds").unwrap_or(0),
         agent_profile: yaml::str_at(&map, "agentProfile").unwrap_or_default(),
+        verify_command: yaml::str_at(&map, "verifyCommand").unwrap_or_default(),
         color: yaml::str_at(&map, "color").unwrap_or_default(),
         image: yaml::str_at(&map, "image").unwrap_or_default(),
         archived: yaml::bool_at(&map, "archived").unwrap_or(false),

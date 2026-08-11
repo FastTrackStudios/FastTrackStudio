@@ -51,6 +51,7 @@ wiki-proto = { workspace = true, optional = true }
 wiki-live = { workspace = true, optional = true }
 agent-proto = { workspace = true, features = ["server", "vox"], optional = true }
 agent-tasks = { workspace = true, optional = true }
+agent-runners = { workspace = true, optional = true }
 agent-dispatch = { workspace = true, optional = true }
 # Codex backend — in-process agent session/turn host. Mounted for
 # the `Sessions` + `TurnDispatch` vox services (the /agents surface).
@@ -219,6 +220,7 @@ plugin-forge = ["dep:git-proto", "dep:git-forgejo", "dep:git-config"]
 plugin-agent = [
     "dep:agent-proto",
     "dep:agent-tasks",
+    "dep:agent-runners",
     "dep:agent-dispatch",
     "dep:agent-codex",
     "dep:agent-hermes",
@@ -244,6 +246,13 @@ project = { workspace = true, features = ["vox"] }
 collection-proto = { workspace = true, features = ["vox"] }
 media-proto = { workspace = true, features = ["vox"] }
 vox-core = { workspace = true }
+# `connection_identity` dials with a hand-built handshake (subprotocol /
+# Authorization header) — `vox::connect_lane` only takes a URL.
+vox-websocket = { workspace = true }
+tokio-tungstenite = { version = "0.29", default-features = false, features = [
+    "connect",
+    "handshake",
+] }
 
 [lints]
 workspace = true

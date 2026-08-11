@@ -96,6 +96,95 @@ pub(crate) fn confirm(prompt: &str) -> eyre::Result<bool> {
     ))
 }
 
+/// Is stdin a terminal? Prompting only makes sense when a person is
+/// there to answer — piped or CI invocations must fail with the
+/// "pass --email" error instead of blocking forever on a read.
+pub(crate) fn stdin_is_tty() -> bool {
+    // SAFETY: `isatty` reads kernel state for a fd and has no
+    // preconditions; fd 0 is always valid to ask about.
+    unsafe { libc::isatty(libc::STDIN_FILENO) == 1 }
+}
+
+/// Prompt for a line of visible input (an email, a name).
+pub(crate) fn prompt_line(label: &str) -> eyre::Result<String> {
+    use std::io::{BufRead, Write};
+    let mut out = std::io::stdout();
+    write!(out, "{label}: ")?;
+    out.flush()?;
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    Ok(line.trim().to_owned())
+}
+
+/// Prompt for a secret with terminal echo disabled, so the password
+/// never appears on screen — and, unlike `--password`, never reaches
+/// `ps` output or shell history.
+///
+/// Echo is restored on every path including the error one: leaving a
+/// terminal with echo off is the kind of breakage a user has to type
+/// `stty sane` blind to escape.
+pub(crate) fn prompt_secret(label: &str) -> eyre::Result<String> {
+    use std::io::{BufRead, Write};
+    let mut out = std::io::stdout();
+    write!(out, "{label}: ")?;
+    out.flush()?;
+
+    let guard = EchoGuard::disable()?;
+    let mut line = String::new();
+    let read = std::io::stdin().lock().read_line(&mut line);
+    drop(guard);
+    // The newline the user typed was swallowed with the echo.
+    writeln!(out)?;
+    read?;
+    Ok(line.trim_end_matches(['\n', '\r']).to_owned())
+}
+
+/// Terminal echo turned off for as long as this lives. `Drop` restores
+/// the original termios, so a `?` between here and the end of the read
+/// can't strand the terminal.
+struct EchoGuard(Option<libc::termios>);
+
+impl EchoGuard {
+    fn disable() -> eyre::Result<Self> {
+        // Not a terminal (piped stdin) — nothing to mask, and
+        // tcgetattr would fail. Read it plainly.
+        if !stdin_is_tty() {
+            return Ok(Self(None));
+        }
+        // SAFETY: `termios` is a plain C struct with no invalid bit
+        // patterns for our purposes; tcgetattr fully initializes it
+        // when it returns 0, and we only read it on that path.
+        let mut term: libc::termios = unsafe { std::mem::zeroed() };
+        // SAFETY: fd 0 is a terminal (checked above) and `term` is a
+        // valid, properly-aligned out-pointer.
+        if unsafe { libc::tcgetattr(libc::STDIN_FILENO, &mut term) } != 0 {
+            return Err(eyre::eyre!("read terminal settings: {}", last_os_error()));
+        }
+        let original = term;
+        term.c_lflag &= !libc::ECHO;
+        // SAFETY: same fd, and `term` is an initialized termios.
+        if unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &term) } != 0 {
+            return Err(eyre::eyre!("disable terminal echo: {}", last_os_error()));
+        }
+        Ok(Self(Some(original)))
+    }
+}
+
+impl Drop for EchoGuard {
+    fn drop(&mut self) {
+        if let Some(original) = self.0 {
+            // SAFETY: restoring the exact termios we captured.
+            unsafe {
+                libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &original);
+            }
+        }
+    }
+}
+
+fn last_os_error() -> String {
+    std::io::Error::last_os_error().to_string()
+}
+
 pub(crate) fn short_uuid(u: &uuid::Uuid) -> String {
     let s = u.to_string();
     s.chars().take(8).collect()

@@ -2,7 +2,7 @@
 //! priority badge · context / project chips.
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{Ban, Check, Ellipsis, Hash, Trash2};
+use fts_ui::lucide_dioxus::{Ban, Check, CornerDownRight, Ellipsis, Flag, Hash, Trash2, Waypoints};
 use uuid::Uuid;
 
 use task_proto::{Priority, Status};
@@ -12,9 +12,30 @@ use crate::{TaskInfo, TaskMutation};
 
 use super::palette::{priority_pill, status_pill};
 
+/// The resolved name of what a task belongs to, for rows whose anchor
+/// isn't a project — a parent task, a workstream, a milestone.
+///
+/// Resolving needs the *other* entity's title, which only the page
+/// layer has (it holds the task / workstream / milestone stores), so
+/// the row takes the answer rather than the ids. Project-anchored
+/// rows don't need this: their chip already comes from `projects`.
+#[derive(Clone, PartialEq)]
+pub struct AnchorChip {
+    /// `"parent"` | `"workstream"` | `"milestone"` — drives the icon.
+    pub kind: String,
+    /// Display name of the thing this task belongs to.
+    pub label: String,
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct TaskRowProps {
     pub task: TaskInfo,
+    /// What this task belongs to when it isn't a project (see
+    /// [`AnchorChip`]). `None` for project-anchored rows — and, now
+    /// that unfiled tasks route to triage instead of the list, never
+    /// `None` alongside an empty `projects`.
+    #[props(default)]
+    pub anchor: Option<AnchorChip>,
     pub on_toggle: EventHandler<Uuid>,
     pub on_open: EventHandler<Uuid>,
     /// Mutation sink for the row's overflow menu (complete / cancel /
@@ -41,9 +62,11 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
     // temporal chips (due, tracked time) go to the right edge. Both
     // ride the title line from `sm:` up and wrap below it on touch
     // widths — no orphaned pills across a wide row.
+    let anchor = props.anchor.clone();
     let identity = {
         let any = !t.contexts.is_empty()
             || !t.projects.is_empty()
+            || anchor.is_some()
             || priority != Priority::Normal
             || (status != Status::Open && status != Status::Done && status != Status::InProgress);
         if any {
@@ -73,6 +96,20 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
                         class: "inline-flex items-center gap-0.5 rounded-full bg-violet-900/30 px-1.5 py-0 text-[10px] text-violet-200",
                         Hash { size: 9 }
                         "{strip_wikilink(p)}"
+                    }
+                }
+                // Non-project belonging — the chip that keeps a row
+                // from reading as a bare title.
+                if let Some(a) = anchor.clone() {
+                    span {
+                        class: "inline-flex items-center gap-0.5 rounded-full bg-slate-700/40 px-1.5 py-0 text-[10px] text-slate-200",
+                        title: "{anchor_tooltip(&a.kind)}",
+                        match a.kind.as_str() {
+                            "workstream" => rsx! { Waypoints { size: 9 } },
+                            "milestone" => rsx! { Flag { size: 9 } },
+                            _ => rsx! { CornerDownRight { size: 9 } },
+                        }
+                        "{a.label}"
                     }
                 }
             }
@@ -267,6 +304,15 @@ pub fn CheckboxButton(props: CheckboxButtonProps) -> Element {
             },
             {glyph}
         }
+    }
+}
+
+/// Hover text spelling out the relationship the icon compresses.
+fn anchor_tooltip(kind: &str) -> &'static str {
+    match kind {
+        "workstream" => "Workstream",
+        "milestone" => "Milestone",
+        _ => "Subtask of",
     }
 }
 

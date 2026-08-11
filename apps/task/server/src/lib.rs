@@ -27,6 +27,7 @@ pub mod connections;
 pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
+pub mod admin_cli;
 pub mod media;
 pub mod notifier;
 pub mod otlp;
@@ -200,6 +201,13 @@ pub struct OrgAppState {
     pub intake: intake::Store,
     #[cfg(feature = "plugin-agent")]
     pub agent_tasks: agent_tasks::Store,
+    /// The runner registry — who can execute agent work, what they
+    /// can do, and whether they are still alive.
+    pub agent_runners: agent_runners::Store,
+    /// Run records — every attempt at every ticket.
+    pub agent_runs: agent_runners::RunStore,
+    /// The grill queue — questions agents are waiting on.
+    pub agent_questions: agent_runners::QuestionStore,
     /// Codex agent backend — in-process session registry + turn
     /// dispatch. Hosts the `Sessions` + `TurnDispatch` vox services
     /// that back the `/agents` UI. Cheaply clonable (Arc-backed).
@@ -764,6 +772,31 @@ pub(crate) async fn build_org_state(
         .await?;
         #[cfg(feature = "plugin-agent")]
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
+
+        // Runner registry. Its OWN sqlite file, like every other
+        // slice — two SeaORM migrators sharing one database share
+        // one `seaql_migrations` table, and the second one silently
+        // applies nothing. There is a regression test for that in
+        // `agent-runners`; do not co-locate this with agent-tasks.
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners_url = std::env::var("TASK_SERVER_AGENT_RUNNERS_URL").unwrap_or_else(|_| {
+            format!(
+                "sqlite://{}?mode=rwc",
+                org_root.path().join("agent-runners.sqlite").display()
+            )
+        });
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners_conn =
+            open_sqlite_pool(scope, agent_runners_url, "agent-runners", |db| {
+                Box::pin(async move { agent_runners::Migrator::up(&db, None).await.map(|()| db) })
+            })
+            .await?;
+        #[cfg(feature = "plugin-agent")]
+        let agent_runs = agent_runners::RunStore::new(agent_runners_conn.clone());
+        #[cfg(feature = "plugin-agent")]
+        let agent_questions = agent_runners::QuestionStore::new(agent_runners_conn.clone());
+        #[cfg(feature = "plugin-agent")]
+        let agent_runners = agent_runners::Store::new(agent_runners_conn);
 
         // Codex agent backend. In-process, in-memory session
         // registry + turn dispatch — hosts the `Sessions` +
@@ -1368,6 +1401,12 @@ pub(crate) async fn build_org_state(
             #[cfg(feature = "plugin-agent")]
             agent_tasks,
             #[cfg(feature = "plugin-agent")]
+            agent_runners,
+            #[cfg(feature = "plugin-agent")]
+            agent_runs,
+            #[cfg(feature = "plugin-agent")]
+            agent_questions,
+            #[cfg(feature = "plugin-agent")]
             agent_codex,
             #[cfg(feature = "plugin-agent")]
             agent_router,
@@ -1676,6 +1715,101 @@ async fn media_dir_listing(dir: &std::path::Path) -> axum::response::Response {
         .into_response()
 }
 
+/// Query string of [`per_org_media_handler`] — the signed media token.
+#[derive(serde::Deserialize, Default)]
+pub struct MediaQuery {
+    /// [`BlobToken::media`], base64url. Absent for an anonymous read.
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+/// Is the media route enforcing? **Off unless `TASK_ENFORCE_MEDIA_TOKEN`
+/// is exactly `1`** — the deliberate operator action, matching
+/// [`enforce_permissions`].
+#[must_use]
+pub fn enforce_media_token() -> bool {
+    std::env::var("TASK_ENFORCE_MEDIA_TOKEN").is_ok_and(|v| v == "1")
+}
+
+/// Decide whether a media read is allowed. `None` = proceed;
+/// `Some(response)` = refuse with it.
+///
+/// Always evaluates and always records, so the observe phase answers
+/// "would enforcing break anyone?" from the traces. Only the final
+/// refusal is conditional on [`enforce_media_token`].
+async fn authorize_media(
+    state: &AppState,
+    slug: &str,
+    rel: &str,
+    token: Option<&str>,
+    headers: &axum::http::HeaderMap,
+) -> Option<axum::response::Response> {
+    use task_telemetry::wide;
+
+    wide::set("org.slug", slug.to_owned());
+    wide::set("media.path", rel.to_owned());
+
+    // 1. Signed prefix token — the browser channel (an <audio> tag can
+    //    set no headers, so the grant has to live in the URL).
+    if let Some(token) = token.filter(|t| !t.is_empty()) {
+        let now = chrono::Utc::now().timestamp();
+        match crate::attachments::signed_url::BlobToken::verify(token, &state.keypair, now) {
+            Ok(tok) if tok.allows_media(slug, rel) => {
+                wide::set("media.authorized", true);
+                wide::set("media.auth_via", "signed-token");
+                return None;
+            }
+            Ok(_) => {
+                wide::set("media.authorized", false);
+                wide::set("media.auth_via", "token-wrong-scope");
+            }
+            Err(e) => {
+                wide::set("media.authorized", false);
+                wide::set("media.auth_via", "token-invalid");
+                wide::set_display("media.token_error", &format!("{e:?}"));
+            }
+        }
+    } else if let Some(bearer) = crate::watch_bridge::bearer(headers) {
+        // 2. Session bearer — native clients own their requests and
+        //    shouldn't need a mint round trip for every file.
+        let ok = match state.org(slug) {
+            Some(org) => org
+                .auth
+                .auth
+                .current_session(architect_auth::CurrentSession { token: bearer })
+                .await
+                .is_ok(),
+            None => false,
+        };
+        wide::set("media.authorized", ok);
+        wide::set("media.auth_via", if ok { "bearer" } else { "bearer-invalid" });
+        if ok {
+            return None;
+        }
+    } else {
+        wide::set("media.authorized", false);
+        wide::set("media.auth_via", "absent");
+    }
+
+    if enforce_media_token() {
+        wide::set("media.mode", "enforcing");
+        Some(axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::UNAUTHORIZED,
+            "media requires a signed token or session bearer",
+        )))
+    } else {
+        // Observe-only: the refusal that did not happen.
+        wide::set("media.mode", "observe-only");
+        tracing::warn!(
+            target: "task_server::media",
+            org = slug,
+            path = rel,
+            "media: WOULD DENY (served anyway — TASK_ENFORCE_MEDIA_TOKEN is off)",
+        );
+        None
+    }
+}
+
 /// Filesystem-first song media: `GET /org/{slug}/media/<path>` serves
 /// `<data_root>/orgs/{slug}/resources/<path>` straight off disk — no
 /// ingest, no content-addressing, drop-a-file-and-it-serves (fits network
@@ -1688,15 +1822,37 @@ async fn media_dir_listing(dir: &std::path::Path) -> axum::response::Response {
 /// without it Chrome's `<audio>` loader stalls at `readyState 0` on Ogg
 /// (which needs a seek to the tail to read its duration), so stems never
 /// actually play. The reference stem player streams these directly.
+///
+/// ## Authorization
+///
+/// This route served the org's whole `resources/` tree — files AND
+/// directory listings — to anyone, and it is NOT a vox path, so
+/// `TASK_ENFORCE_PERMISSIONS` does not reach it (verified open on
+/// production 2026-08-07). A caller now presents either a signed
+/// `?token=` ([`BlobToken::media`], minted over vox by a caller the
+/// permission gate already allowed) or an `Authorization: Bearer`
+/// session token — the latter for native clients, which can set headers
+/// and shouldn't need a mint round trip.
+///
+/// Gated by `TASK_ENFORCE_MEDIA_TOKEN` and OFF by default, deliberately
+/// mirroring `TASK_ENFORCE_PERMISSIONS`: shipping the check hot would
+/// black out every `<audio>`/`<img>` on the deployed bundle the moment
+/// it rolled. The wide fields (`media.authorized`, `media.auth_via`)
+/// make the observe phase queryable, so the flip is evidence-driven
+/// rather than hopeful — the same ordering the vox work followed.
 async fn per_org_media_handler(
     State(state): State<AppState>,
     axum::extract::Path((slug, rel)): axum::extract::Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<MediaQuery>,
     headers: axum::http::HeaderMap,
 ) -> axum::response::Response {
     use axum::http::{StatusCode, header};
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     if rel.split('/').any(|s| s == ".." || s.is_empty()) {
         return StatusCode::NOT_FOUND.into_response();
+    }
+    if let Some(refusal) = authorize_media(&state, &slug, &rel, q.token.as_deref(), &headers).await {
+        return refusal;
     }
     let file = state
         .data_root
@@ -1825,6 +1981,9 @@ pub fn router(state: AppState) -> Router {
         // MCP — Task as a tool surface for agents (Hermes gateway,
         // Claude Code, any MCP client). See `mcp`.
         .route("/org/{slug}/mcp", axum::routing::post(mcp::mcp_handler))
+        // Account-scoped MCP: one endpoint for every org the caller
+        // can reach, instead of one registration per org.
+        .route("/mcp", axum::routing::post(mcp::mcp_account_handler))
         .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
         .with_state(state.clone());
 
@@ -1959,32 +2118,65 @@ async fn permissions_report_handler(headers: axum::http::HeaderMap) -> axum::res
 /// Per `plans/federated-task-platform.md`: peers fetch this
 /// to learn what slugs are available on a federation host
 /// before opening a vox connection.
-async fn well_known_handler(State(state): State<AppState>) -> axum::Json<serde_json::Value> {
-    let orgs: Vec<serde_json::Value> = state
-        .org_slugs()
-        .into_iter()
-        .filter_map(|slug| {
-            // We only have the slug here — the display
-            // name + federation URL live in `org.toml`,
-            // re-loaded for each entry. Cheap (TOML parse
-            // of a tiny file) and avoids holding manifest
-            // copies on every dispatched request.
-            let manifest = state.data_root.org(slug.as_str()).manifest().ok()?;
-            Some(serde_json::json!({
-                "slug": slug,
-                "id": manifest.id,
-                "display_name": manifest.display_name,
-                "is_home": manifest.is_home,
-                "federation_url": manifest.federation_url,
-                // Org-level config, not secret (the doc already carries
-                // schema stamps): the client shell hides a disabled
-                // plugin's nav/widgets/routes from this list.
-                "disabled_plugins": manifest.disabled_plugins.0,
-                "vox": format!("/org/{slug}/vox"),
-                "health": format!("/org/{slug}/health"),
-            }))
-        })
-        .collect();
+async fn well_known_handler(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> axum::Json<serde_json::Value> {
+    // Membership, when the caller says who they are. Each org has its OWN
+    // auth database (`AppState::new` opens one `AuthState` per
+    // `org_root.auth_db()`), so "orgs I belong to" is exactly "orgs where
+    // my token validates" — no cross-org membership table to consult, and
+    // a token from one org is simply unknown to another.
+    //
+    // The list itself is NOT filtered here. A client must be able to see
+    // an org before it can sign into it, and discovery runs before any
+    // session exists; filtering server-side would make sign-in
+    // unreachable. Instead each entry is tagged, and the client uses the
+    // tag to decide what "All organizations" means (issue #109 criterion
+    // 6). Enforcement of actual data access is the permission gate's job
+    // on the org lane, not this endpoint's.
+    let bearer = crate::watch_bridge::bearer(&headers);
+    let mut orgs: Vec<serde_json::Value> = Vec::new();
+    for slug in state.org_slugs() {
+        // We only have the slug here — the display
+        // name + federation URL live in `org.toml`,
+        // re-loaded for each entry. Cheap (TOML parse
+        // of a tiny file) and avoids holding manifest
+        // copies on every dispatched request.
+        let Ok(manifest) = state.data_root.org(slug.as_str()).manifest() else {
+            continue;
+        };
+        // `null` (unknown) when the caller presented nothing, so a client
+        // can tell "signed out" from "signed in and not a member" — the
+        // former must still show every org (that's the sign-in path), the
+        // latter must not.
+        let member = match (&bearer, state.org(&slug)) {
+            (Some(token), Some(org)) => Some(
+                org.auth
+                    .auth
+                    .current_session(architect_auth::CurrentSession {
+                        token: token.clone(),
+                    })
+                    .await
+                    .is_ok(),
+            ),
+            _ => None,
+        };
+        orgs.push(serde_json::json!({
+            "slug": slug,
+            "id": manifest.id,
+            "display_name": manifest.display_name,
+            "is_home": manifest.is_home,
+            "federation_url": manifest.federation_url,
+            // Org-level config, not secret (the doc already carries
+            // schema stamps): the client shell hides a disabled
+            // plugin's nav/widgets/routes from this list.
+            "disabled_plugins": manifest.disabled_plugins.0,
+            "member": member,
+            "vox": format!("/org/{slug}/vox"),
+            "health": format!("/org/{slug}/health"),
+        }));
+    }
     // Schema stamps — the proto/server skew guard. Clients
     // (`task doctor`, ui-lab smoke) compare these against their
     // own build; see `schema_stamps`.
@@ -2058,6 +2250,7 @@ async fn per_org_api_handler(
 async fn per_org_vox_handler(
     State(state): State<AppState>,
     axum::extract::Path(slug): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
     let Some(org) = state.org(&slug) else {
@@ -2066,7 +2259,7 @@ async fn per_org_vox_handler(
             format!("org `{slug}` not hosted"),
         ));
     };
-    serve_org_vox(org, state.write_gate.clone(), ws)
+    serve_org_vox(org, state.write_gate.clone(), ws, &headers)
 }
 
 /// `/server/vox` — server-management WebSocket. Hosts the
@@ -2085,7 +2278,12 @@ async fn server_vox_handler(
     // snapshot verbs themselves pass the entry gate before closing
     // it — no self-deadlock.
     let router = crate::snapshot::GatedRouter::new(router, gate);
-    ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
+    // The `/server/vox` services take the session token as an explicit
+    // ARGUMENT (the identity locker validates it itself), so there is no
+    // gate to feed here — but the subprotocol must still be echoed, or a
+    // browser that offered one gets no connection at all.
+    ws.protocols([VOX_SUBPROTOCOL])
+        .on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
         .into_response()
 }
 
@@ -2137,6 +2335,7 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
 /// happen post-boot but is a sane fallback).
 async fn legacy_vox_handler(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
     let Some(org) = state
@@ -2150,7 +2349,7 @@ async fn legacy_vox_handler(
             "no org hosted on this server",
         ));
     };
-    serve_org_vox(org, state.write_gate.clone(), ws)
+    serve_org_vox(org, state.write_gate.clone(), ws, &headers)
 }
 
 /// Build the per-org [`LayerRouter`]: every service this org hosts,
@@ -2296,6 +2495,11 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             media_proto::media_service_service_descriptor(),
             media_proto::MediaServiceDispatcher::new(crate::media::MediaServiceImpl::new(
                 org.attachments.clone(),
+                org.slug.clone(),
+                // Same process-wide keypair the media route verifies
+                // with (`AppState::keypair`, threaded through
+                // `build_org_state`) — sign and verify cannot drift.
+                org.attachments.keypair.clone(),
             )),
         )
         // Vault file replication (manifest / get / put / delete).
@@ -2376,7 +2580,35 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             .with(
                 agent_proto::service::routines::routines_rpc_service_descriptor(),
                 agent_proto::service::routines::serve(org.agent_router.clone()),
-            );
+            )
+            // Runner registry — who can execute agent work, what they
+            // can do, and whether they have heartbeated recently
+            // enough to be offered any.
+            .with(
+                agent_proto::service::backends::backends_rpc_service_descriptor(),
+                agent_proto::service::backends::serve(org.agent_runners.clone()),
+            )
+            // Run records — every attempt at every ticket, so retry
+            // history and leftover worktrees are both answerable.
+            .with(
+                agent_proto::service::runs::runs_rpc_service_descriptor(),
+                agent_proto::service::runs::serve(org.agent_runs.clone()),
+            )
+            // The grill queue — questions agents are blocked on, and
+            // the answers that unblock them.
+            .with(
+                agent_proto::service::questions::questions_rpc_service_descriptor(),
+                agent_proto::service::questions::serve(org.agent_questions.clone()),
+            )
+            // Live run state — the snapshot half…
+            .with(
+                agent_proto::service::run_stream::run_stream_rpc_service_descriptor(),
+                agent_proto::service::run_stream::serve(org.agent_runs.clone()),
+            )
+            // …and the stream half, off the hub the run store owns.
+            .merge(agent_proto::service::run_stream::stream_layer(
+                org.agent_runs.clone(),
+            ));
     }
 
     router = router
@@ -2850,21 +3082,152 @@ async fn share_landing_handler(
     }
 }
 
+/// The WebSocket subprotocol every Task client offers, and the one the
+/// server selects. A client that offers subprotocols gets no connection at
+/// all unless the server echoes one back, so this is what makes the
+/// bearer subprotocol below safe to add.
+pub const VOX_SUBPROTOCOL: &str = "vox.v1";
+
+/// Prefix of the subprotocol carrying the caller's session token:
+/// `vox.bearer.<token>`.
+///
+/// Session tokens are base64url-no-pad (`generate_token`), whose alphabet
+/// is a subset of the RFC 7230 token charset a subprotocol value must use
+/// — so the token needs no further encoding.
+pub const VOX_BEARER_SUBPROTOCOL_PREFIX: &str = "vox.bearer.";
+
+/// The identity presented at WebSocket **upgrade**, applied to every call
+/// on the resulting connection (see
+/// [`architect::permissions_gate::PermissionsGate::wrap_shared_with_bearer`]).
+///
+/// Two channels, because the two client families can do different things:
+///
+/// - `Authorization: Bearer <token>` — native clients (desktop, CLI, iOS,
+///   the watch bridge) control their handshake request directly.
+/// - `Sec-WebSocket-Protocol: vox.v1, vox.bearer.<token>` — browsers
+///   cannot set arbitrary WebSocket headers, and the token must NOT ride
+///   a URL query parameter (it would land in every proxy + access log
+///   along the path). The subprotocol list is the one client-controlled
+///   field on a browser handshake.
+fn upgrade_bearer(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(token) = crate::watch_bridge::bearer(headers) {
+        return Some(token);
+    }
+    headers
+        .get_all(axum::http::header::SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .filter_map(|p| p.trim().strip_prefix(VOX_BEARER_SUBPROTOCOL_PREFIX))
+        .map(str::to_owned)
+        .find(|t| !t.is_empty())
+}
+
 fn serve_org_vox(
     org: OrgAppState,
     gate: snapshot::WriteGate,
     ws: WebSocketUpgrade,
+    headers: &axum::http::HeaderMap,
 ) -> axum::response::Response {
+    let bearer = upgrade_bearer(headers);
     // Every request parks at the snapshot write gate on dispatch
     // entry — see `snapshot::GatedRouter`. Free when no snapshot is
     // running.
     let router = snapshot::GatedRouter::new(org_layer_router(&org), gate);
     // Outermost: the permission gate (deny before snapshot-parking or
-    // dispatch). One shared gate per org, wrapped per connection.
-    let router =
-        architect::permissions_gate::PermissionsGate::wrap_shared(org.permissions.clone(), router);
-    ws.on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
+    // dispatch). One shared gate per org, wrapped per connection — which
+    // is why the connection's bearer can be baked in here.
+    let router = architect::permissions_gate::PermissionsGate::wrap_shared_with_bearer(
+        org.permissions.clone(),
+        router,
+        bearer,
+    );
+    ws.protocols([VOX_SUBPROTOCOL])
+        .on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
         .into_response()
+}
+
+#[cfg(test)]
+mod upgrade_bearer_tests {
+    use axum::http::{HeaderMap, HeaderValue};
+
+    use super::upgrade_bearer;
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(*k, HeaderValue::from_str(v).unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn no_identity_presented() {
+        assert_eq!(upgrade_bearer(&HeaderMap::new()), None);
+        // Offering the plain subprotocol is not an identity.
+        assert_eq!(
+            upgrade_bearer(&headers(&[("sec-websocket-protocol", "vox.v1")])),
+            None
+        );
+    }
+
+    #[test]
+    fn native_authorization_header() {
+        assert_eq!(
+            upgrade_bearer(&headers(&[("authorization", "Bearer abc123")])),
+            Some("abc123".to_owned())
+        );
+    }
+
+    #[test]
+    fn browser_subprotocol() {
+        // How a browser actually sends it: one header, comma-separated,
+        // with the spaces the client library inserts.
+        assert_eq!(
+            upgrade_bearer(&headers(&[(
+                "sec-websocket-protocol",
+                "vox.v1, vox.bearer.tok-en_9"
+            )])),
+            Some("tok-en_9".to_owned())
+        );
+    }
+
+    #[test]
+    fn subprotocol_split_across_headers() {
+        // Equally legal per RFC 9110 §5.3, and what some proxies produce.
+        assert_eq!(
+            upgrade_bearer(&headers(&[
+                ("sec-websocket-protocol", "vox.v1"),
+                ("sec-websocket-protocol", "vox.bearer.xyz"),
+            ])),
+            Some("xyz".to_owned())
+        );
+    }
+
+    #[test]
+    fn header_wins_over_subprotocol() {
+        assert_eq!(
+            upgrade_bearer(&headers(&[
+                ("authorization", "Bearer from-header"),
+                ("sec-websocket-protocol", "vox.v1, vox.bearer.from-proto"),
+            ])),
+            Some("from-header".to_owned())
+        );
+    }
+
+    #[test]
+    fn empty_token_is_not_an_identity() {
+        // An empty bearer must read as "anonymous", not as a token that
+        // will resolve to nothing and muddy `auth.outcome`.
+        assert_eq!(
+            upgrade_bearer(&headers(&[("sec-websocket-protocol", "vox.v1, vox.bearer.")])),
+            None
+        );
+        assert_eq!(
+            upgrade_bearer(&headers(&[("authorization", "Bearer ")])),
+            None
+        );
+    }
 }
 
 #[cfg(test)]

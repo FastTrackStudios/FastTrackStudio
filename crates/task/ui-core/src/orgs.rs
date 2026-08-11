@@ -38,6 +38,78 @@ pub struct OrgMeta {
     /// [`plugin_set_for`] / [`active_plugin_set`] rather than reading
     /// raw (resolution handles unknown ids + always-on core).
     pub disabled_plugins: Vec<String>,
+    /// Does the caller's session validate against THIS org?
+    ///
+    /// `None` when discovery ran without a token (signed out, or a
+    /// server predating the field) — which must be treated as "show
+    /// everything", because seeing an org is a precondition for signing
+    /// into it. `Some(false)` is a positive answer: signed in, and not a
+    /// member here.
+    ///
+    /// Each org has its own auth database server-side, so this is
+    /// literally "my token validates there" rather than a membership
+    /// table lookup. Drives [`OrgSelection::All`] meaning "all MY orgs"
+    /// (issue #109 criterion 6).
+    pub member: Option<bool>,
+}
+
+/// The orgs an `All` selection should actually span.
+///
+/// Membership is asked of each org **independently** — each org has its
+/// own auth database, and the direction of travel is for an org to be
+/// able to live on its own server entirely. So there is no global
+/// membership table to consult and none is assumed: the question is
+/// always "does my token validate *there*", answered per org (and, once
+/// orgs are separate servers, per server, with the multi-server registry
+/// already holding a token per entry).
+///
+/// The tags are homogeneous — discovery either sent a token (every entry
+/// is `Some`) or did not (every entry is `None`) — which gives two clean
+/// cases:
+///
+/// - **no token sent** (signed out, or a server predating the field):
+///   every org, unchanged. Seeing an org is a precondition for signing
+///   into it, so filtering here would make sign-in unreachable.
+/// - **token sent**: exactly the orgs it validates against, *including
+///   none of them*. A signed-in user who belongs to nothing here gets an
+///   empty span rather than a fan-out that the permission gate will
+///   refuse call by call — an empty state is a better answer than a wall
+///   of errors, and it is the truthful one.
+///
+/// Note on where linked orgs enter this: NOT here. The app root folds
+/// the identity locker's answer into each `OrgMeta::member` as the org
+/// list resolves, because `org_list` is the Signal every consumer
+/// reads. Consulting a global from inside this function instead looked
+/// simpler and was wrong — Dioxus cannot see a static change, so the
+/// switcher kept rendering a stale single org until something unrelated
+/// forced a re-render. Keep this a pure function of its argument.
+#[must_use]
+pub fn my_orgs(orgs: &[OrgMeta]) -> Vec<OrgMeta> {
+    my_orgs_with_links(orgs, &[])
+}
+
+/// [`my_orgs`], plus the orgs the identity locker holds a credential
+/// for.
+///
+/// Discovery can only answer `member` for the ONE token it presented,
+/// so on a server hosting several orgs it reports `false` for every org
+/// that didn't issue that token — even ones this account is a full
+/// member of. The locker is the other half of the answer: a link means
+/// we hold a working credential for that org, which is the same claim
+/// `member: true` makes.
+///
+/// Split out from [`my_orgs`] so the rule stays a pure function over
+/// its inputs and can be tested without touching global session state.
+#[must_use]
+pub fn my_orgs_with_links(orgs: &[OrgMeta], linked: &[String]) -> Vec<OrgMeta> {
+    let linked_here = |o: &OrgMeta| linked.iter().any(|s| s == &o.slug);
+    if orgs.iter().all(|o| o.member.is_none()) {
+        return orgs.to_vec();
+    }
+    orgs.iter()
+        .filter(|o| o.member.unwrap_or(false) || linked_here(o))
+        .cloned()
+        .collect()
 }
 
 /// The effective plugin set of the org with `slug` (unknown slug or a
@@ -91,8 +163,13 @@ pub fn selected_slugs(sel: &OrgSelection, orgs: &[OrgMeta]) -> Vec<String> {
     match sel {
         OrgSelection::One(slug) => vec![slug.clone()],
         OrgSelection::All => {
-            let mut slugs: Vec<String> = orgs.iter().map(|o| o.slug.clone()).collect();
-            slugs.sort_by_key(|s| orgs.iter().find(|o| &o.slug == s).map(|o| !o.is_home));
+            // "All" means all MY orgs, not every org on the server
+            // (#109 criterion 6). This is the fan-out choke point every
+            // multi-org fetch goes through, so filtering here covers
+            // `feeds::*` and the atom hooks in one place.
+            let mine = my_orgs(orgs);
+            let mut slugs: Vec<String> = mine.iter().map(|o| o.slug.clone()).collect();
+            slugs.sort_by_key(|s| mine.iter().find(|o| &o.slug == s).map(|o| !o.is_home));
             slugs
         }
     }
@@ -150,5 +227,117 @@ pub fn http_base() -> String {
         format!("http://{rest}")
     } else {
         v.to_string()
+    }
+}
+
+#[cfg(test)]
+mod my_orgs_tests {
+    use super::*;
+
+    fn org(slug: &str, member: Option<bool>) -> OrgMeta {
+        OrgMeta {
+            slug: slug.to_owned(),
+            name: slug.to_owned(),
+            is_home: slug == "home",
+            id: None,
+            disabled_plugins: Vec::new(),
+            member,
+        }
+    }
+
+    fn slugs(v: &[OrgMeta]) -> Vec<&str> {
+        v.iter().map(|o| o.slug.as_str()).collect()
+    }
+
+    #[test]
+    fn signed_out_sees_every_org() {
+        // Discovery ran without a token, so nothing is known. Filtering
+        // here would hide the org you need to sign in to.
+        let orgs = [org("home", None), org("other", None)];
+        assert_eq!(slugs(&my_orgs(&orgs)), ["home", "other"]);
+    }
+
+    #[test]
+    fn signed_in_sees_only_their_own() {
+        // THE criterion-6 case: "All organizations" must not mean every
+        // org on the server.
+        let orgs = [
+            org("home", Some(true)),
+            org("someone-elses", Some(false)),
+            org("also-mine", Some(true)),
+        ];
+        assert_eq!(slugs(&my_orgs(&orgs)), ["home", "also-mine"]);
+    }
+
+    #[test]
+    fn a_member_of_nothing_gets_an_empty_span() {
+        // Deliberately NOT a fallback to "show everything": an empty
+        // state is truthful, and fanning out would just produce a wall of
+        // refusals once the gate enforces.
+        let orgs = [org("a", Some(false)), org("b", Some(false))];
+        assert!(my_orgs(&orgs).is_empty());
+    }
+
+    #[test]
+    fn a_linked_org_is_mine_even_when_discovery_says_otherwise() {
+        // The production shape: one token, six orgs. Discovery can only
+        // vouch for the org that issued it, so the other five come back
+        // `member: false` despite the account being a full member —
+        // holding a working credential for them is the same claim.
+        let orgs = [
+            org("codywright", Some(true)),
+            org("fasttrackstudios", Some(false)),
+            org("someone-elses", Some(false)),
+        ];
+        let linked = ["fasttrackstudios".to_owned()];
+        assert_eq!(
+            slugs(&my_orgs_with_links(&orgs, &linked)),
+            ["codywright", "fasttrackstudios"],
+            "a link is a credential; an org we hold none for stays hidden"
+        );
+    }
+
+    #[test]
+    fn links_do_not_resurrect_orgs_when_signed_out() {
+        // No token sent → every entry `None` → show everything, and the
+        // link list must not change that shape.
+        let orgs = [org("a", None), org("b", None)];
+        assert_eq!(
+            slugs(&my_orgs_with_links(&orgs, &["a".to_owned()])),
+            ["a", "b"]
+        );
+    }
+
+    #[test]
+    fn all_selection_spans_only_my_orgs() {
+        // `selected_slugs` is the choke point every multi-org fetch uses,
+        // so this is what actually stops the anonymous-style fan-out.
+        let orgs = [
+            org("someone-elses", Some(false)),
+            org("home", Some(true)),
+        ];
+        let spanned = selected_slugs(&OrgSelection::All, &orgs);
+        assert_eq!(spanned, vec!["home".to_string()]);
+    }
+
+    #[test]
+    fn explicitly_selecting_one_org_is_untouched() {
+        // An explicit pick stays an explicit pick — the server decides
+        // whether the data comes back, not the switcher.
+        let orgs = [org("someone-elses", Some(false))];
+        assert_eq!(
+            selected_slugs(&OrgSelection::One("someone-elses".into()), &orgs),
+            vec!["someone-elses".to_string()]
+        );
+    }
+
+    #[test]
+    fn home_still_sorts_first_within_my_orgs() {
+        let orgs = [
+            org("zzz", Some(true)),
+            org("home", Some(true)),
+            org("nope", Some(false)),
+        ];
+        assert_eq!(selected_slugs(&OrgSelection::All, &orgs), ["home", "zzz"]);
     }
 }

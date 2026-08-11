@@ -1369,3 +1369,90 @@ feeds! {
             = list_issues(repo, git_proto::issues::IssueFilter::default()) as "list issues";
     }
 }
+
+
+/// Everything blocking a human in the agent lane, for one project or
+/// the whole fleet.
+///
+/// One fetch rather than three so the panels always describe the same
+/// instant — a surface where "running" and "awaiting review" disagree
+/// about a ticket is worse than one that is slightly stale.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AgentSurface {
+    /// Unresolved questions, paired with the ticket each blocks.
+    pub questions: Vec<(agent_proto::question::QuestionRequest, Option<task_proto::TaskInfo>)>,
+    /// Runs executing right now, paired with their ticket.
+    pub running: Vec<(agent_proto::run::Run, Option<task_proto::TaskInfo>)>,
+    /// Tickets whose branch is green and waiting.
+    pub review: Vec<task_proto::TaskInfo>,
+}
+
+/// Fetch the agent surface. `project` scopes it; `None` is the fleet.
+///
+/// # Errors
+///
+/// The first transport failure. The surface is all-or-nothing on
+/// purpose: a panel that renders empty because its call failed reads
+/// as "nothing is blocking you", which is the opposite of the truth.
+pub async fn fetch_agent_surface(
+    slug: &str,
+    project: Option<uuid::Uuid>,
+) -> Result<AgentSurface, String> {
+    let tasks = crate::vox_clients::establish_for::<task_proto::TaskServiceClient>(slug).await?;
+    let all = tasks.list().await.map_err(|e| format!("{e:?}"))?;
+    let in_scope = |t: &task_proto::TaskInfo| project.is_none_or(|p| t.project_id == Some(p));
+    let find = |id: uuid::Uuid| all.iter().find(|t| t.id == id).cloned();
+
+    let questions_client =
+        crate::vox_clients::establish_for::<agent_proto::service::questions::QuestionsClient>(slug)
+            .await?;
+    let mut questions = Vec::new();
+    for req in questions_client
+        .unresolved_questions()
+        .await
+        .map_err(|e| format!("{e:?}"))?
+    {
+        let ticket = questions_client
+            .question_ticket(req.id.clone())
+            .await
+            .ok()
+            .flatten()
+            .and_then(find);
+        // A question whose ticket is out of scope belongs to another
+        // project's surface. One with no ticket at all is still shown:
+        // it is blocked on a human either way, and hiding it loses it.
+        if ticket.as_ref().is_none_or(in_scope) {
+            questions.push((req, ticket));
+        }
+    }
+
+    let runs_client =
+        crate::vox_clients::establish_for::<agent_proto::service::runs::RunsClient>(slug).await?;
+    let running: Vec<_> = runs_client
+        .list_runs(agent_proto::run::RunFilter {
+            status: Some(agent_proto::run::RunStatus::InProgress),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| format!("{e:?}"))?
+        .into_iter()
+        .map(|r| {
+            let t = find(r.ticket);
+            (r, t)
+        })
+        .filter(|(_, t)| t.as_ref().is_none_or(in_scope))
+        .collect();
+
+    let review: Vec<task_proto::TaskInfo> = all
+        .iter()
+        .filter(|t| task_proto::has_triage_label(t, task_proto::TriageLabel::NeedsReview))
+        .filter(|t| in_scope(t))
+        .cloned()
+        .collect();
+
+    Ok(AgentSurface {
+        questions,
+        running,
+        review,
+    })
+}

@@ -273,7 +273,10 @@ mod imp {
                     // legacy manifest.json — so migrated, manifest-less songs
                     // load in a setlist exactly like the single-song player.
                     let manifest = media::load_song_manifest(&org, slug).await?;
-                    let chart = media::fetch_text(&format!("/org/{org}/media/songs/{slug}/chart.kf"))
+                    let tok = crate::media_grant::suffix(&org, slug).await;
+                    let chart = media::fetch_text(&format!(
+                        "/org/{org}/media/songs/{slug}/chart.kf{tok}"
+                    ))
                         .await
                         .ok()
                         .filter(|t| !t.is_empty());

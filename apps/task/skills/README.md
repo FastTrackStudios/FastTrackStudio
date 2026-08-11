@@ -30,3 +30,10 @@ on the CLI for idempotence + audit.
 - [`email-triage.md`](email-triage.md) — curator sorts the agent@
   inbox, links to tasks/projects, applies Proton labels, marks
   processed.
+- [`task-triage.md`](task-triage.md) — files unfiled tasks (no
+  project / parent / workstream / `@context`) so they leave the
+  triage strip and rejoin the Relevant view. Drives the MCP
+  `list_untriaged_tasks` → `file_task` loop; also runnable from the
+  CLI via `task task list --untriaged` + `task task set-project`.
+  Scheduled from the Tasks UI routines panel ("Triage unfiled
+  tasks" preset).

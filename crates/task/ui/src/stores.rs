@@ -955,6 +955,7 @@ pub fn draft_project(title: String) -> ProjectInfo {
         default_rate_cents: 0,
         estimated_seconds: 0,
         agent_profile: String::new(),
+        verify_command: String::new(),
         color: String::new(),
         image: String::new(),
         archived: false,

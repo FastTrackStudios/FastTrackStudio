@@ -125,7 +125,7 @@ pub type OtelHandle = Option<()>;
 ///
 /// This exists because `tracing`'s macros take a *static* field list —
 /// you cannot add a field to a span that the macro did not declare.
-/// [`set`] goes around that via the OTel span extension, which takes
+/// [`wide::set`] goes around that via the OTel span extension, which takes
 /// dynamic keys. That is the whole reason for this module.
 ///
 /// ```ignore
@@ -264,9 +264,12 @@ pub mod otel {
     /// (`opentelemetry::global::meter`), so instruments work from
     /// anywhere. Returns `None` when [`enabled`] is false or an
     /// exporter fails to build.
-    pub fn init<S>(
-        service: &'static str,
-    ) -> Option<(OtelGuard, Vec<Box<dyn Layer<S> + Send + Sync>>)>
+    /// The layers `init` hands back for the caller to attach to its
+    /// subscriber. Boxed because the set varies with what built
+    /// successfully.
+    pub type OtelLayers<S> = Vec<Box<dyn Layer<S> + Send + Sync>>;
+
+    pub fn init<S>(service: &'static str) -> Option<(OtelGuard, OtelLayers<S>)>
     where
         S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
     {

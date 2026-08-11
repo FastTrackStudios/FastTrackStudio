@@ -30,6 +30,12 @@ struct RawOrg {
     /// predating the plugin toggle — everything on.
     #[serde(default)]
     disabled_plugins: Vec<String>,
+    /// Whether the presented session validates against this org.
+    /// Absent on servers predating #109 criterion 6, and null when
+    /// discovery ran without a token — both mean "unknown", which the
+    /// client treats as "show it".
+    #[serde(default)]
+    member: Option<bool>,
 }
 
 fn parse_orgs(body: &str) -> Result<Vec<OrgMeta>, String> {
@@ -43,6 +49,7 @@ fn parse_orgs(body: &str) -> Result<Vec<OrgMeta>, String> {
             is_home: o.is_home,
             id: o.id,
             disabled_plugins: o.disabled_plugins,
+            member: o.member,
         })
         .collect())
 }
@@ -59,9 +66,25 @@ async fn fetch_orgs_live() -> Result<Vec<OrgMeta>, String> {
     }
     let url = format!("{base}/.well-known/task-server.json");
     let win = web_sys::window().ok_or("no window")?;
-    let resp_val = JsFuture::from(win.fetch_with_str(&url))
-        .await
-        .map_err(|e| format!("fetch orgs: {e:?}"))?;
+    // Discovery carries the session so the server can tag which orgs are
+    // ours (#109 criterion 6). A bare `fetch_with_str` cannot set headers,
+    // so build a Request. Unlike `<audio>`/`<img>`, `fetch` CAN send an
+    // Authorization header — this is only about the API shape.
+    let resp_val = match crate::vox_session::bearer() {
+        Some(token) => {
+            let headers = web_sys::Headers::new().map_err(|e| format!("headers: {e:?}"))?;
+            headers
+                .set("authorization", &format!("Bearer {token}"))
+                .map_err(|e| format!("set authorization: {e:?}"))?;
+            let init = web_sys::RequestInit::new();
+            init.set_headers(&headers);
+            let req = web_sys::Request::new_with_str_and_init(&url, &init)
+                .map_err(|e| format!("orgs request: {e:?}"))?;
+            JsFuture::from(win.fetch_with_request(&req)).await
+        }
+        None => JsFuture::from(win.fetch_with_str(&url)).await,
+    }
+    .map_err(|e| format!("fetch orgs: {e:?}"))?;
     let resp: web_sys::Response = resp_val
         .dyn_into()
         .map_err(|_| "fetch returned a non-Response".to_owned())?;
@@ -98,8 +121,12 @@ async fn fetch_orgs_live() -> Result<Vec<OrgMeta>, String> {
         .build()
         .map_err(|e| format!("http client: {e}"))?;
     let result = async {
-        let body = client
-            .get(&url)
+        let mut req = client.get(&url);
+        // Same tagging as wasm — native clients own their requests.
+        if let Some(token) = crate::vox_session::bearer() {
+            req = req.bearer_auth(token);
+        }
+        let body = req
             .send()
             .await
             .map_err(|e| format!("fetch orgs `{url}`: {e}"))?

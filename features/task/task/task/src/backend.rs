@@ -272,10 +272,12 @@ impl TaskService for TaskBackend {
                 })
             })
             .filter(|t| {
-                filter
-                    .relevance
-                    .as_ref()
-                    .is_none_or(|ctx| crate::relevance::is_relevant(t, ctx))
+                // Unfiled work is triage, not "what should I do now"
+                // — the same exclusion `filter_relevant` applies for
+                // the UI, so `--relevant` means one thing everywhere.
+                filter.relevance.as_ref().is_none_or(|ctx| {
+                    task_proto::is_filed(t) && crate::relevance::is_relevant(t, ctx)
+                })
             })
             .collect();
         // Stable page windows: order by vault-relative path

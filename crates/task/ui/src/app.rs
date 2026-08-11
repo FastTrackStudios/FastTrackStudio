@@ -83,12 +83,118 @@ pub fn App() -> Element {
     // Hosted org list, discovered from the server's well-known endpoint
     // and published for the switcher + data fetchers.
     let mut org_list: Signal<Vec<OrgMeta>> = use_context_provider(|| Signal::new(Vec::new()));
-    // Re-discover orgs whenever the active server changes (reading the
-    // active id inside the resource closure registers the dependency).
+    // The session token, as a REACTIVE signal — provided here, before
+    // discovery, and written by `auth::publish_session_token`.
+    //
+    // Discovery is what tags which orgs are ours (#109 criterion 6), and
+    // it can only do that if it carries the token. But discovery runs
+    // FIRST: sign-in needs the home slug, so the org list has to resolve
+    // before auth can restore a session. That ordering means the boot
+    // fetch is necessarily anonymous, every org comes back `member: null`
+    // ("not asked"), and the switcher correctly falls back to showing all
+    // of them — permanently, because nothing re-ran discovery.
+    //
+    // Caught by watching the live network log: exactly ONE well-known
+    // request per page load, before the session existed. So the token is
+    // a dependency of the resource below, and resolving a session
+    // re-discovers with it.
+    let session_token: Signal<Option<String>> =
+        use_context_provider(|| Signal::new(None::<String>));
+    // Re-discover orgs whenever the active server OR the session changes
+    // (reading both inside the resource closure registers them as
+    // dependencies).
     let orgs_res = use_resource(move || {
         let _active = server_registry.active_id();
+        let _session = session_token();
         async move { fetch_orgs().await }
     });
+    // Pull the identity locker's per-org tokens once the session
+    // resolves. Auth stores are per-org, so the ambient token makes you
+    // a member of exactly ONE org — without these, the switcher can
+    // only ever show that one, whatever the well-known doc lists.
+    let links_res = use_resource(move || {
+        let session = session_token();
+        async move {
+            // INSTRUMENTED at every stage. The first cut swallowed all
+            // three failure modes into one silent `Err`, and the server
+            // logs showed the browser never issuing a `list_links` call
+            // at all — so "which stage" is the whole question.
+            tracing::info!(
+                has_session = session.is_some(),
+                has_bearer = task_ui_core::vox_session::bearer().is_some(),
+                "locker: resolving links"
+            );
+            let client: identity_proto::IdentityServiceClient =
+                match task_ui_core::vox_clients::establish_server(None).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "locker: establish /server/vox FAILED");
+                        return Err(e);
+                    }
+                };
+            let Some(token) = task_ui_core::vox_session::bearer() else {
+                tracing::warn!("locker: no bearer at call time — skipping list_links");
+                return Err("not signed in".to_string());
+            };
+            match client.list_links(token).await {
+                Ok(links) => {
+                    tracing::info!(count = links.len(), "locker: list_links OK");
+                    Ok(links)
+                }
+                Err(e) => {
+                    tracing::warn!(error = ?e, "locker: list_links FAILED");
+                    Err(format!("list links: {e:?}"))
+                }
+            }
+        }
+    });
+    use_effect(move || {
+        // A server with no identity locker (not a home server) answers
+        // an error here; that is a normal deployment, not a fault, so
+        // the ambient token keeps being used — but it is LOGGED, not
+        // swallowed. Silently ignoring the error arm is what hid this
+        // failure through three wrong fixes.
+        if let Some(Err(e)) = &*links_res.read_unchecked() {
+            tracing::warn!(error = %e, "locker: no linked orgs (switcher stays single-org)");
+        }
+        if let Some(Ok(links)) = &*links_res.read_unchecked() {
+            tracing::info!(links = links.len(), "locker: applying linked orgs");
+            let map: std::collections::HashMap<String, String> = links
+                .iter()
+                .filter_map(|l| l.token.clone().map(|t| (l.remote_slug.clone(), t)))
+                .collect();
+            let slugs: Vec<String> = map.keys().cloned().collect();
+            // Membership FIRST, and it must not sit downstream of the
+            // connection teardown below — see why that ordering matters.
+            //
+            // Membership has to land ON the org list, not in a global:
+            // `org_list` is the Signal every consumer reads, so patching
+            // it here is what actually re-renders the switcher. A static
+            // holder would be invisible to Dioxus — the list would stay
+            // stale until something unrelated happened to re-render.
+            mark_linked_orgs(org_list, &slugs);
+            if task_ui_core::vox_session::set_linked_tokens(map) {
+                // A socket presents its identity once, at establish, so
+                // connections opened under the old (single-token) view
+                // have to go before the new credentials can be used.
+                //
+                // DEFERRED, and that is load-bearing. This effect runs
+                // synchronously inside the WebSocket message callback
+                // that delivered `list_links` — tearing the cache down
+                // there drops the very socket whose callback is on the
+                // stack, and wasm-bindgen throws "closure invoked
+                // recursively or after being dropped". That exception
+                // aborted the rest of this effect, which is why the
+                // switcher stayed at one org even once membership was
+                // computed correctly. Spawning defers the teardown past
+                // the callback's return.
+                spawn(async move {
+                    task_ui_core::vox_clients::drop_cached_connections();
+                });
+            }
+        }
+    });
+
     // Surface the discovery outcome so the Servers UI can show *why* it
     // didn't resolve (native fetch failures are otherwise invisible).
     let mut discovery_err =
@@ -97,6 +203,12 @@ pub fn App() -> Element {
         Some(Ok(list)) => {
             if *org_list.peek() != *list {
                 org_list.set(list.clone());
+                // Discovery answers `member` for the ONE token it
+                // presented, so a fresh list forgets every linked org.
+                // Re-apply, or a re-discovery (a session change, a
+                // server switch) silently collapses the switcher back
+                // to a single org.
+                mark_linked_orgs(org_list, &task_ui_core::vox_session::linked_slugs());
             }
             if discovery_err.0.peek().is_some() {
                 discovery_err.0.set(None);
@@ -246,8 +358,45 @@ pub fn App() -> Element {
         style { dangerous_inner_html: MOBILE_BASELINE_CSS }
         ThemeProvider { state: theme_state,
             div { class: "min-h-screen bg-background text-foreground",
-                Router::<Route> {}
+                // Unauthenticated visitors land on sign-in rather than on
+                // a shell full of empty panels (#109 criterion 5). The
+                // gate is presentation only — the server is what actually
+                // refuses data.
+                crate::auth::SignInGate {
+                    Router::<Route> {}
+                }
             }
         }
+    }
+}
+
+/// Mark every org we hold a locker credential for as one of ours.
+///
+/// Discovery can only answer `member` for the single token it presented,
+/// so on a server hosting several orgs it reports `false` for every org
+/// that didn't issue that token — including ones this account is a full
+/// member of. Holding a working credential is the same claim, so this
+/// folds the locker's answer into the list every consumer already reads.
+///
+/// Writing it onto the `org_list` Signal (rather than a static holder)
+/// is the part that matters: Dioxus re-renders on Signal writes, and a
+/// global would leave the switcher showing a stale single org until
+/// something unrelated forced a re-render.
+fn mark_linked_orgs(mut org_list: Signal<Vec<crate::orgs::OrgMeta>>, linked: &[String]) {
+    if linked.is_empty() {
+        return;
+    }
+    let mut list = org_list.peek().clone();
+    let mut changed = false;
+    for org in &mut list {
+        if linked.iter().any(|s| s == &org.slug) && org.member != Some(true) {
+            org.member = Some(true);
+            changed = true;
+        }
+    }
+    // Only write on a real change — an unconditional set would loop the
+    // effect that reads this list.
+    if changed {
+        org_list.set(list);
     }
 }
