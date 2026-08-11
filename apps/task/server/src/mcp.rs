@@ -947,10 +947,37 @@ don't need a confirmation round-trip.",
 
 // ── HTTP surface ─────────────────────────────────────────────────
 
-/// `POST /org/{slug}/mcp`.
+/// `POST /mcp` — the ACCOUNT-scoped lane.
+///
+/// One endpoint per account rather than one per org. Every per-org
+/// tool grows an optional `org` argument (defaulting to the caller's
+/// home), and `list_orgs` reports what's reachable. Registering six
+/// MCP servers for six orgs was the wrong shape: the client had to
+/// know the topology, and adding an org meant editing client config.
+pub async fn mcp_account_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    mcp_dispatch(state, None, headers, body).await
+}
+
+/// `POST /org/{slug}/mcp` — the org-scoped lane, unchanged.
 pub async fn mcp_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    mcp_dispatch(state, Some(slug), headers, body).await
+}
+
+/// Shared JSON-RPC dispatch. `pinned` is `Some(slug)` on the org lane
+/// and `None` on the account lane, where each `tools/call` names its
+/// own org.
+async fn mcp_dispatch(
+    state: AppState,
+    pinned: Option<String>,
     headers: HeaderMap,
     body: String,
 ) -> Response {
@@ -999,24 +1026,93 @@ pub async fn mcp_handler(
             } else {
                 LATEST_PROTOCOL
             };
+            let (name, instructions) = match &pinned {
+                Some(s) => (
+                    format!("task/{s}"),
+                    server_instructions(s, chrono::Local::now()),
+                ),
+                None => (
+                    "task".to_string(),
+                    account_instructions(&state, &headers, chrono::Local::now()).await,
+                ),
+            };
             Json(rpc_result(
                 id,
                 json!({
                     "protocolVersion": version,
                     "capabilities": { "tools": { "listChanged": false } },
-                    "serverInfo": { "name": format!("task/{slug}"), "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": server_instructions(&slug, chrono::Local::now()),
+                    "serverInfo": { "name": name, "version": env!("CARGO_PKG_VERSION") },
+                    "instructions": instructions,
                 }),
             ))
             .into_response()
         }
         "ping" => Json(rpc_result(id, json!({}))).into_response(),
-        "tools/list" => match authenticate(&state, &slug, &headers).await {
-            Ok(org) => Json(rpc_result(id, tools_list_payload(&org.plugins))).into_response(),
-            Err(e) => Json(rpc_error(id, code::INVALID_REQUEST, e)).into_response(),
-        },
+        "tools/list" => {
+            let Some(target) = default_slug(&state, &pinned, &headers).await else {
+                return Json(rpc_error(
+                    id,
+                    code::INVALID_REQUEST,
+                    "no reachable org for this token",
+                ))
+                .into_response();
+            };
+            match authenticate_for(&state, &target, &headers).await {
+                Ok(org) => {
+                    let mut payload = tools_list_payload(&org.plugins);
+                    if pinned.is_none() {
+                        payload = account_tools_payload(payload, &target);
+                    }
+                    Json(rpc_result(id, payload)).into_response()
+                }
+                Err(e) => Json(rpc_error(id, code::INVALID_REQUEST, e)).into_response(),
+            }
+        }
         "tools/call" => {
-            let org = match authenticate(&state, &slug, &headers).await {
+            let args_peek = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            // Account lane: the call names its org, else the default.
+            let target = match &pinned {
+                Some(s) => s.clone(),
+                None => match arg_str(&args_peek, "org") {
+                    Some(s) => s,
+                    None => match default_slug(&state, &pinned, &headers).await {
+                        Some(s) => s,
+                        None => {
+                            return Json(rpc_error(
+                                id,
+                                code::INVALID_REQUEST,
+                                "no reachable org — pass `org`, or check `list_orgs`",
+                            ))
+                            .into_response();
+                        }
+                    },
+                },
+            };
+            // `list_orgs` is account-lane only and spans orgs, so it
+            // answers before any single-org authentication.
+            if pinned.is_none() && params.get("name").and_then(Value::as_str) == Some("list_orgs") {
+                let orgs = reachable_orgs(&state, &headers).await;
+                let home = state.home_slug();
+                let out: Vec<Value> = orgs
+                    .iter()
+                    .map(|s| json!({ "slug": s, "is_home": Some(s) == home.as_ref() }))
+                    .collect();
+                return Json(rpc_result(
+                    id,
+                    tool_ok(&json!({
+                        "count": out.len(),
+                        "orgs": out,
+                        "default": target,
+                        "note": "Each org has its OWN vault. Pass `org` on any tool to act in \
+                                 one; omitting it uses the default.",
+                    })),
+                ))
+                .into_response();
+            }
+            let org = match authenticate_for(&state, &target, &headers).await {
                 Ok(org) => org,
                 Err(e) => return Json(rpc_error(id, code::INVALID_REQUEST, e)).into_response(),
             };
@@ -1087,10 +1183,164 @@ pub async fn mcp_handler(
     }
 }
 
-/// Bearer check → the org's backend state. Mirrors
-/// [`crate::watch_bridge`]'s rule with `TASK_MCP_TOKEN` as the static
-/// device token.
-async fn authenticate(
+/// The org a call lands in when it doesn't name one: the pinned slug
+/// on the org lane, else the caller's home, else the first org they
+/// can reach.
+async fn default_slug(
+    state: &AppState,
+    pinned: &Option<String>,
+    headers: &HeaderMap,
+) -> Option<String> {
+    if let Some(s) = pinned {
+        return Some(s.clone());
+    }
+    let reachable = reachable_orgs(state, headers).await;
+    if reachable.is_empty() {
+        return None;
+    }
+    match state.home_slug() {
+        Some(home) if reachable.contains(&home) => Some(home),
+        _ => reachable.first().cloned(),
+    }
+}
+
+/// Rewrite a per-org tools payload for the account lane: every tool
+/// gains `org`, and `list_orgs` is prepended so a client can discover
+/// the topology before it guesses at slugs.
+fn account_tools_payload(payload: Value, default_slug: &str) -> Value {
+    let mut tools: Vec<Value> = payload
+        .get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut t| {
+            if let Some(schema) = t.get("inputSchema").cloned() {
+                t["inputSchema"] = with_org_param(schema, default_slug);
+            }
+            t
+        })
+        .collect();
+    tools.insert(
+        0,
+        json!({
+            "name": "list_orgs",
+            "description": "The organizations this account can reach, and which one tools \
+                            default to. Each org is a SEPARATE vault — tasks, projects and \
+                            notes do not cross between them. Call this before assuming where \
+                            something lives.",
+            "inputSchema": obj(json!({}), &[]),
+        }),
+    );
+    json!({ "tools": tools })
+}
+
+/// Account-lane orientation: the org-lane text for the default org,
+/// plus the list of everything else this account can act in.
+async fn account_instructions(
+    state: &AppState,
+    headers: &HeaderMap,
+    now: chrono::DateTime<chrono::Local>,
+) -> String {
+    let reachable = reachable_orgs(state, headers).await;
+    let default = default_slug(state, &None, headers)
+        .await
+        .unwrap_or_else(|| "(none)".into());
+    let base = server_instructions(&default, now);
+    if reachable.len() <= 1 {
+        return base;
+    }
+    format!(
+        "{base}\n\nThis connection is ACCOUNT-scoped, not org-scoped. Reachable orgs: {}. \
+Every tool takes an optional `org` argument; omitting it acts in `{default}`. The orgs have \
+SEPARATE vaults — a task in one is invisible in another, so when the user names a project or \
+song you don't recognise, check `list_orgs` rather than assuming it is missing.",
+        reachable.join(", ")
+    )
+}
+
+/// Which orgs this caller can reach, and how.
+///
+/// The static `TASK_MCP_TOKEN` reaches every hosted org — that is what
+/// it is for, and how the cluster agent works today. A *session* token
+/// reaches the org that issued it, plus every org that account has
+/// linked into its home identity locker. The locker is the whole point:
+/// auth stores are per-org, so without it a session is a credential in
+/// exactly one place.
+pub async fn reachable_orgs(state: &AppState, headers: &HeaderMap) -> Vec<String> {
+    let Some(token) = crate::watch_bridge::bearer(headers) else {
+        return Vec::new();
+    };
+    let hosted = state.org_slugs();
+    let static_token = std::env::var("TASK_MCP_TOKEN").unwrap_or_default();
+    if !static_token.is_empty() && token == static_token {
+        return hosted;
+    }
+    let mut reachable = Vec::new();
+    // The issuing org, found by asking each hosted org whether the
+    // token validates there. Cheap (one indexed lookup per org) and it
+    // needs no guess about which org the caller came from.
+    for slug in &hosted {
+        if let Some(org) = state.org(slug)
+            && org
+                .auth
+                .auth
+                .current_session(architect_auth::CurrentSession {
+                    token: token.clone(),
+                })
+                .await
+                .is_ok()
+        {
+            reachable.push(slug.clone());
+        }
+    }
+    // Plus everything the locker holds a credential for.
+    for slug in linked_slugs(state, &token).await {
+        if !reachable.contains(&slug) && hosted.contains(&slug) {
+            reachable.push(slug);
+        }
+    }
+    reachable.sort();
+    reachable
+}
+
+/// Org slugs the caller's home identity locker holds a link for.
+/// Empty when the token isn't a home session, or the server hosts no
+/// home org — both normal, neither an error.
+async fn linked_slugs(state: &AppState, token: &str) -> Vec<String> {
+    let Some(home_slug) = state.home_slug() else {
+        return Vec::new();
+    };
+    let Some(home) = state.org(&home_slug) else {
+        return Vec::new();
+    };
+    let Ok(bundle) = home
+        .auth
+        .auth
+        .current_session(architect_auth::CurrentSession {
+            token: token.to_owned(),
+        })
+        .await
+    else {
+        return Vec::new();
+    };
+    let Some(store) = home.identity else {
+        return Vec::new();
+    };
+    store
+        .list_links(bundle.user.id)
+        .await
+        .map(|links| links.into_iter().map(|l| l.remote_slug).collect())
+        .unwrap_or_default()
+}
+
+/// Authenticate for ONE org on the account-scoped lane.
+///
+/// Three ways in, tried in order: the static token; the presented
+/// token validating against this org directly; or a locker link whose
+/// stored token does. The third is what lets one sign-in reach six
+/// orgs without the client holding six credentials.
+async fn authenticate_for(
     state: &AppState,
     slug: &str,
     headers: &HeaderMap,
@@ -1104,15 +1354,65 @@ async fn authenticate(
     if !static_token.is_empty() && token == static_token {
         return Ok(org);
     }
-    match org
+    if org
         .auth
         .auth
-        .current_session(architect_auth::CurrentSession { token })
+        .current_session(architect_auth::CurrentSession {
+            token: token.clone(),
+        })
         .await
+        .is_ok()
     {
-        Ok(_) => Ok(org),
-        Err(_) => Err("invalid token".to_string()),
+        return Ok(org);
     }
+    // Fall back to the locker's credential for this org.
+    if let Some(home_slug) = state.home_slug()
+        && let Some(home) = state.org(&home_slug)
+        && let Ok(bundle) = home
+            .auth
+            .auth
+            .current_session(architect_auth::CurrentSession {
+                token: token.clone(),
+            })
+            .await
+        && let Some(store) = home.identity
+        && let Ok(links) = store.list_links(bundle.user.id).await
+        && let Some(link) = links.into_iter().find(|l| l.remote_slug == slug)
+        && let Some(linked) = link.token
+        && org
+            .auth
+            .auth
+            .current_session(architect_auth::CurrentSession { token: linked })
+            .await
+            .is_ok()
+    {
+        return Ok(org);
+    }
+    Err(format!(
+        "not authorized for org `{slug}` — sign in there, or link it with `task auth link --org {slug}`"
+    ))
+}
+
+/// Add the account-lane `org` argument to a per-org tool's schema.
+///
+/// The catalog is shared with `/org/{slug}/mcp`, where the org is in
+/// the URL and the argument would be meaningless. Injecting it here
+/// keeps one catalog rather than two that drift.
+fn with_org_param(mut schema: Value, default_slug: &str) -> Value {
+    if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        props.insert(
+            "org".into(),
+            json!({
+                "type": "string",
+                "description": format!(
+                    "Org slug to act in. Defaults to `{default_slug}`. Call list_orgs to see \
+                     which orgs you can reach — they have SEPARATE vaults, so a task in one is \
+                     invisible in another."
+                ),
+            }),
+        );
+    }
+    schema
 }
 
 /// Why a tool call didn't produce a result.
