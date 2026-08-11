@@ -1981,6 +1981,9 @@ pub fn router(state: AppState) -> Router {
         // MCP — Task as a tool surface for agents (Hermes gateway,
         // Claude Code, any MCP client). See `mcp`.
         .route("/org/{slug}/mcp", axum::routing::post(mcp::mcp_handler))
+        // Account-scoped MCP: one endpoint for every org the caller
+        // can reach, instead of one registration per org.
+        .route("/mcp", axum::routing::post(mcp::mcp_account_handler))
         .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
         .with_state(state.clone());
 
