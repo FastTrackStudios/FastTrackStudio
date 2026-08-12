@@ -25,7 +25,7 @@ editing-split-duplicate
 - `kbd:@42432` — Glue the items within the time selection into one.
 - `kbd:@40059` — Cut the selected items.
 - `kbd:@40058` — Paste items at the cursor.
-- `kbd:@40153` — Open the selected item in the MIDI editor (same key closes it from inside).
+- `kbd:@40153` — Open the selected item in the MIDI editor (same key closes it from inside). What to do once you're in there is [[midi-editing|MIDI Editing]].
 
 ## Snapping and the undo stack
 
