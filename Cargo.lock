@@ -10000,6 +10000,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "files-daemon"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "files",
+ "files-proto",
+ "files-sync",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "vox",
+]
+
+[[package]]
 name = "files-proto"
 version = "0.1.0"
 dependencies = [

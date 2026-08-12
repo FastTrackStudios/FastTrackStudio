@@ -1012,6 +1012,9 @@ files-storage = { path = "features/task/files/files-storage" }
 # Replica sync engine (issue #264): reconcile = commit graphs + missing
 # chunks between two live trees; divergence surfaces, never merges.
 files-sync = { path = "features/task/files/files-sync" }
+# Sync daemon (issue #265): the reconcile engine as a long-lived agent
+# with a device identity + the local DaemonControlService (rich status).
+files-daemon = { path = "features/task/files/files-daemon" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }

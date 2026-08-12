@@ -46,7 +46,7 @@ mod scan;
 pub mod stub;
 mod versions;
 
-pub use backend::{Captured, FilesBackend, MaterializeReport};
+pub use backend::{Captured, FilesBackend, MaterializeReport, SyncTreeMeta};
 pub use cadence::{CadenceConfig, CadenceEngine, Clock, SystemClock, TestClock};
 pub use entity::{NamedVersions, ProjectVersions};
 pub use error::{Error, Result};
