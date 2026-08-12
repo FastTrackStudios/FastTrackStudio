@@ -190,7 +190,7 @@ pub fn save_patterns(store_dir: &Path, patterns: Vec<String>) -> Result<Vec<Stri
 /// matching rule wins, so `["*.wav", "!keep.wav"]` and its sorted
 /// permutation mean opposite things — sorting would silently disarm
 /// every `!` re-include a user wrote.
-fn normalize(patterns: Vec<String>) -> Result<Vec<String>> {
+pub(crate) fn normalize(patterns: Vec<String>) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for pattern in patterns {
         let trimmed = pattern.trim().to_string();

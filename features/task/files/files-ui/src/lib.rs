@@ -256,6 +256,12 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                     // reason to re-read too.
                     FilesEvent::VersionNamed(v) | FilesEvent::VersionUnnamed(v) => Some(v.root_id),
                     FilesEvent::ProjectVersionStarted(pv) => Some(pv.root_id),
+                    // Snapshots are ephemeral captures, never listing
+                    // changes — but the snapshots panel re-reads (#260).
+                    FilesEvent::Snapshotted(snap) => Some(snap.root_id),
+                    // A file flipping between resident and stub is a
+                    // listing change in exactly one root (issue #263).
+                    FilesEvent::HydrationChanged(change) => Some(change.root_id),
                 };
                 // Drive listings have no root id, so any Files event is
                 // a reason to re-read (loose files move under roots).

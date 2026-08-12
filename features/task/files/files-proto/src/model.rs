@@ -268,3 +268,40 @@ pub struct CheckpointInfo {
     /// capture rather than being committed torn (issue #260).
     pub requeued_paths: Vec<String>,
 }
+
+/// One file's hydration state changing (issue #263): `Dehydrated` — its
+/// live-tree content replaced by a pointer stub — or `Hydrated` — exact
+/// content restored over the stub, verified by `FileId`. Carried by
+/// [`crate::service::FilesEvent`] so explorers refresh the one row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct HydrationChange {
+    pub root_id: Uuid,
+    /// Root-relative path of the file.
+    pub path: String,
+    /// `true` when the path is now a stub (dehydrated), `false` when it
+    /// is now resident (hydrated).
+    pub stub: bool,
+}
+
+/// Result of [`crate::service::FilesService::apply_hydration_policy`]:
+/// what one policy pass changed, root-relative paths, sorted.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct HydrationReport {
+    /// Stubs the policy matched and restored to resident content.
+    pub hydrated: Vec<String>,
+    /// Resident files the policy left unmatched and dehydrated.
+    pub dehydrated: Vec<String>,
+    /// Resident files the policy would have dehydrated but left alone
+    /// because their content differs from the checkpoint head —
+    /// dehydration never destroys unversioned work. Checkpoint, then
+    /// re-apply, to complete the pass.
+    pub skipped_dirty: Vec<String>,
+    /// Paths whose hydrate/dehydrate errored (details in the server
+    /// log). The pass is per-file fault tolerant: one unhydratable stub
+    /// — normal on a partial replica missing chunks — never aborts the
+    /// pass or discards this report.
+    #[facet(default)]
+    pub failed: Vec<String>,
+}

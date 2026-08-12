@@ -778,3 +778,53 @@ async fn the_mount_point_itself_is_read_only() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// Hydrate-on-access (issue #263): a GET of a pointer stub through the
+/// bridge — a Task-mediated surface, per the glossary — hydrates it
+/// first and serves the real bytes. The stub is gone from disk
+/// afterwards; raw NFS would have kept reading it as a stub.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_get_of_a_stub_hydrates_and_serves_the_content() {
+    let h = Harness::new();
+    let root = h.root("Session").await;
+    let disk = h.data_dir.join("Session").join("mix.wav");
+    std::fs::write(&disk, vec![0x5au8; 48 * 1024]).expect("stage media");
+    h.backend
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("checkpoint");
+    h.backend
+        .dehydrate(root.id, "mix.wav".into())
+        .await
+        .expect("dehydrate");
+    assert!(
+        files::stub::read(&disk).unwrap().is_some(),
+        "precondition: on-disk stub"
+    );
+
+    let (status, body) = h
+        .send("GET", &format!("{MOUNT}/Session/mix.wav"), b"")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.len(), 48 * 1024, "the real content, not stub bytes");
+    assert!(
+        files::stub::read(&disk).unwrap().is_none(),
+        "the file is resident after the access"
+    );
+}
+
+/// The serve path fails CLOSED: a stub-sized file with the magic line
+/// but an unparseable body is refused with 502, never served as if it
+/// were the media it stands in for (PR #289 review).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broken_stub_is_refused_not_served() {
+    let h = Harness::new();
+    let _root = h.root("Session").await;
+    let disk = h.data_dir.join("Session").join("broken.wav");
+    std::fs::write(&disk, format!("{}corrupt body", files::stub::MAGIC)).expect("stage");
+
+    let (status, _body) = h
+        .send("GET", &format!("{MOUNT}/Session/broken.wav"), b"")
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+}

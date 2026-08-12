@@ -13,8 +13,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::model::{
-    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, NamedVersion, ProjectVersion,
-    SnapshotInfo, VersionRef,
+    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, HydrationChange,
+    HydrationReport, NamedVersion, ProjectVersion, SnapshotInfo, VersionRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
@@ -51,6 +51,9 @@ pub enum FilesEvent {
     VersionUnnamed(NamedVersion),
     /// A new Project Version of a root was started.
     ProjectVersionStarted(ProjectVersion),
+    /// A file's live-tree content was replaced by a pointer stub, or a
+    /// stub was restored to resident content (issue #263).
+    HydrationChanged(HydrationChange),
 }
 
 #[architect::rpc]
@@ -228,8 +231,57 @@ pub trait FilesService {
         keep_newer_secs: Option<u64>,
     ) -> Result<GcReport, FilesError>;
 
-    /// Every root-creation / checkpoint / version-curation event, as it
-    /// happens.
+    /// Replace `path`'s live-tree content with a **pointer stub**
+    /// (glossary: a small placeholder standing in for non-resident
+    /// content — dehydration). The content itself stays in the version
+    /// store; listings keep reporting the file with its logical size
+    /// and identity. Media roots only (a software root's working tree
+    /// belongs to its colocated git, same split as
+    /// [`FilesService::gc_root`]).
+    ///
+    /// Refuses with [`FilesError::BadRequest`] when the file's on-disk
+    /// content differs from the checkpoint head — dehydration never
+    /// destroys unversioned work; checkpoint first. A path that is
+    /// already a stub returns its current entry unchanged (idempotent).
+    async fn dehydrate(&self, root_id: Uuid, path: String) -> Result<BrowseEntry, FilesError>;
+
+    /// Restore `path`'s exact content over its stub, streamed from the
+    /// version store and **verified by `FileId`** before it replaces
+    /// the stub. A path that is already resident returns its current
+    /// entry unchanged (idempotent). Fails with
+    /// [`FilesError::NotFound`] when the stub's content is not in the
+    /// store (a partial replica missing chunks hydrates through sync,
+    /// issue #264).
+    async fn hydrate(&self, root_id: Uuid, path: String) -> Result<BrowseEntry, FilesError>;
+
+    /// The root's hydration-policy patterns (gitignore syntax, same
+    /// dialect as the Ignore set). A path **matching** the policy is
+    /// kept hydrated by [`FilesService::apply_hydration_policy`];
+    /// everything else is kept dehydrated. Empty (the default) means no
+    /// automatic dehydration ever — policy is opt-in per root.
+    async fn hydration_policy(&self, root_id: Uuid) -> Result<Vec<String>, FilesError>;
+
+    /// Replace the root's hydration-policy patterns, returning them as
+    /// stored (same trim/dedup/order rules as
+    /// [`FilesService::set_ignore_set`], for the same last-match-wins
+    /// reason). Storing does not touch any file —
+    /// [`FilesService::apply_hydration_policy`] is the pass that does.
+    async fn set_hydration_policy(
+        &self,
+        root_id: Uuid,
+        patterns: Vec<String>,
+    ) -> Result<Vec<String>, FilesError>;
+
+    /// Run the root's hydration policy over its live tree now: hydrate
+    /// every stub the patterns match, dehydrate every clean resident
+    /// file they don't. An empty policy hydrates nothing and — being
+    /// opt-in — dehydrates nothing. Dirty files (content differing from
+    /// the checkpoint head) are never dehydrated; they come back in the
+    /// report so the caller can checkpoint and re-apply.
+    async fn apply_hydration_policy(&self, root_id: Uuid) -> Result<HydrationReport, FilesError>;
+
+    /// Every root-creation / checkpoint / version-curation / hydration
+    /// event, as it happens.
     #[subscribe]
     fn events(&self) -> FilesEvent;
 }

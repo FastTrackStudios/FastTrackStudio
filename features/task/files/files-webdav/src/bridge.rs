@@ -267,6 +267,60 @@ impl WebdavBridge {
             req
         };
 
+        // Task-mediated hydrate-on-access (issue #263, glossary
+        // "Pointer stub"): a WebDAV read of a stub hydrates it first,
+        // then serves the real content — this bridge is exactly the
+        // kind of Task-mediated surface the glossary names, unlike raw
+        // NFS, which keeps reading a stub as a stub. Detection is the
+        // platform's stat-bounded check, so an ordinary GET of media
+        // costs one stat here and nothing more. A stub that cannot
+        // hydrate (store missing its chunks) is a 502, not a silent
+        // serve of placeholder bytes a DAW would try to play.
+        if matches!(req.method().as_str(), "GET" | "HEAD") && !addresses_root {
+            if let Some(rel) = rel_inside(req.uri(), &prefix) {
+                let target = base.join(&rel);
+                // Fail CLOSED on a stub that can't be read or parsed:
+                // `.ok().flatten()` here would serve the ~100-byte
+                // placeholder as the media file with a 200 — the exact
+                // fail-open shape the stub module's own doc forbids
+                // (PR #289 review). A candidate-sized file that errors
+                // is refused, not served.
+                let is_stub = match std::fs::metadata(&target) {
+                    // Regular files only: a directory (including the
+                    // hidden store dir itself, which the guard 404s
+                    // downstream) is never a stub candidate.
+                    Ok(m) if m.is_file() && files::stub::candidate_len(m.len()) => {
+                        match files::stub::read(&target) {
+                            Ok(found) => found.is_some(),
+                            Err(err) => {
+                                tracing::warn!(
+                                    target: "files_webdav::bridge",
+                                    root = %root.id,
+                                    path = %rel,
+                                    error = %err,
+                                    "unreadable stub-sized file; refusing to serve it",
+                                );
+                                return status(StatusCode::BAD_GATEWAY);
+                            }
+                        }
+                    }
+                    _ => false,
+                };
+                if is_stub {
+                    if let Err(err) = self.backend.hydrate(root.id, rel.clone()).await {
+                        tracing::warn!(
+                            target: "files_webdav::bridge",
+                            root = %root.id,
+                            path = %rel,
+                            error = %err,
+                            "hydrate-on-access failed; refusing to serve stub bytes",
+                        );
+                        return status(StatusCode::BAD_GATEWAY);
+                    }
+                }
+            }
+        }
+
         let config = DavConfig::new()
             // Trailing slash on purpose: `DavPath::set_prefix` is a raw
             // byte `starts_with`, so the prefix `…/dav/Mix` also matches
@@ -305,6 +359,23 @@ impl WebdavBridge {
         };
         Some(rest.split('/').next().unwrap_or("").to_string())
     }
+}
+
+/// The root-relative path `uri` addresses inside the root mounted at
+/// `prefix`, [`DavPath`]-normalized (percent-decoded, `.`/`..`
+/// collapsed) — the same resolution the handler itself will perform.
+/// `None` for the collection itself or a path outside this prefix.
+fn rel_inside(uri: &http::Uri, prefix: &str) -> Option<String> {
+    let path = DavPath::new(uri.path()).ok()?;
+    let full = std::str::from_utf8(path.with_prefix().as_bytes())
+        .ok()?
+        .to_owned();
+    let rest = full.strip_prefix(prefix)?.strip_prefix('/')?;
+    let rest = rest.trim_end_matches('/');
+    if rest.is_empty() {
+        return None;
+    }
+    Some(rest.to_string())
 }
 
 /// Does `uri` address the collection at `prefix` itself, rather than
