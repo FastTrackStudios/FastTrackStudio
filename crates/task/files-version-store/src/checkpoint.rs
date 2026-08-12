@@ -23,7 +23,7 @@ use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use jj_lib::tree_builder::TreeBuilder;
 
 use crate::backend::VersionStoreBackend;
-use crate::chain::lookup;
+use crate::chain::lookup_dyn;
 use crate::error::{Error, Result};
 
 /// One recorded change to apply in a checkpoint commit.
@@ -71,7 +71,7 @@ async fn resolve(
     if let Some(value) = overrides.get(path) {
         return Ok(value.clone());
     }
-    lookup(backend, base_tree, path).await
+    lookup_dyn(backend, base_tree, path).await
 }
 
 /// Write one checkpoint commit on top of `parent_id`, applying `changes` in

@@ -119,6 +119,12 @@ pub const CATALOG: &[PluginInfo] = &[
         core: false,
     },
     PluginInfo {
+        id: "files",
+        name: "Files",
+        description: "File Roots, versioned project folders, the Drive surface and the file explorer",
+        core: false,
+    },
+    PluginInfo {
         id: "home",
         name: "Home ops",
         description: "Locations and physical inventory",

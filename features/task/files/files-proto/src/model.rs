@@ -11,11 +11,18 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A File Root's versioning mode, chosen at creation (ADR 0001). Only
-/// `Media` is implemented end-to-end by this ticket — `Software` is
-/// accepted so the wire shape is stable, but [`crate::FilesService`]'s
-/// v1 [`crate::service::FilesService::create_root`] rejects it as
-/// unimplemented rather than silently falling back to a media root.
+/// A File Root's versioning mode, chosen at creation and immutable
+/// afterwards (ADR 0001; flavor conversion, if ever wanted, is a
+/// deliberate relocation-style operation).
+///
+/// - `Media` — the default. The root's history lives in Files' own
+///   content-addressed store (FastCDC + BLAKE3), built for multi-GB
+///   binaries that dedup across versions.
+/// - `Software` — a colocated git repository (issue #273): the root
+///   carries an ordinary `.git`, so GitHub, CI, and IDEs see a normal
+///   checkout, while the Files RPC surface reads that same history.
+///   Heavy stray files are kept out of it by the flavor's Ignore set
+///   seed plus the tree's own `.gitignore`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 #[repr(u8)]
 pub enum RootFlavor {
@@ -36,6 +43,17 @@ pub struct FileRootInfo {
     pub path: String,
     pub flavor: RootFlavor,
     pub created_at: DateTime<Utc>,
+    /// The root's CURRENT lineage: its highest-numbered
+    /// [`ProjectVersion`] entity (issue #261), or `None` on a root that
+    /// has never been restarted. Derived from the Vault on read — the
+    /// entities stay the authority, this is the projection the explorer
+    /// renders as the root's badge.
+    ///
+    /// `#[facet(default)]` so a NEW client decoding an OLD server's
+    /// response (the client-first upgrade direction) defaults the field
+    /// instead of failing the decode plan.
+    #[facet(default)]
+    pub project_version: Option<ProjectVersion>,
 }
 
 /// One entry in a directory listing — either a root-scoped
@@ -47,8 +65,25 @@ pub struct FileRootInfo {
 pub struct BrowseEntry {
     pub name: String,
     pub is_dir: bool,
-    /// `None` for directories.
+    /// `None` for directories, and for a [`BrowseEntry::stub`] entry
+    /// (a stub's logical size lives in its manifest, not on disk).
     pub size: Option<u64>,
+    /// The entry is a **pointer stub**: known to the root's version
+    /// store at the checkpoint head but not resident in the live tree
+    /// (glossary "Pointer stub" — browsing a 240 GB project must not
+    /// mean downloading it). Always `false` for
+    /// [`crate::service::FilesService::drive_browse`], which has no
+    /// root context. On-demand hydration is issue #263; v1 reports the
+    /// state so the explorer can show resident-vs-stub honestly.
+    #[facet(default)]
+    pub stub: bool,
+    /// The entry has **Divergent versions**: the root's version store
+    /// holds more than one visible head and this path's content differs
+    /// between them (glossary "Divergent versions" — concurrent saves
+    /// survive side by side instead of clobbering). Resolution
+    /// (pick A / pick B / keep both) is issue #267.
+    #[facet(default)]
+    pub divergent: bool,
 }
 
 /// One entry in a file's version chain (glossary "File version
@@ -67,6 +102,108 @@ pub struct ChainEntry {
     /// Set when this entry is the commit where the file arrived at
     /// `path` via a recorded rename.
     pub renamed_from: Option<String>,
+    /// Names of every [`NamedVersion`] the Vault holds against this
+    /// entry's commit — the curated metadata layered on top of the
+    /// automatic chain (issue #261). Empty for an ordinary,
+    /// un-curated Session checkpoint. The store itself knows nothing
+    /// about names; this is resolved from the Vault on every read.
+    pub names: Vec<String>,
+}
+
+/// A **Named Version** (glossary): a user-facing, deliberately labeled
+/// version of a deliverable ("v3 for client"), curated on top of the
+/// automatic chain. A Vault entity — a markdown page with frontmatter
+/// under the org vault — referencing `(root id, change id)`; ADR 0001:
+/// "the version store knows nothing about names".
+///
+/// Both ids are recorded: `change_id` is jj's stable, rewrite-surviving
+/// identity (what the reference *is*), `commit_id` the exact content
+/// pointer it resolved to when named (what GC protects and what a
+/// share link streams). See
+/// [`crate::service::FilesService::resolve_named_version`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct NamedVersion {
+    pub id: Uuid,
+    /// Vault-relative path of the entity's own page. Empty on input to
+    /// [`crate::service::FilesService::name_version`]; the server fills
+    /// it in.
+    pub path: String,
+    /// The curated label, as the producer typed it ("v3 for client").
+    pub name: String,
+    pub root_id: Uuid,
+    /// Hex-encoded jj `ChangeId`.
+    pub change_id: String,
+    /// Hex-encoded jj `CommitId`.
+    pub commit_id: String,
+    /// The page body — free-form producer notes about this version.
+    pub note: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A **Project Version** (glossary): a whole-project iteration of one
+/// File Root — the same root with a new lineage, replacing the
+/// "Project Title old" / "Project Title NEW final2" folder idiom. The
+/// folder name never changes. Auto-numbered from 1 with an optional
+/// label; a Vault entity like [`NamedVersion`], referencing the commit
+/// the iteration starts from.
+///
+/// This ticket (#261) is the entity plus its numbering — the restart
+/// flow that actually flips a root's live tree is #268.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct ProjectVersion {
+    pub id: Uuid,
+    /// Vault-relative path of the entity's own page (server-filled).
+    pub path: String,
+    pub root_id: Uuid,
+    /// Auto-assigned, 1-based, per root — never reused.
+    pub number: u32,
+    /// Optional producer label ("Client remix").
+    pub label: Option<String>,
+    /// Hex-encoded jj `ChangeId` of the commit this iteration starts
+    /// from.
+    pub change_id: String,
+    /// Hex-encoded jj `CommitId` of that same commit.
+    pub commit_id: String,
+    pub started_at: DateTime<Utc>,
+}
+
+/// What a Vault version reference resolves to in the store right now —
+/// the answer a share link targeting a Named Version needs before it
+/// can stream anything (glossary "Share link": target enum
+/// `Note | Slice | Named Version | Review`).
+///
+/// `commit_id` is the exact change the reference names: resolved from
+/// the entity's `change_id` through the root's index when possible, so
+/// a rewritten change still lands on its current commit, and falling
+/// back to the recorded `commit_id` otherwise.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct VersionRef {
+    pub root_id: Uuid,
+    /// Hex-encoded jj `ChangeId` — the stable half of the reference.
+    pub change_id: String,
+    /// Hex-encoded jj `CommitId` this reference resolves to now.
+    pub commit_id: String,
+}
+
+/// Result of [`crate::service::FilesService::gc_root`] — one
+/// mark-and-sweep pass over a root's version store, with the protect
+/// set resolved from the Vault (ADR 0001: "protect set =
+/// index-reachable ∪ Vault-referenced ... the Vault is the authority
+/// on immortality").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct GcReport {
+    /// Tree/commit/copy-history objects removed.
+    pub objects_swept: u64,
+    /// Chunk-store manifests removed. Their now-unreferenced chunks are
+    /// reclaimed on the chunk store's own background schedule.
+    pub manifests_swept: u64,
+    /// How many commits the Vault protected this pass — the Named
+    /// Version and Project Version entities pointing at this root.
+    pub protected_commits: u32,
 }
 
 /// Result of [`crate::service::FilesService::checkpoint_now`] (glossary
