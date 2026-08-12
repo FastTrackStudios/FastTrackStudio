@@ -197,17 +197,39 @@ impl FilesBackend {
         root_id: Uuid,
         f: impl FnOnce(&VersionStoreBackend) -> R,
     ) -> Result<R, FilesError> {
+        self.with_repo(root_id, |repo| {
+            let backend = repo
+                .store()
+                .backend_impl::<VersionStoreBackend>()
+                .ok_or_else(|| {
+                    to_files_error(Error::Repo(
+                        "root's repo is not a VersionStoreBackend".into(),
+                    ))
+                })?;
+            Ok(f(backend))
+        })?
+    }
+
+    /// [`FilesBackend::with_version_store`] one level lower: the cached
+    /// jj repo handle itself, for the store-level properties that need
+    /// a transaction rather than just the backend.
+    ///
+    /// Deliberately the **cached** handle, never a reloaded one — a
+    /// test that writes a commit through it and doesn't touch the cache
+    /// reproduces exactly what a second process does to this one: the
+    /// op log on disk moves forward while this backend's handle stays
+    /// where it was. That is the condition [`FilesBackend::reload_repo`]
+    /// exists for, and it cannot be built with two `FilesBackend`s in
+    /// one process — two `FsStore`s over one store hangs (see
+    /// `tests/rpc_surface.rs`).
+    pub fn with_repo<R>(
+        &self,
+        root_id: Uuid,
+        f: impl FnOnce(&Arc<ReadonlyRepo>) -> R,
+    ) -> Result<R, FilesError> {
         let root = self.get_root_info(root_id).map_err(to_files_error)?;
         let (repo, _head) = self.ensure_repo(&root).map_err(to_files_error)?;
-        let backend = repo
-            .store()
-            .backend_impl::<VersionStoreBackend>()
-            .ok_or_else(|| {
-                to_files_error(Error::Repo(
-                    "root's repo is not a VersionStoreBackend".into(),
-                ))
-            })?;
-        Ok(f(backend))
+        Ok(f(&repo))
     }
 
     fn publish(&self, event: FilesEvent) {
@@ -294,6 +316,34 @@ impl FilesBackend {
                 head: head.clone(),
             },
         );
+        Ok((repo, head))
+    }
+
+    /// [`FilesBackend::ensure_repo`], but re-read from the op log
+    /// first — the only honest input for anything that walks the DAG.
+    ///
+    /// The cache is only ever advanced by *this* process's own writes
+    /// (`create_root` / `checkpoint_now` call `set_head`), and
+    /// `root_locks` is a `Mutex` in this process's memory, not a lock
+    /// on disk. A second process writing the same store is a real,
+    /// shipped path: `establish_for_url` falls back to the CLI's own
+    /// embedded backend whenever the dial fails, so `task files
+    /// checkpoint` can write commits the server's cached handle has
+    /// never seen. Sweeping from that stale index would treat those
+    /// commits as unreachable garbage, and `keep_newer` doesn't save
+    /// them — it is a race guard against writes happening *now*, not
+    /// against a handle that has been stale for an hour.
+    ///
+    /// `reload_at_head` goes through the repo's own `RepoLoader`, so
+    /// it reuses this root's existing `Store` (and the one `FsStore`
+    /// under it) rather than opening a second one — see
+    /// `with_version_store`'s doc for why that distinction matters.
+    fn reload_repo(&self, root: &FileRootInfo) -> Result<(Arc<ReadonlyRepo>, CommitId), Error> {
+        let (cached, _head) = self.ensure_repo(root)?;
+        let repo = pollster::block_on(cached.reload_at_head())
+            .map_err(|e| Error::Repo(format!("reloading {} at head: {e}", root.id)))?;
+        let head = Self::head_of(&repo);
+        self.set_head(root.id, repo.clone(), head.clone());
         Ok((repo, head))
     }
 
@@ -619,19 +669,19 @@ impl FilesBackend {
                         .map(|(_, id)| id.clone())
                 })
         });
-        let commit_id = match by_change {
-            Some(commit_id) => commit_id,
-            // The change isn't in the current index (a Named Version
-            // pointing at a commit no view head descends from is a
-            // normal, supported shape — that's exactly what the GC
-            // protect set exists for), so fall back to the exact
-            // commit the entity recorded, validated against the store.
-            None => self.resolve_commit(&root, &named.commit_id)?.0,
-        };
-        let change_id = if named.change_id.is_empty() {
-            self.resolve_commit(&root, &commit_id.hex())?.1.hex()
-        } else {
-            named.change_id.clone()
+        let (commit_id, change_id) = match by_change {
+            Some(commit_id) if !named.change_id.is_empty() => (commit_id, named.change_id.clone()),
+            // Either the change isn't in the current index (a Named
+            // Version pointing at a commit no view head descends from
+            // is a normal, supported shape — that's exactly what the GC
+            // protect set exists for), or the page recorded no change
+            // id to begin with. Both fall back to the exact commit the
+            // entity recorded, validated against the store — one
+            // lookup, which yields both halves of the answer.
+            _ => {
+                let (commit_id, change_id) = self.resolve_commit(&root, &named.commit_id)?;
+                (commit_id, change_id.hex())
+            }
         };
         Ok(VersionRef {
             root_id: named.root_id,
@@ -669,44 +719,77 @@ impl FilesBackend {
     /// resolved live from the vault pages on every pass so a name
     /// deleted (or replicated in) since the last one is honored.
     ///
-    /// Two failure modes both matter here and pull in opposite
-    /// directions, so each gets its own answer:
+    /// Three failure modes matter here and they don't all pull the same
+    /// way, so each gets its own answer:
     ///
-    /// - A page this process **cannot read or cannot parse as a commit
-    ///   id** is a reference we might be about to forfeit. It fails the
-    ///   whole pass (`protect_refs` is the strict walk; a malformed hex
-    ///   is rejected here) — GC is destructive and unnamed content is
-    ///   cheap to keep one more day.
+    /// - A page in **this root's own folder** that this process cannot
+    ///   read, or whose `commitId` isn't hex at all, is a reference we
+    ///   might be about to forfeit. It fails this root's pass
+    ///   (`protect_refs` does the strict half) — GC is destructive and
+    ///   unnamed content is cheap to keep one more day. Other roots
+    ///   sweep normally; a page that is not identifiably this root's is
+    ///   never allowed to wedge it.
     /// - A page naming a commit the store **doesn't have** protects
     ///   nothing: that content is already gone, and treating it as
     ///   fatal would wedge GC for the root forever (one stale page from
     ///   a replication reorder, and the store never gets swept again).
-    ///   It is logged and skipped.
+    ///   Logged and skipped.
+    /// - A page with an **empty** `commitId` — which
+    ///   `ProjectVersions::from_page` tolerates, so it exists — names
+    ///   nothing at all. Same reasoning: logged and skipped, never
+    ///   fatal. (`create_project_version` refuses to write one, so this
+    ///   only ever arrives by hand or by replication.)
+    ///
+    /// Note what goes into `out`: the id `resolve_commit` **resolved**,
+    /// never the one parsed off the page. A page may legitimately carry
+    /// a twelve-character prefix — that is what every human-facing
+    /// surface prints — and `CommitId::try_from_hex` would decode it
+    /// into a six-byte id that the mark phase then chokes on. It also
+    /// makes the dedup work across a page storing a prefix and another
+    /// storing the full id of the same commit.
     fn protected_commits(&self, root: &FileRootInfo) -> Result<Vec<CommitId>, Error> {
+        let (repo, _head) = self.ensure_repo(root)?;
+        let full_hex_len = repo.store().root_commit_id().as_bytes().len() * 2;
         let mut out: Vec<CommitId> = Vec::new();
-        for reference in self.versions.protect_refs(root.id)? {
-            let id = CommitId::try_from_hex(&reference.commit_id)
-                .filter(|id| !id.as_bytes().is_empty())
-                .ok_or_else(|| {
-                    Error::BadRequest(format!(
-                        "{}: {:?} is not a commit id — refusing to compute a GC protect set that \
-                         might silently forfeit the version it references",
-                        reference.page, reference.commit_id
-                    ))
-                })?;
-            match self.resolve_commit(root, &id.hex()) {
-                Ok(_) => {
-                    if !out.contains(&id) {
-                        out.push(id);
+        for reference in self.versions.protect_refs(root.id, &root.name)? {
+            if reference.commit_id.trim().is_empty() {
+                tracing::warn!(
+                    page = %reference.page,
+                    "a Files version page carries no commit id; nothing to protect"
+                );
+                continue;
+            }
+            match self.resolve_commit(root, &reference.commit_id) {
+                Ok((resolved, _change_id)) => {
+                    if !out.contains(&resolved) {
+                        out.push(resolved);
                     }
                 }
-                Err(e) => tracing::warn!(
-                    page = %reference.page,
-                    commit = %reference.commit_id,
-                    ?e,
-                    "a Files version page references a commit this root's store doesn't have; \
-                     nothing to protect"
-                ),
+                // "Not here" only means "already gone" for a full id.
+                // An *abbreviation* that resolves to nothing means we
+                // failed to interpret it — prefix lookup goes through
+                // the index, and a Named Version's whole purpose is to
+                // point at commits the index no longer reaches — so
+                // treating it as stale would forfeit exactly the
+                // content this set exists to keep. Fatal instead, with
+                // the page named so a human can write the full id.
+                Err(Error::NotFound(_)) if reference.commit_id.len() == full_hex_len => {
+                    tracing::warn!(
+                        page = %reference.page,
+                        commit = %reference.commit_id,
+                        "a Files version page references a commit this root's store doesn't have; \
+                         nothing to protect"
+                    );
+                }
+                // Not hex, or an ambiguous prefix: we cannot tell what
+                // this page protects, so we refuse to sweep past it.
+                Err(e) => {
+                    return Err(Error::BadRequest(format!(
+                        "{}: {:?} does not name a commit ({e}) — refusing to compute a GC protect \
+                         set that might silently forfeit the version it references",
+                        reference.page, reference.commit_id
+                    )));
+                }
             }
         }
         Ok(out)
@@ -728,8 +811,12 @@ impl FilesBackend {
         let lock = self.root_lock(root_id);
         let _guard = lock.lock().expect("root lock poisoned");
 
+        // Re-read the op log before deciding what is reachable: a
+        // second process may have written checkpoints this handle has
+        // never seen, and sweeping from a stale index would delete
+        // them. See `reload_repo`.
+        let (repo, _head) = self.reload_repo(&root)?;
         let protected = self.protected_commits(&root)?;
-        let (repo, _head) = self.ensure_repo(&root)?;
         let backend = repo
             .store()
             .backend_impl::<VersionStoreBackend>()
@@ -768,7 +855,10 @@ impl FilesBackend {
         let lock = self.root_lock(root_id);
         let _guard = lock.lock().expect("checkpoint lock poisoned");
 
-        let (repo, head) = self.ensure_repo(&root)?;
+        // Same staleness as `gc_root_inner`, with a different symptom:
+        // building on a cached head that a second process has already
+        // moved past forks the chain instead of extending it.
+        let (repo, head) = self.reload_repo(&root)?;
         let backend = repo
             .store()
             .backend_impl::<VersionStoreBackend>()

@@ -780,3 +780,344 @@ async fn naming_accepts_the_commit_prefix_the_chain_prints() {
 
     fx.finish().await;
 }
+
+/// Write one real checkpoint commit — a jj transaction, so it lands in
+/// the op log on disk — straight through the backend's *cached* repo
+/// handle, without telling the backend about it.
+///
+/// That is precisely the state a second process leaves behind: the op
+/// log has moved on while this `FilesBackend`'s cached handle and its
+/// `head` have not. The CLI reaches this shape for real — its
+/// `establish_for_url` falls back to an embedded backend whenever the
+/// dial fails — but it cannot be staged with two `FilesBackend`s in one
+/// test process, because two `FsStore`s over one store hangs (see
+/// `rpc_surface.rs`). Everything below the cache is identical either
+/// way: same store, same op log, a cache that is simply behind.
+async fn commit_behind_the_cache(
+    repo: &std::sync::Arc<jj_lib::repo::ReadonlyRepo>,
+    name: &str,
+    content: &[u8],
+) -> (CommitId, task_files_chunk_store::FileId) {
+    use jj_lib::repo::Repo as _;
+
+    let vs = repo
+        .store()
+        .backend_impl::<VersionStoreBackend>()
+        .expect("a VersionStoreBackend");
+    let path = RepoPath::from_internal_string(name).unwrap();
+    let chunk_id = vs
+        .chunks()
+        .write_stream(Cursor::new(content.to_vec()))
+        .await
+        .unwrap();
+    let copy_id = vs
+        .write_origin_copy(path, chunk_id.as_bytes().to_vec())
+        .await
+        .unwrap();
+
+    let parent = repo
+        .view()
+        .heads()
+        .iter()
+        .next()
+        .cloned()
+        .unwrap_or_else(|| repo.store().root_commit_id().clone());
+    let base_tree_id = repo
+        .store()
+        .get_commit_async(&parent)
+        .await
+        .unwrap()
+        .tree()
+        .tree_ids()
+        .as_resolved()
+        .cloned()
+        .expect("an unconflicted parent tree");
+
+    let mut builder = jj_lib::tree_builder::TreeBuilder::new(repo.store().clone(), base_tree_id);
+    builder.set(
+        path.to_owned(),
+        TreeValue::File {
+            id: FileId::from_bytes(chunk_id.as_bytes()),
+            executable: false,
+            copy_id,
+        },
+    );
+    let tree_id = builder.write_tree().await.unwrap();
+    let merged = jj_lib::merged_tree::MergedTree::resolved(repo.store().clone(), tree_id);
+
+    let mut tx = repo.start_transaction();
+    tx.repo_mut()
+        .new_commit(vec![parent], merged)
+        .set_description(format!("outside writer: {name}"))
+        .write()
+        .await
+        .unwrap();
+    let new_repo = tx.commit("outside checkpoint").await.unwrap();
+    let commit_id = new_repo.view().heads().iter().next().cloned().unwrap();
+    (commit_id, chunk_id)
+}
+
+/// Conductor review, finding 1: `gc_root` must not sweep from a stale
+/// cached index.
+///
+/// The repo cache only ever advances on *this* process's own writes,
+/// and `root_locks` is a `Mutex` in this process's memory, not a lock
+/// on disk. A checkpoint written by anyone else is in neither the stale
+/// index's heads nor the Vault — and `keep_newer` doesn't save it,
+/// because that guard is about writes happening *now*, not about a
+/// handle that went stale an hour ago. The sweep below runs with the
+/// guard fully off, so staleness is the only thing under test.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_checkpoint_written_behind_the_cache_survives_gc() {
+    let fx = fixture("Two Writers").await;
+    let root_id = fx.root_id().await;
+
+    std::fs::write(fx.root_dir.join("mix.wav"), b"server take").unwrap();
+    fx.client
+        .checkpoint_now(root_id, Some("server".into()))
+        .await
+        .expect("checkpoint_now rpc");
+
+    let (outside_commit, outside_chunk) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_repo(root_id, |repo| {
+                pollster::block_on(commit_behind_the_cache(repo, "mix.wav", b"laptop take"))
+            })
+            .expect("with_repo")
+    });
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let report = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("gc_root rpc");
+    assert_eq!(report.manifests_swept, 0, "nothing here is garbage");
+
+    let present = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(vs.chunks().read_to_vec(outside_chunk))
+            })
+            .expect("with_version_store")
+    });
+    assert_eq!(
+        present.expect("the outside checkpoint's content survived gc"),
+        b"laptop take",
+        "a checkpoint this process never saw must not be swept as garbage"
+    );
+
+    // And the reload is what put it back in view: the chain now walks
+    // through the commit the cache had never heard of.
+    let chain = fx
+        .client
+        .chain(root_id, "mix.wav".into())
+        .await
+        .expect("chain rpc");
+    assert!(
+        chain.iter().any(|e| e.commit_id == outside_commit.hex()),
+        "the reloaded head sees the outside checkpoint: {chain:?}"
+    );
+
+    fx.finish().await;
+}
+
+/// Conductor review, finding 2: the strict parse is scoped to the
+/// root's own folder, so a broken page belonging to a *different* root
+/// — or an ordinary note that merely carries the `files-named-version`
+/// tag — cannot wedge this root's sweep.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_foreign_broken_page_does_not_block_this_roots_gc() {
+    let fx = fixture("Scoped").await;
+    let root_id = fx.root_id().await;
+
+    let (kept_commit, kept_chunk, swept_chunk) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    let (kept, kept_chunk) =
+                        write_unreachable_commit(vs, "keeper.wav", b"the deliverable").await;
+                    let (_swept, swept_chunk) =
+                        write_unreachable_commit(vs, "scratch.wav", b"expired").await;
+                    (kept, kept_chunk, swept_chunk)
+                })
+            })
+            .expect("with_version_store")
+    });
+    fx.client
+        .name_version(root_id, kept_commit.hex(), "keeper".into())
+        .await
+        .expect("name_version rpc");
+
+    // Another root's version page, malformed.
+    let foreign = fx.vault_dir.join("Files/some-other-root/versions/v1.md");
+    std::fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+    std::fs::write(
+        &foreign,
+        "---\ntype: files-named-version\nname: theirs\nnope: no root id\n---\n",
+    )
+    .unwrap();
+
+    // And an ordinary note a user happened to tag — `matches` accepts a
+    // `tags:` entry, not just `type:`, so this is claimed by the walk
+    // too.
+    let tagged = fx.vault_dir.join("Notes/mixing-thoughts.md");
+    std::fs::create_dir_all(tagged.parent().unwrap()).unwrap();
+    std::fs::write(
+        &tagged,
+        "---\ntags:\n  - files-named-version\n---\n\nJust a note about versioning.\n",
+    )
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let report = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("a page outside this root's folder must not block its sweep");
+    assert_eq!(report.protected_commits, 1);
+
+    let (kept_present, swept_present) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    (
+                        vs.chunks().has(kept_chunk).await,
+                        vs.chunks().has(swept_chunk).await,
+                    )
+                })
+            })
+            .expect("with_version_store")
+    });
+    assert!(kept_present, "the Named Version's content survived");
+    assert!(!swept_present, "the unnamed content was swept");
+
+    fx.finish().await;
+}
+
+/// Conductor review, findings 3 and 4, on the two shapes a hand-written
+/// page actually takes (these pages are advertised as editable in a
+/// text editor):
+///
+/// - a twelve-character commit *prefix* — what `task files chain` and
+///   `version list` print — sweeps normally, because the protect set
+///   stores the id `resolve_commit` resolved rather than the truncated
+///   one parsed off the page (which would decode to a six-byte id and
+///   fail the mark phase on every pass);
+/// - an empty `commitId`, which `ProjectVersions::from_page`
+///   deliberately tolerates, names nothing and is skipped rather than
+///   wedging the root forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_prefix_page_gcs_fine_and_an_empty_commit_id_does_not_wedge() {
+    let fx = fixture("Handwritten").await;
+    let root_id = fx.root_id().await;
+
+    // A real checkpoint, so its commit is in the index — which is what
+    // prefix resolution goes through.
+    std::fs::write(fx.root_dir.join("keeper.wav"), b"the deliverable").unwrap();
+    let cp = fx
+        .client
+        .checkpoint_now(root_id, Some("keeper".into()))
+        .await
+        .expect("checkpoint_now rpc");
+    let swept_chunk = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(write_unreachable_commit(vs, "scratch.wav", b"expired")).1
+            })
+            .expect("with_version_store")
+    });
+    let named = fx
+        .client
+        .name_version(root_id, cp.commit_id.clone(), "keeper".into())
+        .await
+        .expect("name_version rpc");
+
+    // Rewrite the page the way a human would after copying an id out of
+    // `task files chain`: the first twelve characters.
+    let page = fx.vault_dir.join(&named.path);
+    let body = std::fs::read_to_string(&page).unwrap();
+    std::fs::write(
+        &page,
+        body.replace(&named.commit_id, &named.commit_id[..12]),
+    )
+    .unwrap();
+
+    // And a hand-written Project Version page that never got a commit
+    // id — a shape `ProjectVersions::from_page` deliberately tolerates.
+    // (`start_project_version` refuses to write one, so it can only
+    // arrive by hand or by replication.)
+    let empty = fx
+        .vault_dir
+        .join("Files/handwritten/project-versions/v7.md");
+    std::fs::create_dir_all(empty.parent().unwrap()).unwrap();
+    std::fs::write(
+        &empty,
+        format!(
+            "---\ntype: files-project-version\nrootId: {root_id}\nnumber: 7\ncommitId: ''\n---\n"
+        ),
+    )
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let report = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("a prefix id and an empty id must both leave gc working");
+    assert_eq!(
+        report.protected_commits, 1,
+        "the prefix resolved to the real commit; the empty id protected nothing"
+    );
+    assert_eq!(report.manifests_swept, 1, "the unnamed orphan was swept");
+
+    // Still working on the next pass — the point of "does not wedge".
+    fx.client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("gc stays healthy on subsequent passes");
+    let swept_present = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(vs.chunks().has(swept_chunk))
+            })
+            .expect("with_version_store")
+    });
+    assert!(!swept_present);
+
+    // The one abbreviation that must NOT be waved through: a prefix
+    // naming a commit the index can't reach. Prefix lookup goes through
+    // the index, and pointing past it is a Named Version's whole
+    // purpose — so "didn't resolve" here means "couldn't interpret",
+    // not "already gone", and forfeiting the content would be the very
+    // mistake this protect set exists to prevent.
+    let orphan = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(write_unreachable_commit(vs, "orphan.wav", b"unreachable")).0
+            })
+            .expect("with_version_store")
+    });
+    let orphan_named = fx
+        .client
+        .name_version(root_id, orphan.hex(), "orphan".into())
+        .await
+        .expect("name_version rpc");
+    let orphan_page = fx.vault_dir.join(&orphan_named.path);
+    let orphan_body = std::fs::read_to_string(&orphan_page).unwrap();
+    std::fs::write(
+        &orphan_page,
+        orphan_body.replace(&orphan_named.commit_id, &orphan_named.commit_id[..12]),
+    )
+    .unwrap();
+    let err =
+        fx.client.gc_root(root_id, Some(0)).await.expect_err(
+            "an unresolvable abbreviation must stop the sweep, not forfeit the content",
+        );
+    assert!(
+        format!("{err}").contains(&orphan_named.path),
+        "the error names the page to fix: {err}"
+    );
+
+    fx.finish().await;
+}

@@ -78,41 +78,64 @@ impl VaultVersions {
         Ok(VaultEntityStore::new(vault))
     }
 
-    /// Every version entity of `root_id`, from **one** vault scan, with
-    /// **no page silently skipped** — the input `gc_root`'s protect set
-    /// is built from.
+    /// Every version entity of `root_id`, from **one** vault scan — the
+    /// input `gc_root`'s protect set is built from, and the one read
+    /// where a page must never be silently skipped.
     ///
     /// The ordinary list paths above go through `VaultEntityStore::scan`,
     /// which logs and drops a page it can't parse. That is right for a
     /// listing (one broken page must not blank the UI) and catastrophic
     /// for GC: ADR 0001 makes the Vault "the authority on immortality",
     /// so a reference the Vault holds but this process failed to read
-    /// must stop the sweep, never quietly forfeit that content's
-    /// protection. Hence a separate, strict walk that returns the first
-    /// parse failure.
-    pub fn protect_refs(&self, root_id: Uuid) -> Result<Vec<VersionEntityRef>> {
+    /// must stop the sweep rather than quietly forfeit that content's
+    /// protection.
+    ///
+    /// **But only for pages that are identifiably this root's.** The
+    /// strict half is scoped to `Files/<root-slug>/`, where this crate
+    /// writes them. Everywhere else, a page that fails to parse is
+    /// logged and skipped, because "matches" is a loose test: the
+    /// shared `VaultEntity::matches` accepts `type:` *or* a `tags:`
+    /// entry, so an ordinary note a user tagged `files-named-version`
+    /// is claimed by this walk, and a page missing `rootId` belongs to
+    /// no root at all. Without the scope, one such page anywhere in the
+    /// org vault would wedge GC for *every* root — the exact blast
+    /// radius the log-and-skip arm downstream exists to prevent.
+    pub fn protect_refs(&self, root_id: Uuid, root_name: &str) -> Result<Vec<VersionEntityRef>> {
         let store = self.read_store::<NamedVersions>()?;
+        let owned_prefix = format!(
+            "{FILES_FOLDER}/{}/",
+            vault_entity::slugify(root_name, "root")
+        );
         store.with_vault(|vault| {
             let mut out = Vec::new();
             for page in &vault.pages {
-                if NamedVersions::matches(page) {
-                    let v =
-                        NamedVersions::from_page(page).map_err(|e| strict_parse_err(page, e))?;
-                    if v.root_id == root_id {
-                        out.push(VersionEntityRef {
-                            page: page.rel_path.clone(),
-                            commit_id: v.commit_id,
-                        });
-                    }
+                let parsed = if NamedVersions::matches(page) {
+                    NamedVersions::from_page(page).map(|v| (v.root_id, v.commit_id))
                 } else if ProjectVersions::matches(page) {
-                    let v =
-                        ProjectVersions::from_page(page).map_err(|e| strict_parse_err(page, e))?;
-                    if v.root_id == root_id {
-                        out.push(VersionEntityRef {
-                            page: page.rel_path.clone(),
-                            commit_id: v.commit_id,
-                        });
+                    ProjectVersions::from_page(page).map(|v| (v.root_id, v.commit_id))
+                } else {
+                    continue;
+                };
+                let (page_root_id, commit_id) = match parsed {
+                    Ok(v) => v,
+                    Err(e) if page.rel_path.starts_with(&owned_prefix) => {
+                        return Err(strict_parse_err(page, e));
                     }
+                    Err(e) => {
+                        tracing::warn!(
+                            page = %page.rel_path,
+                            ?e,
+                            "a page claiming a Files version type is unreadable; it is not in \
+                             this root's folder, so it cannot be one of its references"
+                        );
+                        continue;
+                    }
+                };
+                if page_root_id == root_id {
+                    out.push(VersionEntityRef {
+                        page: page.rel_path.clone(),
+                        commit_id,
+                    });
                 }
             }
             Ok(out)
@@ -206,6 +229,15 @@ impl VaultVersions {
         change_id: String,
         commit_id: String,
     ) -> Result<ProjectVersion> {
+        // `ProjectVersions::from_page` tolerates a missing `commitId`
+        // (a page written by hand mid-edit still has to load), so the
+        // writer is where that shape gets refused — otherwise this
+        // crate would itself produce references that name nothing.
+        if commit_id.trim().is_empty() {
+            return Err(Error::BadRequest(
+                "a Project Version must reference a commit".into(),
+            ));
+        }
         // One snapshot for both the numbering and the path (see
         // `create_named_version`).
         let store = self.write_store::<ProjectVersions>()?;
