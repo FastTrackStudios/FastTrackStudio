@@ -333,3 +333,73 @@ async fn the_flip_arrives_as_ordinary_events() {
     assert!(saw_checkpoint, "the flip checkpoint is an ordinary event");
     assert!(saw_pv, "the Project Version rides the same stream");
 }
+
+/// PR #290 review regressions: the validations that keep a restart a
+/// no-op when its inputs are wrong, and the seed that never clobbers.
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_refuses_bad_inputs_before_touching_anything() {
+    let rig = rig().await;
+
+    // A template inside the root would be gutted by the clear first.
+    let inner = rig.root_dir.join("_template");
+    std::fs::create_dir_all(&inner).unwrap();
+    let err = rig
+        .client
+        .restart_project_version(
+            rig.root_id,
+            RestartMode::Template {
+                source_path: inner.to_string_lossy().into_owned(),
+            },
+            None,
+        )
+        .await
+        .expect_err("template inside the root must refuse");
+    assert!(err.to_string().contains("outside the root"), "{err}");
+
+    // A carry-forward typo would clear the whole tree.
+    let err = rig
+        .client
+        .restart_project_version(
+            rig.root_id,
+            RestartMode::CarryForward {
+                paths: vec!["stemz".into()],
+            },
+            None,
+        )
+        .await
+        .expect_err("carry-forward typo must refuse");
+    assert!(err.to_string().contains("matches nothing tracked"), "{err}");
+
+    // Both refusals were no-ops: live tree intact, no entity minted.
+    assert!(rig.root_dir.join("mix.wav").exists());
+    assert!(rig.root_dir.join("stems").join("kick.wav").exists());
+    let versions = rig.client.list_project_versions(rig.root_id).await.unwrap();
+    assert!(versions.is_empty());
+}
+
+/// A template file never overwrites a file that survived the clear —
+/// the survivor (here: ignored, never versioned) wins.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_seed_never_overwrites_a_survivor() {
+    let rig = rig().await;
+    let template = rig.data_dir.path().join("template");
+    std::fs::create_dir_all(&template).unwrap();
+    // The template ships a file colliding with the root's ignored junk.
+    std::fs::write(template.join("mix.wav.reapeaks"), b"template peaks").unwrap();
+
+    rig.client
+        .restart_project_version(
+            rig.root_id,
+            RestartMode::Template {
+                source_path: template.to_string_lossy().into_owned(),
+            },
+            None,
+        )
+        .await
+        .expect("restart from template");
+    assert_eq!(
+        std::fs::read(rig.root_dir.join("mix.wav.reapeaks")).unwrap(),
+        b"peaks",
+        "the survivor's bytes, not the template's"
+    );
+}

@@ -1155,6 +1155,20 @@ impl FilesBackend {
         commit_ref: &str,
     ) -> Result<(CommitId, ChangeId), Error> {
         let (repo, _head) = self.ensure_repo(root)?;
+        Self::resolve_commit_in(&repo, root, commit_ref)
+    }
+
+    /// [`FilesBackend::resolve_commit`] against a repo handle the
+    /// caller already holds — the read-path variant: it opens nothing,
+    /// so a read surface (`browse_at`) can resolve without the
+    /// store-initializing side effect `ensure_repo` carries (the
+    /// read-must-never-init rule of PR #288, re-flagged for time-travel
+    /// browsing by PR #290's review).
+    fn resolve_commit_in(
+        repo: &Arc<ReadonlyRepo>,
+        root: &FileRootInfo,
+        commit_ref: &str,
+    ) -> Result<(CommitId, ChangeId), Error> {
         let backend = repo.store().backend();
 
         // A full id is just an even-length hex string as far as
@@ -2208,6 +2222,16 @@ impl FilesBackend {
             RestartMode::Template { source_path } => {
                 let source = self.confine(Path::new(source_path))?;
                 crate::restart::validate_template(&source)?;
+                // Disjoint from the root, both directions: a template
+                // inside the restarting root would be gutted by the
+                // clear before it seeds (a half-completed destructive
+                // restart), and a template containing the root would
+                // copy the tree into itself (PR #290 review).
+                if source.starts_with(&root_path) || root_path.starts_with(&source) {
+                    return Err(Error::BadRequest(format!(
+                        "{source_path}: the template must be outside the root being restarted"
+                    )));
+                }
                 Some(source)
             }
             _ => None,
@@ -2281,8 +2305,34 @@ impl FilesBackend {
             }
             None => true,
         };
+        // A carry-forward path that names nothing tracked is almost
+        // certainly a typo, and the cost of honoring it is clearing
+        // the whole tree (PR #290 review): refuse before removing
+        // anything. Matching mirrors `keeps`: exact path or directory
+        // prefix of something tracked.
+        if let Some(set) = &carry {
+            for kept in set {
+                let prefix = format!("{}/", kept.as_internal_file_string());
+                let hits = head_paths.contains(kept)
+                    || head_paths
+                        .iter()
+                        .any(|p| p.as_internal_file_string().starts_with(&prefix));
+                if !hits {
+                    return Err(Error::BadRequest(format!(
+                        "carry-forward path {:?} matches nothing tracked — nothing was cleared",
+                        kept.as_internal_file_string()
+                    )));
+                }
+            }
+        }
+
+        struct Mover {
+            repo_path: RepoPathBuf,
+            disk: PathBuf,
+            copy_id: jj_lib::backend::CopyId,
+        }
         let mut removed: Vec<PathBuf> = Vec::new();
-        let mut movers: Vec<(RepoPathBuf, PathBuf)> = Vec::new();
+        let mut movers: Vec<Mover> = Vec::new();
         for repo_path in &head_paths {
             if keeps(repo_path) {
                 continue;
@@ -2291,32 +2341,62 @@ impl FilesBackend {
             if !disk.exists() {
                 continue;
             }
-            // A stub clears without any verify: its content is in the
-            // store by construction, and its bytes are a placeholder.
+            let Some(existing) = pollster::block_on(task_files_version_store::chain::lookup_dyn(
+                backend, &head_tree, repo_path,
+            ))?
+            else {
+                continue;
+            };
+            let (head_id, copy_id) = match existing {
+                jj_lib::backend::TreeValue::File { id, copy_id, .. } => (id, copy_id),
+                _ => continue,
+            };
+            let as_mover = |disk: &Path| Mover {
+                repo_path: repo_path.clone(),
+                disk: disk.to_path_buf(),
+                copy_id: copy_id.clone(),
+            };
+            // A stub clears without a content verify: its content is
+            // in the store by construction and its bytes are a
+            // placeholder — but the stat sandwich still runs, because
+            // a save can replace the stub with real content mid-flip.
             let is_stub = stub::probe(&disk).is_some();
+            // Every removal rides the same certify sandwich as a
+            // checkpoint read (PR #290 review): an external writer —
+            // DAW, WebDAV — holds none of our locks, so a file that
+            // moved between the verify and the delete is a mid-flip
+            // save. It is never deleted: it becomes a mover, kept on
+            // the old iteration as flagged divergence.
+            let guard = crate::certify::StatGuard::begin(&disk)?;
             if !is_stub {
-                let Some(existing) = pollster::block_on(
-                    task_files_version_store::chain::lookup_dyn(backend, &head_tree, repo_path),
-                )?
-                else {
-                    continue;
-                };
-                let head_id = match existing {
-                    jj_lib::backend::TreeValue::File { id, .. } => id,
-                    _ => continue,
-                };
                 let disk_id = content.probe(&disk)?.ok_or_else(|| {
                     Error::Repo(
                         "this root's backend cannot derive content ids without writing".into(),
                     )
                 })?;
                 if disk_id != head_id {
-                    movers.push((repo_path.clone(), disk.clone()));
+                    movers.push(as_mover(&disk));
                     continue;
                 }
             }
-            std::fs::remove_file(&disk)?;
-            removed.push(disk);
+            match guard.check(&disk)? {
+                crate::certify::Settled::Stable => {}
+                // Moved, or timestamps too coarse to prove otherwise:
+                // treat as a mid-flip save rather than re-reading —
+                // the mover path re-verifies by content anyway.
+                _ => {
+                    movers.push(as_mover(&disk));
+                    continue;
+                }
+            }
+            match std::fs::remove_file(&disk) {
+                Ok(()) => removed.push(disk),
+                // Vanished concurrently: exactly the outcome a removal
+                // wants; aborting a restart half-done over it would be
+                // worse than the race (PR #290 review).
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
         }
         crate::restart::prune_empty_dirs(&root_path, &removed);
 
@@ -2331,24 +2411,25 @@ impl FilesBackend {
             let store = repo.store().clone();
             let mut builder =
                 jj_lib::tree_builder::TreeBuilder::new(store.clone(), head_tree_id.clone());
-            for (repo_path, disk) in &movers {
-                let probed = content.probe(disk)?;
-                let id = pollster::block_on(content.write(repo_path, disk, probed))?;
-                let existing = pollster::block_on(task_files_version_store::chain::lookup_dyn(
-                    backend, &head_tree, repo_path,
-                ))?;
-                let copy_id = match existing {
-                    Some(jj_lib::backend::TreeValue::File { copy_id, .. }) => copy_id,
-                    _ => jj_lib::backend::CopyId::placeholder(),
-                };
+            let mut settled: Vec<bool> = Vec::with_capacity(movers.len());
+            for mover in &movers {
+                // Sandwich the ingest too: a THIRD save landing while
+                // the mover streams into the store means the on-disk
+                // bytes are newer than what the divergence commit will
+                // hold — such a file is left on disk for the flip scan
+                // to capture instead of being deleted below.
+                let guard = crate::certify::StatGuard::begin(&mover.disk)?;
+                let probed = content.probe(&mover.disk)?;
+                let id = pollster::block_on(content.write(&mover.repo_path, &mover.disk, probed))?;
                 builder.set(
-                    repo_path.clone(),
+                    mover.repo_path.clone(),
                     jj_lib::backend::TreeValue::File {
                         id,
                         executable: false,
-                        copy_id,
+                        copy_id: mover.copy_id.clone(),
                     },
                 );
+                settled.push(guard.check(&mover.disk)? == crate::certify::Settled::Stable);
             }
             let div_tree_id = pollster::block_on(builder.write_tree())
                 .map_err(|e| Error::Repo(format!("mid-flip tree: {e}")))?;
@@ -2365,10 +2446,21 @@ impl FilesBackend {
             .map_err(|e| Error::Repo(format!("mid-flip commit: {e}")))?;
             let committed = pollster::block_on(tx.commit("mid-flip divergence"))
                 .map_err(|e| Error::Repo(e.to_string()))?;
-            for (_, disk) in &movers {
+            for (mover, settled) in movers.iter().zip(&settled) {
+                if !settled {
+                    // Still being written when it was ingested: the
+                    // disk bytes may be newer than the divergence
+                    // commit. Leave the file — the flip scan captures
+                    // it into the new lineage; nothing is lost.
+                    continue;
+                }
                 // Durably in the store (and flagged); the live tree
                 // belongs to the new lineage now.
-                std::fs::remove_file(disk)?;
+                if let Err(e) = std::fs::remove_file(&mover.disk)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    return Err(e.into());
+                }
             }
             flip_repo = committed;
         }
@@ -2449,9 +2541,17 @@ impl FilesBackend {
         subpath: String,
     ) -> Result<Vec<BrowseEntry>, Error> {
         let root = self.get_root_info(root_id)?;
-        let (commit_id, _) = self.resolve_commit(&root, &commit_ref)?;
+        // Read path: open-only, reloaded to head — time-travel browsing
+        // must neither initialize a store on a bare mountpoint nor
+        // answer from a snapshot frozen at this process's last write
+        // (PR #288's browse rule, applied here per PR #290's review).
+        let Some((repo, _head)) = self.reload_existing_repo(&root)? else {
+            return Err(Error::NotFound(format!(
+                "{root_id}: no version store (never checkpointed, or its volume is not mounted)"
+            )));
+        };
+        let (commit_id, _) = Self::resolve_commit_in(&repo, &root, &commit_ref)?;
         let dir = badges::repo_dir(&subpath)?;
-        let (repo, _) = self.ensure_repo(&root)?;
         let backend = repo.store().backend();
         let listed = pollster::block_on(badges::listing(backend, &commit_id, &dir))?;
         if listed.is_empty() && !subpath.is_empty() {
@@ -2482,6 +2582,12 @@ impl FilesBackend {
         paths: Vec<String>,
     ) -> Result<Vec<String>, Error> {
         let root = self.get_root_info(root_id)?;
+        // Media-only like every other verb that mutates the live tree
+        // from Files' side: rewriting a Software root's colocated git
+        // working tree behind git's back would hand git users surprise
+        // modifications (PR #290 review) — `git checkout <commit> -- p`
+        // is that flavor's copy-forward.
+        Self::require_media(&root, "copy_forward")?;
         if paths.is_empty() {
             return Err(Error::BadRequest("copy_forward: no paths given".into()));
         }

@@ -33,6 +33,19 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
             std::fs::create_dir_all(&target)?;
             copy_dir(&entry.path(), &target)?;
         } else if file_type.is_file() {
+            // Never overwrite a file that survived the clear: whatever
+            // it is — an ignored note, a mid-flip save the clear kept —
+            // it is by definition data no checkpoint holds, and a
+            // template seed must not be the thing that destroys it
+            // (PR #290 review). The template's copy simply loses to
+            // what's already there.
+            if target.exists() {
+                tracing::warn!(
+                    target_path = %target.display(),
+                    "template seed skipping a file that survived the clear",
+                );
+                continue;
+            }
             std::fs::copy(entry.path(), &target)?;
         }
         // Symlinks in a template are skipped, matching the scan walker.
