@@ -349,6 +349,24 @@ impl FilesBackend {
         &self.data_dir
     }
 
+    /// This org's files area — the boundary every caller-supplied path
+    /// is confined to (see the module doc's "Filesystem confinement").
+    ///
+    /// Exposed as the boundary itself rather than as a
+    /// `is_confined(path) -> bool` helper so that other surfaces over
+    /// the same roots — the WebDAV bridge (`files-webdav`, issue #274)
+    /// checks a root's live tree before handing a filesystem view of it
+    /// to a network client — can call [`task_files_util::confine`]
+    /// directly and *keep the error kind*. A `bool` collapses
+    /// `PathError::Escapes` (a genuine confinement breach, alert-worthy)
+    /// into `PathError::Io` (a temporarily-unmounted volume, EIO), and
+    /// reporting the second as the first is both a false alarm and the
+    /// wrong status code (PR #287 review).
+    #[must_use]
+    pub fn confine_root(&self) -> &Path {
+        &self.confine_root
+    }
+
     /// The org vault the curated version entities live in.
     #[must_use]
     pub fn vault_root(&self) -> &Path {

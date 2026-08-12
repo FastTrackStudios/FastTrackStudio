@@ -38,6 +38,7 @@ pub mod share;
 pub mod snapshot;
 pub mod storage;
 pub mod watch_bridge;
+pub mod webdav;
 #[cfg(feature = "plugin-forge")]
 pub mod webhooks;
 
@@ -152,6 +153,11 @@ pub struct OrgAppState {
     /// per-root jj repos live under `<org>/files/`, outside the vault
     /// (a File Root is never vault-replicated; see the glossary).
     pub files: files::FilesBackend,
+    /// WebDAV compat bridge over the same roots (issue #274) — mounted
+    /// at `/org/{slug}/dav`, current heads only, never the sync path.
+    /// Holds this org's per-root WebDAV policy and lock managers, so it
+    /// is built once per org rather than per request.
+    pub files_webdav: files_webdav::WebdavBridge,
     /// This org's lane onto the Files placement layer (issue #262) — the
     /// Storage Locations it was granted, and where its roots are placed.
     /// The registry underneath is deployment-scoped and shared by every
@@ -1192,6 +1198,7 @@ pub(crate) async fn build_org_state(
         // ordinary vault pages, so the backend gets both paths.
         let files = files::FilesBackend::new(org_root.path().join("files"), vault_root.clone())
             .map_err(|e| eyre::eyre!("files backend: {e}"))?;
+        let files_webdav = files_webdav::WebdavBridge::new(files.clone());
         // Placement lane. The coordinator is the deployment's, owned by
         // `AppState` and passed in — this is just this org's view of it.
         let storage = files_storage::StorageBackend::new(storage.clone(), org_root.slug());
@@ -1425,6 +1432,7 @@ pub(crate) async fn build_org_state(
             milestones,
             workstreams,
             files,
+            files_webdav,
             storage,
             tasks,
             #[cfg(feature = "plugin-home")]
@@ -2080,7 +2088,34 @@ pub fn router(state: AppState) -> Router {
     };
     #[cfg(feature = "plugin-forge")]
     let router = router.merge(webhook_routes);
-    router.layer(cors_layer()).with_state(state)
+
+    // Files WebDAV bridge (issue #274) — mount an org's File Roots from
+    // Finder/Explorer. `any` because WebDAV's verbs (PROPFIND, MKCOL,
+    // MOVE, LOCK, …) are not in axum's method router, and all three
+    // path shapes because a collection is addressed with a trailing
+    // slash (`/dav/` is what a client PROPFINDs at mount time), which
+    // axum's wildcard does not match — it needs at least one character
+    // — while `/dav` without one is what a user types into the dialog.
+    //
+    // Merged AFTER `cors_layer()` so these routes sit outside it.
+    // tower-http's `Cors` short-circuits *any* request whose method is
+    // `OPTIONS` — it does not require an `Origin` or
+    // `Access-Control-Request-Method` header — returning a bare 200 and
+    // never calling the inner service. Finder/Explorer/gvfs begin a
+    // mount with exactly that: `OPTIONS /org/{slug}/dav/` with no CORS
+    // headers, and they read `DAV:` and `Allow:` off the response to
+    // decide whether this is a WebDAV server at all. Under the layer
+    // they got a bare 200 with neither header and refused to mount, and
+    // `webdav_handler` was never reached — so nothing authenticated
+    // either. WebDAV clients are not browsers; CORS has nothing to say
+    // about them (PR #287 review).
+    let dav = Router::new()
+        .route("/org/{slug}/dav", any(webdav::webdav_handler))
+        .route("/org/{slug}/dav/", any(webdav::webdav_handler))
+        .route("/org/{slug}/dav/{*path}", any(webdav::webdav_handler))
+        .with_state(state.clone());
+
+    router.layer(cors_layer()).merge(dav).with_state(state)
 }
 
 /// CORS policy. **Default is unchanged**: with `TASK_CORS_ALLOWED_ORIGINS`

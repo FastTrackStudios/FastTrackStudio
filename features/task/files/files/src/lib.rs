@@ -50,6 +50,13 @@ pub use error::{Error, Result};
 pub use files_proto::service;
 pub use versions::VaultVersions;
 
+// A root's own internals, by name. Public because every *other* view of
+// a live tree has to agree with `browse` about what is and is not part
+// of the tree — the WebDAV bridge (`files-webdav`, issue #274) hides
+// exactly these two so a mount shows the current head and nothing of
+// the version store.
+pub use consts::{MARKER_FILE, STORE_DIR};
+
 pub use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
     GcReport, NamedVersion, ProjectVersion, RootFlavor, SavePoint, SnapshotInfo, VersionRef,

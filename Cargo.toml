@@ -1002,6 +1002,9 @@ task-files-util = { path = "crates/task/files-util" }
 files-proto = { path = "features/task/files/files-proto", default-features = false }
 files = { path = "features/task/files/files" }
 files-ui = { path = "features/task/files/files-ui" }
+# The WebDAV compat bridge (issue #274): mount a root's live tree from
+# any OS file manager. Current heads only, never the sync path.
+files-webdav = { path = "features/task/files/files-webdav" }
 # Files placement layer (issue #262): Storage Locations, Storage grants,
 # the storage-agent protocol, and the in-server hosting.
 files-storage-proto = { path = "features/task/files/files-storage-proto", default-features = false }
