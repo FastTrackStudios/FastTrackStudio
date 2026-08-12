@@ -9133,6 +9133,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "expression-editor-demo"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-proto",
+ "dawfile-reaper",
+ "dawfile-standalone",
+ "expression-editor-audio",
+ "expression-editor-core",
+ "expression-editor-corpus",
+ "expression-editor-daw",
+ "expression-editor-guitarpro",
+ "expression-editor-tools",
+ "hound",
+ "midly",
+]
+
+[[package]]
 name = "expression-editor-guitarpro"
 version = "0.1.0"
 dependencies = [
@@ -9167,6 +9185,7 @@ dependencies = [
  "expression-editor-audio",
  "expression-editor-core",
  "expression-editor-daw",
+ "expression-editor-guitarpro",
  "expression-editor-ui",
  "nice-plug-dioxus",
  "tokio",
@@ -9914,16 +9933,22 @@ dependencies = [
  "async-trait",
  "chrono",
  "files-proto",
+ "gix",
  "jj-lib",
  "pollster 0.4.0",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "task-files-chunk-store",
  "task-files-version-store",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
+ "vault",
+ "vault-entity",
  "vox",
 ]
 

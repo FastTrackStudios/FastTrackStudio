@@ -6,7 +6,10 @@
 //! `apps/task/docs/adr/0001-files-version-store-jj-cas.md`). This
 //! ticket (#259) is the RPC surface v1: create a File Root from an
 //! existing folder, browse it, read a file's version chain, trigger a
-//! checkpoint on demand.
+//! checkpoint on demand. Issue #261 adds the curated half — Named
+//! Versions and Project Versions, which are *Vault* entities
+//! referencing `(root id, change id)` rather than store constructs,
+//! plus the Vault-protected GC pass that makes them immortal.
 //!
 //! This proto owns the wasm-clean wire surface — [`model`]'s types plus
 //! the [`service::FilesService`] trait. The sibling `files` crate sits
@@ -17,7 +20,8 @@ pub mod model;
 pub mod service;
 
 pub use model::{
-    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, ProjectVersionBadge, RootFlavor,
+    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, NamedVersion, ProjectVersion,
+    RootFlavor, VersionRef,
 };
 pub use service::{FilesError, FilesEvent, FilesService};
 

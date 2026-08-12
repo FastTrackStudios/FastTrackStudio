@@ -22,7 +22,8 @@
 //!   saves survive side by side; the badge rides the entry until
 //!   someone resolves it (issue #267).
 //! - *Project Version* — [`files_proto::FileRootInfo::project_version`]:
-//!   the root's lineage badge, so "Project NEW final2" folders stay
+//!   the root's current lineage (its highest-numbered `ProjectVersion`
+//!   Vault entity, issue #261), so "Project NEW final2" folders stay
 //!   dead.
 //! - *Versions* — a file's [`files_proto::ChainEntry`] count, fetched
 //!   when a row is opened (the chain is derived per file, so it is a
@@ -35,7 +36,7 @@
 use dioxus::prelude::*;
 use files_proto::{
     BrowseEntry, ChainEntry, FileRootInfo, FilesEvent, FilesServiceClient,
-    FilesServiceStreamClient, ProjectVersionBadge,
+    FilesServiceStreamClient, ProjectVersion,
 };
 use fts_ui::prelude::*;
 use task_ui_core::orgs::{OrgMeta, OrgSelection};
@@ -174,11 +175,14 @@ fn human_size(entry: &BrowseEntry) -> String {
 }
 
 /// The root's Project Version badge label ("Project Version 2 · client
-/// cut").
-fn project_version_label(badge: &ProjectVersionBadge) -> String {
-    match &badge.label {
-        Some(label) if !label.is_empty() => format!("Project Version {} · {label}", badge.number),
-        _ => format!("Project Version {}", badge.number),
+/// cut") — the projection of its current [`ProjectVersion`] entity
+/// (issue #261).
+fn project_version_label(version: &ProjectVersion) -> String {
+    match &version.label {
+        Some(label) if !label.is_empty() => {
+            format!("Project Version {} · {label}", version.number)
+        }
+        _ => format!("Project Version {}", version.number),
     }
 }
 
@@ -214,7 +218,7 @@ pub fn Explorer(props: ExplorerProps) -> Element {
     let start = props.start.clone();
     use_effect(use_reactive!(|start| location.set(start)));
 
-    let entries = {
+    let mut entries = {
         let org = org.clone();
         use_resource(move || {
             let org = org.clone();
@@ -246,6 +250,12 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                 let touched = match &event {
                     FilesEvent::Checkpointed(info) => Some(info.root_id),
                     FilesEvent::RootCreated(root) => Some(root.id),
+                    // Curation (issue #261) doesn't move a live tree,
+                    // but it does move the badges this pane renders
+                    // (a chain's names, a root's lineage), so it is a
+                    // reason to re-read too.
+                    FilesEvent::VersionNamed(v) | FilesEvent::VersionUnnamed(v) => Some(v.root_id),
+                    FilesEvent::ProjectVersionStarted(pv) => Some(pv.root_id),
                 };
                 // Drive listings have no root id, so any Files event is
                 // a reason to re-read (loose files move under roots).
@@ -327,15 +337,19 @@ pub fn Explorer(props: ExplorerProps) -> Element {
             }
             {match listing {
                 None => rsx! {
-                    Text { variant: TextVariant::Muted, "Loading…" }
+                    task_ui_core::states::LoadingState { rows: 3 }
                 },
                 Some(Err(e)) => rsx! {
-                    div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                        "Couldn't reach the Files service: {e}"
+                    task_ui_core::states::ErrorState {
+                        message: e,
+                        on_retry: move |()| entries.restart(),
                     }
                 },
                 Some(Ok(rows)) if rows.is_empty() => rsx! {
-                    Text { variant: TextVariant::Muted, "Nothing here yet." }
+                    task_ui_core::states::EmptyState {
+                        title: "Nothing here yet",
+                        hint: "Files saved into this folder show up on the next Session checkpoint.",
+                    }
                 },
                 Some(Ok(rows)) => rsx! {
                     div { class: "flex flex-col divide-y divide-border/30",
@@ -469,6 +483,19 @@ fn short_id(commit_id: &str) -> String {
 
 // ── The standalone pane ───────────────────────────────────────────
 
+/// What the pane is showing. Three states, not `Option<Uuid>`: "nothing
+/// chosen yet" and "the user chose Drive" are different answers, and
+/// collapsing them makes every roots refresh look like a fresh mount.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Selection {
+    /// Before the roots list has landed — the only state the
+    /// auto-select effect may act on.
+    Unset,
+    /// The Drive surface (loose files outside any root).
+    Drive,
+    Root(Uuid),
+}
+
 /// The shell's `/files` pane: the org's roots down the side, the
 /// selected root (or Drive) in the middle.
 #[component]
@@ -478,7 +505,7 @@ pub fn FilesPane() -> Element {
     let org =
         use_memo(move || task_ui_core::orgs::active_slug(&selection.read(), &org_list.read()));
 
-    let roots = use_resource(move || async move {
+    let mut roots = use_resource(move || async move {
         let slug = org();
         if slug.is_empty() {
             return Ok(Vec::new());
@@ -508,27 +535,37 @@ pub fn FilesPane() -> Element {
         },
     );
 
-    // `None` = the Drive surface.
-    let mut selected = use_signal(|| Option::<Uuid>::None);
+    let mut selected = use_signal(|| Selection::Unset);
     let rows = roots.read_unchecked().clone();
     let known: Vec<FileRootInfo> = match &rows {
         Some(Ok(list)) => list.clone(),
         _ => Vec::new(),
     };
-    // Land on the first root once the list arrives (reads the roots
-    // resource, so it re-runs when the list lands).
+    // Land on the first root once the list arrives — ONLY from
+    // `Unset`. The effect re-runs on every `roots` completion (a
+    // `RootCreated` anywhere restarts it), so a two-state selection
+    // that spelled Drive as "nothing selected" would yank a user off
+    // Drive and drop the path they had typed (PR #288 review).
     use_effect(move || {
-        if selected.peek().is_some() {
+        if *selected.peek() != Selection::Unset {
             return;
         }
         if let Some(Ok(list)) = &*roots.read() {
             if let Some(first) = list.first() {
-                selected.set(Some(first.id));
+                selected.set(Selection::Root(first.id));
             }
         }
     });
 
-    let active = selected().and_then(|id| known.iter().find(|r| r.id == id).cloned());
+    let selection = selected();
+    let active = match selection {
+        Selection::Root(id) => known.iter().find(|r| r.id == id).cloned(),
+        Selection::Unset | Selection::Drive => None,
+    };
+    // A selected root that has vanished from the list (deleted
+    // elsewhere) leaves the sidebar unhighlighted; say so rather than
+    // silently showing Drive.
+    let missing_root = matches!(selection, Selection::Root(_)) && active.is_none();
 
     rsx! {
         div { class: "mx-auto w-full max-w-6xl flex flex-col gap-6 p-4 sm:p-6 lg:p-10",
@@ -540,8 +577,10 @@ pub fn FilesPane() -> Element {
                 }
             }
             if let Some(Err(e)) = &rows {
-                div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
-                    "Couldn't list roots: {e}"
+                task_ui_core::states::ErrorState {
+                    message: e.clone(),
+                    title: "Couldn't list File Roots",
+                    on_retry: move |()| roots.restart(),
                 }
             }
             div { class: "grid gap-4 md:grid-cols-[16rem_1fr]",
@@ -549,12 +588,12 @@ pub fn FilesPane() -> Element {
                     for root in known.iter().cloned() {
                         button {
                             key: "{root.id}",
-                            class: if selected() == Some(root.id) {
+                            class: if selection == Selection::Root(root.id) {
                                 "rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-left text-sm"
                             } else {
                                 "rounded-md border border-transparent px-3 py-2 text-left text-sm hover:bg-muted/20"
                             },
-                            onclick: move |_| selected.set(Some(root.id)),
+                            onclick: move |_| selected.set(Selection::Root(root.id)),
                             div { class: "flex items-center gap-2",
                                 span { class: "truncate", "{root.name}" }
                                 if let Some(badge) = &root.project_version {
@@ -565,12 +604,12 @@ pub fn FilesPane() -> Element {
                         }
                     }
                     button {
-                        class: if selected().is_none() {
+                        class: if selection == Selection::Drive {
                             "rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-left text-sm"
                         } else {
                             "rounded-md border border-transparent px-3 py-2 text-left text-sm hover:bg-muted/20"
                         },
-                        onclick: move |_| selected.set(None),
+                        onclick: move |_| selected.set(Selection::Drive),
                         div { class: "flex items-center gap-2",
                             span { "Drive" }
                             Badge { variant: BadgeVariant::Outline, "loose files" }
@@ -580,13 +619,19 @@ pub fn FilesPane() -> Element {
                 }
                 {match (rows.is_none(), active) {
                     (true, _) => rsx! {
-                        Text { variant: TextVariant::Muted, "Loading roots…" }
+                        task_ui_core::states::LoadingState { rows: 3 }
                     },
                     (false, Some(root)) => rsx! {
                         Explorer {
                             org: org(),
                             start: Location::Root { id: root.id, subpath: String::new() },
                             root: root.clone(),
+                        }
+                    },
+                    (false, None) if missing_root => rsx! {
+                        task_ui_core::states::EmptyState {
+                            title: "That File Root is gone",
+                            hint: "It is no longer in this org's roots — pick another, or browse Drive.",
                         }
                     },
                     (false, None) => rsx! {
@@ -743,11 +788,12 @@ fn FileRootNoteWidget(ctx: WidgetCtx) -> Element {
 
     match resolved {
         None => rsx! {
-            Text { variant: TextVariant::Muted, "Loading Files…" }
+            task_ui_core::states::LoadingState { rows: 1 }
         },
         Some(None) => rsx! {
-            div { class: "rounded-lg border border-border/40 bg-card/40 p-3 text-sm text-muted-foreground",
-                "No File Root named “{scope.root}” in this org."
+            task_ui_core::states::EmptyState {
+                title: format!("No File Root named “{}”", scope.root),
+                hint: "Point this note's `root:` at a File Root in this org — by name or by id.",
             }
         },
         Some(Some(root)) => rsx! {
@@ -828,20 +874,27 @@ mod tests {
         assert_eq!(human_size(&stub), "—");
     }
 
+    fn project_version(number: u32, label: Option<&str>) -> ProjectVersion {
+        ProjectVersion {
+            id: Uuid::new_v4(),
+            path: "Files/Project Versions/v2.md".to_owned(),
+            root_id: Uuid::new_v4(),
+            number,
+            label: label.map(str::to_owned),
+            change_id: "abc".to_owned(),
+            commit_id: "def".to_owned(),
+            started_at: chrono::Utc::now(),
+        }
+    }
+
     #[test]
     fn project_version_badge_reads_as_lineage() {
         assert_eq!(
-            project_version_label(&ProjectVersionBadge {
-                number: 2,
-                label: Some("client cut".to_owned())
-            }),
+            project_version_label(&project_version(2, Some("client cut"))),
             "Project Version 2 · client cut"
         );
         assert_eq!(
-            project_version_label(&ProjectVersionBadge {
-                number: 3,
-                label: None
-            }),
+            project_version_label(&project_version(3, None)),
             "Project Version 3"
         );
     }

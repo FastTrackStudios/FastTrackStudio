@@ -10,6 +10,12 @@
 //! subpath, `..`, symlink), nested-root rejection, `changed_paths`
 //! accuracy, the concurrent-checkpoint race, and root identity
 //! surviving a genuine `FilesBackend` restart.
+//!
+//! The second `FilesBackend::new` argument is the org vault holding
+//! the curated version entities (issue #261) — irrelevant to
+//! everything here, so these tests point it at a directory beside the
+//! roots rather than staging a whole vault. The curation surface has
+//! its own file, `versions_rpc.rs`.
 
 use std::time::Duration;
 
@@ -51,7 +57,8 @@ async fn create_browse_chain_checkpoint_over_rpc() {
     std::fs::create_dir(root_dir.join("stems")).unwrap();
     std::fs::write(root_dir.join("stems").join("kick.wav"), b"boom").unwrap();
 
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend.clone()), scope.clone());
 
@@ -228,7 +235,8 @@ async fn filesystem_access_is_confined() {
     let outside = tempfile::tempdir().expect("outside tempdir");
     std::fs::write(outside.path().join("secret.txt"), b"org B's data").unwrap();
 
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -310,7 +318,8 @@ async fn filesystem_access_is_confined() {
 #[tokio::test(flavor = "multi_thread")]
 async fn nested_roots_are_rejected() {
     let data_dir = tempfile::tempdir().expect("data tempdir");
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -378,7 +387,8 @@ async fn concurrent_checkpoints_on_same_root_do_not_race() {
     let root_dir = data_dir.path().join("concurrent");
     std::fs::create_dir(&root_dir).unwrap();
 
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -450,7 +460,8 @@ async fn root_identity_survives_backend_restart() {
     std::fs::write(root_dir.join("session.rpp"), b"reaper project").unwrap();
 
     let created: FileRootInfo = {
-        let backend = FilesBackend::new(data_dir.path()).expect("backend");
+        let backend =
+            FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
         let scope = Scope::new();
         let local = LocalServer::serve(router(backend.clone()), scope.clone());
         let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -491,7 +502,8 @@ async fn root_identity_survives_backend_restart() {
     // chain — both the marker file and the registry entity, plus the
     // reopened jj repo, survive.
     let restart = tokio::time::timeout(Duration::from_secs(15), async {
-        let backend = FilesBackend::new(data_dir.path()).expect("backend");
+        let backend =
+            FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
         let scope = Scope::new();
         let local = LocalServer::serve(router(backend), scope.clone());
         let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -531,7 +543,8 @@ async fn browse_reports_pointer_stubs_for_non_resident_paths() {
     std::fs::create_dir(root_dir.join("media")).unwrap();
     std::fs::write(root_dir.join("media").join("b-roll.mov"), b"more").unwrap();
 
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -617,21 +630,28 @@ async fn browse_reports_pointer_stubs_for_non_resident_paths() {
     scope.close().await;
 }
 
-/// Divergent versions — two saves of the same file from the same base,
-/// as an offline replica reconciling would leave them — surface on the
-/// listing as the explorer's divergence badge, derived from the store's
-/// visible heads (never a second authority).
+/// Divergent versions — two saves from the same base, as an offline
+/// replica reconciling would leave them — surface on the listing as the
+/// explorer's divergence badge, derived from the store's visible heads
+/// (never a second authority). Covers three things the badge exists
+/// for:
 ///
-/// The two saves are written as two independent transactions on one
-/// repo handle (the version store's own divergence recipe, per its
-/// `tests/acceptance.rs`). Two live `FilesBackend`s over one root can't
-/// stand in for two machines here: they would share the root's on-disk
-/// chunk store, which is single-writer.
+/// 1. a file BOTH heads carry with different content is divergent;
+/// 2. a file only the *other* head carries, never hydrated here, still
+///    gets a row (stub + divergent) — a concurrent save nobody can see
+///    is a save the user concludes was lost (PR #288 review);
+/// 3. the answer arrives on a WARM backend — one that had already
+///    browsed this root before the divergent writes — because a read
+///    re-reads the op log rather than serving its cached snapshot.
+///
+/// The two saves are written through the backend's own cached repo
+/// handle without touching its head cache, which is exactly what a
+/// second process (the CLI's embedded backend, the cadence engine)
+/// does to this one. Two `FilesBackend`s over one root cannot stand in:
+/// they would share the root's single-writer chunk store.
 #[tokio::test(flavor = "multi_thread")]
 async fn browse_reports_divergent_versions_from_concurrent_saves() {
-    use jj_lib::repo::Repo as _;
     use jj_lib::repo_path::RepoPathBuf;
-    use task_files_version_store::VersionStoreBackend;
     use task_files_version_store::checkpoint::{Change, checkpoint};
 
     let data_dir = tempfile::tempdir().expect("data tempdir");
@@ -640,83 +660,86 @@ async fn browse_reports_divergent_versions_from_concurrent_saves() {
     std::fs::write(root_dir.join("mix.wav"), b"base take").unwrap();
     std::fs::write(root_dir.join("readme.txt"), b"untouched").unwrap();
 
-    // The base checkpoint, over RPC.
-    let root = {
-        let backend = FilesBackend::new(data_dir.path()).expect("backend");
-        let scope = Scope::new();
-        let local = LocalServer::serve(router(backend.clone()), scope.clone());
-        let client: FilesServiceClient = local.establish().await.expect("establish client");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(backend.clone()), scope.clone());
+    let client: FilesServiceClient = local.establish().await.expect("establish client");
 
-        let root = client
-            .create_root(
-                root_dir.to_str().unwrap().to_string(),
-                "Split Session".to_string(),
-                RootFlavor::Media,
-            )
-            .await
-            .expect("create_root rpc");
-        client
-            .checkpoint_now(root.id, Some("base".to_string()))
-            .await
-            .expect("checkpoint_now rpc");
+    let root = client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            "Split Session".to_string(),
+            RootFlavor::Media,
+        )
+        .await
+        .expect("create_root rpc");
+    client
+        .checkpoint_now(root.id, Some("base".to_string()))
+        .await
+        .expect("checkpoint_now rpc");
 
-        backend.shutdown().await;
-        drop(client);
-        scope.close().await;
-        drop(local);
-        drop(backend);
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-        }
-        root
-    };
+    // Warm the backend: this browse caches the repo handle at the base
+    // checkpoint, so everything below has to survive a stale cache.
+    let before = client
+        .browse(root.id, String::new())
+        .await
+        .expect("browse rpc");
+    assert!(
+        before.iter().all(|e| !e.divergent),
+        "nothing is divergent yet: {before:?}"
+    );
 
-    // Two saves of `mix.wav` from the same base, neither aware of the
-    // other. jj-lib is driven synchronously (see `repo_open`'s module
-    // doc on why), so this runs on the blocking pool.
-    let store_dir = root_dir.join(".fts-files");
+    // Two saves from the same base, neither aware of the other. Side B
+    // also ADDS a file that never lands in this machine's live tree —
+    // the replica case the listing has to surface.
+    let writer = backend.clone();
     tokio::task::spawn_blocking(move || {
-        let repo = files::repo_open::open_or_init_repo(&store_dir).expect("open root repo");
-        let base = repo
-            .view()
-            .heads()
-            .iter()
-            .next()
-            .cloned()
-            .expect("base checkpoint head");
-        let mix = RepoPathBuf::from_internal_string("mix.wav").unwrap();
-        for (content, description) in [
-            (b"take A: brighter".to_vec(), "side A"),
-            (b"take B: warmer".to_vec(), "side B"),
-        ] {
-            pollster::block_on(checkpoint(
-                &repo,
-                base.clone(),
-                vec![Change::Write {
-                    path: mix.clone(),
-                    content,
-                }],
-                description,
-            ))
-            .expect("write a divergent save");
-        }
-        if let Some(backend) = repo.store().backend_impl::<VersionStoreBackend>() {
-            let _ = pollster::block_on(backend.chunks().shutdown());
-        }
+        writer
+            .with_repo(root.id, |repo| {
+                let base = repo
+                    .view()
+                    .heads()
+                    .iter()
+                    .next()
+                    .cloned()
+                    .expect("base checkpoint head");
+                let mix = RepoPathBuf::from_internal_string("mix.wav").unwrap();
+                let solo = RepoPathBuf::from_internal_string("solo-from-b.wav").unwrap();
+                pollster::block_on(checkpoint(
+                    repo,
+                    base.clone(),
+                    vec![Change::Write {
+                        path: mix.clone(),
+                        content: b"take A: brighter".to_vec(),
+                    }],
+                    "side A",
+                ))
+                .expect("side A");
+                pollster::block_on(checkpoint(
+                    repo,
+                    base,
+                    vec![
+                        Change::Write {
+                            path: mix,
+                            content: b"take B: warmer".to_vec(),
+                        },
+                        Change::Write {
+                            path: solo,
+                            content: b"a take only B has".to_vec(),
+                        },
+                    ],
+                    "side B",
+                ))
+                .expect("side B");
+            })
+            .expect("with_repo");
     })
     .await
     .expect("divergent saves");
-    for _ in 0..10 {
-        tokio::task::yield_now().await;
-    }
 
-    // A reader opens the root fresh: jj merges the op-log heads, both
-    // saves survive as visible heads, and browsing says so.
-    let backend = FilesBackend::new(data_dir.path()).expect("reader backend");
-    let scope = Scope::new();
-    let local = LocalServer::serve(router(backend), scope.clone());
-    let client: FilesServiceClient = local.establish().await.expect("establish reader");
-
+    // Same, already-warm backend: the read re-reads the op log, jj
+    // merges the heads, and both saves are visible.
     let top = tokio::time::timeout(
         Duration::from_secs(30),
         client.browse(root.id, String::new()),
@@ -731,36 +754,51 @@ async fn browse_reports_divergent_versions_from_concurrent_saves() {
         .expect("mix.wav listed");
     assert!(
         mix.divergent,
-        "two saves of the same file from one base surface as divergent: {top:?}"
+        "two saves of one file from one base are divergent: {top:?}"
     );
+    assert!(!mix.stub, "mix.wav is still resident on disk: {mix:?}");
+
+    // The file only the other head has: a row, badged both ways.
+    let solo = top
+        .iter()
+        .find(|e| e.name == "solo-from-b.wav")
+        .unwrap_or_else(|| {
+            panic!("a save only the other head carries must still be listed: {top:?}")
+        });
+    assert!(solo.stub, "not resident here, so it is a stub: {solo:?}");
+    assert!(
+        solo.divergent,
+        "present on one head and not the other is divergence: {solo:?}"
+    );
+
     let readme = top
         .iter()
         .find(|e| e.name == "readme.txt")
         .expect("readme.txt listed");
     assert!(
-        !readme.divergent,
-        "a file both sides agree on is not divergent: {readme:?}"
+        !readme.divergent && !readme.stub,
+        "a file both sides agree on is untouched: {readme:?}"
     );
-    // The live tree keeps its content; nothing is clobbered, and
-    // neither side is a stub.
-    assert!(!mix.stub && !readme.stub);
 
+    backend.shutdown().await;
     scope.close().await;
 }
 
-/// A root whose live tree is a Project Version reports that badge on
-/// every root read — it rides the marker file, so it survives a restart
-/// and travels with the tree (the Vault-entity half is issue #261).
+/// A root's lineage badge: `list_roots`/`get_root` project the root's
+/// CURRENT Project Version — the highest-numbered entity (#261) — so
+/// the explorer can render it without a second round trip, and a root
+/// that has never been restarted carries none.
 #[tokio::test(flavor = "multi_thread")]
-async fn root_reads_carry_the_project_version_badge() {
+async fn root_reads_carry_the_current_project_version() {
     let data_dir = tempfile::tempdir().expect("data tempdir");
     let root_dir = data_dir.path().join("album");
     std::fs::create_dir(&root_dir).unwrap();
     std::fs::write(root_dir.join("song.rpp"), b"session").unwrap();
 
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
-    let local = LocalServer::serve(router(backend), scope.clone());
+    let local = LocalServer::serve(router(backend.clone()), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
 
     let root = client
@@ -775,14 +813,27 @@ async fn root_reads_carry_the_project_version_badge() {
         root.project_version, None,
         "a root that has never been restarted wears no badge"
     );
+    client
+        .checkpoint_now(root.id, Some("base".to_string()))
+        .await
+        .expect("checkpoint_now rpc");
 
-    // Record a restart in the marker file (what the Project Version
-    // restart flow writes).
-    let marker_path = root_dir.join(".fts-root.json");
-    let mut marker: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&marker_path).unwrap()).unwrap();
-    marker["project_version"] = serde_json::json!({ "number": 2, "label": "client cut" });
-    std::fs::write(&marker_path, serde_json::to_vec_pretty(&marker).unwrap()).unwrap();
+    // A root with only v1 recorded already shows it — the badge is
+    // "which lineage is this", not "has it been restarted twice".
+    let v1 = client
+        .start_project_version(root.id, None)
+        .await
+        .expect("start_project_version rpc");
+    assert_eq!(v1.number, 1);
+    let got = client.get_root(root.id).await.expect("get_root rpc");
+    assert_eq!(got.project_version.as_ref().map(|pv| pv.number), Some(1));
+
+    // A second restart wins: the badge is the CURRENT lineage.
+    let v2 = client
+        .start_project_version(root.id, Some("client cut".to_string()))
+        .await
+        .expect("start_project_version rpc");
+    assert_eq!(v2.number, 2);
 
     let got = client.get_root(root.id).await.expect("get_root rpc");
     let badge = got.project_version.expect("badge on get_root");
@@ -791,16 +842,58 @@ async fn root_reads_carry_the_project_version_badge() {
 
     let listed = client.list_roots().await.expect("list_roots rpc");
     assert_eq!(
-        listed[0].project_version.as_ref().map(|b| b.number),
+        listed[0].project_version.as_ref().map(|pv| pv.number),
         Some(2),
         "list_roots carries the badge too — the explorer's root list reads it"
     );
 
-    // A malformed badge is ignored, never fatal to browsing the root.
-    marker["project_version"] = serde_json::json!("v2");
-    std::fs::write(&marker_path, serde_json::to_vec_pretty(&marker).unwrap()).unwrap();
-    let got = client.get_root(root.id).await.expect("get_root rpc");
-    assert_eq!(got.project_version, None);
+    backend.shutdown().await;
+    scope.close().await;
+}
+
+/// Browsing must never *write*. A registered root whose tree is gone
+/// (an unmounted volume, a folder deleted behind Files' back) is a read
+/// error — not a silent re-init of an empty version store inside the
+/// stale mountpoint (PR #288 review).
+#[tokio::test(flavor = "multi_thread")]
+async fn browse_never_initializes_a_missing_store() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let root_dir = data_dir.path().join("on-a-drive");
+    std::fs::create_dir(&root_dir).unwrap();
+    std::fs::write(root_dir.join("take.wav"), b"take").unwrap();
+
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(backend.clone()), scope.clone());
+    let client: FilesServiceClient = local.establish().await.expect("establish client");
+
+    let root = client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            "On A Drive".to_string(),
+            RootFlavor::Media,
+        )
+        .await
+        .expect("create_root rpc");
+    backend.shutdown().await;
+
+    // Simulate the volume going away: the tree (store included) is no
+    // longer there, but the registry still knows the root.
+    std::fs::remove_dir_all(&root_dir).unwrap();
+    // …and the mountpoint itself still exists, empty — the shape that
+    // used to get a store initialized into it.
+    std::fs::create_dir(&root_dir).unwrap();
+
+    let listed = client
+        .browse(root.id, String::new())
+        .await
+        .expect("an empty mountpoint lists as empty, not as an error");
+    assert!(listed.is_empty(), "nothing is there: {listed:?}");
+    assert!(
+        !root_dir.join(".fts-files").exists(),
+        "a read must not initialize a version store"
+    );
 
     scope.close().await;
 }
