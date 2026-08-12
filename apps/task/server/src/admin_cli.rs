@@ -40,6 +40,7 @@ pub async fn dispatch() -> eyre::Result<bool> {
         Some("delete-user") => delete_user(&args[2..]).await.map(|()| true),
         Some("set-role") => set_role(&args[2..]).await.map(|()| true),
         Some("create-user") => create_user(&args[2..]).await.map(|()| true),
+        Some("seed") => seed(&args[2..]).await.map(|()| true),
         Some("webdav") => webdav(&args[2..]).map(|()| true),
         other => {
             eprintln!(
@@ -54,6 +55,8 @@ pub async fn dispatch() -> eyre::Result<bool> {
                  task-server admin set-role --org <slug> --email <address> [--role admin|--clear]\n  \
                  task-server admin create-user --org <slug> --email <address> \\\n    \
                  [--name <display>] [--username <handle>] (reads the password from STDIN)\n  \
+                 task-server admin seed [--orgs <a,b,c>] [--email <address>] \\\n    \
+                 [--password <pw>] (stands up a local multi-org dev vault with demo data)\n  \
                  task-server admin webdav --org <slug> [--hide <root-id>|--show <root-id>]\n    \
                  (no flag lists the org's File Roots and their WebDAV visibility)\n"
             );
@@ -401,6 +404,245 @@ async fn email_history(args: &[String]) -> eyre::Result<()> {
             println!("      {reason}");
         }
     }
+    Ok(())
+}
+
+/// `admin seed` — stand up (or top up) a LOCAL multi-org dev vault with
+/// demo data so a fresh `task-server` has something to sign into and
+/// exercise: an owner account with known credentials in every org, a
+/// couple of vault notes, and a Files root with real version history
+/// (checkpoints + a Named Version) plus a divergence for the resolution
+/// UI (issue #267). DEV ONLY.
+///
+/// Authorization is filesystem ownership of the data root, like every
+/// other verb here. It writes into `$TASK_DATA_ROOT` (default
+/// `~/.task`) — point that at a throwaway dir for local dev (the
+/// `dev-seed` wrapper does). Idempotent: an existing owner account or
+/// `Demo Project` root is left as-is, so re-running tops up what's
+/// missing rather than duplicating.
+async fn seed(args: &[String]) -> eyre::Result<()> {
+    let email = flag(args, "--email").unwrap_or_else(|| "dev@fasttrackstudio.dev".to_owned());
+    let password = flag(args, "--password").unwrap_or_else(|| "password".to_owned());
+    // A divergent root is only browseable by a warm backend today — a
+    // freshly-opened server hangs its first `browse` on it — so seeding
+    // a divergence is off by default. `--with-divergence` opts in for
+    // exercising the resolution UI once that path is warm-safe.
+    let with_divergence = has(args, "--with-divergence");
+    let orgs: Vec<(String, String)> = match flag(args, "--orgs") {
+        Some(list) => list
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| (s.to_owned(), title_case(s)))
+            .collect(),
+        None => vec![
+            ("fasttrackstudio".to_owned(), "FastTrackStudio".to_owned()),
+            ("acme-films".to_owned(), "Acme Films".to_owned()),
+            ("northwind".to_owned(), "Northwind".to_owned()),
+        ],
+    };
+    if orgs.is_empty() {
+        bail!("--orgs was empty");
+    }
+
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    data_root
+        .ensure()
+        .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
+    println!(
+        "seeding {} org(s) into {}",
+        orgs.len(),
+        data_root.path().display()
+    );
+
+    for (i, (slug, display)) in orgs.iter().enumerate() {
+        let is_home = i == 0;
+        println!(
+            "\n== {slug} ({display}){} ==",
+            if is_home { " [home]" } else { "" }
+        );
+        match data_root.init_org(slug, display, is_home) {
+            Ok(_) => println!("  org: created on disk"),
+            Err(e) => println!("  org: already present ({e})"),
+        }
+        let org = data_root.org(slug);
+        seed_owner(&org, &email, &password, display).await?;
+        seed_vault_notes(&org, display)?;
+        seed_files_demo(&org, with_divergence).await?;
+    }
+
+    println!("\ndone. sign in at the web app with:");
+    println!("  email:    {email}");
+    println!("  password: {password}");
+    println!("home org:   {}", orgs[0].0);
+    Ok(())
+}
+
+/// `north-west-films` -> `North West Films`.
+fn title_case(slug: &str) -> String {
+    slug.split(['-', '_'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Create (idempotently) the org's owner account with the admin role.
+async fn seed_owner(
+    org: &org_proto::OrgRoot,
+    email: &str,
+    password: &str,
+    display: &str,
+) -> eyre::Result<()> {
+    let db = org.auth_db();
+    let url = format!("sqlite://{}?mode=rwc", db.display());
+    let auth = crate::AuthState::open(&url, &crate::auth_secret())
+        .await
+        .wrap_err_with(|| format!("open/create auth store for `{}`", org.slug()))?;
+    if let Some(existing) = auth
+        .auth
+        .find_user_by_email(email)
+        .await
+        .map_err(|e| eyre::eyre!("look up `{email}`: {e:?}"))?
+    {
+        println!("  owner: {email} already exists ({})", existing.id);
+        return Ok(());
+    }
+    let bundle = auth
+        .auth
+        .create_email_password_user(architect_auth::CreateEmailPasswordUser {
+            email: email.to_owned(),
+            password: password.to_owned(),
+            name: Some(format!("Dev ({display})")),
+            username: None,
+            image: None,
+            metadata_json: None,
+            ip_address: None,
+            user_agent: Some("task-server admin seed".into()),
+        })
+        .await
+        .map_err(|e| eyre::eyre!("create `{email}`: {e:?}"))?;
+    auth.auth
+        .set_user_role_local_trusted(bundle.user.id, Some("admin".to_owned()))
+        .await
+        .map_err(|e| eyre::eyre!("set admin role: {e:?}"))?;
+    println!("  owner: {email} created ({}) with admin role", bundle.user.id);
+    Ok(())
+}
+
+/// A couple of vault markdown notes so the org isn't empty.
+fn seed_vault_notes(org: &org_proto::OrgRoot, display: &str) -> eyre::Result<()> {
+    let vault = org.vault_dir();
+    std::fs::create_dir_all(&vault).wrap_err("create vault dir")?;
+    let welcome = format!(
+        "---\ntitle: Welcome to {display}\ntype: note\n---\n\n# Welcome to {display}\n\n\
+         This is a **seeded dev org** for local task-server development. Everything \
+         here is demo data — safe to change or delete.\n"
+    );
+    write_if_absent(&vault.join("Welcome.md"), &welcome)?;
+    let project = format!(
+        "---\ntitle: Q1 Launch\ntype: project\nstatus: active\n---\n\n# Q1 Launch\n\n\
+         A seeded demo project in {display}.\n\n- [ ] Kickoff\n- [ ] Draft\n- [ ] Ship\n"
+    );
+    write_if_absent(&vault.join("Q1 Launch.md"), &project)?;
+    println!("  vault: Welcome + Q1 Launch notes");
+    Ok(())
+}
+
+fn write_if_absent(path: &std::path::Path, content: &str) -> eyre::Result<()> {
+    if !path.exists() {
+        std::fs::write(path, content).wrap_err_with(|| format!("write {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// A Files root with real version history (three checkpoints + a Named
+/// Version) and a divergence — the demo the version-history / divergence
+/// UI (issue #267) is built to show.
+async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyre::Result<()> {
+    let files_dir = org.path().join("files");
+    let backend = files::FilesBackend::new(&files_dir, org.vault_dir())
+        .map_err(|e| eyre::eyre!("open files backend: {e}"))?;
+
+    // Idempotent: leave an already-seeded root alone.
+    let existing = files::FilesService::list_roots(&backend)
+        .await
+        .map_err(|e| eyre::eyre!("list roots: {e:?}"))?;
+    if existing.iter().any(|r| r.name == "Demo Project") {
+        println!("  files: Demo Project already present");
+        backend.shutdown().await;
+        return Ok(());
+    }
+
+    // create_root adopts an existing on-disk dir; checkpoint_now captures
+    // whatever is on disk at call time, so we write, then checkpoint. The
+    // root must live inside the Files area (roots are confined to it).
+    let root_dir = files_dir.join("demo-project");
+    std::fs::create_dir_all(&root_dir).wrap_err("create demo root dir")?;
+    std::fs::write(root_dir.join("edit.mov"), b"reel v1 - assembly cut")?;
+    std::fs::write(root_dir.join("graphics.png"), b"\x89PNG\r\n\x1a\n seeded-demo")?;
+    std::fs::write(root_dir.join("notes.md"), b"# Editorial notes\n\n- assembly cut\n")?;
+
+    let root = files::FilesService::create_root(
+        &backend,
+        root_dir.to_string_lossy().into_owned(),
+        "Demo Project".to_owned(),
+        files::RootFlavor::Media,
+    )
+    .await
+    .map_err(|e| eyre::eyre!("create root: {e:?}"))?;
+    files::FilesService::checkpoint_now(&backend, root.id, Some("Initial import".to_owned()))
+        .await
+        .map_err(|e| eyre::eyre!("checkpoint 1: {e:?}"))?;
+
+    // A revision, checkpointed and given a Named Version.
+    std::fs::write(root_dir.join("edit.mov"), b"reel v2 - rough cut")?;
+    std::fs::write(
+        root_dir.join("notes.md"),
+        b"# Editorial notes\n\n- assembly cut\n- rough cut: tightened the intro\n",
+    )?;
+    let cp2 = files::FilesService::checkpoint_now(&backend, root.id, Some("Rough cut".to_owned()))
+        .await
+        .map_err(|e| eyre::eyre!("checkpoint 2: {e:?}"))?;
+    files::FilesService::name_version(&backend, root.id, cp2.commit_id.clone(), "Rough Cut v1".to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("name version: {e:?}"))?;
+
+    // A third revision.
+    std::fs::write(root_dir.join("edit.mov"), b"reel v3 - color pass")?;
+    files::FilesService::checkpoint_now(&backend, root.id, Some("Color pass".to_owned()))
+        .await
+        .map_err(|e| eyre::eyre!("checkpoint 3: {e:?}"))?;
+
+    // A divergence on edit.mov, for the resolution UI — opt-in, since a
+    // divergent root currently wedges a cold server's first browse.
+    if with_divergence {
+        backend
+            .seed_divergent_file(
+                root.id,
+                "edit.mov",
+                b"reel v4 - warm grade",
+                b"reel v4 - cool grade",
+            )
+            .await
+            .map_err(|e| eyre::eyre!("seed divergence: {e:?}"))?;
+    }
+
+    backend.shutdown().await;
+    println!(
+        "  files: Demo Project (3 checkpoints, 1 named version{})",
+        if with_divergence {
+            ", 1 divergence"
+        } else {
+            ""
+        }
+    );
     Ok(())
 }
 
