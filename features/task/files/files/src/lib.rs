@@ -41,6 +41,7 @@ mod registry;
 /// can reach the same repo the backend serves, without duplicating
 /// jj-lib's loader wiring.
 pub mod repo_open;
+mod restart;
 mod scan;
 pub mod stub;
 mod versions;
@@ -61,7 +62,8 @@ pub use consts::{MARKER_FILE, STORE_DIR};
 
 pub use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    GcReport, NamedVersion, ProjectVersion, RootFlavor, SavePoint, SnapshotInfo, VersionRef,
+    GcReport, NamedVersion, ProjectVersion, RestartMode, RootFlavor, SavePoint, SnapshotInfo,
+    VersionRef,
 };
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor

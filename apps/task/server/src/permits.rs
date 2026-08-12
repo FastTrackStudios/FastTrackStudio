@@ -360,6 +360,10 @@ table!(FILES, "files", "files/**", [
     // an ordinary write. Applying policy does both in bulk.
     wa "dehydrate", wr "hydrate", rd "hydration_policy", wr "set_hydration_policy",
     wa "apply_hydration_policy",
+    // Project Version restart (issue #268). Restarting reshapes the
+    // whole live tree and copy-forward can overwrite versioned files —
+    // audited writes; time-travel browsing is an ordinary read.
+    wa "restart_project_version", rd "browse_at", wa "copy_forward",
 ]);
 table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
 // The Files placement layer's ORG lane (issue #262). The operator and

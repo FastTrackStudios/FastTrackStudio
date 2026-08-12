@@ -233,6 +233,10 @@ pub struct FilesBackend {
     driver: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Test seam — see [`FilesBackend::set_mid_hash_hook`].
     hook: Arc<Mutex<Option<MidHashHook>>>,
+    /// Test seam — see [`FilesBackend::set_mid_flip_hook`]: invoked
+    /// between a restart's terminal checkpoint and its clear phase,
+    /// which is the window a mid-flip save lands in (issue #268).
+    flip_hook: Arc<Mutex<Option<MidHashHook>>>,
     /// Fan-out hub behind `#[subscribe] fn events` — every successful
     /// root creation / checkpoint publishes here. Sliding mailbox: a
     /// slow subscriber loses its *oldest* queued events, correct for
@@ -336,6 +340,7 @@ impl FilesBackend {
             watch_new_roots: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             driver: Arc::new(Mutex::new(None)),
             hook: Arc::new(Mutex::new(None)),
+            flip_hook: Arc::new(Mutex::new(None)),
             events: architect::PubSub::sliding(256),
         })
     }
@@ -354,6 +359,13 @@ impl FilesBackend {
     #[doc(hidden)]
     pub fn set_mid_hash_hook(&self, hook: Option<MidHashHook>) {
         *self.hook.lock().expect("hook lock poisoned") = hook;
+    }
+
+    /// Test seam only: runs between a restart's terminal checkpoint
+    /// and its clear phase — the mid-flip window AC 3 of issue #268 is
+    /// about. Production never sets one.
+    pub fn set_mid_flip_hook(&self, hook: Option<MidHashHook>) {
+        *self.flip_hook.lock().expect("flip hook lock poisoned") = hook;
     }
 
     #[must_use]
@@ -2170,6 +2182,405 @@ impl FilesBackend {
     }
 }
 
+/// The Project Version restart flow (issue #268) and its two read
+/// verbs. The spec's sequence, literally: **checkpoint** (the old
+/// iteration's terminal state, taken through the ordinary certified
+/// capture), **reshape** (the disk half — clear per mode, with every
+/// removal re-verified against the checkpoint so a mid-flip save is
+/// never destroyed), **flip** (the new lineage's first commit, again
+/// through the ordinary scan machinery, so the flip is just data other
+/// subscribers — and replicas, #264 — receive as events).
+impl FilesBackend {
+    fn restart_inner(
+        &self,
+        root_id: Uuid,
+        mode: files_proto::RestartMode,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, Error> {
+        use files_proto::RestartMode;
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "restart")?;
+        let root_path = PathBuf::from(&root.path);
+
+        // Validate the mode's inputs BEFORE the checkpoint mutates
+        // anything — a restart that fails validation must be a no-op.
+        let template = match &mode {
+            RestartMode::Template { source_path } => {
+                let source = self.confine(Path::new(source_path))?;
+                crate::restart::validate_template(&source)?;
+                Some(source)
+            }
+            _ => None,
+        };
+        let carry: Option<BTreeSet<RepoPathBuf>> = match &mode {
+            RestartMode::CarryForward { paths } if !paths.is_empty() => {
+                let mut set = BTreeSet::new();
+                for p in paths {
+                    let (_, repo_path) = self.resolve_root_file(&root, p)?;
+                    set.insert(repo_path);
+                }
+                Some(set)
+            }
+            // Empty carry list = the picker default: everything minus
+            // the Ignore set — which is every tracked path, since the
+            // Ignore set governs what enters tracking in the first
+            // place. A pure lineage cut.
+            RestartMode::CarryForward { .. } => None,
+            _ => Some(BTreeSet::new()), // Empty / Template carry nothing
+        };
+
+        // 1. The old iteration's terminal checkpoint — ordinary,
+        // certified, session-ending.
+        self.checkpoint_now_inner(
+            root_id,
+            Some("final checkpoint of the old iteration".to_string()),
+        )?;
+        if let Some(hook) = self
+            .flip_hook
+            .lock()
+            .expect("flip hook lock poisoned")
+            .clone()
+        {
+            hook(&root_path);
+        }
+
+        // 2. Everything else under the root lock.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        let (repo, head) = self.reload_repo(&root)?;
+        let backend = repo.store().backend();
+        let head_commit = pollster::block_on(backend.read_commit(&head))?;
+        let head_tree_id =
+            head_commit.root_tree.clone().into_resolved().map_err(|_| {
+                Error::Repo("restarting a conflicted tree is unsupported (v1)".into())
+            })?;
+        let head_tree = pollster::block_on(backend.read_tree(RepoPath::root(), &head_tree_id))?;
+        let mut head_paths: BTreeSet<RepoPathBuf> = BTreeSet::new();
+        pollster::block_on(scan::walk_tree_paths(
+            backend,
+            &head_tree,
+            RepoPath::root(),
+            &mut head_paths,
+        ))?;
+
+        // 3. Clear phase. Every candidate removal is re-verified
+        // against the checkpoint we just took: a file whose content
+        // moved in the window is a mid-flip save — it is never
+        // deleted from under the writer; it is committed as a sibling
+        // of the old head below, surviving as flagged divergence
+        // (spec AC 3).
+        let content = crate::content::ContentStore::for_repo(&repo, backend)?;
+        let keeps = |path: &RepoPathBuf| match &carry {
+            Some(set) => {
+                set.contains(path)
+                    || set.iter().any(|kept| {
+                        // A carried directory carries its subtree.
+                        path.as_internal_file_string()
+                            .starts_with(&format!("{}/", kept.as_internal_file_string()))
+                    })
+            }
+            None => true,
+        };
+        let mut removed: Vec<PathBuf> = Vec::new();
+        let mut movers: Vec<(RepoPathBuf, PathBuf)> = Vec::new();
+        for repo_path in &head_paths {
+            if keeps(repo_path) {
+                continue;
+            }
+            let disk = root_path.join(repo_path.as_internal_file_string());
+            if !disk.exists() {
+                continue;
+            }
+            // A stub clears without any verify: its content is in the
+            // store by construction, and its bytes are a placeholder.
+            let is_stub = stub::probe(&disk).is_some();
+            if !is_stub {
+                let Some(existing) = pollster::block_on(
+                    task_files_version_store::chain::lookup_dyn(backend, &head_tree, repo_path),
+                )?
+                else {
+                    continue;
+                };
+                let head_id = match existing {
+                    jj_lib::backend::TreeValue::File { id, .. } => id,
+                    _ => continue,
+                };
+                let disk_id = content.probe(&disk)?.ok_or_else(|| {
+                    Error::Repo(
+                        "this root's backend cannot derive content ids without writing".into(),
+                    )
+                })?;
+                if disk_id != head_id {
+                    movers.push((repo_path.clone(), disk.clone()));
+                    continue;
+                }
+            }
+            std::fs::remove_file(&disk)?;
+            removed.push(disk);
+        }
+        crate::restart::prune_empty_dirs(&root_path, &removed);
+
+        // 4. Mid-flip saves: one sibling commit of the old head
+        // carrying every mover at its saved content. Two heads —
+        // the new lineage's start below and this — is exactly the
+        // Divergent-versions shape the badges flag and #267 resolves.
+        // The flip commits through whichever repo handle is newest, so
+        // its op parents chain rather than diverge.
+        let mut flip_repo = repo.clone();
+        if !movers.is_empty() {
+            let store = repo.store().clone();
+            let mut builder =
+                jj_lib::tree_builder::TreeBuilder::new(store.clone(), head_tree_id.clone());
+            for (repo_path, disk) in &movers {
+                let probed = content.probe(disk)?;
+                let id = pollster::block_on(content.write(repo_path, disk, probed))?;
+                let existing = pollster::block_on(task_files_version_store::chain::lookup_dyn(
+                    backend, &head_tree, repo_path,
+                ))?;
+                let copy_id = match existing {
+                    Some(jj_lib::backend::TreeValue::File { copy_id, .. }) => copy_id,
+                    _ => jj_lib::backend::CopyId::placeholder(),
+                };
+                builder.set(
+                    repo_path.clone(),
+                    jj_lib::backend::TreeValue::File {
+                        id,
+                        executable: false,
+                        copy_id,
+                    },
+                );
+            }
+            let div_tree_id = pollster::block_on(builder.write_tree())
+                .map_err(|e| Error::Repo(format!("mid-flip tree: {e}")))?;
+            let merged = jj_lib::merged_tree::MergedTree::resolved(store, div_tree_id);
+            let mut tx = repo.start_transaction();
+            pollster::block_on(async {
+                tx.repo_mut()
+                    .new_commit(vec![head.clone()], merged)
+                    .set_description("save landed mid-restart — kept on the old iteration")
+                    .write()
+                    .await
+                    .map(|_| ())
+            })
+            .map_err(|e| Error::Repo(format!("mid-flip commit: {e}")))?;
+            let committed = pollster::block_on(tx.commit("mid-flip divergence"))
+                .map_err(|e| Error::Repo(e.to_string()))?;
+            for (_, disk) in &movers {
+                // Durably in the store (and flagged); the live tree
+                // belongs to the new lineage now.
+                std::fs::remove_file(disk)?;
+            }
+            flip_repo = committed;
+        }
+
+        // 5. Template seed, after the clear so the template's own
+        // names never collide with removals.
+        if let Some(source) = &template {
+            crate::restart::seed_template(&root_path, source)?;
+        }
+
+        // 6. The flip: the new lineage's first checkpoint, through the
+        // ordinary certified scan — parented on the OLD HEAD this
+        // function has held since step 2, never on a reloaded pick:
+        // `heads_of` deliberately follows descendants, so after the
+        // mid-flip divergence commit it would choose that sibling as
+        // the parent and silently absorb the save into the new lineage
+        // — the exact opposite of "survives as flagged divergence".
+        let backend = flip_repo.store().backend();
+        let ignores = self.ignore_of(&root)?;
+        let disk_files = scan::walk_live_tree(&root_path, root.flavor, &ignores, &head_paths)?;
+        let next_number = self.versions.next_project_version_number(root_id)?;
+        let result = crate::checkpoint::write_checkpoint(Capture {
+            repo: &flip_repo,
+            backend,
+            parent_id: head.clone(),
+            base_tree_id: head_tree_id.clone(),
+            base_tree: &head_tree,
+            disk_files: &disk_files,
+            base_paths: &head_paths,
+            description: format!("restart: Project Version v{next_number}"),
+            attempts: self.cadence.config().certify_attempts,
+            hook: None,
+        })?;
+        let at = self.cadence.now();
+        let commit_hex = result.commit_id.hex();
+        let store_dir = repo_open::store_dir(&root_path);
+        let mut journal = Journal::load(&store_dir)?;
+        journal.record_checkpoint(CheckpointRecord {
+            commit_id: commit_hex.clone(),
+            at,
+            save_points: Vec::new(),
+            requeued_paths: result.requeued_paths.clone(),
+        });
+        journal.save(&store_dir)?;
+        self.set_heads(root_id, result.repo, result.commit_id.clone(), None);
+
+        // 7. The entity, minted on the new lineage's first commit —
+        // and the events replicas fold in like any other sync signal
+        // (spec AC 4): the checkpoint that IS the flip, then the
+        // Project Version that names it.
+        let (commit_id, change_id) = self.resolve_commit(&root, &commit_hex)?;
+        let pv = self.versions.create_project_version(
+            root_id,
+            &root.name,
+            label
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty()),
+            change_id.hex(),
+            commit_id.hex(),
+        )?;
+        self.publish(FilesEvent::Checkpointed(CheckpointInfo {
+            root_id,
+            commit_id: commit_hex,
+            description: format!("restart: Project Version v{}", pv.number),
+            at,
+            changed_paths: result.changed_paths,
+            save_points: Vec::new(),
+            requeued_paths: result.requeued_paths,
+        }));
+        self.publish(FilesEvent::ProjectVersionStarted(pv.clone()));
+        Ok(pv)
+    }
+
+    fn browse_at_inner(
+        &self,
+        root_id: Uuid,
+        commit_ref: String,
+        subpath: String,
+    ) -> Result<Vec<BrowseEntry>, Error> {
+        let root = self.get_root_info(root_id)?;
+        let (commit_id, _) = self.resolve_commit(&root, &commit_ref)?;
+        let dir = badges::repo_dir(&subpath)?;
+        let (repo, _) = self.ensure_repo(&root)?;
+        let backend = repo.store().backend();
+        let listed = pollster::block_on(badges::listing(backend, &commit_id, &dir))?;
+        if listed.is_empty() && !subpath.is_empty() {
+            // Distinguish "empty directory / not a directory here" from
+            // a real listing the same way browse does: absent is a 404.
+            return Err(Error::NotFound(format!("{root_id}@{commit_ref}:{subpath}")));
+        }
+        let mut out: Vec<BrowseEntry> = listed
+            .into_iter()
+            .map(|(name, (is_dir, _state))| BrowseEntry {
+                name,
+                is_dir,
+                // Tree entries carry identities, not lengths; nothing
+                // is opened to answer a time-travel listing.
+                size: None,
+                stub: false,
+                divergent: false,
+            })
+            .collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    fn copy_forward_inner(
+        &self,
+        root_id: Uuid,
+        commit_ref: String,
+        paths: Vec<String>,
+    ) -> Result<Vec<String>, Error> {
+        let root = self.get_root_info(root_id)?;
+        if paths.is_empty() {
+            return Err(Error::BadRequest("copy_forward: no paths given".into()));
+        }
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        let (repo, head) = self.reload_repo(&root)?;
+        let backend = repo.store().backend();
+        let (commit_id, _) = self.resolve_commit(&root, &commit_ref)?;
+        let source_commit = pollster::block_on(backend.read_commit(&commit_id))?;
+        let source_tree_id = source_commit
+            .root_tree
+            .clone()
+            .into_resolved()
+            .map_err(|_| {
+                Error::Repo("copying forward from a conflicted tree is unsupported (v1)".into())
+            })?;
+        let source_tree = pollster::block_on(backend.read_tree(RepoPath::root(), &source_tree_id))?;
+        let head_commit = pollster::block_on(backend.read_commit(&head))?;
+        let head_tree_id = head_commit
+            .root_tree
+            .clone()
+            .into_resolved()
+            .map_err(|_| Error::Repo("conflicted head tree".into()))?;
+        let head_tree = pollster::block_on(backend.read_tree(RepoPath::root(), &head_tree_id))?;
+        let content = crate::content::ContentStore::for_repo(&repo, backend)?;
+
+        // Two phases: validate everything, then write everything — a
+        // multi-file copy-forward either starts cleanly or not at all.
+        struct Planned {
+            repo_path: RepoPathBuf,
+            disk: PathBuf,
+            id: jj_lib::backend::FileId,
+            executable: bool,
+        }
+        let mut planned = Vec::new();
+        let mut dirty = Vec::new();
+        for p in &paths {
+            let (disk, repo_path) = self.resolve_root_file(&root, p)?;
+            let Some(jj_lib::backend::TreeValue::File { id, executable, .. }) = pollster::block_on(
+                task_files_version_store::chain::lookup_dyn(backend, &source_tree, &repo_path),
+            )?
+            else {
+                return Err(Error::NotFound(format!(
+                    "{commit_ref}:{p}: not a file there"
+                )));
+            };
+            if disk.exists() && stub::probe(&disk).is_none() {
+                // Overwriting live content is the verb's point — but
+                // only content that is already versioned. Unversioned
+                // work is refused, never clobbered.
+                let head_id = match pollster::block_on(
+                    task_files_version_store::chain::lookup_dyn(backend, &head_tree, &repo_path),
+                )? {
+                    Some(jj_lib::backend::TreeValue::File { id, .. }) => Some(id),
+                    _ => None,
+                };
+                let disk_id = content.probe(&disk)?.ok_or_else(|| {
+                    Error::Repo(
+                        "this root's backend cannot derive content ids without writing".into(),
+                    )
+                })?;
+                if head_id.as_ref() != Some(&disk_id) {
+                    dirty.push(p.clone());
+                    continue;
+                }
+            }
+            planned.push(Planned {
+                repo_path,
+                disk,
+                id,
+                executable,
+            });
+        }
+        if !dirty.is_empty() {
+            return Err(Error::BadRequest(format!(
+                "unversioned changes at {} — checkpoint first, then copy forward",
+                dirty.join(", ")
+            )));
+        }
+
+        let mut written = Vec::new();
+        for plan in planned {
+            if let Some(parent) = plan.disk.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            self.restore_content(
+                &repo,
+                &plan.repo_path,
+                &plan.disk,
+                &plan.id,
+                plan.executable,
+            )?;
+            written.push(plan.repo_path.as_internal_file_string().to_string());
+        }
+        written.sort();
+        Ok(written)
+    }
+}
+
 impl FilesService for FilesBackend {
     async fn create_root(
         &self,
@@ -2329,6 +2740,36 @@ impl FilesService for FilesBackend {
     ) -> Result<Vec<ProjectVersion>, FilesError> {
         let this = self.clone();
         blocking(move || this.versions.project_versions(root_id)).await
+    }
+
+    async fn restart_project_version(
+        &self,
+        root_id: Uuid,
+        mode: files_proto::RestartMode,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, FilesError> {
+        let this = self.clone();
+        blocking(move || this.restart_inner(root_id, mode, label)).await
+    }
+
+    async fn browse_at(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        subpath: String,
+    ) -> Result<Vec<BrowseEntry>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.browse_at_inner(root_id, commit_id, subpath)).await
+    }
+
+    async fn copy_forward(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        paths: Vec<String>,
+    ) -> Result<Vec<String>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.copy_forward_inner(root_id, commit_id, paths)).await
     }
 
     async fn gc_root(

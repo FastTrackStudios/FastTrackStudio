@@ -76,7 +76,7 @@ async fn dir_tree(
 }
 
 /// One head's listing of `dir`: entry name ⇒ its state.
-async fn listing(
+pub(crate) async fn listing(
     backend: &dyn Backend,
     commit_id: &CommitId,
     dir: &RepoPath,
