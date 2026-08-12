@@ -34,6 +34,10 @@ pub mod identity;
 pub mod model;
 pub mod service;
 
+/// Re-exported so the headless binary (and embedders) can name the
+/// coordinator client type without a direct dependency.
+pub use files_sync;
+
 pub use control::DaemonControl;
 pub use daemon::{EventHub, SyncDaemon};
 pub use error::{DaemonError, Result};

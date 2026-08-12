@@ -213,12 +213,15 @@ impl SyncDaemon {
         slice: Vec<String>,
         peer: SyncServiceClient,
     ) -> Result<()> {
-        if !slice.is_empty() {
-            self.inner
-                .backend
-                .set_hydration_policy(root_id, slice.clone())
-                .await?;
-        }
+        // Always write the policy — including an empty one — so
+        // re-choosing a root with slice=[] ("the whole root") CLEARS a
+        // stale partial policy instead of leaving the replica silently
+        // partial (PR #292 review). An empty policy means materialize
+        // hydrates everything.
+        self.inner
+            .backend
+            .set_hydration_policy(root_id, slice.clone())
+            .await?;
         let mut roots = self.inner.roots.lock().expect("roots lock");
         roots.insert(
             root_id,

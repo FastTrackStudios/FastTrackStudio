@@ -504,26 +504,37 @@ async fn import_file(
         .map(|c| (c.hash.as_str(), c.len))
         .collect();
 
+    // Accounting is per manifest ENTRY, not per unique chunk hash — a
+    // manifest may repeat a hash (silence/padding dedups to one stored
+    // chunk), and the report's `fetched + skipped == total` invariant
+    // is entry-based (PR #292 review). `missing` is the set of UNIQUE
+    // hashes to actually pull; `entries_for` maps each to how many
+    // entries it satisfies, so importing it advances progress by that
+    // many.
     let mut missing: Vec<String> = Vec::new();
     let mut resident = 0usize;
+    let mut entries_for: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     for entry in &manifest.chunks {
         let (l, h) = (local.clone(), entry.hash.clone());
         let present = off_thread(move || l.sync_has_chunk(root_id, &h).map_err(from_files)).await?;
         if present {
             report.chunks_skipped += 1;
             resident += 1;
-        } else if !missing.contains(&entry.hash) {
-            missing.push(entry.hash.clone());
+        } else {
+            *entries_for.entry(entry.hash.clone()).or_default() += 1;
+            if !missing.contains(&entry.hash) {
+                missing.push(entry.hash.clone());
+            }
         }
     }
 
     // Per-file progress (issue #265): the resumed transfer starts at
-    // `resident`, the bytes already local.
+    // `resident` entries, the bytes already local.
     let mut done = resident;
     let mut bytes_done: u64 = manifest
         .chunks
         .iter()
-        .filter(|c| !missing.contains(&c.hash))
+        .filter(|c| !entries_for.contains_key(&c.hash))
         .map(|c| c.len)
         .sum();
     observer.file_started(root_id, path, total_chunks, resident, logical_bytes);
@@ -552,15 +563,17 @@ async fn import_file(
             .map_err(|e| SyncError::Io(format!("chunks rpc: {e}")))?;
         for chunk in wire {
             let len = chunk_len.get(chunk.hash.as_str()).copied().unwrap_or(0);
+            // How many manifest entries this one unique chunk satisfies.
+            let satisfied = entries_for.get(chunk.hash.as_str()).copied().unwrap_or(1);
             let l = local.clone();
             off_thread(move || {
                 l.sync_import_chunk(root_id, &chunk.hash, chunk.bytes)
                     .map_err(from_files)
             })
             .await?;
-            report.chunks_fetched += 1;
-            done += 1;
-            bytes_done += len;
+            report.chunks_fetched += satisfied;
+            done += satisfied as usize;
+            bytes_done += len * u64::from(satisfied);
             observer.file_progress(root_id, path, done, bytes_done);
         }
     }

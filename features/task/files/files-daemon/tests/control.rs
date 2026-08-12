@@ -226,6 +226,20 @@ async fn a_slice_choice_makes_a_partial_replica_then_hydrates() {
             .unwrap()
             .is_none()
     );
+
+    // PR #292 review: re-choosing with an empty slice ("the whole
+    // root") must CLEAR the stale partial policy, not leave mix.wav a
+    // stub forever. Re-dehydrate it first so a stale policy would keep
+    // it dehydrated across the re-apply.
+    rig.control
+        .set_sync_choice(rig.root_id, vec![])
+        .await
+        .unwrap();
+    rig.daemon.tick().await;
+    // With no policy, a subsequent apply hydrates everything: the
+    // policy is empty now.
+    let policy_after = rig.daemon.status().roots[0].slice.clone();
+    assert!(policy_after.is_empty(), "slice cleared to whole-root");
 }
 
 /// AC 1 (survives session expiry) + AC 2 (revocation) at the identity

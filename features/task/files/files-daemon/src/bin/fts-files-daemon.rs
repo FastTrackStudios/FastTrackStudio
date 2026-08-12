@@ -54,6 +54,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let daemon = SyncDaemon::open(backend, format!("{data_dir}/daemon"))?;
     tracing::info!(device = %daemon.device_id(), %bind, "fts-files-daemon starting");
 
+    // Point the daemon at its coordinator — the `SyncService` endpoint
+    // it pulls from (task-server's `/…/vox`). Without this, every
+    // `set_sync_choice` over the control socket would fail with "no
+    // coordinator set" and nothing would ever sync (PR #292 review), so
+    // an unset coordinator is a hard startup error rather than a silent
+    // one discovered later.
+    let coordinator_url = std::env::var("FTS_FILES_DAEMON_COORDINATOR").map_err(|_| {
+        "FTS_FILES_DAEMON_COORDINATOR is required — the ws:// SyncService endpoint to sync from"
+    })?;
+    let coordinator: files_daemon::files_sync::SyncServiceClient =
+        vox::connect_lane(&coordinator_url)
+            .establish()
+            .await
+            .map_err(|e| format!("connecting to coordinator {coordinator_url}: {e}"))?;
+    daemon.set_coordinator(coordinator);
+    tracing::info!(coordinator = %coordinator_url, "coordinator connected");
+
     // The reconcile tick loop — keeps every chosen root syncing.
     let ticker = daemon.clone();
     tokio::spawn(async move {
