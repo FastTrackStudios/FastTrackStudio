@@ -370,3 +370,30 @@ pub enum DivergenceChoice {
     /// each other side lands beside it as `<stem> (divergent <n>).<ext>`.
     KeepBoth,
 }
+
+/// Which derived rendition of a media file (issue #269) — a proxy for
+/// streaming, an audio rendition, waveform peaks, a filmstrip. The wire
+/// tag mirrors `files_transcode::RenditionKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+pub enum RenditionKind {
+    Proxy1080,
+    Proxy720,
+    Audio,
+    Peaks,
+    Filmstrip,
+}
+
+/// A generated (or cached) rendition, ready to stream: its CAS content
+/// id, byte length, and MIME. The Review page (issue #270) resolves a
+/// media file to this, then streams the bytes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct RenditionInfo {
+    /// Hex CAS `FileId` of the rendition's bytes.
+    pub file_id: String,
+    pub len: u64,
+    /// MIME type for the served stream.
+    pub mime: String,
+    pub kind: RenditionKind,
+}

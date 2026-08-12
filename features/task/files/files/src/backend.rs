@@ -237,6 +237,22 @@ pub struct FilesBackend {
     /// between a restart's terminal checkpoint and its clear phase,
     /// which is the window a mid-flip save lands in (issue #268).
     flip_hook: Arc<Mutex<Option<MidHashHook>>>,
+    /// The transcoder that generates derived media (issue #269), when
+    /// one is configured (the server injects ffmpeg; a test injects a
+    /// fake; unset means the `rendition` RPC 404s and checkpoints skip
+    /// warm-up). Behind an `Arc` so a checkpoint can spawn a best-effort
+    /// warm-up that outlives the call.
+    transcoder: Arc<Mutex<Option<Arc<dyn files_transcode::Transcoder>>>>,
+    /// Per-root rendition stores (issue #269), opened once and cached —
+    /// a rendition store owns a private iroh-blobs `FsStore`, and
+    /// opening a second on one dir while the first is alive hangs (the
+    /// same trap the repo cache avoids).
+    rendition_stores: Arc<Mutex<HashMap<Uuid, Arc<files_transcode::RenditionStore>>>>,
+    /// Serializes rendition-store OPENS across concurrent callers (the
+    /// checkpoint warm-up task and a `rendition` request race the same
+    /// dir; two opens of one `FsStore` hang). Held across the async
+    /// open, so a `tokio` mutex.
+    rendition_open_lock: Arc<tokio::sync::Mutex<()>>,
     /// Fan-out hub behind `#[subscribe] fn events` — every successful
     /// root creation / checkpoint publishes here. Sliding mailbox: a
     /// slow subscriber loses its *oldest* queued events, correct for
@@ -341,8 +357,19 @@ impl FilesBackend {
             driver: Arc::new(Mutex::new(None)),
             hook: Arc::new(Mutex::new(None)),
             flip_hook: Arc::new(Mutex::new(None)),
+            transcoder: Arc::new(Mutex::new(None)),
+            rendition_stores: Arc::new(Mutex::new(HashMap::new())),
+            rendition_open_lock: Arc::new(tokio::sync::Mutex::new(())),
             events: architect::PubSub::sliding(256),
         })
+    }
+
+    /// Inject the transcoder that generates derived media (issue #269).
+    /// The server sets `files_transcode::FfmpegTranscoder`; a test sets
+    /// a fake. Until set, `rendition` fails NotFound and checkpoints
+    /// take no warm-up.
+    pub fn set_transcoder(&self, transcoder: Arc<dyn files_transcode::Transcoder>) {
+        *self.transcoder.lock().expect("transcoder lock") = Some(transcoder);
     }
 
     /// The cadence engine driving this backend's sessions.
@@ -1598,6 +1625,22 @@ impl FilesBackend {
             Captured::Snapshot(info) => FilesEvent::Snapshotted(info.clone()),
             Captured::Checkpoint(info) => FilesEvent::Checkpointed(info.clone()),
         });
+
+        // Checkpoint trigger for derived media (issue #269): warm up the
+        // new head's rendition ladder ahead of demand. Detached and
+        // best-effort — a checkpoint never waits on (or fails for)
+        // transcoding, which is slow and off the critical path. Only
+        // when a transcoder is configured; the spawn rides the
+        // `spawn_blocking` thread's ambient runtime handle.
+        if let Captured::Checkpoint(info) = &captured
+            && self.transcoder_opt().is_some()
+            && let Some(head) = CommitId::try_from_hex(&info.commit_id)
+        {
+            let this = self.clone();
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move { this.warm_up_head(root_id, head).await });
+            }
+        }
         Ok(captured)
     }
 
@@ -3674,6 +3717,242 @@ fn chunk_file_id_from_hex(hex: &str) -> Result<task_files_chunk_store::FileId, F
         .map_err(|e| FilesError::BadRequest(format!("{hex}: {e}")))
 }
 
+/// Derived media (issue #269): the `rendition` RPC, the checkpoint
+/// warm-up trigger, and the source-tied rendition GC.
+impl FilesBackend {
+    /// The transcoder if one is configured.
+    fn transcoder_opt(&self) -> Option<Arc<dyn files_transcode::Transcoder>> {
+        self.transcoder.lock().expect("transcoder lock").clone()
+    }
+
+    /// The root's rendition store, opened once and cached (a private
+    /// `FsStore` — opening a second on one dir hangs).
+    async fn rendition_store(
+        &self,
+        root_id: Uuid,
+        root_path: &Path,
+    ) -> Result<Arc<files_transcode::RenditionStore>, Error> {
+        if let Some(store) = self
+            .rendition_stores
+            .lock()
+            .expect("rendition store cache")
+            .get(&root_id)
+        {
+            return Ok(store.clone());
+        }
+        // Serialize the open: two concurrent misses must not both open
+        // an `FsStore` on one dir (that hangs). Re-check the cache once
+        // the lock is held — the winner populated it.
+        let _open = self.rendition_open_lock.lock().await;
+        if let Some(store) = self
+            .rendition_stores
+            .lock()
+            .expect("rendition store cache")
+            .get(&root_id)
+        {
+            return Ok(store.clone());
+        }
+        let store = Arc::new(crate::transcode::open_store(root_path).await?);
+        self.rendition_stores
+            .lock()
+            .expect("rendition store cache")
+            .insert(root_id, store.clone());
+        Ok(store)
+    }
+
+    /// Resolve a media file at `path` to its source CAS `FileId` (at the
+    /// checkpoint head) plus the root's chunk store — the sync prep a
+    /// rendition needs before the async generate.
+    fn rendition_prep(
+        &self,
+        root_id: Uuid,
+        path: &str,
+    ) -> Result<
+        (
+            Arc<task_files_chunk_store::ChunkStore>,
+            task_files_chunk_store::FileId,
+            PathBuf,
+        ),
+        Error,
+    > {
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "rendition")?;
+        let (_disk, repo_path) = self.resolve_root_file(&root, path)?;
+        let (repo, head) = self.reload_repo(&root)?;
+        let Some((source_id, _exec)) = Self::head_file(&repo, &head, &repo_path)? else {
+            return Err(Error::NotFound(format!(
+                "{path}: not tracked by the checkpoint head"
+            )));
+        };
+        let source_fid = task_files_chunk_store::FileId::from_hex(&source_id.hex())
+            .map_err(|e| Error::Repo(format!("source file id: {e}")))?;
+        let chunks = self
+            .with_version_store(root_id, |vs| vs.chunks().clone())
+            .map_err(from_files_error)?;
+        Ok((chunks, source_fid, PathBuf::from(&root.path)))
+    }
+
+    async fn rendition_inner(
+        &self,
+        root_id: Uuid,
+        path: String,
+        kind: files_proto::RenditionKind,
+    ) -> Result<files_proto::RenditionInfo, Error> {
+        let Some(transcoder) = self.transcoder_opt() else {
+            return Err(Error::NotFound(
+                "no transcoder configured on this server".into(),
+            ));
+        };
+        let this = self.clone();
+        let p = path.clone();
+        let (chunks, source_fid, root_path) = blocking(move || this.rendition_prep(root_id, &p))
+            .await
+            .map_err(from_files_error)?;
+        let store = self.rendition_store(root_id, &root_path).await?;
+        let pipe = files_transcode::TranscodePipeline::new(chunks, store, transcoder);
+        let rendition = pipe
+            .rendition(&source_fid, crate::transcode::engine_kind(kind))
+            .await
+            .map_err(|e| match e {
+                files_transcode::Error::NotMedia(m) => Error::BadRequest(m),
+                other => Error::Repo(format!("transcode: {other}")),
+            })?;
+        Ok(files_proto::RenditionInfo {
+            file_id: rendition.file_id.to_hex(),
+            len: rendition.len,
+            mime: rendition.kind.mime().to_string(),
+            kind,
+        })
+    }
+
+    /// Warm up (pre-generate) every media file's rendition ladder in
+    /// `head`'s tree — the checkpoint trigger (AC 1). Best-effort: a
+    /// failed rendition is logged, never fatal to the checkpoint that
+    /// spawned it. Skips when no transcoder is configured.
+    async fn warm_up_head(&self, root_id: Uuid, head: CommitId) {
+        let Some(transcoder) = self.transcoder_opt() else {
+            return;
+        };
+        let this = self.clone();
+        let sources = match blocking(move || this.head_source_ids(root_id, &head)).await {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::warn!(%root_id, %err, "transcode warm-up: reading head failed");
+                return;
+            }
+        };
+        let root_path = match self.get_root_info(root_id) {
+            Ok(r) => PathBuf::from(&r.path),
+            Err(_) => return,
+        };
+        let chunks = match self.with_version_store(root_id, |vs| vs.chunks().clone()) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let store = match self.rendition_store(root_id, &root_path).await {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::warn!(%root_id, %err, "transcode warm-up: store failed");
+                return;
+            }
+        };
+        let pipe = files_transcode::TranscodePipeline::new(chunks, store, transcoder);
+        for source in sources {
+            if let Err(err) = pipe.warm_up(&source).await {
+                tracing::warn!(%root_id, source = %source.to_hex(), %err, "transcode warm-up failed");
+            }
+        }
+    }
+
+    /// Every file's source CAS `FileId` in `head`'s tree.
+    fn head_source_ids(
+        &self,
+        root_id: Uuid,
+        head: &CommitId,
+    ) -> Result<Vec<task_files_chunk_store::FileId>, Error> {
+        let (repo, _) = self.ensure_repo(&self.get_root_info(root_id)?)?;
+        let backend = repo.store().backend();
+        let files = Self::tree_files_of(backend, head)?;
+        let mut out = Vec::new();
+        for (_path, id) in files {
+            if let Ok(fid) = task_files_chunk_store::FileId::from_hex(&id.hex()) {
+                out.push(fid);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether a rendition's content (by hex CAS id) is present in the
+    /// root's rendition store — test/introspection observability for the
+    /// GC (a swept rendition's content is gone from here).
+    pub async fn rendition_content_present(
+        &self,
+        root_id: Uuid,
+        file_id_hex: &str,
+    ) -> Result<bool, FilesError> {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        let store = self
+            .rendition_store(root_id, Path::new(&root.path))
+            .await
+            .map_err(to_files_error)?;
+        let fid = task_files_chunk_store::FileId::from_hex(file_id_hex)
+            .map_err(|e| FilesError::BadRequest(format!("{file_id_hex}: {e}")))?;
+        Ok(store.has_content(fid).await)
+    }
+
+    /// Prune a root's renditions whose source content the store no
+    /// longer holds, or whose recipe is superseded — the source-tied
+    /// half of GC (AC 3/4). Called after `gc_root`'s version-store
+    /// sweep, with the chunk store as the liveness oracle. Returns the
+    /// index entries removed.
+    fn gc_renditions(&self, root_id: Uuid) -> Result<u64, Error> {
+        let root = self.get_root_info(root_id)?;
+        if root.flavor != RootFlavor::Media {
+            return Ok(0);
+        }
+        let root_path = PathBuf::from(&root.path);
+        let chunks = self
+            .with_version_store(root_id, |vs| vs.chunks().clone())
+            .map_err(from_files_error)?;
+        let store = pollster::block_on(self.rendition_store(root_id, &root_path))?;
+        pollster::block_on(async {
+            // Resolve liveness for every referenced source up front
+            // (async), then hand `gc` a plain sync predicate — a nested
+            // `block_on` inside the gc scan deadlocks. Live = the
+            // SOURCE's manifest is still in the source chunk store (the
+            // version-store sweep just ran, so a dead source's manifest
+            // is already gone).
+            let mut live = std::collections::HashSet::new();
+            for src_hex in store
+                .source_ids()
+                .await
+                .map_err(|e| Error::Repo(format!("rendition sources: {e}")))?
+            {
+                if let Ok(fid) = task_files_chunk_store::FileId::from_hex(&src_hex)
+                    && chunks.has(fid).await
+                {
+                    live.insert(src_hex);
+                }
+            }
+            store
+                .gc(|src_hex| live.contains(src_hex))
+                .await
+                .map_err(|e| Error::Repo(format!("rendition gc: {e}")))
+        })
+    }
+}
+
+/// `FilesError` back to the crate error, for the few call sites that
+/// bridge a `blocking()`-wrapped inner call inside another async method.
+fn from_files_error(err: FilesError) -> Error {
+    match err {
+        FilesError::NotFound(m) => Error::NotFound(m),
+        FilesError::AlreadyExists(m) => Error::AlreadyExists(m),
+        FilesError::BadRequest(m) => Error::BadRequest(m),
+        FilesError::Io(m) => Error::Repo(m),
+    }
+}
+
 impl FilesService for FilesBackend {
     async fn create_root(
         &self,
@@ -3889,7 +4168,29 @@ impl FilesService for FilesBackend {
         keep_newer_secs: Option<u64>,
     ) -> Result<GcReport, FilesError> {
         let this = self.clone();
-        blocking(move || this.gc_root_inner(root_id, keep_newer_secs)).await
+        blocking(move || {
+            let report = this.gc_root_inner(root_id, keep_newer_secs)?;
+            // Fold in the source-tied rendition sweep (issue #269): a
+            // rendition whose source content the version-store sweep
+            // just removed is now dead too. Best-effort — a rendition
+            // GC hiccup must not fail the main sweep's report.
+            if let Err(err) = this.gc_renditions(root_id) {
+                tracing::warn!(%root_id, %err, "rendition gc after gc_root failed");
+            }
+            Ok(report)
+        })
+        .await
+    }
+
+    async fn rendition(
+        &self,
+        root_id: Uuid,
+        path: String,
+        kind: files_proto::RenditionKind,
+    ) -> Result<files_proto::RenditionInfo, FilesError> {
+        self.rendition_inner(root_id, path, kind)
+            .await
+            .map_err(to_files_error)
     }
 }
 

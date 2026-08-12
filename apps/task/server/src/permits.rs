@@ -367,6 +367,10 @@ table!(FILES, "files", "files/**", [
     // Divergent versions (issue #264): listing is a read; settling
     // writes a merge checkpoint and rewrites live-tree files (audited).
     rd "divergences", wa "resolve_divergence",
+    // Derived media (issue #269). Requesting a rendition may generate
+    // it (an expensive transcode) and cache it, but it never mutates
+    // the versioned tree — a read from the caller's point of view.
+    rd "rendition",
 ]);
 table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
 // The Files placement layer's ORG lane (issue #262). The operator and

@@ -353,6 +353,23 @@ pub trait FilesService {
         choice: crate::model::DivergenceChoice,
     ) -> Result<CheckpointInfo, FilesError>;
 
+    /// One derived rendition of a media file at `path` (issue #269):
+    /// generated on demand and cached in the CAS if not already present,
+    /// then returned as a streamable handle. This is what the Review
+    /// page (issue #270) resolves before streaming a proxy — originals
+    /// are never sent. Fails with [`FilesError::BadRequest`] when the
+    /// file's media class doesn't yield the requested kind (a filmstrip
+    /// of an audio file), and [`FilesError::NotFound`] when no
+    /// transcoder is configured on this server.
+    ///
+    /// [`RootFlavor::Media`](crate::model::RootFlavor::Media) only.
+    async fn rendition(
+        &self,
+        root_id: Uuid,
+        path: String,
+        kind: crate::model::RenditionKind,
+    ) -> Result<crate::model::RenditionInfo, FilesError>;
+
     /// Every root-creation / checkpoint / version-curation / hydration
     /// event, as it happens.
     #[subscribe]

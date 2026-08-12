@@ -9976,6 +9976,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "files-proto",
+ "files-transcode",
  "futures-util",
  "gix",
  "globset",
@@ -10092,6 +10093,22 @@ dependencies = [
  "tracing",
  "uuid",
  "vox",
+]
+
+[[package]]
+name = "files-transcode"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "facet 0.50.0-rc.5",
+ "serde",
+ "serde_json",
+ "task-files-chunk-store",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -1015,6 +1015,9 @@ files-sync = { path = "features/task/files/files-sync" }
 # Sync daemon (issue #265): the reconcile engine as a long-lived agent
 # with a device identity + the local DaemonControlService (rich status).
 files-daemon = { path = "features/task/files/files-daemon" }
+# Transcode pipeline (issue #269): server-side derived media (proxies,
+# peaks, filmstrips) cached in the CAS, GC-tied to their source.
+files-transcode = { path = "features/task/files/files-transcode" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }
