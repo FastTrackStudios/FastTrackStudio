@@ -18,6 +18,7 @@
 //! set, which is what makes a named deliverable immortal.
 
 mod backend;
+mod badges;
 mod checkpoint;
 mod consts;
 mod content;
@@ -26,7 +27,11 @@ mod error;
 mod git_root;
 mod ignore;
 mod registry;
-mod repo_open;
+/// Opening (and reopening) a root's version-store repo. Public so a
+/// test — or a future sibling crate, e.g. the cadence engine (#260) —
+/// can reach the same repo the backend serves, without duplicating
+/// jj-lib's loader wiring.
+pub mod repo_open;
 mod scan;
 mod versions;
 

@@ -56,6 +56,36 @@ pub fn store_dir(root_path: &Path) -> PathBuf {
     root_path.join(STORE_DIR)
 }
 
+/// Open the repo backing the root at `root_path` **only if it already
+/// exists** — `Ok(None)` when the root has no store yet.
+///
+/// Read paths use this instead of [`open_or_init_repo`] so that
+/// browsing never *writes*: a registered root whose volume is
+/// unmounted (or whose tree was deleted behind Files' back) would
+/// otherwise have a fresh, empty store initialized inside the stale
+/// mountpoint by nothing more than a click in the explorer — after
+/// which the store says "this root is empty" and the next
+/// `checkpoint_now` treats the real tree as brand new (PR #288
+/// review). A read that finds no store degrades to a plain live-tree
+/// listing with no badges, which is the truth: nothing is tracked yet.
+pub fn open_existing_repo(
+    root_path: &Path,
+    flavor: RootFlavor,
+) -> Result<Option<Arc<ReadonlyRepo>>> {
+    let repo_path = store_dir(root_path);
+    if !already_initialized(&repo_path) {
+        return Ok(None);
+    }
+    let repo = open_existing(&repo_path, flavor)?;
+    match flavor {
+        RootFlavor::Software => {
+            git_root::exclude_root_internals(&repo)?;
+            git_root::import_from_git(repo).map(Some)
+        }
+        RootFlavor::Media => Ok(Some(repo)),
+    }
+}
+
 /// Open the repo backing the root at `root_path`, initializing it on
 /// first touch. Reopening goes through `RepoLoader::init_from_file_system`
 /// with our own `VersionStoreBackend` layered onto jj-lib's stock

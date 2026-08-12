@@ -43,6 +43,17 @@ pub struct FileRootInfo {
     pub path: String,
     pub flavor: RootFlavor,
     pub created_at: DateTime<Utc>,
+    /// The root's CURRENT lineage: its highest-numbered
+    /// [`ProjectVersion`] entity (issue #261), or `None` on a root that
+    /// has never been restarted. Derived from the Vault on read — the
+    /// entities stay the authority, this is the projection the explorer
+    /// renders as the root's badge.
+    ///
+    /// `#[facet(default)]` so a NEW client decoding an OLD server's
+    /// response (the client-first upgrade direction) defaults the field
+    /// instead of failing the decode plan.
+    #[facet(default)]
+    pub project_version: Option<ProjectVersion>,
 }
 
 /// One entry in a directory listing — either a root-scoped
@@ -54,8 +65,25 @@ pub struct FileRootInfo {
 pub struct BrowseEntry {
     pub name: String,
     pub is_dir: bool,
-    /// `None` for directories.
+    /// `None` for directories, and for a [`BrowseEntry::stub`] entry
+    /// (a stub's logical size lives in its manifest, not on disk).
     pub size: Option<u64>,
+    /// The entry is a **pointer stub**: known to the root's version
+    /// store at the checkpoint head but not resident in the live tree
+    /// (glossary "Pointer stub" — browsing a 240 GB project must not
+    /// mean downloading it). Always `false` for
+    /// [`crate::service::FilesService::drive_browse`], which has no
+    /// root context. On-demand hydration is issue #263; v1 reports the
+    /// state so the explorer can show resident-vs-stub honestly.
+    #[facet(default)]
+    pub stub: bool,
+    /// The entry has **Divergent versions**: the root's version store
+    /// holds more than one visible head and this path's content differs
+    /// between them (glossary "Divergent versions" — concurrent saves
+    /// survive side by side instead of clobbering). Resolution
+    /// (pick A / pick B / keep both) is issue #267.
+    #[facet(default)]
+    pub divergent: bool,
 }
 
 /// One entry in a file's version chain (glossary "File version

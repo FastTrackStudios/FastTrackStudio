@@ -987,6 +987,7 @@ task-files-version-store = { path = "crates/task/files-version-store" }
 # chain / checkpoint-now over the version store above.
 files-proto = { path = "features/task/files/files-proto", default-features = false }
 files = { path = "features/task/files/files" }
+files-ui = { path = "features/task/files/files-ui" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }

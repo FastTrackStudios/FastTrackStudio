@@ -209,6 +209,13 @@ impl VaultVersions {
 
     // ── Project Versions ──────────────────────────────────────────
 
+    /// Every Project Version in the vault, any root — ONE scan, for
+    /// callers that need the lineage of a whole list of roots
+    /// (`list_roots`' badge overlay, issue #266) rather than of one.
+    pub fn all_project_versions(&self) -> Result<Vec<ProjectVersion>> {
+        Ok(self.read_store::<ProjectVersions>()?.list())
+    }
+
     /// Every Project Version of `root_id`, oldest number first.
     pub fn project_versions(&self, root_id: Uuid) -> Result<Vec<ProjectVersion>> {
         let mut list = self.read_store::<ProjectVersions>()?.list();

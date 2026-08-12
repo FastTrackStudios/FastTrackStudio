@@ -51,6 +51,7 @@ use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use task_files_version_store::VersionStoreBackend;
 use uuid::Uuid;
 
+use crate::badges;
 use crate::consts::{GIT_DIR, MARKER_FILE, STORE_DIR};
 use crate::error::Error;
 use crate::git_root;
@@ -265,10 +266,48 @@ impl FilesBackend {
         }
     }
 
+    /// The registry's own record — no Vault lookups. Every inner
+    /// caller (`browse` / `chain` / `checkpoint_now` / curation) wants
+    /// exactly this; only `list_roots`/`get_root` project the lineage
+    /// badge on top (see [`FilesBackend::with_project_version`]), so
+    /// the hot paths never pay for a vault scan they don't read (PR
+    /// #288 review).
     fn get_root_info(&self, id: Uuid) -> Result<FileRootInfo, Error> {
         self.registry
             .get(id)
             .ok_or_else(|| Error::NotFound(id.to_string()))
+    }
+
+    /// Project each root's CURRENT lineage — its highest-numbered
+    /// [`ProjectVersion`] entity (issue #261) — onto the roots
+    /// `list_roots`/`get_root` return. ONE vault scan for the whole
+    /// list, not one per root, and a vault that can't be read degrades
+    /// to un-badged roots rather than failing the listing: the badge is
+    /// decoration on a registry-owned answer.
+    fn with_project_version(&self, mut roots: Vec<FileRootInfo>) -> Vec<FileRootInfo> {
+        let mut current: HashMap<Uuid, ProjectVersion> = HashMap::new();
+        match self.versions.all_project_versions() {
+            Ok(all) => {
+                for pv in all {
+                    current
+                        .entry(pv.root_id)
+                        .and_modify(|held| {
+                            if pv.number > held.number {
+                                *held = pv.clone();
+                            }
+                        })
+                        .or_insert(pv);
+                }
+            }
+            Err(e) => tracing::warn!(
+                ?e,
+                "reading Project Versions failed; listing roots without lineage badges"
+            ),
+        }
+        for root in &mut roots {
+            root.project_version = current.get(&root.id).cloned();
+        }
+        roots
     }
 
     /// Canonicalize `requested` and confirm it resolves inside
@@ -381,6 +420,51 @@ impl FilesBackend {
         Ok((repo, head))
     }
 
+    /// The read-path counterpart of [`FilesBackend::reload_repo`]:
+    /// open the root's store **only if it already exists**, then
+    /// re-read it at head. `Ok(None)` when the root has no store yet
+    /// (or its volume is not mounted) — a read must never initialize
+    /// one, and must never serve a snapshot frozen at this process's
+    /// last write (PR #288 review; the same staleness `reload_repo`
+    /// exists for on the write/GC side).
+    fn reload_existing_repo(
+        &self,
+        root: &FileRootInfo,
+    ) -> Result<Option<(Arc<ReadonlyRepo>, CommitId)>, Error> {
+        // Disk first, cache second: a root whose volume went away
+        // still has a live handle in this process, and reloading that
+        // handle at head fails with a bare "Failed to read operation
+        // heads" where the honest answer is "there is no store here
+        // right now". Evict it so a remount reopens cleanly.
+        if !repo_open::store_dir(Path::new(&root.path)).exists() {
+            self.repos
+                .lock()
+                .expect("repo cache lock poisoned")
+                .remove(&root.id);
+            return Ok(None);
+        }
+        let cached = {
+            let repos = self.repos.lock().expect("repo cache lock poisoned");
+            repos.get(&root.id).map(|rt| rt.repo.clone())
+        };
+        let repo = match cached {
+            Some(repo) => match root.flavor {
+                // Git is the authority for a software root, and
+                // importing its refs is how the jj view catches up.
+                RootFlavor::Software => git_root::import_from_git(repo)?,
+                RootFlavor::Media => pollster::block_on(repo.reload_at_head())
+                    .map_err(|e| Error::Repo(format!("reloading {} at head: {e}", root.id)))?,
+            },
+            None => match repo_open::open_existing_repo(Path::new(&root.path), root.flavor)? {
+                Some(repo) => repo,
+                None => return Ok(None),
+            },
+        };
+        let head = Self::head_of(&repo, root.flavor)?;
+        self.set_head(root.id, repo.clone(), head.clone());
+        Ok(Some((repo, head)))
+    }
+
     fn set_head(&self, root_id: Uuid, repo: Arc<ReadonlyRepo>, head: CommitId) {
         self.repos
             .lock()
@@ -450,6 +534,10 @@ impl FilesBackend {
             path: canonical_str,
             flavor,
             created_at,
+            // A freshly created root is lineage 1 with no restart
+            // behind it, so it wears no Project Version badge until
+            // one is recorded in its marker (issue #261).
+            project_version: None,
         };
         self.registry.insert(root.clone())?;
         self.set_head(id, repo, head);
@@ -491,6 +579,12 @@ impl FilesBackend {
                 name: name.to_string(),
                 is_dir: file_type.is_dir(),
                 size,
+                // Resident by definition (this listing is the live
+                // tree); root browsing overlays the version store's
+                // stub/divergence state in `browse_inner`, Drive
+                // browsing has no root context and leaves both false.
+                stub: false,
+                divergent: false,
             });
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -515,26 +609,80 @@ impl FilesBackend {
         } else {
             root_path.join(&subpath)
         };
-        let canonical_target = requested
-            .canonicalize()
-            .map_err(|_| Error::NotFound(format!("{root_id}:{subpath}")))?;
-        if canonical_target != root_path && !canonical_target.starts_with(&root_path) {
+        // A subpath that isn't on disk may still be TRACKED — a
+        // directory whose whole content is pointer stubs (issue #266).
+        // The store answers for it; the escape guard is the repo-path
+        // parse (jj rejects `..` and absolute components), so this
+        // branch can't reach outside the root either.
+        //
+        // ONLY `NotFound` falls through to the store: EACCES, ELOOP,
+        // EIO or an unmounted volume mean we cannot see the live tree,
+        // and answering from the store would report every resident file
+        // as a stub (PR #288 review). Those propagate. An absolute
+        // subpath is refused here too — `repo_dir` would otherwise trim
+        // its leading `/` and answer with a root-relative listing.
+        if Path::new(&subpath).is_absolute() {
             return Err(Error::BadRequest(format!(
                 "subpath escapes the root: {subpath}"
             )));
         }
-        let metadata = std::fs::metadata(&canonical_target)?;
-        if !metadata.is_dir() {
-            return Err(Error::BadRequest(format!("{subpath}: not a directory")));
+        let canonical_target = match requested.canonicalize() {
+            Ok(target) => Some(target),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(Error::Io(e)),
+        };
+        if let Some(target) = &canonical_target {
+            if target != &root_path && !target.starts_with(&root_path) {
+                return Err(Error::BadRequest(format!(
+                    "subpath escapes the root: {subpath}"
+                )));
+            }
+            if !std::fs::metadata(target)?.is_dir() {
+                return Err(Error::BadRequest(format!("{subpath}: not a directory")));
+            }
         }
         // `.git` is hidden at every depth on a software root (a nested
         // one is a submodule's object store — not this root's content),
         // while the marker/store pair only ever exists at the top level.
-        Self::list_dir(
-            &canonical_target,
-            canonical_target == root_path,
-            root.flavor == RootFlavor::Software,
-        )
+        let mut entries = match &canonical_target {
+            Some(target) => Self::list_dir(
+                target,
+                *target == root_path,
+                root.flavor == RootFlavor::Software,
+            )?,
+            None => Vec::new(),
+        };
+        // Overlay the version store's view: tracked-but-not-resident
+        // paths join the listing as pointer stubs, and paths whose
+        // state differs between visible heads wear the divergence badge
+        // (issue #266's explorer renders both). Reading is
+        // OPEN-ONLY — browsing must never initialize a store (PR #288
+        // review) — and reloads to head first, because the cached
+        // handle is only advanced by this process's own writes and a
+        // second writer (the CLI's embedded backend, the cadence
+        // engine) would otherwise stay invisible forever.
+        let dir = badges::repo_dir(&subpath)?;
+        let tracked = match self.reload_existing_repo(&root)? {
+            Some((repo, head)) => {
+                let heads: BTreeSet<CommitId> = match root.flavor {
+                    // A software root's authority is git's refs, whose
+                    // head `head_of` already resolved; jj's op-log view
+                    // is an import of it, not a second opinion.
+                    RootFlavor::Software => BTreeSet::from([head.clone()]),
+                    RootFlavor::Media => repo.view().heads().iter().cloned().collect(),
+                };
+                badges::tracked_dir(repo.store().backend(), &head, &heads, &dir)?
+            }
+            // No store yet (never checkpointed, or the volume is not
+            // mounted): the live tree is the whole truth.
+            None => badges::TrackedDir::empty(),
+        };
+        if canonical_target.is_none() && tracked.is_empty() {
+            // Neither on disk nor in any head's tree.
+            return Err(Error::NotFound(format!("{root_id}:{subpath}")));
+        }
+        badges::annotate(&tracked, &mut entries);
+        Ok(entries)
     }
 
     fn drive_browse_inner(&self, path: String) -> Result<Vec<BrowseEntry>, Error> {
@@ -989,11 +1137,23 @@ impl FilesService for FilesBackend {
     }
 
     async fn list_roots(&self) -> Result<Vec<FileRootInfo>, FilesError> {
-        Ok(self.registry.list())
+        // On the blocking pool like every other method here: the
+        // lineage overlay scans the vault, and one root on a sleeping
+        // drive must not stall a runtime worker for every org.
+        let this = self.clone();
+        blocking(move || Ok(this.with_project_version(this.registry.list()))).await
     }
 
     async fn get_root(&self, id: Uuid) -> Result<FileRootInfo, FilesError> {
-        self.get_root_info(id).map_err(to_files_error)
+        let this = self.clone();
+        blocking(move || {
+            let root = this.get_root_info(id)?;
+            Ok(this
+                .with_project_version(vec![root])
+                .pop()
+                .expect("one root in, one root out"))
+        })
+        .await
     }
 
     async fn browse(&self, root_id: Uuid, subpath: String) -> Result<Vec<BrowseEntry>, FilesError> {
