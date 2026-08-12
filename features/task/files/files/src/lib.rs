@@ -44,6 +44,7 @@ pub mod repo_open;
 mod restart;
 mod scan;
 pub mod stub;
+mod transcode;
 mod versions;
 
 pub use backend::{Captured, FilesBackend, MaterializeReport, SyncTreeMeta};

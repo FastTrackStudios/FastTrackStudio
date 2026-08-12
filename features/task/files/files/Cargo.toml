@@ -36,6 +36,10 @@ serde_yaml = { workspace = true }
 # shared vault-entity slice layer.
 vault = { workspace = true }
 vault-entity = { workspace = true }
+# Derived media (issue #269): proxies/peaks/filmstrips generated from
+# source media and cached in the CAS. The transcoder is injected, so
+# this crate takes no ffmpeg dependency.
+files-transcode = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "rt"] }
 tokio-util = { workspace = true, features = ["compat"] }
@@ -44,6 +48,7 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 vox = { workspace = true }
 
 [dev-dependencies]
+files-transcode = { workspace = true, features = ["test-transcoder"] }
 tempfile = "3"
 # Chunk-level survival after a GC pass is invisible at the RPC seam —
 # the spec's "secondary harness" (issue #261's AC 2).
