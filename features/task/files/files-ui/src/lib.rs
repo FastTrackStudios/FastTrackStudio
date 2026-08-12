@@ -343,10 +343,14 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                     Some(id) if touched != Some(id) => {}
                     // The open file's chain moves with the same events
                     // (a checkpoint adds an entry, a naming adds a name),
-                    // so refresh it alongside the listing.
+                    // so refresh it alongside the listing — but only when
+                    // a file is actually open, else there's no chain to
+                    // re-fetch.
                     _ => {
                         entries.restart();
-                        chain.restart();
+                        if opened.peek().is_some() {
+                            chain.restart();
+                        }
                     }
                 }
             },
@@ -585,7 +589,7 @@ fn OpenFileDetail(
                                 if versions.len() != 1 { "s" }
                             }
                         }
-                        for version in versions.iter().take(20).cloned() {
+                        for version in versions.iter().cloned() {
                             ChainRow {
                                 key: "{version.commit_id}",
                                 org: org.clone(),
@@ -767,6 +771,39 @@ fn DivergencePanel(
             async move { fetch_divergences(&org, root_id).await }
         })
     };
+
+    // Keep the sides live: a concurrent save/sync on this root changes
+    // the divergent heads, and the `commit_id`s the Pick resolver uses
+    // must not go stale under the panel. Re-read on any event touching
+    // this root.
+    {
+        let org = org.clone();
+        architect::use_stream(
+            move |tx| {
+                let org = org.clone();
+                async move {
+                    let Ok(stream) =
+                        task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
+                            .await
+                    else {
+                        return false;
+                    };
+                    stream.events(tx).await.is_ok()
+                }
+            },
+            move |event: FilesEvent| {
+                let mut info = info;
+                let touched = match &event {
+                    FilesEvent::Checkpointed(i) => Some(i.root_id),
+                    FilesEvent::HydrationChanged(c) => Some(c.root_id),
+                    _ => None,
+                };
+                if touched == Some(root_id) {
+                    info.restart();
+                }
+            },
+        );
+    }
 
     // The resolver: a `DivergenceChoice`, run + toast + refresh.
     let resolve = {
