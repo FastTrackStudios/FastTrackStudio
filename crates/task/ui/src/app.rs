@@ -358,13 +358,19 @@ pub fn App() -> Element {
     rsx! {
         style { dangerous_inner_html: MOBILE_BASELINE_CSS }
         ThemeProvider { state: theme_state,
-            div { class: "min-h-screen bg-background text-foreground",
-                // Unauthenticated visitors land on sign-in rather than on
-                // a shell full of empty panels (#109 criterion 5). The
-                // gate is presentation only — the server is what actually
-                // refuses data.
-                crate::auth::SignInGate {
-                    Router::<Route> {}
+            // App-wide toast host: any component under the router can
+            // `use_toast()` to surface the result of a mutation (a named
+            // version, a restored file, a resolved divergence — issue
+            // #267 is the first consumer).
+            ToastProvider {
+                div { class: "min-h-screen bg-background text-foreground",
+                    // Unauthenticated visitors land on sign-in rather than on
+                    // a shell full of empty panels (#109 criterion 5). The
+                    // gate is presentation only — the server is what actually
+                    // refuses data.
+                    crate::auth::SignInGate {
+                        Router::<Route> {}
+                    }
                 }
             }
         }
