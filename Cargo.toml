@@ -1009,6 +1009,9 @@ files-webdav = { path = "features/task/files/files-webdav" }
 # the storage-agent protocol, and the in-server hosting.
 files-storage-proto = { path = "features/task/files/files-storage-proto", default-features = false }
 files-storage = { path = "features/task/files/files-storage" }
+# Replica sync engine (issue #264): reconcile = commit graphs + missing
+# chunks between two live trees; divergence surfaces, never merges.
+files-sync = { path = "features/task/files/files-sync" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }

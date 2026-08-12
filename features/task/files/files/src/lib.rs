@@ -46,7 +46,7 @@ mod scan;
 pub mod stub;
 mod versions;
 
-pub use backend::{Captured, FilesBackend};
+pub use backend::{Captured, FilesBackend, MaterializeReport};
 pub use cadence::{CadenceConfig, CadenceEngine, Clock, SystemClock, TestClock};
 pub use entity::{NamedVersions, ProjectVersions};
 pub use error::{Error, Result};
@@ -61,9 +61,9 @@ pub use versions::VaultVersions;
 pub use consts::{MARKER_FILE, STORE_DIR};
 
 pub use files_proto::{
-    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    GcReport, NamedVersion, ProjectVersion, RestartMode, RootFlavor, SavePoint, SnapshotInfo,
-    VersionRef,
+    BrowseEntry, ChainEntry, CheckpointInfo, DivergenceChoice, DivergenceInfo, DivergenceSide,
+    FileRootInfo, FilesError, FilesEvent, FilesService, GcReport, NamedVersion, ProjectVersion,
+    RestartMode, RootFlavor, SavePoint, SnapshotInfo, VersionRef,
 };
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor

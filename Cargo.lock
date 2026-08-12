@@ -10056,6 +10056,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "files-sync"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "files",
+ "files-proto",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vox",
+]
+
+[[package]]
 name = "files-ui"
 version = "0.1.0"
 dependencies = [
