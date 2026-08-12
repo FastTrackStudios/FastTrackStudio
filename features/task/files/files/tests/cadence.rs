@@ -16,8 +16,8 @@ use chrono::TimeDelta;
 use files::service::FilesServiceStreamSource as _;
 use files::{
     CadenceConfig, FileRootInfo, FilesBackend, FilesEvent, FilesServiceClient,
-    FilesServiceStreamClient, IgnoreSet, RootFlavor, TestClock, files_service_layer,
-    files_service_stream_layer,
+    FilesServiceStreamClient, RootFlavor, TestClock, files_service_layer,
+    files_service_stream_layer, ignore,
 };
 use uuid::Uuid;
 
@@ -51,8 +51,14 @@ impl Harness {
         std::fs::create_dir(&root_dir).unwrap();
 
         let clock = Arc::new(TestClock::default());
+        // A vault root beside the data dir: Named / Project Version
+        // entities are vault pages (issue #261), and the cadence tests
+        // never write one — but the backend needs somewhere to look.
+        let vault_root = data_dir.path().join("vault");
+        std::fs::create_dir_all(&vault_root).unwrap();
         let backend =
-            FilesBackend::with_cadence(data_dir.path(), config, clock.clone()).expect("backend");
+            FilesBackend::with_cadence(data_dir.path(), &vault_root, config, clock.clone())
+                .expect("backend");
         let scope = Scope::new();
         let local = LocalServer::serve(router(backend.clone()), scope.clone());
         let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -307,14 +313,16 @@ async fn ignored_patterns_never_enter_the_store() {
     harness.write("Audio Files/gtr.reapeaks", b"peak cache");
     harness.write("Audio Files/.DS_Store", b"finder junk");
 
-    // The set is seeded from the root's flavor at creation.
+    // A fresh root has no *edited* patterns — the flavor seed is not a
+    // stored pattern, it is what the stored ones layer onto (issue
+    // #273's design, adopted here). Its effect is asserted below: none
+    // of this junk reaches the store.
     let ignore = harness
         .client
         .ignore_set(root.id)
         .await
         .expect("ignore_set rpc");
-    assert!(ignore.contains(&"*.rpp-bak".to_string()), "{ignore:?}");
-    assert!(ignore.contains(&"*.reapeaks".to_string()), "{ignore:?}");
+    assert!(ignore.is_empty(), "nothing edited yet: {ignore:?}");
 
     // Backup churn is not activity: hinting only ignored paths opens no
     // session at all.
@@ -409,14 +417,15 @@ async fn ignored_patterns_never_enter_the_store() {
         "the already-versioned file keeps its last versioned state: {survivor:?}"
     );
 
-    // A bad glob is rejected rather than silently ignoring nothing.
+    // A "pattern" that is really several rules is rejected rather than
+    // quietly smuggling a `!` re-include past the flavor seed.
     assert!(
         harness
             .client
-            .set_ignore_set(root.id, vec!["[".to_string()])
+            .set_ignore_set(root.id, vec!["*.wav\n!keep.wav".to_string()])
             .await
             .is_err(),
-        "an invalid glob must be rejected"
+        "a pattern carrying a line break must be rejected"
     );
 
     harness.shutdown().await;
@@ -656,7 +665,7 @@ async fn a_write_during_a_capture_keeps_the_session_alive() {
             cadence.note_activity(
                 root_id,
                 &["Audio Files/vox.wav".to_string()],
-                &IgnoreSet::seed(RootFlavor::Media),
+                &ignore::seed(RootFlavor::Media).unwrap(),
                 RootFlavor::Media,
             );
         })));

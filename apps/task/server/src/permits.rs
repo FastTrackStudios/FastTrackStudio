@@ -345,6 +345,14 @@ table!(FILES, "files", "files/**", [
     // Cadence engine (issue #260): activity hints and the per-root
     // Ignore set. A hint can cause a capture, so it is a write.
     wr "hint_activity", rd "snapshots", rd "ignore_set", wr "set_ignore_set",
+    // Curation (issue #261). Naming and starting an iteration are
+    // ordinary writes; dropping a name and running GC carry an audit
+    // line even on allow (`wa`, like every `delete` above) because both
+    // can end an object's protection. Still member tier — this lane has
+    // no admin permits at all (see the module doc).
+    wr "name_version", rd "list_named_versions", rd "resolve_named_version",
+    wa "unname_version", wr "start_project_version", rd "list_project_versions",
+    wa "gc_root",
 ]);
 table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
 table!(TASK, "task", "tasks/**", [

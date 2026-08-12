@@ -115,6 +115,7 @@ members = [
     "features/dawfile/dawfile-protools",
     "features/dawfile/dawfile-reaper",
     "features/dawfile/dawfile-standalone",
+    "features/expression-editor/expression-editor-demo",
     # ── features/reaper ───────────────────────────────────────────────
     "features/reaper/daw-reaper",
     "features/reaper/daw-bridge",
@@ -638,6 +639,7 @@ expression-editor-audio = { path = "features/expression-editor/expression-editor
 expression-editor-core = { path = "features/expression-editor/expression-editor-core" }
 expression-editor-corpus = { path = "features/expression-editor/expression-editor-corpus" }
 expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
+expression-editor-demo = { path = "features/expression-editor/expression-editor-demo" }
 expression-editor-guitarpro = { path = "features/expression-editor/expression-editor-guitarpro" }
 expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
 expression-editor-standalone = { path = "features/expression-editor/expression-editor-standalone" }
@@ -692,6 +694,15 @@ blake3 = { version = "1.8" }
 # implemented over the chunk store above. Pinned (jj-lib is pre-1.0 per the
 # ADR); vendor-patch here if/when we need to carry a local fix.
 jj-lib = { version = "=0.44.0" }
+# Software File Roots (issue #273) are colocated git: the `files` feature
+# talks to the root's real `.git` directly (branch refs, index) alongside
+# jj-lib's `GitBackend`. Same version jj-lib itself pins, so there is one
+# gix in the tree; features are a subset of jj-lib's own.
+gix = { version = "0.85", default-features = false, features = [
+    "index",
+    "max-performance-safe",
+    "sha1",
+] }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
 # Embeds the staged fasttrackstudio web bundle into the native binary
@@ -988,6 +999,7 @@ task-files-version-store = { path = "crates/task/files-version-store" }
 # chain / checkpoint-now over the version store above.
 files-proto = { path = "features/task/files/files-proto", default-features = false }
 files = { path = "features/task/files/files" }
+files-ui = { path = "features/task/files/files-ui" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }
@@ -1264,6 +1276,32 @@ filter_next = "allow"
 [profile.dev]
 opt-level = 1
 
+# Debuginfo discipline. Full DWARF was the single biggest cost in this
+# tree: a `debug` test binary measured 1.62 GB, of which 1.59 GB (98%)
+# was `.debug_*` sections — and the default linker copies all of it into
+# every binary, every relink. Across ~6 worktrees that was ~1 TB of
+# target/ and minutes of link time per build.
+#
+#   line-tables-only  keeps file:line in backtraces + profiler symbols
+#                     (samply/perf still work); drops variable/type DWARF,
+#                     so a *debugger* can't inspect locals.
+#   unpacked          leaves the remaining DWARF in the .o files under
+#                     deps/ instead of copying it into each artifact, so
+#                     linking stops moving gigabytes around.
+#
+# Need a real debugger session? Build with `--profile dev-dbg` (below) —
+# same codegen, full DWARF, and it uses a separate target dir so it never
+# invalidates the fast dev artifacts.
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+# Escape hatch: full DWARF for stepping in gdb/lldb. Everything else is
+# identical to dev, so package opt-level overrides below still apply.
+[profile.dev-dbg]
+inherits = "dev"
+debug = 2
+split-debuginfo = "packed"
+
 # dx web builds: native debuginfo in the wasm module blew past
 # Chrome's 1 GiB WebAssembly module cap (1.14 GB observed). Wasm dev
 # builds don't need it — strip it and dev bundles come back to a
@@ -1286,8 +1324,86 @@ opt-level = 3
 [profile.wasm-dev.package.daw-standalone]
 opt-level = 3
 
+# Dependencies. Was 3 across the board, which meant paying full LLVM
+# optimization on ~1500 registry crates for every cold build / new
+# worktree. Dropped to 1: still gets rid of the pathological O0 debug
+# codegen, at a fraction of the compile cost. The crates that actually
+# run on the audio thread are exempted below — this override applies to
+# dependencies only, so workspace members are governed by profile.dev's
+# base opt-level and the explicit list further down.
 [profile.dev.package."*"]
+opt-level = 1
+
+# Audio-thread dependencies, kept at 3. `package."*"` above would
+# otherwise drop these to 1, and a dev run of the rig would start
+# xrunning. Sourced from `cargo tree` over audiocore-dsp /
+# daw-audio-graph / signal-sampler / neural-amp-modeler / eq-dsp /
+# pitch-dsp, keeping the crates that do real per-sample or per-block
+# work (resampling, decode, FFT, sample-pack decompression, JIT).
+#
+# If a dev run ever xruns on a path not covered here: run it --release
+# (the launch paths already do), or add the crate to this list.
+[profile.dev.package.rubato]
 opt-level = 3
+[profile.dev.package.fixed-resample]
+opt-level = 3
+[profile.dev.package.fast-interleave]
+opt-level = 3
+[profile.dev.package.dasp_frame]
+opt-level = 3
+[profile.dev.package.dasp_sample]
+opt-level = 3
+[profile.dev.package.rustfft]
+opt-level = 3
+[profile.dev.package.realfft]
+opt-level = 3
+[profile.dev.package.transpose]
+opt-level = 3
+[profile.dev.package.strength_reduce]
+opt-level = 3
+[profile.dev.package.primal-check]
+opt-level = 3
+[profile.dev.package.num-complex]
+opt-level = 3
+[profile.dev.package.symphonia-core]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-adpcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-aac]
+opt-level = 3
+[profile.dev.package.symphonia-format-riff]
+opt-level = 3
+[profile.dev.package.symphonia-format-mkv]
+opt-level = 3
+# Sample-pack streaming: packs are zstd-framed, so decompression is on
+# the voice-start path, and blake3 hashes pack content on load.
+[profile.dev.package.zstd-safe]
+opt-level = 3
+[profile.dev.package.zstd-sys]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+# phon's JIT engine — generates and runs the DSP graph itself.
+[profile.dev.package.phon]
+opt-level = 3
+[profile.dev.package.phon-engine]
+opt-level = 3
+[profile.dev.package.phon-jit]
+opt-level = 3
+
+# Build scripts + proc macros and their deps. `package."*"` does NOT cover
+# these — cargo routes them through build-override, where they were landing
+# at opt-level 0 with full debuginfo. This tree leans hard on derive macros
+# (facet, architect, dioxus rsx), so the macros are *executed* thousands of
+# times per build: paying O3 once to compile syn/quote wins that back many
+# times over, and build scripts have no use for DWARF.
+[profile.dev.build-override]
+opt-level = 3
+debug = false
 
 # `package."*"` covers DEPENDENCIES only — workspace members stay at the
 # base opt-level. The audio path is ours, so the hot crates get full opt

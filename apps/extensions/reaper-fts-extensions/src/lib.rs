@@ -152,6 +152,8 @@ mod midi_mode;
 mod midi_mode_input;
 #[cfg(feature = "ui-dock")]
 mod midi_tools_panel;
+#[cfg(all(feature = "mod-input", feature = "mod-expression-editor"))]
+mod expression_mouse;
 #[cfg(feature = "mod-mirror")]
 mod mirror;
 #[cfg(all(feature = "mod-session", feature = "mod-input"))]
@@ -283,6 +285,11 @@ extern "C" fn timer_callback() {
                 daw_reaper::extension_setup::refresh_audio_sync_registry(&registry);
             });
         }
+
+        // Expression editor live sync: follow the item selection and
+        // write settled edits back to the take, ~30Hz, panel-visible only.
+        #[cfg(feature = "mod-expression-editor")]
+        catch_panic("expression_editor_poll", expression_editor_reaper::poll);
 
         catch_panic("_fire_timer_callbacks", daw::_fire_timer_callbacks);
         catch_panic(
@@ -638,6 +645,33 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         info!("MIDI-editor mode → input workflow bridge installed");
     }
 
+    // Overlay the user's reaper-mouse.ini onto the expression editor's
+    // mouse maps, before any take is loaded — the map is captured when
+    // a session's mode is set.
+    #[cfg(all(feature = "mod-input", feature = "mod-expression-editor"))]
+    expression_mouse::install();
+
+    // The expression editor panel is its own input context: reaper-input
+    // asks the dock whose window a keystroke targets, and routes editor
+    // keys through the `expression-editor` bindings (unbound → the panel
+    // itself, never REAPER's accelerators). The panel takes focus on any
+    // click so that routing actually engages.
+    #[cfg(all(
+        feature = "mod-input",
+        feature = "mod-expression-editor",
+        feature = "ui-dock"
+    ))]
+    {
+        reaper_input::input::window_detection::set_panel_context_probe(|hwnd| {
+            daw::reaper_ui::dock::is_panel_hwnd(
+                expression_editor_reaper::PANEL_ID,
+                hwnd as *mut std::ffi::c_void,
+            )
+            .then_some(reaper_input::input::window_detection::EXPRESSION_EDITOR_TAG)
+        });
+        info!("Expression editor input-context probe registered");
+    }
+
     // Collect actions from all modules after init has populated runtime state.
     let module_actions = module::collect_actions(&modules);
 
@@ -717,6 +751,16 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
 
     register_actions_sync(&all_defs, modules, panels);
+
+    // After the (scheduled) panel registration: the expression editor
+    // takes keyboard focus on any click, so its input context engages.
+    // Queued behind the registration task on the same FIFO.
+    #[cfg(all(feature = "ui-dock", feature = "mod-expression-editor"))]
+    if let Err(e) = Global::get().task_support.do_later_in_main_thread_asap(|| {
+        daw::reaper_ui::dock::set_panel_focus_on_click(expression_editor_reaper::PANEL_ID, true);
+    }) {
+        warn!("Failed to schedule expression-editor focus flag: {e}");
+    }
 
     // After the main registration: also expose the midi-tools panels in
     // REAPER's MIDI editor section, so their toolbar buttons there

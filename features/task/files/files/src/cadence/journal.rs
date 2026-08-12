@@ -126,7 +126,21 @@ impl Journal {
 
     /// Record an auto-snapshot: it becomes the snapshot head, and any
     /// snapshot older than [`SNAPSHOT_RETENTION`] stops being listed.
-    pub fn record_snapshot(&mut self, record: SnapshotRecord, now: DateTime<Utc>) {
+    ///
+    /// `checkpoint_head` is the commit the snapshot branch hangs off —
+    /// recorded here too, and not only by [`Journal::record_checkpoint`],
+    /// because a session's *first* snapshot is exactly the moment the
+    /// view stops having one obvious head. Without it, a root that has
+    /// snapshotted but never checkpointed would fall back to "the first
+    /// view head" and pick a snapshot as its checkpoint line, putting
+    /// every ephemeral capture into the version chain.
+    pub fn record_snapshot(
+        &mut self,
+        record: SnapshotRecord,
+        checkpoint_head: &str,
+        now: DateTime<Utc>,
+    ) {
+        self.checkpoint_head = Some(checkpoint_head.to_string());
         self.snapshot_head = Some(record.snapshot_id.clone());
         self.snapshots.push(record);
         self.snapshots.retain(|s| now - s.at < SNAPSHOT_RETENTION);

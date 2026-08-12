@@ -48,9 +48,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use task_files_chunk_store::{ChunkStore, FileId};
-
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 /// Test seam: a callback invoked after the pre-read `stat` and before
 /// the streaming read, so a test can make a file change *during* its
@@ -120,48 +118,51 @@ impl FileStat {
     }
 }
 
-/// Stream `path` into `chunks`, certified stable.
-///
-/// `Ok(Some(id))` — the file was provably identical before and after the
-/// read; `id` is its content address. `Ok(None)` — the file was still
-/// being written (or its metadata was too coarse to settle and a second
-/// read disagreed) after `attempts` tries: requeue it.
-pub async fn stream_certified(
-    chunks: &ChunkStore,
-    path: &Path,
-    attempts: u32,
-    hook: Option<&MidHashHook>,
-) -> Result<Option<FileId>> {
-    for _ in 0..attempts.max(1) {
-        let before = FileStat::read(path)?;
-        if let Some(hook) = hook {
-            hook(path);
-        }
-        let file_id = stream_once(chunks, path).await?;
-        let after = FileStat::read(path)?;
-        if before != after {
-            continue;
-        }
-        if !after.is_coarse() {
-            return Ok(Some(file_id));
-        }
-        // Coarse (or absent) timestamps: the stats agreeing proves
-        // nothing, so prove it by content. Two independent reads
-        // hashing alike means no write landed between them.
-        let second = stream_once(chunks, path).await?;
-        if second == file_id && FileStat::read(path)? == after {
-            return Ok(Some(file_id));
-        }
-    }
-    Ok(None)
+/// What a stat sandwich concluded about one read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settled {
+    /// The file provably held still: commit what was read.
+    Stable,
+    /// The stats matched, but nothing in them has the resolution to
+    /// rule out a same-length in-place rewrite (see the module doc).
+    /// The caller must confirm by content — re-read and compare ids.
+    Coarse,
+    /// The file moved under the read: retry, or requeue it.
+    Moved,
 }
 
-async fn stream_once(chunks: &ChunkStore, path: &Path) -> Result<FileId> {
-    let file = tokio::fs::File::open(path).await?;
-    chunks
-        .write_stream(file)
-        .await
-        .map_err(|e| Error::Repo(format!("chunk store: {e}")))
+/// The "before" half of a stat sandwich, taken before a file is read
+/// into the store and consulted again after.
+///
+/// Flavor-agnostic on purpose (issue #273 generalized the checkpoint
+/// writer to jj's `Backend` trait): this measures the *file*, so it
+/// guards a media root's CAS write and a software root's git blob write
+/// identically.
+#[derive(Debug)]
+pub struct StatGuard {
+    before: FileStat,
+}
+
+impl StatGuard {
+    /// Stat `path` before reading it.
+    pub fn begin(path: &Path) -> Result<Self> {
+        Ok(Self {
+            before: FileStat::read(path)?,
+        })
+    }
+
+    /// Stat `path` again and judge the read.
+    pub fn check(&self, path: &Path) -> Result<Settled> {
+        let after = FileStat::read(path)?;
+        if after != self.before {
+            return Ok(Settled::Moved);
+        }
+        Ok(if after.is_coarse() {
+            Settled::Coarse
+        } else {
+            Settled::Stable
+        })
+    }
 }
 
 #[cfg(test)]

@@ -33,10 +33,11 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use files_proto::{RootFlavor, SavePoint};
+use jj_lib::gitignore::GitIgnoreFile;
 use uuid::Uuid;
 
 use super::clock::Clock;
-use crate::ignore::IgnoreSet;
+use crate::ignore;
 use std::sync::Arc;
 
 /// The tunables of the cadence (spec #255: "~10 min" snapshots,
@@ -192,11 +193,14 @@ impl CadenceEngine {
         &self,
         root_id: Uuid,
         paths: &[String],
-        ignore: &IgnoreSet,
+        ignores: &GitIgnoreFile,
         flavor: RootFlavor,
     ) -> u32 {
         let now = self.clock.now();
-        let live: Vec<&String> = paths.iter().filter(|p| !ignore.is_ignored(p)).collect();
+        let live: Vec<&String> = paths
+            .iter()
+            .filter(|p| !ignore::is_ignored(ignores, p))
+            .collect();
         if live.is_empty() {
             return 0;
         }
@@ -207,7 +211,7 @@ impl CadenceEngine {
         state.last_activity_at = now;
         state.uncaptured_activity = true;
         for path in &live {
-            if IgnoreSet::is_project_file(path, flavor) {
+            if ignore::is_project_file(path, flavor) {
                 state.pending_save_points.push(SavePoint {
                     path: (*path).clone(),
                     at: now,
@@ -397,7 +401,7 @@ mod tests {
         let n = engine.note_activity(
             root,
             &[path.to_string()],
-            &IgnoreSet::seed(RootFlavor::Media),
+            &ignore::seed(RootFlavor::Media).unwrap(),
             RootFlavor::Media,
         );
         assert_eq!(n, 1, "{path} should have survived the ignore set");
@@ -445,12 +449,12 @@ mod tests {
     fn ignored_paths_never_open_a_session() {
         let (clock, engine) = engine();
         let root = Uuid::new_v4();
-        let ignore = IgnoreSet::seed(RootFlavor::Media);
+        let ignores = ignore::seed(RootFlavor::Media).unwrap();
 
         let accepted = engine.note_activity(
             root,
             &["El Artisa.rpp-bak".into(), "Audio/kick.reapeaks".into()],
-            &ignore,
+            &ignores,
             RootFlavor::Media,
         );
         assert_eq!(accepted, 0);
