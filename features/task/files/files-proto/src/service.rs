@@ -204,6 +204,57 @@ pub trait FilesService {
     async fn list_project_versions(&self, root_id: Uuid)
     -> Result<Vec<ProjectVersion>, FilesError>;
 
+    /// Restart the root as a new Project Version (issue #268, glossary:
+    /// same folder, new lineage, auto-numbered): checkpoint the old
+    /// iteration's terminal state, reshape the live tree per `mode`,
+    /// commit the result as the new lineage's first checkpoint, and
+    /// mint the [`ProjectVersion`] entity on it. The old iteration
+    /// stays browsable read-only via [`FilesService::browse_at`] at
+    /// the new start's parent commit.
+    ///
+    /// A save landing on disk mid-flip is never destroyed: the clear
+    /// phase re-verifies every file against the just-taken checkpoint,
+    /// and a file that moved is committed as a **sibling** of the old
+    /// head instead of being cleared — it survives as flagged
+    /// Divergent versions, resolved like any other divergence (#267).
+    ///
+    /// Media roots only — a software root's lineage is git's (branch
+    /// there), same split as [`FilesService::gc_root`].
+    async fn restart_project_version(
+        &self,
+        root_id: Uuid,
+        mode: crate::model::RestartMode,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, FilesError>;
+
+    /// List the direct children of `subpath` inside `commit_id`'s tree
+    /// — **time-travel browsing**, read-only by construction (answers
+    /// come from the version store; the live tree and disk are never
+    /// touched). This is how an old Project Version iteration is
+    /// explored (glossary: "old iterations stay browsable read-only").
+    /// Sizes are unreported (`None`): tree entries carry identities,
+    /// not lengths, and no content is opened to answer a listing.
+    async fn browse_at(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        subpath: String,
+    ) -> Result<Vec<BrowseEntry>, FilesError>;
+
+    /// Copy chosen files out of `commit_id`'s tree into the live tree
+    /// — **copy-forward**, the everyday verb for quarrying an old
+    /// iteration (glossary). Streams each file from the store and
+    /// verifies its `FileId` before the rename, like hydration. A
+    /// target that exists with unversioned changes is refused (listed
+    /// in the error) rather than overwritten — checkpoint first.
+    /// Returns the root-relative paths written, sorted.
+    async fn copy_forward(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        paths: Vec<String>,
+    ) -> Result<Vec<String>, FilesError>;
+
     /// Run one GC pass over `root_id`'s version store with the protect
     /// set resolved from the Vault: everything Named/Project Versions
     /// reference is immortal regardless of age, on top of jj's own

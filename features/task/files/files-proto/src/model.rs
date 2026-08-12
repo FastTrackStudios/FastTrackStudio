@@ -206,6 +206,30 @@ pub struct ProjectVersion {
     pub started_at: DateTime<Utc>,
 }
 
+/// How a Project Version restart seeds the root's new live tree
+/// (issue #268, glossary "Project Version": restarting replaces the
+/// "Project Title NEW final2" folder idiom — same folder, new
+/// lineage). Whatever the mode, the old iteration's terminal state is
+/// checkpointed first and stays browsable read-only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+pub enum RestartMode {
+    /// The new iteration starts with nothing: every tracked file is
+    /// cleared from the live tree (ignored/untracked junk is left
+    /// alone — a restart never deletes unversioned data).
+    Empty,
+    /// The new iteration starts from a template folder's contents,
+    /// copied in after the clear. The path is org-confined server-side
+    /// like every other path argument.
+    Template { source_path: String },
+    /// The new iteration carries chosen files forward from the old
+    /// one; everything else is cleared. An empty list means the
+    /// picker's default — carry **everything minus the Ignore set**
+    /// (spec: "picker defaults to everything minus the Ignore set"),
+    /// which makes the restart a pure lineage cut with no tree change.
+    CarryForward { paths: Vec<String> },
+}
+
 /// What a Vault version reference resolves to in the store right now —
 /// the answer a share link targeting a Named Version needs before it
 /// can stream anything (glossary "Share link": target enum

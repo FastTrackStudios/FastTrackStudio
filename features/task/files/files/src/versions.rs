@@ -228,6 +228,22 @@ impl VaultVersions {
     /// `max(existing) + 1` over the *scanned* pages, so a version that
     /// arrived by vault replication is counted too; the first one is
     /// v1.
+    /// The number the NEXT Project Version of `root_id` will get —
+    /// what a restart writes into its flip commit's description before
+    /// the entity exists (issue #268). Advisory: the entity write
+    /// re-derives it under its own snapshot, so a racing creation can
+    /// bump it; the description is a label, the entity is the
+    /// authority.
+    pub fn next_project_version_number(&self, root_id: Uuid) -> Result<u32> {
+        Ok(self
+            .project_versions(root_id)?
+            .into_iter()
+            .map(|v| v.number)
+            .max()
+            .unwrap_or(0)
+            + 1)
+    }
+
     pub fn create_project_version(
         &self,
         root_id: Uuid,

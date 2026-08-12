@@ -171,6 +171,46 @@ pub(crate) enum FilesProjectVersionCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Restart the root as a new Project Version: checkpoint the old
+    /// iteration, reshape the live tree, and start the new lineage.
+    /// Exactly one of --empty / --template / --carry-forward picks the
+    /// starting mode; --carry-forward with no paths carries everything
+    /// (a pure lineage cut).
+    Restart {
+        root_id: uuid::Uuid,
+        #[arg(long)]
+        label: Option<String>,
+        /// Start with an empty tree.
+        #[arg(long, conflicts_with_all = ["template", "carry_forward"])]
+        empty: bool,
+        /// Start from this template folder's contents.
+        #[arg(long, conflicts_with = "carry_forward")]
+        template: Option<String>,
+        /// Carry these root-relative paths forward (repeatable); with
+        /// no paths, carries everything minus the Ignore set.
+        #[arg(long, num_args = 0..)]
+        carry_forward: Option<Vec<String>>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Browse an old iteration read-only at a commit (time travel).
+    BrowseAt {
+        root_id: uuid::Uuid,
+        commit_id: String,
+        #[arg(default_value = "")]
+        subpath: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Copy chosen files out of an old commit into the live tree.
+    CopyForward {
+        root_id: uuid::Uuid,
+        commit_id: String,
+        #[arg(required = true)]
+        paths: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// A root's versioning flavor, chosen at creation (ADR 0001). `media`
@@ -526,6 +566,68 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                         v.id
                     );
                 }
+            }
+        }
+        FilesCmd::ProjectVersion(FilesProjectVersionCmd::Restart {
+            root_id,
+            label,
+            empty,
+            template,
+            carry_forward,
+            json,
+        }) => {
+            let mode = match (empty, template, carry_forward) {
+                (true, None, None) => files_proto::RestartMode::Empty,
+                (false, Some(source_path), None) => {
+                    files_proto::RestartMode::Template { source_path }
+                }
+                (false, None, Some(paths)) => files_proto::RestartMode::CarryForward { paths },
+                _ => eyre::bail!("pick exactly one of --empty / --template / --carry-forward"),
+            };
+            let pv = client
+                .restart_project_version(root_id, mode, label)
+                .await
+                .map_err(|e| eyre::eyre!("restart_project_version: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&pv)?);
+            } else {
+                println!(
+                    "restarted as v{}{} at {}",
+                    pv.number,
+                    label_suffix(&pv.label),
+                    short(&pv.commit_id)
+                );
+            }
+        }
+        FilesCmd::ProjectVersion(FilesProjectVersionCmd::BrowseAt {
+            root_id,
+            commit_id,
+            subpath,
+            json,
+        }) => {
+            let entries = client
+                .browse_at(root_id, commit_id, subpath)
+                .await
+                .map_err(|e| eyre::eyre!("browse_at: {e}"))?;
+            print_entries(&entries, json)?;
+        }
+        FilesCmd::ProjectVersion(FilesProjectVersionCmd::CopyForward {
+            root_id,
+            commit_id,
+            paths,
+            json,
+        }) => {
+            let written = client
+                .copy_forward(root_id, commit_id, paths)
+                .await
+                .map_err(|e| eyre::eyre!("copy_forward: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&written)?);
+            } else {
+                for path in &written {
+                    println!("{path}");
+                }
+                println!("{} file(s) copied forward", written.len());
             }
         }
         FilesCmd::Hint { root_id, paths } => {
