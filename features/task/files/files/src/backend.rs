@@ -2701,7 +2701,7 @@ impl FilesBackend {
         let Some((repo, head)) = self.reload_existing_repo(&root)? else {
             return Ok(Vec::new());
         };
-        let heads = Self::ordered_heads(&repo, &head);
+        let heads = self.ordered_heads(&repo, &root, &head);
         if heads.len() < 2 {
             return Ok(Vec::new());
         }
@@ -2738,15 +2738,33 @@ impl FilesBackend {
         Ok(out)
     }
 
-    /// The root's visible heads with the journal-line head first — the
-    /// stable "side A" every surface reports.
-    fn ordered_heads(repo: &Arc<ReadonlyRepo>, head: &CommitId) -> Vec<CommitId> {
+    /// The root's visible **checkpoint** heads with the journal-line
+    /// head first — the stable "side A" every divergence surface
+    /// reports. Ephemeral auto-snapshot tips are excluded (PR #291
+    /// review): a snapshot branch is not a divergent version, and
+    /// counting one would fold ephemeral captures into the chain and
+    /// leak them to replicas via `sync_heads`.
+    fn ordered_heads(
+        &self,
+        repo: &Arc<ReadonlyRepo>,
+        root: &FileRootInfo,
+        head: &CommitId,
+    ) -> Vec<CommitId> {
+        let known_snapshots: std::collections::HashSet<String> = Self::journal_of(root)
+            .map(|j| {
+                j.snapshots
+                    .iter()
+                    .map(|s| s.snapshot_id.clone())
+                    .chain(j.snapshot_head.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut heads: Vec<CommitId> = vec![head.clone()];
         heads.extend(
             repo.view()
                 .heads()
                 .iter()
-                .filter(|h| *h != head)
+                .filter(|h| *h != head && !known_snapshots.contains(&h.hex()))
                 .cloned()
                 .collect::<BTreeSet<_>>(),
         );
@@ -2797,14 +2815,26 @@ impl FilesBackend {
         Ok(())
     }
 
-    /// The `(stem) (divergent n)(.ext)` name a KeepBoth side lands
-    /// under, beside the journal-line side's file.
+    /// The `<stem> (divergent n).<ext>` name a KeepBoth side lands
+    /// under, beside the journal-line side's file. The extension split
+    /// applies to the FILE NAME only, never a dot in a parent
+    /// directory (`a.b/c` must not become `a (divergent 1).b/c`, which
+    /// would relocate the sibling into a stray directory — PR #291
+    /// review).
     fn divergent_name(path: &str, n: usize) -> String {
-        match path.rsplit_once('.') {
+        let (dir, name) = match path.rsplit_once('/') {
+            Some((dir, name)) => (Some(dir), name),
+            None => (None, path),
+        };
+        let renamed = match name.rsplit_once('.') {
             Some((stem, ext)) if !stem.is_empty() => {
                 format!("{stem} (divergent {n}).{ext}")
             }
-            _ => format!("{path} (divergent {n})"),
+            _ => format!("{name} (divergent {n})"),
+        };
+        match dir {
+            Some(dir) => format!("{dir}/{renamed}"),
+            None => renamed,
         }
     }
 
@@ -2822,7 +2852,7 @@ impl FilesBackend {
         let _guard = lock.lock().expect("root lock poisoned");
 
         let (repo, head) = self.reload_repo(&root)?;
-        let heads = Self::ordered_heads(&repo, &head);
+        let heads = self.ordered_heads(&repo, &root, &head);
         if heads.len() < 2 {
             return Err(Error::BadRequest(format!(
                 "{root_id}: no divergence to resolve"
@@ -2877,16 +2907,52 @@ impl FilesBackend {
             )?)
         };
 
+        // A KeepBoth sibling name that is already tracked or on disk
+        // must not be clobbered (PR #291 review): bump the counter past
+        // any collision. `tracked` is every path any head knows; the
+        // disk check catches an untracked file sitting there too.
+        let tracked_names: BTreeSet<String> = per_head
+            .iter()
+            .flat_map(|m| m.keys().map(|p| p.as_internal_file_string().to_string()))
+            .collect();
+        let sibling_name = |base: &str, start: usize| -> Result<(String, RepoPathBuf), Error> {
+            let mut n = start;
+            loop {
+                let candidate = Self::divergent_name(base, n);
+                let (disk, rp) = self.resolve_root_file(&root, &candidate)?;
+                if !tracked_names.contains(rp.as_internal_file_string()) && !disk.exists() {
+                    return Ok((candidate, rp));
+                }
+                n += 1;
+            }
+        };
+
         // 1. The named path, per the choice.
         match &choice {
             DivergenceChoice::Pick { commit_id } => {
-                let picked = heads
+                // An empty or ambiguous id must never silently resolve
+                // to side A (PR #291 review): require an exact match or
+                // a non-empty unambiguous prefix.
+                if commit_id.trim().is_empty() {
+                    return Err(Error::BadRequest("pick: empty commit id".into()));
+                }
+                let matches: Vec<&CommitId> = heads
                     .iter()
-                    .find(|h| h.hex() == *commit_id || h.hex().starts_with(commit_id.as_str()))
-                    .ok_or_else(|| {
-                        Error::BadRequest(format!("{commit_id}: not one of this root's heads"))
-                    })?
-                    .clone();
+                    .filter(|h| h.hex() == *commit_id || h.hex().starts_with(commit_id.as_str()))
+                    .collect();
+                let picked = match matches.as_slice() {
+                    [one] => (*one).clone(),
+                    [] => {
+                        return Err(Error::BadRequest(format!(
+                            "{commit_id}: not one of this root's divergent heads"
+                        )));
+                    }
+                    _ => {
+                        return Err(Error::BadRequest(format!(
+                            "{commit_id}: ambiguous — names more than one head"
+                        )));
+                    }
+                };
                 match tree_value_of(&picked, &repo_path)? {
                     Some(value) => {
                         let id = match &value {
@@ -2905,7 +2971,8 @@ impl FilesBackend {
             }
             DivergenceChoice::KeepBoth => {
                 // Side A already sits in the base tree; each other
-                // side's distinct content lands beside it.
+                // side's distinct content lands beside it under a
+                // collision-free `(divergent n)` name.
                 let a_state = value_in(0, &repo_path).map(|id| id.hex());
                 let mut n = 1;
                 for (idx, h) in heads.iter().enumerate().skip(1) {
@@ -2914,9 +2981,8 @@ impl FilesBackend {
                         continue;
                     }
                     if let Some(id) = side {
-                        let sibling = Self::divergent_name(&path, n);
+                        let (sibling, sibling_path) = sibling_name(&path, n)?;
                         n += 1;
-                        let (_, sibling_path) = self.resolve_root_file(&root, &sibling)?;
                         let value = tree_value_of(h, &repo_path)?.ok_or_else(|| {
                             Error::Repo(format!("{path}: side vanished mid-resolve"))
                         })?;
@@ -2954,9 +3020,8 @@ impl FilesBackend {
                 }
                 if let Some(id) = side {
                     let other_str = other.as_internal_file_string().to_string();
-                    let sibling = Self::divergent_name(&other_str, n);
+                    let (sibling, sibling_path) = sibling_name(&other_str, n)?;
                     n += 1;
-                    let (_, sibling_path) = self.resolve_root_file(&root, &sibling)?;
                     let value = tree_value_of(h, &other)?.ok_or_else(|| {
                         Error::Repo(format!("{other_str}: side vanished mid-resolve"))
                     })?;
@@ -2965,6 +3030,39 @@ impl FilesBackend {
                     changed_paths.push(sibling);
                 }
             }
+        }
+
+        // Never destroy unversioned work when materializing the decided
+        // state (PR #291 review — the same rule `materialize_head`
+        // enforces): a materialize target that exists on disk with
+        // content the store does not hold is an unversioned edit;
+        // refuse rather than overwrite or delete it.
+        let content = crate::content::ContentStore::for_repo(&repo, backend)?;
+        let root_path = PathBuf::from(&root.path);
+        let mut dirty = Vec::new();
+        for (p, _want) in &materialize {
+            let disk = root_path.join(p.as_internal_file_string());
+            if !disk.exists() || stub::probe(&disk).is_some() {
+                continue;
+            }
+            if let Some(disk_id) = content.probe(&disk)? {
+                let known = match task_files_chunk_store::FileId::from_hex(&disk_id.hex()) {
+                    Ok(fid) => self
+                        .with_version_store(root_id, |vs| pollster::block_on(vs.chunks().has(fid)))
+                        .map_err(|e| Error::Repo(e.to_string()))?,
+                    Err(_) => false,
+                };
+                if !known {
+                    dirty.push(p.as_internal_file_string().to_string());
+                }
+            }
+        }
+        if !dirty.is_empty() {
+            dirty.sort();
+            return Err(Error::BadRequest(format!(
+                "unversioned changes at {} — checkpoint first, then resolve",
+                dirty.join(", ")
+            )));
         }
 
         // 3. One merge checkpoint over every head: the decided state is
@@ -2986,7 +3084,6 @@ impl FilesBackend {
             .map_err(|e| Error::Repo(e.to_string()))?;
 
         // 4. Materialize the decided state into the live tree.
-        let root_path = PathBuf::from(&root.path);
         for (p, want) in &materialize {
             let disk = root_path.join(p.as_internal_file_string());
             match want {
@@ -3037,13 +3134,22 @@ impl FilesBackend {
     /// local half of replica creation — the content arrives by
     /// reconcile (the `files-sync` crate). Not an RPC: the sync daemon
     /// (#265) drives it on its own machine.
+    /// `flavor` is the flavor of the root being replicated. Only
+    /// [`RootFlavor::Media`] is supported (PR #291 review): this engine
+    /// is the CAS chunk store's reconcile, and a media replica's whole
+    /// materialize path assumes it. A software root is replicated by
+    /// cloning its colocated git — a different, git-native path — so a
+    /// non-media flavor is refused here rather than silently adopted as
+    /// media (which would give it wrong semantics and a half-applied,
+    /// then-erroring reconcile).
     pub fn adopt_replica(
         &self,
         root_id: Uuid,
         name: &str,
         path: &str,
+        flavor: RootFlavor,
     ) -> Result<FileRootInfo, FilesError> {
-        self.adopt_replica_inner(root_id, name, path)
+        self.adopt_replica_inner(root_id, name, path, flavor)
             .map_err(to_files_error)
     }
 
@@ -3052,7 +3158,14 @@ impl FilesBackend {
         root_id: Uuid,
         name: &str,
         path: &str,
+        flavor: RootFlavor,
     ) -> Result<FileRootInfo, Error> {
+        if flavor != RootFlavor::Media {
+            return Err(Error::BadRequest(
+                "replica sync is media-only; a software root is replicated by cloning its git"
+                    .into(),
+            ));
+        }
         let requested = PathBuf::from(path);
         std::fs::create_dir_all(&requested)?;
         let canonical = self.confine(&requested)?;
@@ -3105,7 +3218,8 @@ impl FilesBackend {
         let Some((repo, head)) = self.reload_existing_repo(&root).map_err(to_files_error)? else {
             return Ok(Vec::new());
         };
-        Ok(Self::ordered_heads(&repo, &head)
+        Ok(self
+            .ordered_heads(&repo, &root, &head)
             .iter()
             .map(|h| h.hex())
             .collect())
@@ -3128,6 +3242,20 @@ impl FilesBackend {
         self.with_version_store(root_id, |vs| {
             pollster::block_on(vs.read_raw_object(&bytes)).is_ok()
         })
+    }
+
+    /// Decode a fetched commit's `(parent hex ids, tree hex id)`
+    /// **without storing it** — reconcile imports a commit's closure
+    /// before the commit object itself (issue #264 / PR #291 review:
+    /// a commit's presence must mean its whole closure is present, so
+    /// an interrupted pull is re-runnable).
+    pub fn sync_decode_commit(&self, bytes: &[u8]) -> Result<(Vec<String>, String), FilesError> {
+        let (parents, tree) = VersionStoreBackend::decode_commit_meta(bytes)
+            .map_err(|e| to_files_error(Error::VersionStore(e)))?;
+        Ok((
+            parents.iter().map(|p| bytes_to_hex(p)).collect(),
+            bytes_to_hex(&tree),
+        ))
     }
 
     /// Import one structural object received from a peer (hash-verified
@@ -3186,6 +3314,19 @@ impl FilesBackend {
             pollster::block_on(vs.chunks().read_chunk(hash))
         })?
         .map_err(|e| to_files_error(Error::VersionStore(e.into())))
+    }
+
+    /// Hold GC quiescent for a file's whole chunk+manifest import
+    /// (issue #264 / PR #291 review): synced chunks have no manifest
+    /// protecting them until the manifest lands, so the caller holds
+    /// this across the import to stop a sweep in that window.
+    pub fn sync_gc_quiesce(
+        &self,
+        root_id: Uuid,
+    ) -> Result<tokio::sync::OwnedRwLockReadGuard<()>, FilesError> {
+        self.with_version_store(root_id, |vs| {
+            pollster::block_on(vs.chunks().gc_quiesce_guard())
+        })
     }
 
     /// Import one chunk (hash-verified inside the store).
@@ -3488,6 +3629,14 @@ pub struct MaterializeReport {
     /// Left untouched: on-disk content the store holds nowhere —
     /// unversioned work materialization must never destroy.
     pub kept_dirty: Vec<String>,
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
 }
 
 fn hex_bytes(hex: &str) -> Result<Vec<u8>, FilesError> {

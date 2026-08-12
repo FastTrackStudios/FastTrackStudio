@@ -229,6 +229,29 @@ impl VersionStoreBackend {
         self.read_object(id).await
     }
 
+    /// Decode a raw commit's `(parent ids, root tree id)` **without
+    /// storing it** — the seam replica sync (issue #264) needs to
+    /// import a commit's whole closure *before* the commit object
+    /// itself, so that a commit's presence in the store means its
+    /// closure is present too (the same manifest-last durability
+    /// invariant the chunk store upholds). Returns each id as raw
+    /// bytes.
+    pub fn decode_commit_meta(bytes: &[u8]) -> Result<(Vec<Vec<u8>>, Vec<u8>)> {
+        let commit = codec::decode_commit(bytes)?;
+        let tree = commit
+            .root_tree
+            .as_resolved()
+            .ok_or_else(|| Error::Object("conflicted root tree in synced commit".into()))?
+            .as_bytes()
+            .to_vec();
+        let parents = commit
+            .parents
+            .iter()
+            .map(|p| p.as_bytes().to_vec())
+            .collect();
+        Ok((parents, tree))
+    }
+
     /// Store one structural object received from a peer, **verified**:
     /// the bytes must hash to `expected_id` — a sync peer is never
     /// trusted about content addresses. Also verifies the bytes decode

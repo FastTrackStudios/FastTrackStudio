@@ -443,11 +443,30 @@ impl ChunkStore {
         }
     }
 
+    /// A held guard that quiesces the GC protect scan for its lifetime —
+    /// the seam replica sync (issue #264) holds across a file's whole
+    /// chunk+manifest import so a chunk that has arrived but whose
+    /// manifest has not yet landed cannot be swept out from under the
+    /// import (PR #291 review). It is the SAME `write_lock.read()`
+    /// [`ChunkStore::write_stream`] holds for exactly this reason —
+    /// the protect callback takes `write_lock.write()`, so any read
+    /// guard blocks a sweep — just held across the import instead of a
+    /// single call. Owned so the caller can hold it across `.await`s.
+    pub async fn gc_quiesce_guard(&self) -> tokio::sync::OwnedRwLockReadGuard<()> {
+        self.write_lock.clone().read_owned().await
+    }
+
     /// Store one chunk received from a peer, **verified**: the bytes are
     /// hashed here and a payload that doesn't hash to `expected` is
     /// refused — a sync peer is never trusted about content addresses
     /// (issue #264's "iroh verified streaming" property, applied at this
     /// store's boundary).
+    ///
+    /// The chunk has NO manifest referencing it yet, so it has no GC
+    /// protection of its own — the caller must hold a
+    /// [`ChunkStore::gc_quiesce_guard`] across the whole file import
+    /// (chunks + manifest) so nothing sweeps it before its manifest
+    /// lands (PR #291 review).
     pub async fn import_chunk(&self, expected: blake3::Hash, bytes: Vec<u8>) -> Result<()> {
         let actual = blake3::hash(&bytes);
         if actual != expected {

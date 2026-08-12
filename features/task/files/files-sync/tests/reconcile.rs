@@ -66,7 +66,12 @@ async fn rig() -> (Agent, Agent, uuid::Uuid) {
     let replica_dir = replica._dir.path().join("session");
     replica
         .backend
-        .adopt_replica(root.id, "session", replica_dir.to_str().unwrap())
+        .adopt_replica(
+            root.id,
+            "session",
+            replica_dir.to_str().unwrap(),
+            RootFlavor::Media,
+        )
         .expect("adopt replica");
     (primary, replica, root.id)
 }
@@ -230,6 +235,7 @@ async fn interrupted_transfer_resumes_at_chunk_level() {
             root.id,
             "session",
             replica._dir.path().join("session").to_str().unwrap(),
+            RootFlavor::Media,
         )
         .unwrap();
 
@@ -427,4 +433,145 @@ async fn keep_both_lands_every_side_side_by_side() {
             .is_empty(),
         "one head again"
     );
+}
+
+/// PR #291 review, finding 1: reconcile is re-runnable. With commit
+/// objects imported LAST (after their whole closure), a commit's
+/// presence means its closure is present, so a second pull correctly
+/// skips complete commits and completes any that are absent. A partial
+/// closure (some objects present, the commit not yet) also re-runs —
+/// the object imports are idempotent. This exercises both: seed the
+/// replica with the head's tree/chunk closure but NOT the head commit
+/// (exactly what the new commit-last order leaves after a mid-pull
+/// crash), then a full reconcile must complete and materialize.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_pull_completes_on_retry() {
+    let (primary, replica, root_id) = rig().await;
+    let head = {
+        let b = primary.backend.clone();
+        tokio::task::spawn_blocking(move || b.sync_heads(root_id).unwrap()[0].clone())
+            .await
+            .unwrap()
+    };
+
+    // Seed the closure minus the head commit: fetch the head's meta
+    // from the primary, import its tree closure objects + chunks +
+    // manifests onto the replica, but leave the head commit object
+    // absent — the crash state the new import order can produce.
+    {
+        let (pb, rb, h) = (
+            primary.backend.clone(),
+            replica.backend.clone(),
+            head.clone(),
+        );
+        tokio::task::spawn_blocking(move || {
+            let bytes = pb.sync_object(root_id, &h).unwrap();
+            let (_parents, tree) = pb.sync_decode_commit(&bytes).unwrap();
+            // One-level tree here (root); import it and each file's
+            // manifest + chunks.
+            let tree_bytes = pb.sync_object(root_id, &tree).unwrap();
+            rb.sync_import_object(root_id, &tree, tree_bytes).unwrap();
+            let (subtrees, files) = pb.sync_tree_meta(root_id, &tree).unwrap();
+            let mut trees = subtrees;
+            let mut all_files = files;
+            while let Some(t) = trees.pop() {
+                let tb = pb.sync_object(root_id, &t).unwrap();
+                rb.sync_import_object(root_id, &t, tb).unwrap();
+                let (st, fs) = pb.sync_tree_meta(root_id, &t).unwrap();
+                trees.extend(st);
+                all_files.extend(fs);
+            }
+            let _g = rb.sync_gc_quiesce(root_id).unwrap();
+            for (fid, _copy) in all_files {
+                let m = pb.sync_manifest(root_id, &fid).unwrap();
+                for (hash, _len) in &m {
+                    let bytes = pb.sync_read_chunk(root_id, hash).unwrap();
+                    rb.sync_import_chunk(root_id, hash, bytes).unwrap();
+                }
+                rb.sync_import_manifest(root_id, &fid, m).unwrap();
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    // The head commit is still absent, so the retry imports it (last,
+    // after its now-present closure) and makes it visible.
+    reconcile(&replica.backend, &primary.client, root_id)
+        .await
+        .expect("resumed pull completes");
+    assert_eq!(read(&replica, "mix.wav"), vec![0x11u8; 96 * 1024]);
+    assert_eq!(read(&replica, "stems/kick.wav"), vec![0x22u8; 48 * 1024]);
+    let chain = replica
+        .backend
+        .chain(root_id, "mix.wav".into())
+        .await
+        .unwrap();
+    assert!(
+        !chain.is_empty(),
+        "the head's tree is readable after resume"
+    );
+
+    // And a THIRD, fully-satisfied reconcile is a clean no-op.
+    let report = reconcile(&replica.backend, &primary.client, root_id)
+        .await
+        .expect("idempotent re-run");
+    assert_eq!(report.objects_imported, 0);
+    assert_eq!(report.chunks_fetched, 0);
+}
+
+/// PR #291 review, finding 4: resolving a divergence must not destroy
+/// unversioned on-disk work — if the live-tree target the resolution
+/// would overwrite holds content the store doesn't know, refuse.
+#[tokio::test(flavor = "multi_thread")]
+async fn resolve_refuses_to_clobber_unversioned_work() {
+    let (primary, replica, root_id) = rig().await;
+    reconcile(&replica.backend, &primary.client, root_id)
+        .await
+        .expect("seed replica");
+    std::fs::write(
+        primary._dir.path().join("session").join("mix.wav"),
+        b"studio take".as_slice(),
+    )
+    .unwrap();
+    primary
+        .backend
+        .checkpoint_now(root_id, Some("studio".into()))
+        .await
+        .unwrap();
+    std::fs::write(
+        replica._dir.path().join("session").join("mix.wav"),
+        b"plane take".as_slice(),
+    )
+    .unwrap();
+    replica
+        .backend
+        .checkpoint_now(root_id, Some("plane".into()))
+        .await
+        .unwrap();
+    reconcile(&primary.backend, &replica.client, root_id)
+        .await
+        .expect("pull replica line");
+
+    // Unversioned edit lands on the divergent file after the sync.
+    std::fs::write(
+        primary._dir.path().join("session").join("mix.wav"),
+        b"live unversioned edit".as_slice(),
+    )
+    .unwrap();
+
+    let other = primary.backend.divergences(root_id).await.unwrap()[0].sides[1]
+        .commit_id
+        .clone();
+    let err = primary
+        .backend
+        .resolve_divergence(
+            root_id,
+            "mix.wav".into(),
+            files::DivergenceChoice::Pick { commit_id: other },
+        )
+        .await
+        .expect_err("must refuse to clobber unversioned work");
+    assert!(err.to_string().contains("checkpoint first"), "{err}");
+    assert_eq!(read(&primary, "mix.wav"), b"live unversioned edit");
 }

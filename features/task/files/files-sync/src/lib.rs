@@ -283,22 +283,47 @@ async fn import_commit_closure(
     head: &str,
     report: &mut ReconcileReport,
 ) -> Result<(), SyncError> {
-    let mut pending: Vec<String> = vec![head.to_string()];
-    while let Some(commit_hex) = pending.pop() {
+    // Post-order: a commit's object is imported only after its tree
+    // closure and every parent are present, so a commit's presence in
+    // the store means its WHOLE closure is present — which is what
+    // makes an interrupted pull re-runnable (PR #291 review). The
+    // fetched-but-not-yet-imported commit bytes are cached between a
+    // node's two stack visits so the wire is hit once per commit.
+    let mut cached: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+    let mut stack: Vec<(String, bool)> = vec![(head.to_string(), false)];
+    while let Some((commit_hex, closure_done)) = stack.pop() {
+        if closure_done {
+            // Trees + parents are in; the commit object lands last.
+            if let Some(bytes) = cached.remove(&commit_hex) {
+                let (l, c, b) = (local.clone(), commit_hex.clone(), bytes);
+                off_thread(move || l.sync_import_object(root_id, &c, b).map_err(from_files))
+                    .await?;
+                report.objects_imported += 1;
+            }
+            continue;
+        }
         let known = {
             let (l, c) = (local.clone(), commit_hex.clone());
             off_thread(move || l.sync_has_object(root_id, &c).map_err(from_files)).await?
         };
-        if known {
+        if known || cached.contains_key(&commit_hex) {
             continue;
         }
-        fetch_object(local, remote, root_id, &commit_hex, report).await?;
+        let bytes = remote
+            .object(root_id, commit_hex.clone())
+            .await
+            .map_err(|e| SyncError::Io(format!("object rpc: {e}")))?;
         let (parents, tree) = {
-            let (l, c) = (local.clone(), commit_hex.clone());
-            off_thread(move || l.sync_commit_meta(root_id, &c).map_err(from_files)).await?
+            let (l, b) = (local.clone(), bytes.clone());
+            off_thread(move || l.sync_decode_commit(&b).map_err(from_files)).await?
         };
         import_tree_closure(local, remote, root_id, &tree, report).await?;
-        pending.extend(parents);
+        cached.insert(commit_hex.clone(), bytes);
+        // Revisit this commit to import its object after its parents.
+        stack.push((commit_hex, true));
+        for parent in parents {
+            stack.push((parent, false));
+        }
     }
     Ok(())
 }
@@ -393,6 +418,19 @@ async fn import_file(
         }
     }
 
+    // Hold GC quiescent from the first imported chunk through the
+    // manifest write: a synced chunk has no manifest protecting it
+    // yet, so without this a sweep firing mid-import destroys it (PR
+    // #291 review). Held only while chunks actually need importing —
+    // a fully-present file (all chunks skipped) writes just its
+    // manifest, which protects them the instant it lands.
+    let _quiesce = if missing.is_empty() {
+        None
+    } else {
+        let l = local.clone();
+        Some(off_thread(move || l.sync_gc_quiesce(root_id).map_err(from_files)).await?)
+    };
+
     // Fetch the missing chunks in bounded batches — the resumability
     // seam (only misses are requested) and the bounded-memory seam (no
     // more than a batch in flight).
@@ -423,6 +461,9 @@ async fn import_file(
             .map_err(from_files)
     })
     .await?;
+    // The manifest is durable; its chunks are now protected by it, so
+    // the quiesce guard can release.
+    drop(_quiesce);
     report.manifests_imported += 1;
     Ok(())
 }
