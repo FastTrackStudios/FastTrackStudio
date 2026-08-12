@@ -22,9 +22,9 @@ pub mod service;
 
 pub use consts::{GIT_DIR, MARKER_FILE, STORE_DIR};
 pub use model::{
-    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, HydrationChange,
-    HydrationReport, NamedVersion, ProjectVersion, RestartMode, RootFlavor, SavePoint,
-    SnapshotInfo, VersionRef,
+    BrowseEntry, ChainEntry, CheckpointInfo, DivergenceChoice, DivergenceInfo, DivergenceSide,
+    FileRootInfo, GcReport, HydrationChange, HydrationReport, NamedVersion, ProjectVersion,
+    RestartMode, RootFlavor, SavePoint, SnapshotInfo, VersionRef,
 };
 pub use service::{FilesError, FilesEvent, FilesService};
 

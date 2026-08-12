@@ -413,6 +413,80 @@ impl ChunkStore {
         self.read_manifest(file_id).await
     }
 
+    /// Is this one chunk in the blob store? The chunk-level presence
+    /// probe replica reconcile plans transfers with (issue #264):
+    /// "resumable at chunk level" means asking this per chunk and
+    /// fetching only the misses.
+    pub async fn has_chunk(&self, hash: blake3::Hash) -> Result<bool> {
+        self.blobs
+            .has(*hash.as_bytes())
+            .await
+            .map_err(|e| Error::Store(format!("checking chunk {hash}: {e}")))
+    }
+
+    /// Read one chunk's bytes. Chunks are bounded by the chunker's max
+    /// size, so a whole-chunk `Vec` is bounded memory by construction.
+    pub async fn read_chunk(&self, hash: blake3::Hash) -> Result<Vec<u8>> {
+        let hash_bytes = *hash.as_bytes();
+        let mut reader = self.blobs.reader(hash_bytes);
+        let mut buf = Vec::new();
+        match tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf).await {
+            Ok(_) => Ok(buf),
+            Err(io_err) => {
+                let present = self.blobs.has(hash_bytes).await.unwrap_or(true);
+                if present {
+                    Err(Error::Io(io_err))
+                } else {
+                    Err(Error::MissingChunk(hash.to_hex().to_string()))
+                }
+            }
+        }
+    }
+
+    /// Store one chunk received from a peer, **verified**: the bytes are
+    /// hashed here and a payload that doesn't hash to `expected` is
+    /// refused — a sync peer is never trusted about content addresses
+    /// (issue #264's "iroh verified streaming" property, applied at this
+    /// store's boundary).
+    pub async fn import_chunk(&self, expected: blake3::Hash, bytes: Vec<u8>) -> Result<()> {
+        let actual = blake3::hash(&bytes);
+        if actual != expected {
+            return Err(Error::Store(format!(
+                "chunk payload hashes to {actual}, peer claimed {expected}"
+            )));
+        }
+        let _write_guard = self.write_lock.read().await;
+        let batch = self
+            .blobs
+            .batch()
+            .await
+            .map_err(|e| Error::Store(format!("opening a gc-protection batch: {e}")))?;
+        let _tag = batch
+            .add_bytes(bytes)
+            .await
+            .map_err(|e| Error::Store(format!("storing chunk {expected}: {e}")))?;
+        // The tag drops with the batch: liveness comes from the manifest
+        // the caller imports once every chunk is present (manifests are
+        // the GC roots).
+        Ok(())
+    }
+
+    /// Store a manifest received from a peer, returning its `FileId` —
+    /// **refused unless every chunk it references is already present**,
+    /// so an imported manifest never names content this store cannot
+    /// serve (a partial replica stays honest: absent files are stubs,
+    /// never half-manifests).
+    pub async fn import_manifest(&self, manifest: &Manifest) -> Result<FileId> {
+        for chunk in &manifest.chunks {
+            if !self.has_chunk(chunk.hash).await? {
+                return Err(Error::MissingChunk(chunk.hash.to_hex().to_string()));
+            }
+        }
+        let file_id = manifest.file_id();
+        self.write_manifest(file_id, manifest).await?;
+        Ok(file_id)
+    }
+
     /// Whether a manifest for `file_id` is on disk. Does not verify that
     /// every chunk it references is still present in the blob store.
     pub async fn has(&self, file_id: FileId) -> bool {

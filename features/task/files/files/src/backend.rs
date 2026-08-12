@@ -35,7 +35,7 @@
 //! `browse_inner`'s doc for how that also closes the absolute-subpath
 //! and symlink-escape holes.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -45,7 +45,7 @@ use files_proto::{
     GcReport, HydrationChange, HydrationReport, NamedVersion, ProjectVersion, RootFlavor,
     SavePoint, SnapshotInfo, VersionRef,
 };
-use jj_lib::backend::{ChangeId, CommitId};
+use jj_lib::backend::{Backend, ChangeId, CommitId};
 use jj_lib::object_id::{HexPrefix, ObjectId as _, PrefixResolution};
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
@@ -2687,6 +2687,832 @@ impl FilesBackend {
     }
 }
 
+/// Divergent versions (issue #264, ADR 0001): listing the paths whose
+/// state differs between the root's visible heads, and settling them.
+/// Resolution is a **merge checkpoint** — every visible head becomes a
+/// parent, so both sides stay in history and the root returns to one
+/// head. jj's own concurrency model is what makes the listing correct:
+/// concurrent writers leave multiple visible heads, never lost data.
+impl FilesBackend {
+    /// Every `(path, per-head state)` where the visible heads disagree,
+    /// journal-line head first. Empty for a single-head root.
+    fn divergences_inner(&self, root_id: Uuid) -> Result<Vec<files_proto::DivergenceInfo>, Error> {
+        let root = self.get_root_info(root_id)?;
+        let Some((repo, head)) = self.reload_existing_repo(&root)? else {
+            return Ok(Vec::new());
+        };
+        let heads = Self::ordered_heads(&repo, &head);
+        if heads.len() < 2 {
+            return Ok(Vec::new());
+        }
+        let backend = repo.store().backend();
+        let mut per_head: Vec<BTreeMap<RepoPathBuf, jj_lib::backend::FileId>> = Vec::new();
+        for h in &heads {
+            per_head.push(Self::tree_files_of(backend, h)?);
+        }
+        let mut all_paths: BTreeSet<RepoPathBuf> = BTreeSet::new();
+        for map in &per_head {
+            all_paths.extend(map.keys().cloned());
+        }
+        let mut out = Vec::new();
+        for path in all_paths {
+            let states: BTreeSet<Option<String>> = per_head
+                .iter()
+                .map(|m| m.get(&path).map(|id| id.hex()))
+                .collect();
+            if states.len() > 1 {
+                out.push(files_proto::DivergenceInfo {
+                    root_id,
+                    path: path.as_internal_file_string().to_string(),
+                    sides: heads
+                        .iter()
+                        .zip(&per_head)
+                        .map(|(h, m)| files_proto::DivergenceSide {
+                            commit_id: h.hex(),
+                            file_id: m.get(&path).map(|id| id.hex()),
+                        })
+                        .collect(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// The root's visible heads with the journal-line head first — the
+    /// stable "side A" every surface reports.
+    fn ordered_heads(repo: &Arc<ReadonlyRepo>, head: &CommitId) -> Vec<CommitId> {
+        let mut heads: Vec<CommitId> = vec![head.clone()];
+        heads.extend(
+            repo.view()
+                .heads()
+                .iter()
+                .filter(|h| *h != head)
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+        );
+        heads
+    }
+
+    /// Every file `path → FileId` in `commit`'s tree.
+    fn tree_files_of(
+        backend: &dyn Backend,
+        commit_id: &CommitId,
+    ) -> Result<BTreeMap<RepoPathBuf, jj_lib::backend::FileId>, Error> {
+        let mut out = BTreeMap::new();
+        pollster::block_on(async {
+            let commit = backend.read_commit(commit_id).await?;
+            let tree_id =
+                commit.root_tree.clone().into_resolved().map_err(|_| {
+                    jj_lib::backend::BackendError::Other("conflicted root tree".into())
+                })?;
+            let tree = backend.read_tree(RepoPath::root(), &tree_id).await?;
+            Self::walk_tree_files(backend, &tree, RepoPath::root(), &mut out).await
+        })
+        .map_err(|e| Error::Repo(format!("walking {}: {e}", commit_id.hex())))?;
+        Ok(out)
+    }
+
+    async fn walk_tree_files(
+        backend: &dyn Backend,
+        tree: &jj_lib::backend::Tree,
+        prefix: &RepoPath,
+        out: &mut BTreeMap<RepoPathBuf, jj_lib::backend::FileId>,
+    ) -> std::result::Result<(), jj_lib::backend::BackendError> {
+        for name in tree.names() {
+            let Some(value) = tree.value(name) else {
+                continue;
+            };
+            let path = prefix.join(name);
+            match value {
+                jj_lib::backend::TreeValue::Tree(id) => {
+                    let sub = backend.read_tree(&path, id).await?;
+                    Box::pin(Self::walk_tree_files(backend, &sub, &path, out)).await?;
+                }
+                jj_lib::backend::TreeValue::File { id, .. } => {
+                    out.insert(path, id.clone());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// The `(stem) (divergent n)(.ext)` name a KeepBoth side lands
+    /// under, beside the journal-line side's file.
+    fn divergent_name(path: &str, n: usize) -> String {
+        match path.rsplit_once('.') {
+            Some((stem, ext)) if !stem.is_empty() => {
+                format!("{stem} (divergent {n}).{ext}")
+            }
+            _ => format!("{path} (divergent {n})"),
+        }
+    }
+
+    fn resolve_divergence_inner(
+        &self,
+        root_id: Uuid,
+        path: String,
+        choice: files_proto::DivergenceChoice,
+    ) -> Result<CheckpointInfo, Error> {
+        use files_proto::DivergenceChoice;
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "resolve_divergence")?;
+        let (_, repo_path) = self.resolve_root_file(&root, &path)?;
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+
+        let (repo, head) = self.reload_repo(&root)?;
+        let heads = Self::ordered_heads(&repo, &head);
+        if heads.len() < 2 {
+            return Err(Error::BadRequest(format!(
+                "{root_id}: no divergence to resolve"
+            )));
+        }
+        let backend = repo.store().backend();
+        let mut per_head: Vec<BTreeMap<RepoPathBuf, jj_lib::backend::FileId>> = Vec::new();
+        for h in &heads {
+            per_head.push(Self::tree_files_of(backend, h)?);
+        }
+        let named_states: BTreeSet<Option<String>> = per_head
+            .iter()
+            .map(|m| m.get(&repo_path).map(|id| id.hex()))
+            .collect();
+        if named_states.len() < 2 {
+            return Err(Error::BadRequest(format!("{path}: not divergent")));
+        }
+
+        // The resolved tree starts from the journal-line head (the live
+        // tree's own line) and takes the decided state for the named
+        // path. Every OTHER divergent path defaults to KeepBoth — one
+        // resolution returns the root to a single head, and "nothing is
+        // lost" outranks tidiness for the paths nobody named: their
+        // other sides land as `(divergent n)` files to keep or delete
+        // as ordinary content. Resolve the paths you care about first.
+        let head_commit = pollster::block_on(backend.read_commit(&head))?;
+        let base_tree_id = head_commit
+            .root_tree
+            .clone()
+            .into_resolved()
+            .map_err(|_| Error::Repo("conflicted head tree".into()))?;
+        let store = repo.store().clone();
+        let mut builder = jj_lib::tree_builder::TreeBuilder::new(store.clone(), base_tree_id);
+        let mut changed_paths: Vec<String> = Vec::new();
+        // Disk materialization plan: (root-relative, Some(id, exec) to
+        // restore | None to delete).
+        let mut materialize: Vec<(RepoPathBuf, Option<jj_lib::backend::FileId>)> = Vec::new();
+
+        let value_in = |head_idx: usize, p: &RepoPathBuf| per_head[head_idx].get(p).cloned();
+        let tree_value_of = |commit_id: &CommitId,
+                             p: &RepoPathBuf|
+         -> Result<Option<jj_lib::backend::TreeValue>, Error> {
+            let commit = pollster::block_on(backend.read_commit(commit_id))?;
+            let tree_id = commit
+                .root_tree
+                .clone()
+                .into_resolved()
+                .map_err(|_| Error::Repo("conflicted tree".into()))?;
+            let tree = pollster::block_on(backend.read_tree(RepoPath::root(), &tree_id))?;
+            Ok(pollster::block_on(
+                task_files_version_store::chain::lookup_dyn(backend, &tree, p),
+            )?)
+        };
+
+        // 1. The named path, per the choice.
+        match &choice {
+            DivergenceChoice::Pick { commit_id } => {
+                let picked = heads
+                    .iter()
+                    .find(|h| h.hex() == *commit_id || h.hex().starts_with(commit_id.as_str()))
+                    .ok_or_else(|| {
+                        Error::BadRequest(format!("{commit_id}: not one of this root's heads"))
+                    })?
+                    .clone();
+                match tree_value_of(&picked, &repo_path)? {
+                    Some(value) => {
+                        let id = match &value {
+                            jj_lib::backend::TreeValue::File { id, .. } => id.clone(),
+                            _ => return Err(Error::BadRequest(format!("{path}: not a file"))),
+                        };
+                        builder.set(repo_path.clone(), value);
+                        materialize.push((repo_path.clone(), Some(id)));
+                    }
+                    None => {
+                        builder.remove(repo_path.clone());
+                        materialize.push((repo_path.clone(), None));
+                    }
+                }
+                changed_paths.push(path.clone());
+            }
+            DivergenceChoice::KeepBoth => {
+                // Side A already sits in the base tree; each other
+                // side's distinct content lands beside it.
+                let a_state = value_in(0, &repo_path).map(|id| id.hex());
+                let mut n = 1;
+                for (idx, h) in heads.iter().enumerate().skip(1) {
+                    let side = value_in(idx, &repo_path);
+                    if side.as_ref().map(|id| id.hex()) == a_state {
+                        continue;
+                    }
+                    if let Some(id) = side {
+                        let sibling = Self::divergent_name(&path, n);
+                        n += 1;
+                        let (_, sibling_path) = self.resolve_root_file(&root, &sibling)?;
+                        let value = tree_value_of(h, &repo_path)?.ok_or_else(|| {
+                            Error::Repo(format!("{path}: side vanished mid-resolve"))
+                        })?;
+                        builder.set(sibling_path.clone(), value);
+                        materialize.push((sibling_path, Some(id)));
+                        changed_paths.push(sibling);
+                    }
+                }
+            }
+        }
+
+        // 2. Every other divergent path: KeepBoth by default.
+        let mut all_paths: BTreeSet<RepoPathBuf> = BTreeSet::new();
+        for m in &per_head {
+            all_paths.extend(m.keys().cloned());
+        }
+        for other in all_paths {
+            if other == repo_path {
+                continue;
+            }
+            let states: BTreeSet<Option<String>> = per_head
+                .iter()
+                .map(|m| m.get(&other).map(|id| id.hex()))
+                .collect();
+            if states.len() < 2 {
+                continue;
+            }
+            let a_state = value_in(0, &other).map(|id| id.hex());
+            let mut n = 1;
+            for (idx, h) in heads.iter().enumerate().skip(1) {
+                let side = value_in(idx, &other);
+                let side_hex = side.as_ref().map(|id| id.hex());
+                if side_hex == a_state {
+                    continue;
+                }
+                if let Some(id) = side {
+                    let other_str = other.as_internal_file_string().to_string();
+                    let sibling = Self::divergent_name(&other_str, n);
+                    n += 1;
+                    let (_, sibling_path) = self.resolve_root_file(&root, &sibling)?;
+                    let value = tree_value_of(h, &other)?.ok_or_else(|| {
+                        Error::Repo(format!("{other_str}: side vanished mid-resolve"))
+                    })?;
+                    builder.set(sibling_path.clone(), value);
+                    materialize.push((sibling_path, Some(id)));
+                    changed_paths.push(sibling);
+                }
+            }
+        }
+
+        // 3. One merge checkpoint over every head: the decided state is
+        // the single new head; every side stays reachable in history.
+        let new_tree_id = pollster::block_on(builder.write_tree())
+            .map_err(|e| Error::Repo(format!("resolution tree: {e}")))?;
+        let merged = jj_lib::merged_tree::MergedTree::resolved(store, new_tree_id);
+        let mut tx = repo.start_transaction();
+        let commit = pollster::block_on(async {
+            tx.repo_mut()
+                .new_commit(heads.clone(), merged)
+                .set_description(format!("resolve divergence: {path}"))
+                .write()
+                .await
+        })
+        .map_err(|e| Error::Repo(format!("resolution commit: {e}")))?;
+        let commit_id = commit.id().clone();
+        let new_repo = pollster::block_on(tx.commit("resolve divergence"))
+            .map_err(|e| Error::Repo(e.to_string()))?;
+
+        // 4. Materialize the decided state into the live tree.
+        let root_path = PathBuf::from(&root.path);
+        for (p, want) in &materialize {
+            let disk = root_path.join(p.as_internal_file_string());
+            match want {
+                Some(id) => {
+                    if let Some(parent) = disk.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    self.restore_content(&new_repo, p, &disk, id, false)?;
+                }
+                None => {
+                    if let Err(e) = std::fs::remove_file(&disk)
+                        && e.kind() != std::io::ErrorKind::NotFound
+                    {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+
+        let at = self.cadence.now();
+        let commit_hex = commit_id.hex();
+        let store_dir = repo_open::store_dir(&root_path);
+        let mut journal = Journal::load(&store_dir)?;
+        journal.record_checkpoint(CheckpointRecord {
+            commit_id: commit_hex.clone(),
+            at,
+            save_points: Vec::new(),
+            requeued_paths: Vec::new(),
+        });
+        journal.save(&store_dir)?;
+        self.set_heads(root_id, new_repo, commit_id, None);
+        changed_paths.sort();
+        let info = CheckpointInfo {
+            root_id,
+            commit_id: commit_hex,
+            description: format!("resolve divergence: {path}"),
+            at,
+            changed_paths,
+            save_points: Vec::new(),
+            requeued_paths: Vec::new(),
+        };
+        self.publish(FilesEvent::Checkpointed(info.clone()));
+        Ok(info)
+    }
+
+    /// Adopt a directory as a **replica** of an existing root (issue
+    /// #264): same root id, same name, fresh local store. This is the
+    /// local half of replica creation — the content arrives by
+    /// reconcile (the `files-sync` crate). Not an RPC: the sync daemon
+    /// (#265) drives it on its own machine.
+    pub fn adopt_replica(
+        &self,
+        root_id: Uuid,
+        name: &str,
+        path: &str,
+    ) -> Result<FileRootInfo, FilesError> {
+        self.adopt_replica_inner(root_id, name, path)
+            .map_err(to_files_error)
+    }
+
+    fn adopt_replica_inner(
+        &self,
+        root_id: Uuid,
+        name: &str,
+        path: &str,
+    ) -> Result<FileRootInfo, Error> {
+        let requested = PathBuf::from(path);
+        std::fs::create_dir_all(&requested)?;
+        let canonical = self.confine(&requested)?;
+        let canonical_str = canonical
+            .to_str()
+            .ok_or_else(|| Error::BadRequest(format!("{path}: not valid UTF-8")))?
+            .to_string();
+        if canonical.join(MARKER_FILE).exists() {
+            return Err(Error::AlreadyExists(canonical_str));
+        }
+        if let Some(existing) = self.registry.conflicting_root(&canonical) {
+            return Err(Error::AlreadyExists(format!(
+                "{canonical_str} overlaps existing root {} ({})",
+                existing.id, existing.path
+            )));
+        }
+        let repo = repo_open::open_or_init_repo(&canonical, RootFlavor::Media)?;
+        let head = Self::head_of(&repo, RootFlavor::Media)?;
+        let marker = serde_json::json!({ "id": root_id, "name": name });
+        std::fs::write(
+            canonical.join(MARKER_FILE),
+            serde_json::to_vec_pretty(&marker)?,
+        )?;
+        let root = FileRootInfo {
+            id: root_id,
+            name: name.to_string(),
+            path: canonical_str,
+            flavor: RootFlavor::Media,
+            created_at: Utc::now(),
+            project_version: None,
+        };
+        self.registry.insert(root.clone())?;
+        self.set_heads(root_id, repo, head, None);
+        self.ignore_of(&root)?;
+        self.publish(FilesEvent::RootCreated(root.clone()));
+        Ok(root)
+    }
+}
+
+/// The sync seam (issue #264): what the `files-sync` crate's reconcile
+/// engine needs from a backend on either side of a replica
+/// relationship. Serve-side accessors are thin and verified; the two
+/// mutating entry points — importing a remote head and materializing
+/// the live tree — carry the safety rules (parents-present,
+/// never-clobber-unversioned-work).
+impl FilesBackend {
+    /// The root's visible heads, hex, journal-line first.
+    pub fn sync_heads(&self, root_id: Uuid) -> Result<Vec<String>, FilesError> {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        let Some((repo, head)) = self.reload_existing_repo(&root).map_err(to_files_error)? else {
+            return Ok(Vec::new());
+        };
+        Ok(Self::ordered_heads(&repo, &head)
+            .iter()
+            .map(|h| h.hex())
+            .collect())
+    }
+
+    /// Raw structural-object bytes (commit/tree/copy-history) by hex id.
+    pub fn sync_object(&self, root_id: Uuid, id_hex: &str) -> Result<Vec<u8>, FilesError> {
+        let bytes = hex_bytes(id_hex)?;
+        self.with_version_store(root_id, |vs| pollster::block_on(vs.read_raw_object(&bytes)))?
+            .map_err(|e| to_files_error(Error::VersionStore(e)))
+    }
+
+    /// Does this root's store hold the object? (The root commit's
+    /// all-zero id is virtual on every store and reports `true`.)
+    pub fn sync_has_object(&self, root_id: Uuid, id_hex: &str) -> Result<bool, FilesError> {
+        if id_hex.chars().all(|c| c == '0') {
+            return Ok(true);
+        }
+        let bytes = hex_bytes(id_hex)?;
+        self.with_version_store(root_id, |vs| {
+            pollster::block_on(vs.read_raw_object(&bytes)).is_ok()
+        })
+    }
+
+    /// Import one structural object received from a peer (hash-verified
+    /// inside the store).
+    pub fn sync_import_object(
+        &self,
+        root_id: Uuid,
+        id_hex: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), FilesError> {
+        let id = hex_bytes(id_hex)?;
+        self.with_version_store(root_id, |vs| {
+            pollster::block_on(vs.import_raw_object(&id, bytes))
+        })?
+        .map_err(|e| to_files_error(Error::VersionStore(e)))
+    }
+
+    /// A file's chunk manifest as `(chunk hash hex, len)` pairs.
+    pub fn sync_manifest(
+        &self,
+        root_id: Uuid,
+        file_id_hex: &str,
+    ) -> Result<Vec<(String, u64)>, FilesError> {
+        let file_id = chunk_file_id_from_hex(file_id_hex)?;
+        self.with_version_store(root_id, |vs| {
+            pollster::block_on(vs.chunks().manifest(file_id))
+        })?
+        .map(|m| {
+            m.chunks
+                .iter()
+                .map(|c| (c.hash.to_hex().to_string(), c.len))
+                .collect()
+        })
+        .map_err(|e| to_files_error(Error::VersionStore(e.into())))
+    }
+
+    /// Does this root's chunk store hold a manifest for the file?
+    pub fn sync_has_manifest(&self, root_id: Uuid, file_id_hex: &str) -> Result<bool, FilesError> {
+        let file_id = chunk_file_id_from_hex(file_id_hex)?;
+        self.with_version_store(root_id, |vs| pollster::block_on(vs.chunks().has(file_id)))
+    }
+
+    /// Does this root's chunk store hold the chunk?
+    pub fn sync_has_chunk(&self, root_id: Uuid, hash_hex: &str) -> Result<bool, FilesError> {
+        let hash = chunk_hash_from_hex(hash_hex)?;
+        self.with_version_store(root_id, |vs| {
+            pollster::block_on(vs.chunks().has_chunk(hash))
+        })?
+        .map_err(|e| to_files_error(Error::VersionStore(e.into())))
+    }
+
+    /// One chunk's bytes.
+    pub fn sync_read_chunk(&self, root_id: Uuid, hash_hex: &str) -> Result<Vec<u8>, FilesError> {
+        let hash = chunk_hash_from_hex(hash_hex)?;
+        self.with_version_store(root_id, |vs| {
+            pollster::block_on(vs.chunks().read_chunk(hash))
+        })?
+        .map_err(|e| to_files_error(Error::VersionStore(e.into())))
+    }
+
+    /// Import one chunk (hash-verified inside the store).
+    pub fn sync_import_chunk(
+        &self,
+        root_id: Uuid,
+        hash_hex: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), FilesError> {
+        let hash = chunk_hash_from_hex(hash_hex)?;
+        self.with_version_store(root_id, |vs| {
+            pollster::block_on(vs.chunks().import_chunk(hash, bytes))
+        })?
+        .map_err(|e| to_files_error(Error::VersionStore(e.into())))
+    }
+
+    /// Import a manifest once every chunk it references is present.
+    pub fn sync_import_manifest(
+        &self,
+        root_id: Uuid,
+        file_id_hex: &str,
+        chunks: Vec<(String, u64)>,
+    ) -> Result<(), FilesError> {
+        let expected = chunk_file_id_from_hex(file_id_hex)?;
+        let mut refs = Vec::with_capacity(chunks.len());
+        for (hash_hex, len) in chunks {
+            refs.push(task_files_chunk_store::ChunkRef {
+                hash: chunk_hash_from_hex(&hash_hex)?,
+                len,
+            });
+        }
+        let manifest = task_files_chunk_store::Manifest::new(refs);
+        if manifest.file_id() != expected {
+            return Err(FilesError::BadRequest(format!(
+                "manifest re-derives to {}, peer claimed {file_id_hex}",
+                manifest.file_id().to_hex()
+            )));
+        }
+        self.with_version_store(root_id, |vs| {
+            pollster::block_on(vs.chunks().import_manifest(&manifest)).map(|_| ())
+        })?
+        .map_err(|e| to_files_error(Error::VersionStore(e.into())))
+    }
+
+    /// A commit's `(parents, root tree id)` read from the LOCAL store —
+    /// the puller decodes objects only after importing them, so the
+    /// wire never needs a structured commit format.
+    pub fn sync_commit_meta(
+        &self,
+        root_id: Uuid,
+        commit_hex: &str,
+    ) -> Result<(Vec<String>, String), FilesError> {
+        let id = CommitId::try_from_hex(commit_hex)
+            .ok_or_else(|| FilesError::BadRequest(format!("{commit_hex}: not a commit id")))?;
+        self.with_repo(root_id, |repo| {
+            let backend = repo.store().backend();
+            let commit = pollster::block_on(backend.read_commit(&id))
+                .map_err(|e| to_files_error(Error::JjBackend(e)))?;
+            let tree = commit
+                .root_tree
+                .clone()
+                .into_resolved()
+                .map_err(|_| FilesError::Io("conflicted root tree".into()))?;
+            Ok((commit.parents.iter().map(|p| p.hex()).collect(), tree.hex()))
+        })?
+    }
+
+    /// One tree level's `(subtree ids, (file id, copy id) pairs)`, read
+    /// from the LOCAL store after import.
+    #[allow(clippy::type_complexity)]
+    pub fn sync_tree_meta(
+        &self,
+        root_id: Uuid,
+        tree_hex: &str,
+    ) -> Result<(Vec<String>, Vec<(String, Option<String>)>), FilesError> {
+        let id = jj_lib::backend::TreeId::try_from_hex(tree_hex)
+            .ok_or_else(|| FilesError::BadRequest(format!("{tree_hex}: not a tree id")))?;
+        self.with_repo(root_id, |repo| {
+            let backend = repo.store().backend();
+            let tree = pollster::block_on(backend.read_tree(RepoPath::root(), &id))
+                .map_err(|e| to_files_error(Error::JjBackend(e)))?;
+            let mut subtrees = Vec::new();
+            let mut files = Vec::new();
+            for name in tree.names() {
+                match tree.value(name) {
+                    Some(jj_lib::backend::TreeValue::Tree(t)) => subtrees.push(t.hex()),
+                    Some(jj_lib::backend::TreeValue::File { id, copy_id, .. }) => {
+                        let copy = (!copy_id.as_bytes().is_empty()).then(|| copy_id.hex());
+                        files.push((id.hex(), copy));
+                    }
+                    _ => {}
+                }
+            }
+            Ok((subtrees, files))
+        })?
+    }
+
+    /// Make a fully-imported remote commit a visible head of this
+    /// root's repo. jj's own view semantics take it from there: a head
+    /// descending from the local line fast-forwards it (the journal
+    /// follows via `heads_of`); anything else stays a sibling —
+    /// Divergent versions, flagged until resolved. Every ancestor
+    /// object must already be imported.
+    pub fn import_remote_head(&self, root_id: Uuid, commit_hex: &str) -> Result<(), FilesError> {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        let id = CommitId::try_from_hex(commit_hex)
+            .ok_or_else(|| FilesError::BadRequest(format!("{commit_hex}: not a commit id")))?;
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        let (repo, _head) = self.reload_repo(&root).map_err(to_files_error)?;
+        if repo.view().heads().contains(&id) {
+            return Ok(());
+        }
+        let commit = pollster::block_on(repo.store().get_commit_async(&id))
+            .map_err(|e| FilesError::Io(format!("reading imported head: {e}")))?;
+        let mut tx = repo.start_transaction();
+        pollster::block_on(tx.repo_mut().add_head(&commit))
+            .map_err(|e| FilesError::Io(format!("adding head: {e}")))?;
+        let new_repo = pollster::block_on(tx.commit("sync: import remote head"))
+            .map_err(|e| FilesError::Io(e.to_string()))?;
+        let (head, snapshot_head) = Self::heads_of(&new_repo, &root).map_err(to_files_error)?;
+        self.set_heads(root_id, new_repo, head, snapshot_head);
+        Ok(())
+    }
+
+    /// Bring the live tree in line with the (journal-line) head —
+    /// replica checkout, hydration-policy aware (issue #263: matching
+    /// paths hydrate, the rest become stubs), and **safe**: a disk file
+    /// whose content the store does not hold anywhere is unversioned
+    /// work — it is never overwritten or deleted, only reported.
+    pub fn materialize_head(&self, root_id: Uuid) -> Result<MaterializeReport, FilesError> {
+        self.materialize_head_inner(root_id).map_err(to_files_error)
+    }
+
+    fn materialize_head_inner(&self, root_id: Uuid) -> Result<MaterializeReport, Error> {
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "materialize")?;
+        let root_path = PathBuf::from(&root.path);
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        let (repo, head) = self.reload_repo(&root)?;
+        let backend = repo.store().backend();
+        let target = Self::tree_files_of(backend, &head)?;
+        let store_dir = repo_open::store_dir(&root_path);
+        let policy = hydration::matcher(&store_dir)?;
+        let content = crate::content::ContentStore::for_repo(&repo, backend)?;
+        let mut report = MaterializeReport::default();
+
+        // Disk side: anything tracked-on-disk that the head no longer
+        // has, or holds at different content.
+        let ignores = self.ignore_of(&root)?;
+        let tracked_paths: BTreeSet<RepoPathBuf> = target.keys().cloned().collect();
+        let disk_files = scan::walk_live_tree(&root_path, root.flavor, &ignores, &tracked_paths)?;
+        let mut on_disk: BTreeSet<RepoPathBuf> = BTreeSet::new();
+        for file in &disk_files {
+            if file.ignored {
+                continue;
+            }
+            on_disk.insert(file.repo_path.clone());
+            let want = target.get(&file.repo_path);
+            let current_id = match &file.stub {
+                Some(s) => Some(s.file_id()?),
+                None => content.probe(&file.disk_path)?,
+            };
+            match (want, current_id) {
+                (Some(want_id), Some(cur)) if *want_id == cur => {
+                    // Content agrees; hydration state may still change
+                    // below via the policy pass.
+                }
+                (want, Some(cur)) => {
+                    // Disk differs. Known content (the store holds a
+                    // manifest for it) is versioned SOMEWHERE — safe to
+                    // move aside; unknown content is unversioned work
+                    // and stays untouched.
+                    let known = match task_files_chunk_store::FileId::from_hex(&cur.hex()) {
+                        Ok(cur_id) => self
+                            .with_version_store(root_id, |vs| {
+                                pollster::block_on(vs.chunks().has(cur_id))
+                            })
+                            .map_err(|e| Error::Repo(e.to_string()))?,
+                        Err(_) => false,
+                    };
+                    if !known {
+                        report
+                            .kept_dirty
+                            .push(file.repo_path.as_internal_file_string().to_string());
+                        continue;
+                    }
+                    match want {
+                        Some(want_id) => {
+                            self.write_materialized(
+                                &root,
+                                &repo,
+                                &file.repo_path,
+                                want_id,
+                                &policy,
+                                &mut report,
+                            )?;
+                        }
+                        None => {
+                            if let Err(e) = std::fs::remove_file(&file.disk_path)
+                                && e.kind() != std::io::ErrorKind::NotFound
+                            {
+                                return Err(e.into());
+                            }
+                            report
+                                .removed
+                                .push(file.repo_path.as_internal_file_string().to_string());
+                        }
+                    }
+                }
+                (None, None) => {}
+                (Some(_), None) => {
+                    // Unprobeable backend — already errored in probe.
+                }
+            }
+        }
+
+        // Store side: every tracked path absent from disk materializes
+        // per the hydration policy.
+        for (path, want_id) in &target {
+            if on_disk.contains(path) {
+                // Present: reconcile hydration STATE with the policy
+                // (hydrate a stub the policy wants resident; a resident
+                // file the policy wants dehydrated is left for
+                // apply_hydration_policy — materialize never dehydrates).
+                let disk = root_path.join(path.as_internal_file_string());
+                let is_stub = stub::probe(&disk).is_some();
+                let keep = policy
+                    .as_deref()
+                    .is_some_and(|p| hydration::keeps_hydrated(p, path.as_internal_file_string()));
+                if is_stub && keep {
+                    self.write_materialized(&root, &repo, path, want_id, &policy, &mut report)?;
+                }
+                continue;
+            }
+            self.write_materialized(&root, &repo, path, want_id, &policy, &mut report)?;
+        }
+        report.written.sort();
+        report.stubbed.sort();
+        report.removed.sort();
+        report.kept_dirty.sort();
+        Ok(report)
+    }
+
+    /// Write one path's materialized form: resident content when the
+    /// hydration policy keeps it (or there is no policy), a stub
+    /// otherwise (partial replica, issue #264's AC 4).
+    fn write_materialized(
+        &self,
+        root: &FileRootInfo,
+        repo: &Arc<ReadonlyRepo>,
+        path: &RepoPath,
+        want_id: &jj_lib::backend::FileId,
+        policy: &Option<Arc<jj_lib::gitignore::GitIgnoreFile>>,
+        report: &mut MaterializeReport,
+    ) -> Result<(), Error> {
+        let root_path = PathBuf::from(&root.path);
+        let disk = root_path.join(path.as_internal_file_string());
+        if let Some(parent) = disk.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let hydrate = match policy.as_deref() {
+            // No policy: a full replica — everything resident.
+            None => true,
+            Some(p) => hydration::keeps_hydrated(p, path.as_internal_file_string()),
+        };
+        let rel = path.as_internal_file_string().to_string();
+        if hydrate {
+            self.restore_content(repo, path, &disk, want_id, false)?;
+            report.written.push(rel);
+        } else {
+            let file_id = task_files_chunk_store::FileId::from_hex(&want_id.hex())
+                .map_err(|e| Error::VersionStore(e.into()))?;
+            let size = self
+                .with_version_store(root.id, |vs| {
+                    pollster::block_on(vs.chunks().manifest(file_id))
+                })
+                .map_err(|e| Error::Repo(e.to_string()))?
+                .map(|m| m.total_len())
+                .map_err(|e| Error::VersionStore(e.into()))?;
+            stub::write(&disk, &stub::Stub::new(want_id, size, false))?;
+            report.stubbed.push(rel);
+        }
+        Ok(())
+    }
+}
+
+/// What one [`FilesBackend::materialize_head`] pass did, root-relative
+/// paths, sorted.
+#[derive(Debug, Default, Clone)]
+pub struct MaterializeReport {
+    /// Hydrated to resident content.
+    pub written: Vec<String>,
+    /// Materialized as pointer stubs (partial replica).
+    pub stubbed: Vec<String>,
+    /// Removed (their content is store-held; the head no longer has
+    /// them).
+    pub removed: Vec<String>,
+    /// Left untouched: on-disk content the store holds nowhere —
+    /// unversioned work materialization must never destroy.
+    pub kept_dirty: Vec<String>,
+}
+
+fn hex_bytes(hex: &str) -> Result<Vec<u8>, FilesError> {
+    if !hex.len().is_multiple_of(2) {
+        return Err(FilesError::BadRequest(format!("{hex}: odd-length hex")));
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&hex[i..i + 2], 16)
+                .map_err(|_| FilesError::BadRequest(format!("{hex}: not hex")))
+        })
+        .collect()
+}
+
+fn chunk_hash_from_hex(hex: &str) -> Result<task_files_chunk_store::blake3::Hash, FilesError> {
+    task_files_chunk_store::blake3::Hash::from_hex(hex)
+        .map_err(|e| FilesError::BadRequest(format!("{hex}: {e}")))
+}
+
+fn chunk_file_id_from_hex(hex: &str) -> Result<task_files_chunk_store::FileId, FilesError> {
+    task_files_chunk_store::FileId::from_hex(hex)
+        .map_err(|e| FilesError::BadRequest(format!("{hex}: {e}")))
+}
+
 impl FilesService for FilesBackend {
     async fn create_root(
         &self,
@@ -2876,6 +3702,24 @@ impl FilesService for FilesBackend {
     ) -> Result<Vec<String>, FilesError> {
         let this = self.clone();
         blocking(move || this.copy_forward_inner(root_id, commit_id, paths)).await
+    }
+
+    async fn divergences(
+        &self,
+        root_id: Uuid,
+    ) -> Result<Vec<files_proto::DivergenceInfo>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.divergences_inner(root_id)).await
+    }
+
+    async fn resolve_divergence(
+        &self,
+        root_id: Uuid,
+        path: String,
+        choice: files_proto::DivergenceChoice,
+    ) -> Result<CheckpointInfo, FilesError> {
+        let this = self.clone();
+        blocking(move || this.resolve_divergence_inner(root_id, path, choice)).await
     }
 
     async fn gc_root(

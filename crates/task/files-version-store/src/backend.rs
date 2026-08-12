@@ -220,6 +220,40 @@ impl VersionStoreBackend {
         &self.chunks
     }
 
+    /// One structural object's **raw encoded bytes** (a tree, commit, or
+    /// copy-history record) by its id. The replica-sync wire format
+    /// (issue #264): objects are content-addressed (id = blake3 of the
+    /// bytes), so shipping the bytes verbatim is what guarantees the
+    /// receiver derives the identical id — no re-encode, no drift.
+    pub async fn read_raw_object(&self, id: &[u8]) -> Result<Vec<u8>> {
+        self.read_object(id).await
+    }
+
+    /// Store one structural object received from a peer, **verified**:
+    /// the bytes must hash to `expected_id` — a sync peer is never
+    /// trusted about content addresses. Also verifies the bytes decode
+    /// as one of the three object kinds, so a peer can't park arbitrary
+    /// data in the object store under a valid hash.
+    pub async fn import_raw_object(&self, expected_id: &[u8], bytes: Vec<u8>) -> Result<()> {
+        let expected = Self::object_hash(expected_id)?;
+        let actual = blake3::hash(&bytes);
+        if actual != expected {
+            return Err(Error::Object(format!(
+                "object bytes hash to {actual}, peer claimed {expected}"
+            )));
+        }
+        if codec::decode_commit(&bytes).is_err()
+            && codec::decode_tree(&bytes).is_err()
+            && codec::decode_copy_history(&bytes).is_err()
+        {
+            return Err(Error::Object(format!(
+                "object {expected} decodes as no known kind — refusing to store it"
+            )));
+        }
+        self.objects.write(&bytes).await?;
+        Ok(())
+    }
+
     /// The tree/commit/copy-history object store, for `gc.rs`'s sweep.
     pub(crate) fn objects(&self) -> &ObjectStore {
         &self.objects

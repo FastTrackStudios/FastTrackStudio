@@ -331,6 +331,28 @@ pub trait FilesService {
     /// report so the caller can checkpoint and re-apply.
     async fn apply_hydration_policy(&self, root_id: Uuid) -> Result<HydrationReport, FilesError>;
 
+    /// Every path whose state differs between the root's visible heads
+    /// — the Divergent versions surface (glossary; ADR 0001: both
+    /// sides survive, the UI resolves). Empty when the root has one
+    /// visible head, which is the steady state.
+    async fn divergences(
+        &self,
+        root_id: Uuid,
+    ) -> Result<Vec<crate::model::DivergenceInfo>, FilesError>;
+
+    /// Settle one divergent path (glossary: pick A / pick B / keep
+    /// both). Writes a **merge checkpoint** with every visible head as
+    /// a parent: the decided state becomes the single new head, the
+    /// live tree is materialized to match, and both sides remain in
+    /// history — resolution never discards a commit. When the last
+    /// divergent path settles, the root is back to one head.
+    async fn resolve_divergence(
+        &self,
+        root_id: Uuid,
+        path: String,
+        choice: crate::model::DivergenceChoice,
+    ) -> Result<CheckpointInfo, FilesError>;
+
     /// Every root-creation / checkpoint / version-curation / hydration
     /// event, as it happens.
     #[subscribe]

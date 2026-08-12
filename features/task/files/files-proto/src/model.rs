@@ -329,3 +329,44 @@ pub struct HydrationReport {
     #[facet(default)]
     pub failed: Vec<String>,
 }
+
+/// One side of a file's Divergent versions (glossary): the commit
+/// (a view head) holding this side and the content identity it has
+/// there — `None` when this side deleted the file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct DivergenceSide {
+    /// Hex jj `CommitId` of the head carrying this side.
+    pub commit_id: String,
+    /// Hex `FileId` of this side's content, `None` for a deletion.
+    pub file_id: Option<String>,
+}
+
+/// A path whose state differs between the root's visible heads —
+/// concurrent saves that both survived (ADR 0001: nothing is lost, no
+/// on-disk conflict markers; the UI resolves). Produced by
+/// [`crate::service::FilesService::divergences`], settled by
+/// [`crate::service::FilesService::resolve_divergence`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct DivergenceInfo {
+    pub root_id: Uuid,
+    /// Root-relative path.
+    pub path: String,
+    /// Every visible head's take on the path, in head order (the
+    /// journal's own line first, then the others).
+    pub sides: Vec<DivergenceSide>,
+}
+
+/// The resolution verdict for one divergent path (glossary "Divergent
+/// versions": pick A / pick B / keep both).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+pub enum DivergenceChoice {
+    /// Keep the named head's side of this path (pick by commit id —
+    /// unambiguous where A/B would depend on listing order).
+    Pick { commit_id: String },
+    /// Keep every side: the first (journal-line) side keeps the path,
+    /// each other side lands beside it as `<stem> (divergent <n>).<ext>`.
+    KeepBoth,
+}

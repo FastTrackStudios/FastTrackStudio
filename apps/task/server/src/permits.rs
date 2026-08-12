@@ -364,6 +364,9 @@ table!(FILES, "files", "files/**", [
     // whole live tree and copy-forward can overwrite versioned files —
     // audited writes; time-travel browsing is an ordinary read.
     wa "restart_project_version", rd "browse_at", wa "copy_forward",
+    // Divergent versions (issue #264): listing is a read; settling
+    // writes a merge checkpoint and rewrites live-tree files (audited).
+    rd "divergences", wa "resolve_divergence",
 ]);
 table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
 // The Files placement layer's ORG lane (issue #262). The operator and
