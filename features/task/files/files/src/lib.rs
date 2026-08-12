@@ -33,6 +33,7 @@ mod content;
 mod entity;
 mod error;
 mod git_root;
+pub mod hydration;
 pub mod ignore;
 mod registry;
 /// Opening (and reopening) a root's version-store repo. Public so a
@@ -41,6 +42,7 @@ mod registry;
 /// jj-lib's loader wiring.
 pub mod repo_open;
 mod scan;
+pub mod stub;
 mod versions;
 
 pub use backend::{Captured, FilesBackend};

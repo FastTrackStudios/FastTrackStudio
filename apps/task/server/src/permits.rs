@@ -353,6 +353,13 @@ table!(FILES, "files", "files/**", [
     wr "name_version", rd "list_named_versions", rd "resolve_named_version",
     wa "unname_version", wr "start_project_version", rd "list_project_versions",
     wa "gc_root",
+    // Hydration (issue #263). Dehydrate carries an audit line even on
+    // allow (`wa`): it replaces live-tree content with a stub, and
+    // although the content survives in the store, it is the one write
+    // here that makes files non-resident. Hydrate restores content —
+    // an ordinary write. Applying policy does both in bulk.
+    wa "dehydrate", wr "hydrate", rd "hydration_policy", wr "set_hydration_policy",
+    wa "apply_hydration_policy",
 ]);
 table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
 // The Files placement layer's ORG lane (issue #262). The operator and

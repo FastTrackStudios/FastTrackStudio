@@ -42,7 +42,8 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    GcReport, NamedVersion, ProjectVersion, RootFlavor, SavePoint, SnapshotInfo, VersionRef,
+    GcReport, HydrationChange, HydrationReport, NamedVersion, ProjectVersion, RootFlavor,
+    SavePoint, SnapshotInfo, VersionRef,
 };
 use jj_lib::backend::{ChangeId, CommitId};
 use jj_lib::object_id::{HexPrefix, ObjectId as _, PrefixResolution};
@@ -62,10 +63,12 @@ use crate::checkpoint::Capture;
 use crate::consts::{GIT_DIR, MARKER_FILE, STORE_DIR};
 use crate::error::Error;
 use crate::git_root;
+use crate::hydration;
 use crate::ignore;
 use crate::registry::Registry;
 use crate::repo_open;
 use crate::scan;
+use crate::stub;
 use crate::versions::VaultVersions;
 
 /// Default `keep_newer` window for [`FilesService::gc_root`]: nothing
@@ -965,11 +968,32 @@ impl FilesBackend {
         // one is a submodule's object store — not this root's content),
         // while the marker/store pair only ever exists at the top level.
         let mut entries = match &canonical_target {
-            Some(target) => Self::list_dir(
-                target,
-                *target == root_path,
-                root.flavor == RootFlavor::Software,
-            )?,
+            Some(target) => {
+                let mut listed = Self::list_dir(
+                    target,
+                    *target == root_path,
+                    root.flavor == RootFlavor::Software,
+                )?;
+                // On-disk pointer stubs (issue #263) are resident *files*
+                // to the raw listing but stubs to the platform: flag them
+                // and report the LOGICAL size the stub preserves, not the
+                // placeholder's own few bytes. Detection is stat-bounded —
+                // only a file small enough to be a stub has its header
+                // read, so listing a directory of media opens nothing.
+                for entry in &mut listed {
+                    if entry.is_dir {
+                        continue;
+                    }
+                    if let Some(len) = entry.size
+                        && stub::candidate_len(len)
+                        && let Some(s) = stub::read(&target.join(&entry.name))?
+                    {
+                        entry.stub = true;
+                        entry.size = Some(s.size);
+                    }
+                }
+                listed
+            }
             None => Vec::new(),
         };
         // Overlay the version store's view: tracked-but-not-resident
@@ -1617,6 +1641,335 @@ impl FilesBackend {
         Ok(stored)
     }
 
+    /// Resolve + confine one root-relative file path for the hydration
+    /// ops. Same double guard as `browse_inner`: refuse absolute
+    /// subpaths before `join` (std `join` replaces the base), then
+    /// canonicalize-and-prefix-check the platform way. The jj repo
+    /// path is parsed too, which rejects `.`/`..` components.
+    fn resolve_root_file(
+        &self,
+        root: &FileRootInfo,
+        path: &str,
+    ) -> Result<(PathBuf, RepoPathBuf), Error> {
+        if Path::new(path).is_absolute() {
+            return Err(Error::BadRequest(format!("path escapes the root: {path}")));
+        }
+        let repo_path =
+            RepoPathBuf::from_internal_string(&path.replace(std::path::MAIN_SEPARATOR, "/"))
+                .map_err(|e| Error::BadRequest(format!("{path:?}: {e}")))?;
+        let root_path = PathBuf::from(&root.path);
+        let disk_path = root_path.join(repo_path.as_internal_file_string());
+        if let Ok(canonical) = disk_path.canonicalize() {
+            task_files_util::confine(&canonical, &root_path).map_err(confinement)?;
+        }
+        Ok((disk_path, repo_path))
+    }
+
+    /// The checkpoint head's `TreeValue::File` fields for `repo_path`,
+    /// or `None` when the head doesn't track it.
+    fn head_file(
+        repo: &Arc<ReadonlyRepo>,
+        head: &CommitId,
+        repo_path: &RepoPath,
+    ) -> Result<Option<(jj_lib::backend::FileId, bool)>, Error> {
+        let backend = repo.store().backend();
+        let value = pollster::block_on(async {
+            let commit = backend.read_commit(head).await?;
+            let tree_id =
+                commit.root_tree.clone().into_resolved().map_err(|_| {
+                    jj_lib::backend::BackendError::Other("conflicted root tree".into())
+                })?;
+            let tree = backend.read_tree(RepoPath::root(), &tree_id).await?;
+            task_files_version_store::chain::lookup_dyn(backend, &tree, repo_path).await
+        })
+        .map_err(|e| Error::Repo(format!("reading head tree: {e}")))?;
+        Ok(match value {
+            Some(jj_lib::backend::TreeValue::File { id, executable, .. }) => Some((id, executable)),
+            _ => None,
+        })
+    }
+
+    /// One file's `BrowseEntry` as the hydration ops report it.
+    fn entry_for(disk_path: &Path, name: &str) -> Result<BrowseEntry, Error> {
+        let len = std::fs::metadata(disk_path)?.len();
+        let stub = if stub::candidate_len(len) {
+            stub::read(disk_path)?
+        } else {
+            None
+        };
+        Ok(BrowseEntry {
+            name: name.to_string(),
+            is_dir: false,
+            size: Some(stub.as_ref().map_or(len, |s| s.size)),
+            stub: stub.is_some(),
+            divergent: false,
+        })
+    }
+
+    /// Media-only guard shared by the hydration ops — a software root's
+    /// working tree belongs to its colocated git (same split as
+    /// `gc_root`): a stub there would just be a modified file to git,
+    /// and every git tool would happily commit it as content.
+    fn require_media(root: &FileRootInfo, what: &str) -> Result<(), Error> {
+        if root.flavor != RootFlavor::Media {
+            return Err(Error::BadRequest(format!(
+                "{what} is media-only: a software root's working tree belongs to its colocated git"
+            )));
+        }
+        Ok(())
+    }
+
+    fn dehydrate_inner(&self, root_id: Uuid, path: String) -> Result<BrowseEntry, Error> {
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "dehydrate")?;
+        let (disk_path, repo_path) = self.resolve_root_file(&root, &path)?;
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+
+        if !disk_path.exists() {
+            return Err(Error::NotFound(format!("{root_id}:{path}")));
+        }
+        // Idempotent: already a stub — report it, touch nothing.
+        let len = std::fs::metadata(&disk_path)?.len();
+        if stub::candidate_len(len) && stub::read(&disk_path)?.is_some() {
+            return Self::entry_for(&disk_path, &path);
+        }
+
+        // Reloaded head, not the cache: dehydration compares against
+        // what is genuinely committed, wherever it was written.
+        let (repo, head) = self.reload_repo(&root)?;
+        let Some((head_id, executable)) = Self::head_file(&repo, &head, &repo_path)? else {
+            return Err(Error::BadRequest(format!(
+                "{path}: not tracked by the checkpoint head — checkpoint before dehydrating"
+            )));
+        };
+
+        // The one rule that makes dehydration safe: on-disk content
+        // must BE the committed content. Streaming the file through the
+        // content store re-derives its id (a dedup no-op when it is
+        // already there); any difference means unversioned work, which
+        // a placeholder must never overwrite.
+        let backend = repo.store().backend();
+        let content = crate::content::ContentStore::for_repo(&repo, backend)?;
+        let probed = content.probe(&disk_path)?;
+        let disk_id = pollster::block_on(content.write(&repo_path, &disk_path, probed))?;
+        if disk_id != head_id {
+            return Err(Error::BadRequest(format!(
+                "{path}: on-disk content differs from the checkpoint head — checkpoint first, then dehydrate"
+            )));
+        }
+
+        stub::write(&disk_path, &stub::Stub::new(&head_id, len, executable))?;
+        self.publish(FilesEvent::HydrationChanged(HydrationChange {
+            root_id,
+            path: repo_path.as_internal_file_string().to_string(),
+            stub: true,
+        }));
+        Self::entry_for(&disk_path, &path)
+    }
+
+    fn hydrate_inner(&self, root_id: Uuid, path: String) -> Result<BrowseEntry, Error> {
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "hydrate")?;
+        let (disk_path, repo_path) = self.resolve_root_file(&root, &path)?;
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+
+        if !disk_path.exists() {
+            return Err(Error::NotFound(format!("{root_id}:{path}")));
+        }
+        let len = std::fs::metadata(&disk_path)?.len();
+        let on_disk = if stub::candidate_len(len) {
+            stub::read(&disk_path)?
+        } else {
+            None
+        };
+        // Idempotent: already resident — report it, touch nothing.
+        let Some(recorded) = on_disk else {
+            return Self::entry_for(&disk_path, &path);
+        };
+
+        // The id to restore: the checkpoint head's when it tracks the
+        // path (the head may have moved since dehydration — "the live
+        // tree shows the newest save" wins over a stale stub), the
+        // stub's own recorded id otherwise.
+        let (repo, head) = self.reload_repo(&root)?;
+        let (target_id, executable) = match Self::head_file(&repo, &head, &repo_path)? {
+            Some((id, exec)) => (id, exec),
+            None => (recorded.file_id()?, recorded.executable),
+        };
+
+        self.restore_content(&repo, &repo_path, &disk_path, &target_id, executable)?;
+        self.publish(FilesEvent::HydrationChanged(HydrationChange {
+            root_id,
+            path: repo_path.as_internal_file_string().to_string(),
+            stub: false,
+        }));
+        Self::entry_for(&disk_path, &path)
+    }
+
+    /// Stream `target_id`'s content from the store to a temp file in
+    /// the same directory, verify the bytes re-derive to exactly
+    /// `target_id` (the acceptance criterion's "verified by FileId" —
+    /// a truncated or corrupt restore never replaces the stub), set the
+    /// executable bit, and rename into place.
+    fn restore_content(
+        &self,
+        repo: &Arc<ReadonlyRepo>,
+        repo_path: &RepoPath,
+        disk_path: &Path,
+        target_id: &jj_lib::backend::FileId,
+        executable: bool,
+    ) -> Result<(), Error> {
+        use futures_util::io::AsyncReadExt as _;
+        use std::io::Write as _;
+
+        let backend = repo.store().backend();
+        let dir = disk_path
+            .parent()
+            .ok_or_else(|| Error::BadRequest(format!("{}: no parent", disk_path.display())))?;
+        let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+        pollster::block_on(async {
+            let mut reader = backend.read_file(repo_path, target_id).await?;
+            let mut buf = vec![0u8; 128 * 1024];
+            loop {
+                let n = reader.read(&mut buf).await.map_err(|e| {
+                    jj_lib::backend::BackendError::Other(
+                        format!("reading {} from the store: {e}", target_id.hex()).into(),
+                    )
+                })?;
+                if n == 0 {
+                    break;
+                }
+                tmp.write_all(&buf[..n]).map_err(|e| {
+                    jj_lib::backend::BackendError::Other(format!("writing restore: {e}").into())
+                })?;
+            }
+            Ok::<(), jj_lib::backend::BackendError>(())
+        })
+        .map_err(Error::from)?;
+        tmp.as_file().sync_all()?;
+
+        // Verify by identity before the rename: re-derive the restored
+        // bytes' id through the same content store and require it to be
+        // the id we asked for.
+        let content = crate::content::ContentStore::for_repo(repo, backend)?;
+        let probed = content.probe(tmp.path())?;
+        let restored_id = pollster::block_on(content.write(repo_path, tmp.path(), probed))?;
+        if restored_id != *target_id {
+            return Err(Error::Repo(format!(
+                "{}: restored content re-derives to {} but the stub promised {} — store damage, stub left in place",
+                disk_path.display(),
+                restored_id.hex(),
+                target_id.hex(),
+            )));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = if executable { 0o755 } else { 0o644 };
+            std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(mode))?;
+        }
+        #[cfg(not(unix))]
+        let _ = executable;
+        tmp.persist(disk_path).map_err(|e| Error::Io(e.error))?;
+        Ok(())
+    }
+
+    fn hydration_policy_inner(&self, root_id: Uuid) -> Result<Vec<String>, Error> {
+        let root = self.get_root_info(root_id)?;
+        hydration::stored_policy(&repo_open::store_dir(Path::new(&root.path)))
+    }
+
+    fn set_hydration_policy_inner(
+        &self,
+        root_id: Uuid,
+        patterns: Vec<String>,
+    ) -> Result<Vec<String>, Error> {
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "hydration policy")?;
+        hydration::save_policy(&repo_open::store_dir(Path::new(&root.path)), patterns)
+    }
+
+    fn apply_hydration_policy_inner(&self, root_id: Uuid) -> Result<HydrationReport, Error> {
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "hydration policy")?;
+        let store_dir = repo_open::store_dir(Path::new(&root.path));
+        let Some(policy) = hydration::matcher(&store_dir)? else {
+            // Empty policy: opt-in means touch nothing.
+            return Ok(HydrationReport {
+                hydrated: Vec::new(),
+                dehydrated: Vec::new(),
+                skipped_dirty: Vec::new(),
+            });
+        };
+
+        // One live-tree walk decides the whole pass; the per-file ops
+        // then re-take the root lock each, so a checkpoint landing
+        // mid-pass serializes between files rather than deadlocking
+        // against a pass-wide lock.
+        let ignores = self.ignore_of(&root)?;
+        let (_, head) = self.reload_repo(&root)?;
+        let tracked = self.tracked_paths(&root, &head)?;
+        let files = scan::walk_live_tree(Path::new(&root.path), root.flavor, &ignores, &tracked)?;
+
+        let mut report = HydrationReport {
+            hydrated: Vec::new(),
+            dehydrated: Vec::new(),
+            skipped_dirty: Vec::new(),
+        };
+        for file in files {
+            let rel = file.repo_path.as_internal_file_string().to_string();
+            let keep = hydration::keeps_hydrated(&policy, &rel);
+            if file.stub.is_some() {
+                if keep {
+                    self.hydrate_inner(root_id, rel.clone())?;
+                    report.hydrated.push(rel);
+                }
+            } else if !keep && !file.ignored && tracked.contains(&file.repo_path) {
+                match self.dehydrate_inner(root_id, rel.clone()) {
+                    Ok(_) => report.dehydrated.push(rel),
+                    // Dirty content is the expected, reportable case —
+                    // everything else is a real fault.
+                    Err(Error::BadRequest(m)) if m.contains("differs from the checkpoint head") => {
+                        report.skipped_dirty.push(rel);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        report.hydrated.sort();
+        report.dehydrated.sort();
+        report.skipped_dirty.sort();
+        Ok(report)
+    }
+
+    /// The checkpoint head's full tracked-path set (the scan walker's
+    /// second input).
+    fn tracked_paths(
+        &self,
+        root: &FileRootInfo,
+        head: &CommitId,
+    ) -> Result<std::collections::BTreeSet<RepoPathBuf>, Error> {
+        let (repo, _) = self.ensure_repo(root)?;
+        let backend = repo.store().backend();
+        let mut out = std::collections::BTreeSet::new();
+        pollster::block_on(async {
+            let commit = backend.read_commit(head).await?;
+            let tree_id =
+                commit.root_tree.clone().into_resolved().map_err(|_| {
+                    jj_lib::backend::BackendError::Other("conflicted root tree".into())
+                })?;
+            let tree = backend.read_tree(RepoPath::root(), &tree_id).await?;
+            scan::walk_tree_paths(backend, &tree, RepoPath::root(), &mut out)
+                .await
+                .map_err(|e| jj_lib::backend::BackendError::Other(e.to_string().into()))
+        })
+        .map_err(|e| Error::Repo(format!("walking head tree: {e}")))?;
+        Ok(out)
+    }
+
     /// Run one cadence pass: perform every capture that has fallen due
     /// as of the engine's clock. This is what the driver task calls on
     /// a timer in production, and what a test calls after advancing its
@@ -1787,6 +2140,35 @@ impl FilesService for FilesBackend {
     async fn browse(&self, root_id: Uuid, subpath: String) -> Result<Vec<BrowseEntry>, FilesError> {
         let this = self.clone();
         blocking(move || this.browse_inner(root_id, subpath)).await
+    }
+
+    async fn dehydrate(&self, root_id: Uuid, path: String) -> Result<BrowseEntry, FilesError> {
+        let this = self.clone();
+        blocking(move || this.dehydrate_inner(root_id, path)).await
+    }
+
+    async fn hydrate(&self, root_id: Uuid, path: String) -> Result<BrowseEntry, FilesError> {
+        let this = self.clone();
+        blocking(move || this.hydrate_inner(root_id, path)).await
+    }
+
+    async fn hydration_policy(&self, root_id: Uuid) -> Result<Vec<String>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.hydration_policy_inner(root_id)).await
+    }
+
+    async fn set_hydration_policy(
+        &self,
+        root_id: Uuid,
+        patterns: Vec<String>,
+    ) -> Result<Vec<String>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.set_hydration_policy_inner(root_id, patterns)).await
+    }
+
+    async fn apply_hydration_policy(&self, root_id: Uuid) -> Result<HydrationReport, FilesError> {
+        let this = self.clone();
+        blocking(move || this.apply_hydration_policy_inner(root_id)).await
     }
 
     async fn drive_browse(&self, path: String) -> Result<Vec<BrowseEntry>, FilesError> {

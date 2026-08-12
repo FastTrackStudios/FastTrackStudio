@@ -148,6 +148,17 @@ async fn write_checkpoint_async(capture: Capture<'_>) -> Result<CheckpointResult
         present.insert(repo_path.clone());
         let existing = lookup_dyn(backend, head_tree, repo_path).await?;
 
+        // A pointer stub (issue #263) is a placeholder, never content:
+        // the path keeps its tracked state exactly as the head records
+        // it — no write, no changed_paths entry, and (being in
+        // `present`) no recorded deletion. Dehydration is invisible to
+        // history. A stub at a path the head doesn't track is inert:
+        // its bytes must never be ingested, and there is nothing
+        // tracked to preserve, so it is simply skipped.
+        if file.stub.is_some() {
+            continue;
+        }
+
         // The mode to record: the live file's own executable bit where
         // the filesystem has one, otherwise whatever the tree already
         // said (never a silent flip to non-executable — see

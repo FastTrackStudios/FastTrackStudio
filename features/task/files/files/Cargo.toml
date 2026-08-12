@@ -23,8 +23,12 @@ jj-lib = { workspace = true }
 # the in-tree notifications feature. The Files cadence engine uses it for
 # activity *hints* only (a stat-scan certifies every capture).
 notify-fs = { workspace = true }
+futures-util = { workspace = true, features = ["io"] }
 pollster = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+# Atomic stub/hydration writes (issue #263): content is restored to a
+# temp file in the target's own directory and renamed into place.
+tempfile = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 # Named / Project Versions are Vault entities (issue #261/ADR 0001):

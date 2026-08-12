@@ -9976,6 +9976,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "files-proto",
+ "futures-util",
  "gix",
  "globset",
  "jj-lib",

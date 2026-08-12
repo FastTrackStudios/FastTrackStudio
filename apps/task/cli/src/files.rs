@@ -76,6 +76,31 @@ pub(crate) enum FilesCmd {
     /// The root's Ignore set (patterns neither versioned nor synced).
     #[command(subcommand)]
     Ignore(FilesIgnoreCmd),
+    /// Replace a file's live-tree content with a pointer stub. The
+    /// content stays in the version store; listings keep its logical
+    /// size and identity. Refused when the file has unversioned
+    /// changes — checkpoint first.
+    Dehydrate {
+        root_id: uuid::Uuid,
+        /// Root-relative path.
+        path: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore a stub's exact content from the version store,
+    /// verified by FileId.
+    Hydrate {
+        root_id: uuid::Uuid,
+        /// Root-relative path.
+        path: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The root's hydration policy: paths MATCHING these patterns are
+    /// kept hydrated by `apply`; everything else is kept dehydrated.
+    /// Empty policy = touch nothing (opt-in).
+    #[command(subcommand)]
+    HydrationPolicy(FilesHydrationPolicyCmd),
     /// Named Versions — curated labels on top of the automatic chain
     /// ("v3 for client"). Vault entities, not store constructs.
     #[command(subcommand)]
@@ -166,6 +191,34 @@ impl From<FlavorArg> for RootFlavor {
             FlavorArg::Software => Self::Software,
         }
     }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum FilesHydrationPolicyCmd {
+    /// Show the root's hydration-policy patterns.
+    Show {
+        root_id: uuid::Uuid,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replace the root's hydration-policy patterns (gitignore
+    /// syntax; matching = kept hydrated). Storing changes no file —
+    /// run `apply` to enact it.
+    Set {
+        root_id: uuid::Uuid,
+        #[arg(required = true)]
+        patterns: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run the policy over the live tree now: hydrate matching stubs,
+    /// dehydrate clean non-matching files. Dirty files are skipped and
+    /// reported.
+    Apply {
+        root_id: uuid::Uuid,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -499,6 +552,81 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                 .await
                 .map_err(|e| eyre::eyre!("set_ignore_set: {e}"))?;
             print_patterns(&stored, json)?;
+        }
+        FilesCmd::Dehydrate {
+            root_id,
+            path,
+            json,
+        } => {
+            let entry = client
+                .dehydrate(root_id, path)
+                .await
+                .map_err(|e| eyre::eyre!("dehydrate: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&entry)?);
+            } else {
+                println!(
+                    "{} dehydrated ({} bytes stay addressable in the store)",
+                    entry.name,
+                    entry.size.unwrap_or(0)
+                );
+            }
+        }
+        FilesCmd::Hydrate {
+            root_id,
+            path,
+            json,
+        } => {
+            let entry = client
+                .hydrate(root_id, path)
+                .await
+                .map_err(|e| eyre::eyre!("hydrate: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&entry)?);
+            } else {
+                println!(
+                    "{} hydrated ({} bytes resident, verified by FileId)",
+                    entry.name,
+                    entry.size.unwrap_or(0)
+                );
+            }
+        }
+        FilesCmd::HydrationPolicy(FilesHydrationPolicyCmd::Show { root_id, json }) => {
+            let patterns = client
+                .hydration_policy(root_id)
+                .await
+                .map_err(|e| eyre::eyre!("hydration_policy: {e}"))?;
+            print_patterns(&patterns, json)?;
+        }
+        FilesCmd::HydrationPolicy(FilesHydrationPolicyCmd::Set {
+            root_id,
+            patterns,
+            json,
+        }) => {
+            let stored = client
+                .set_hydration_policy(root_id, patterns)
+                .await
+                .map_err(|e| eyre::eyre!("set_hydration_policy: {e}"))?;
+            print_patterns(&stored, json)?;
+        }
+        FilesCmd::HydrationPolicy(FilesHydrationPolicyCmd::Apply { root_id, json }) => {
+            let report = client
+                .apply_hydration_policy(root_id)
+                .await
+                .map_err(|e| eyre::eyre!("apply_hydration_policy: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "hydrated {}, dehydrated {}, skipped {} dirty",
+                    report.hydrated.len(),
+                    report.dehydrated.len(),
+                    report.skipped_dirty.len()
+                );
+                for path in &report.skipped_dirty {
+                    println!("  dirty (checkpoint first): {path}");
+                }
+            }
         }
         FilesCmd::Gc {
             root_id,

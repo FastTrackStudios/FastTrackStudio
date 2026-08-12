@@ -31,6 +31,11 @@ pub struct LiveFile {
     /// is skipped by a checkpoint *unless it is already tracked* — an
     /// ignore pattern must never turn into a recorded deletion.
     pub ignored: bool,
+    /// The on-disk content is a **pointer stub** ([`crate::stub`],
+    /// issue #263) — a placeholder, never content. A checkpoint keeps
+    /// the path's tracked state untouched (dehydration is invisible to
+    /// history); nothing ever ingests the stub's own bytes.
+    pub stub: Option<crate::stub::Stub>,
 }
 
 /// Recursively list every regular file under `root_path`, as [`LiveFile`]
@@ -153,11 +158,21 @@ fn walk_dir(
                 out,
             )?;
         } else if file_type.is_file() {
+            // Stub detection rides the stat the walk already takes:
+            // only a file small enough to be a stub gets its header
+            // read, so no media file is ever opened here.
+            let metadata = entry.metadata()?;
+            let stub = if crate::stub::candidate_len(metadata.len()) {
+                crate::stub::read(&path)?
+            } else {
+                None
+            };
             out.push(LiveFile {
                 ignored: dir_ignored || ignores.matches_file(&child_repo_path),
                 executable: is_executable(&entry)?,
                 repo_path: child_repo_path,
                 disk_path: path,
+                stub,
             });
         }
         // symlinks: skipped (see doc comment).
