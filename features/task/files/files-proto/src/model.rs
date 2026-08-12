@@ -23,6 +23,21 @@ pub enum RootFlavor {
     Software,
 }
 
+/// The badge a root wears when its live tree is a **Project Version**
+/// (glossary: "the same root restarted as a new lineage — auto-numbered,
+/// optionally labelled; the folder name never changes"). Recorded in the
+/// root's marker file so the badge survives a restart; the Vault-entity
+/// half (issue #261) will own naming and lineage, this is the wire shape
+/// the explorer renders.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct ProjectVersionBadge {
+    /// Auto-numbered lineage ordinal, 1-based.
+    pub number: u32,
+    /// Optional human label ("client cut", "rebuild").
+    pub label: Option<String>,
+}
+
 /// A File Root: a folder tree with a stable identity (ADR 0001 /
 /// glossary "File Root"). `path` is the root's live tree on the
 /// storage location hosting it — v1 is single-machine, so this is a
@@ -36,6 +51,10 @@ pub struct FileRootInfo {
     pub path: String,
     pub flavor: RootFlavor,
     pub created_at: DateTime<Utc>,
+    /// Set when this root's live tree is a Project Version — the
+    /// explorer renders it as the root's badge. `None` on a root that
+    /// has never been restarted.
+    pub project_version: Option<ProjectVersionBadge>,
 }
 
 /// One entry in a directory listing — either a root-scoped
@@ -47,8 +66,23 @@ pub struct FileRootInfo {
 pub struct BrowseEntry {
     pub name: String,
     pub is_dir: bool,
-    /// `None` for directories.
+    /// `None` for directories, and for a [`BrowseEntry::stub`] entry
+    /// (a stub's logical size lives in its manifest, not on disk).
     pub size: Option<u64>,
+    /// The entry is a **pointer stub**: known to the root's version
+    /// store at the checkpoint head but not resident in the live tree
+    /// (glossary "Pointer stub" — browsing a 240 GB project must not
+    /// mean downloading it). Always `false` for
+    /// [`crate::service::FilesService::drive_browse`], which has no
+    /// root context. On-demand hydration is issue #263; v1 reports the
+    /// state so the explorer can show resident-vs-stub honestly.
+    pub stub: bool,
+    /// The entry has **Divergent versions**: the root's version store
+    /// holds more than one visible head and this path's content differs
+    /// between them (glossary "Divergent versions" — concurrent saves
+    /// survive side by side instead of clobbering). Resolution
+    /// (pick A / pick B / keep both) is issue #267.
+    pub divergent: bool,
 }
 
 /// One entry in a file's version chain (glossary "File version

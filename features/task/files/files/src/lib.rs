@@ -12,11 +12,16 @@
 //! a root's jj repo).
 
 mod backend;
+mod badges;
 mod checkpoint;
 mod consts;
 mod error;
 mod registry;
-mod repo_open;
+/// Opening (and reopening) a root's version-store repo. Public so a
+/// test — or a future sibling crate, e.g. the cadence engine (#260) —
+/// can reach the same repo the backend serves, without duplicating
+/// jj-lib's loader wiring.
+pub mod repo_open;
 mod scan;
 
 pub use backend::FilesBackend;
@@ -25,7 +30,7 @@ pub use files_proto::service;
 
 pub use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    RootFlavor,
+    ProjectVersionBadge, RootFlavor,
 };
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor

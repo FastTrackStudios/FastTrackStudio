@@ -51,6 +51,7 @@ use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use task_files_version_store::VersionStoreBackend;
 use uuid::Uuid;
 
+use crate::badges;
 use crate::consts::{MARKER_FILE, STORE_DIR};
 use crate::error::Error;
 use crate::registry::Registry;
@@ -179,7 +180,17 @@ impl FilesBackend {
     fn get_root_info(&self, id: Uuid) -> Result<FileRootInfo, Error> {
         self.registry
             .get(id)
+            .map(Self::with_project_version)
             .ok_or_else(|| Error::NotFound(id.to_string()))
+    }
+
+    /// Overlay the root's Project Version badge, which lives in its
+    /// marker file rather than the registry — the marker travels with
+    /// the tree, so a root restarted on another machine (issue #261)
+    /// still shows its lineage here.
+    fn with_project_version(mut root: FileRootInfo) -> FileRootInfo {
+        root.project_version = badges::project_version(Path::new(&root.path));
+        root
     }
 
     fn store_dir(root_path: &Path) -> PathBuf {
@@ -313,6 +324,10 @@ impl FilesBackend {
             path: canonical_str,
             flavor,
             created_at,
+            // A freshly created root is lineage 1 with no restart
+            // behind it, so it wears no Project Version badge until
+            // one is recorded in its marker (issue #261).
+            project_version: None,
         };
         self.registry.insert(root.clone())?;
         self.set_head(id, repo, head);
@@ -341,6 +356,12 @@ impl FilesBackend {
                 name: name.to_string(),
                 is_dir: file_type.is_dir(),
                 size,
+                // Resident by definition (this listing is the live
+                // tree); root browsing overlays the version store's
+                // stub/divergence state in `browse_inner`, Drive
+                // browsing has no root context and leaves both false.
+                stub: false,
+                divergent: false,
             });
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -365,19 +386,43 @@ impl FilesBackend {
         } else {
             root_path.join(&subpath)
         };
-        let canonical_target = requested
-            .canonicalize()
-            .map_err(|_| Error::NotFound(format!("{root_id}:{subpath}")))?;
-        if canonical_target != root_path && !canonical_target.starts_with(&root_path) {
-            return Err(Error::BadRequest(format!(
-                "subpath escapes the root: {subpath}"
-            )));
+        // A subpath that isn't on disk may still be TRACKED — a
+        // directory whose whole content is pointer stubs (issue #266).
+        // The version store answers for it; the escape guard is the
+        // repo-path parse (jj rejects `..` and absolute components), so
+        // this branch can't reach outside the root either.
+        let canonical_target = requested.canonicalize().ok();
+        if let Some(target) = &canonical_target {
+            if target != &root_path && !target.starts_with(&root_path) {
+                return Err(Error::BadRequest(format!(
+                    "subpath escapes the root: {subpath}"
+                )));
+            }
+            if !std::fs::metadata(target)?.is_dir() {
+                return Err(Error::BadRequest(format!("{subpath}: not a directory")));
+            }
         }
-        let metadata = std::fs::metadata(&canonical_target)?;
-        if !metadata.is_dir() {
-            return Err(Error::BadRequest(format!("{subpath}: not a directory")));
+        let mut entries = match &canonical_target {
+            Some(target) => Self::list_dir(target, *target == root_path)?,
+            None => Vec::new(),
+        };
+        // Overlay the version store's view: tracked-but-not-resident
+        // paths join the listing as pointer stubs, and paths whose
+        // content differs between visible heads wear the divergence
+        // badge (issue #266's explorer renders both).
+        let (repo, head) = self.ensure_repo(&root)?;
+        let backend = repo
+            .store()
+            .backend_impl::<VersionStoreBackend>()
+            .ok_or_else(|| Error::Repo("root's repo is not a VersionStoreBackend".into()))?;
+        let dir = badges::repo_dir(&subpath)?;
+        let heads: BTreeSet<CommitId> = repo.view().heads().iter().cloned().collect();
+        badges::annotate(backend, &head, &heads, &dir, &mut entries)?;
+        if canonical_target.is_none() && entries.is_empty() {
+            // Neither on disk nor in the store.
+            return Err(Error::NotFound(format!("{root_id}:{subpath}")));
         }
-        Self::list_dir(&canonical_target, canonical_target == root_path)
+        Ok(entries)
     }
 
     fn drive_browse_inner(&self, path: String) -> Result<Vec<BrowseEntry>, Error> {
@@ -485,7 +530,12 @@ impl FilesService for FilesBackend {
     }
 
     async fn list_roots(&self) -> Result<Vec<FileRootInfo>, FilesError> {
-        Ok(self.registry.list())
+        Ok(self
+            .registry
+            .list()
+            .into_iter()
+            .map(Self::with_project_version)
+            .collect())
     }
 
     async fn get_root(&self, id: Uuid) -> Result<FileRootInfo, FilesError> {

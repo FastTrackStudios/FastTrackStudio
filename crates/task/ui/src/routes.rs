@@ -115,6 +115,11 @@ pub enum Route {
         #[route("/repos")]
         ReposRoute {},
 
+        // Files — the explorer over File Roots, their live trees, and
+        // the Drive surface (issue #266).
+        #[route("/files")]
+        FilesRoute {},
+
         #[route("/wiki")]
         WikiRoute {},
 
@@ -360,6 +365,13 @@ fn LedgerRoute() -> Element {
 fn ReposRoute() -> Element {
     rsx! {
         crate::plugin_gate::PluginGate { plugin: "forge", pages::repos::ReposView {} }
+    }
+}
+
+#[component]
+fn FilesRoute() -> Element {
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "files", pages::files::FilesView {} }
     }
 }
 

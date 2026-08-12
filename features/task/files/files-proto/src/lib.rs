@@ -16,7 +16,9 @@
 pub mod model;
 pub mod service;
 
-pub use model::{BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, RootFlavor};
+pub use model::{
+    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, ProjectVersionBadge, RootFlavor,
+};
 pub use service::{FilesError, FilesEvent, FilesService};
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor

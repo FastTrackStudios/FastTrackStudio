@@ -108,7 +108,13 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
                 println!("{}", serde_json::to_string_pretty(&roots)?);
             } else {
                 for r in roots {
-                    println!("{}  {}  {}", r.id, r.name, r.path);
+                    println!(
+                        "{}  {}  {}{}",
+                        r.id,
+                        r.name,
+                        r.path,
+                        project_version_suffix(&r)
+                    );
                 }
             }
         }
@@ -120,7 +126,12 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
             if json {
                 println!("{}", serde_json::to_string_pretty(&root)?);
             } else {
-                println!("{} ({})", root.name, root.path);
+                println!(
+                    "{} ({}){}",
+                    root.name,
+                    root.path,
+                    project_version_suffix(&root)
+                );
             }
         }
         FilesCmd::Browse {
@@ -191,6 +202,18 @@ pub(crate) async fn run_files(cmd: FilesCmd, org_override: Option<&str>) -> eyre
     Ok(())
 }
 
+/// The root's Project Version badge, as a printable suffix — empty for
+/// a root that has never been restarted (issue #266).
+fn project_version_suffix(root: &files_proto::FileRootInfo) -> String {
+    match &root.project_version {
+        Some(badge) => match &badge.label {
+            Some(label) => format!("  [v{} {label}]", badge.number),
+            None => format!("  [v{}]", badge.number),
+        },
+        None => String::new(),
+    }
+}
+
 fn print_entries(entries: &[files_proto::BrowseEntry], json: bool) -> eyre::Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(entries)?);
@@ -199,7 +222,17 @@ fn print_entries(entries: &[files_proto::BrowseEntry], json: bool) -> eyre::Resu
     for e in entries {
         let kind = if e.is_dir { "dir " } else { "file" };
         let size = e.size.map(|s| s.to_string()).unwrap_or_default();
-        println!("{kind}  {size:>10}  {}", e.name);
+        // Same badges the explorer renders (issue #266): a pointer stub
+        // is tracked but not resident here, a divergent entry has
+        // concurrent saves waiting to be resolved.
+        let mut badges = String::new();
+        if e.stub {
+            badges.push_str("  [stub]");
+        }
+        if e.divergent {
+            badges.push_str("  [divergent]");
+        }
+        println!("{kind}  {size:>10}  {}{badges}", e.name);
     }
     Ok(())
 }

@@ -9945,6 +9945,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "files-ui"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "dioxus",
+ "files-proto",
+ "fts-ui",
+ "task-ui-core",
+ "task-widgets",
+ "uuid",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -30139,6 +30153,7 @@ dependencies = [
  "editor-crdt",
  "email-ui",
  "fake",
+ "files-ui",
  "finance-proto",
  "fitness-proto",
  "fts-ui",
