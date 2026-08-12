@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::model::{BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo};
+use crate::model::{
+    BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, NamedVersion, ProjectVersion,
+    SnapshotInfo, VersionRef,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
 #[repr(u8)]
@@ -38,6 +41,16 @@ pub enum FilesEvent {
     RootCreated(FileRootInfo),
     /// A root's session ended in a certified checkpoint.
     Checkpointed(CheckpointInfo),
+    /// The cadence engine took an ephemeral auto-snapshot during
+    /// activity (issue #260). Not a version — see [`SnapshotInfo`].
+    Snapshotted(SnapshotInfo),
+    /// A version was curated with a name (issue #261).
+    VersionNamed(NamedVersion),
+    /// A Named Version's curation was dropped — the entity that was
+    /// removed, so a subscriber can drop it by id without a refetch.
+    VersionUnnamed(NamedVersion),
+    /// A new Project Version of a root was started.
+    ProjectVersionStarted(ProjectVersion),
 }
 
 #[architect::rpc]
@@ -46,10 +59,14 @@ pub trait FilesService {
     /// file, mints a stable id, and initializes its version store.
     /// Fails with [`FilesError::AlreadyExists`] if `path` is already a
     /// root, and with [`FilesError::BadRequest`] if `path` doesn't
-    /// exist or isn't a directory. `flavor` is accepted for wire
-    /// stability but only `RootFlavor::Media` is implemented in v1 —
-    /// `RootFlavor::Software` fails with [`FilesError::BadRequest`]
-    /// (ADR 0001: software roots are colocated git, a distinct build).
+    /// exist or isn't a directory.
+    ///
+    /// `flavor` picks the versioning engine and is fixed for the root's
+    /// life (see [`crate::model::RootFlavor`]).
+    /// [`RootFlavor::Software`](crate::model::RootFlavor::Software)
+    /// initializes a colocated git repository in the folder — or
+    /// *adopts* the one already there, keeping its history and remotes
+    /// (issue #273).
     async fn create_root(
         &self,
         path: String,
@@ -81,18 +98,138 @@ pub trait FilesService {
     async fn chain(&self, root_id: Uuid, path: String) -> Result<Vec<ChainEntry>, FilesError>;
 
     /// Scan-certify a Session checkpoint right now (glossary: the
-    /// explicit-trigger half of "Session checkpoint" — the
-    /// quiescence/debounce cadence engine is future work): full-scan
-    /// the root's live tree, diff against the current head, and write
-    /// one commit. `description` defaults to `"checkpoint now"` when
-    /// `None`.
+    /// explicit-trigger half of "Session checkpoint" — the other half
+    /// is per-root quiescence, driven by the cadence engine of issue
+    /// #260): full-scan the root's live tree, diff against the current
+    /// head, and write one commit. `description` defaults to
+    /// `"checkpoint now"` when `None`. Ends the root's open session, so
+    /// a quiescence checkpoint never lands straight on top of an
+    /// explicit one.
     async fn checkpoint_now(
         &self,
         root_id: Uuid,
         description: Option<String>,
     ) -> Result<CheckpointInfo, FilesError>;
 
-    /// Every root-creation / checkpoint event, as it happens.
+    /// Feed the cadence engine activity hints for `root_id` — the
+    /// root-relative paths a watcher saw written (issue #260). Hints
+    /// are exactly that: they open/extend a session and mark save
+    /// points, but nothing they claim is trusted as content — a full
+    /// stat-scan certifies every capture. The server-side watcher calls
+    /// the same engine path; this method exists so a sync daemon (or a
+    /// DAW-side integration that knows it just saved) can report
+    /// activity the server can't see. Paths matching the root's Ignore
+    /// set are dropped; the return value is how many hints survived
+    /// that filter.
+    async fn hint_activity(&self, root_id: Uuid, paths: Vec<String>) -> Result<u32, FilesError>;
+
+    /// The root's auto-snapshots (glossary), newest first — the
+    /// ephemeral captures a mid-session mistake is recovered from.
+    /// Never version-chain entries.
+    async fn snapshots(&self, root_id: Uuid) -> Result<Vec<SnapshotInfo>, FilesError>;
+
+    /// The root's **editable** Ignore-set patterns (glossary: the
+    /// patterns that are neither versioned nor synced). Gitignore
+    /// syntax. These are layered *on top of* the root's flavor seed —
+    /// REAPER backup/peak churn on a media root, build scaffolding and
+    /// stray heavy media on a software root — which is why an untouched
+    /// root reports an empty list while still ignoring plenty.
+    async fn ignore_set(&self, root_id: Uuid) -> Result<Vec<String>, FilesError>;
+
+    /// Replace the root's editable Ignore-set patterns, returning them
+    /// as stored (trimmed and deduplicated; order is preserved, because
+    /// in gitignore the last matching rule wins and a `!` re-include
+    /// must be able to follow what it re-includes). Fails with
+    /// [`FilesError::BadRequest`] on a pattern carrying a line break or
+    /// written as a comment — both would mean something other than the
+    /// one rule it claims to be.
+    ///
+    /// Already-versioned paths that a new pattern now covers are not
+    /// retroactively removed from history — an Ignore set governs what
+    /// *starts* being versioned; it never ends it.
+    async fn set_ignore_set(
+        &self,
+        root_id: Uuid,
+        patterns: Vec<String>,
+    ) -> Result<Vec<String>, FilesError>;
+
+    /// Curate `commit_id` in `root_id` as a [`NamedVersion`] — writes
+    /// the Vault entity that references `(root id, change id)`. The
+    /// version store is not touched: naming is Vault-side curation
+    /// (ADR 0001). Fails with [`FilesError::NotFound`] when `root_id`
+    /// is unknown or `commit_id` names no commit in that root's store,
+    /// and with [`FilesError::AlreadyExists`] when this root already
+    /// has a Named Version by that name.
+    async fn name_version(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        name: String,
+    ) -> Result<NamedVersion, FilesError>;
+
+    /// Every Named Version the Vault holds, newest first. `root_id`
+    /// filters to one root; `None` lists the whole org's.
+    async fn list_named_versions(
+        &self,
+        root_id: Option<Uuid>,
+    ) -> Result<Vec<NamedVersion>, FilesError>;
+
+    /// What a Named Version points at in the store *right now* — the
+    /// resolution step a share link targeting it performs before
+    /// streaming (glossary "Share link"). Fails with
+    /// [`FilesError::NotFound`] when the entity is gone or its change
+    /// resolves to nothing in the root's store.
+    async fn resolve_named_version(&self, id: Uuid) -> Result<VersionRef, FilesError>;
+
+    /// Drop a Named Version's curation (the Vault entity), leaving the
+    /// automatic chain untouched. Its content stops being immortal at
+    /// the next [`FilesService::gc_root`].
+    async fn unname_version(&self, id: Uuid) -> Result<(), FilesError>;
+
+    /// Start a new [`ProjectVersion`] of `root_id` from its current
+    /// checkpoint head: writes the Vault entity with the next
+    /// auto-assigned number and an optional `label`. The live tree is
+    /// untouched — the restart flow that carries files forward is
+    /// #268.
+    async fn start_project_version(
+        &self,
+        root_id: Uuid,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, FilesError>;
+
+    /// Every Project Version of `root_id`, oldest number first.
+    async fn list_project_versions(&self, root_id: Uuid)
+    -> Result<Vec<ProjectVersion>, FilesError>;
+
+    /// Run one GC pass over `root_id`'s version store with the protect
+    /// set resolved from the Vault: everything Named/Project Versions
+    /// reference is immortal regardless of age, on top of jj's own
+    /// index reachability.
+    ///
+    /// [`RootFlavor::Media`](crate::model::RootFlavor::Media) only. A
+    /// software root's objects belong to its colocated git repository,
+    /// which collects its own garbage (`git gc`); calling this on one
+    /// fails with [`FilesError::BadRequest`] rather than reaching into
+    /// a store Files does not own. Naming and Project Versions have no
+    /// such split — curation is flavor-agnostic. `keep_newer_secs` guards concurrent writers
+    /// by refusing to sweep anything written within that many seconds
+    /// (default 60).
+    ///
+    /// The pass holds the root's write lock, so writers *in this
+    /// process* are already excluded and the guard is really about a
+    /// second process on the same store (a CLI's embedded backend, a
+    /// storage agent). `Some(0)` therefore disables the only
+    /// protection those writers have: pass it when you know nothing
+    /// else holds this root — a test, or a maintenance window — and
+    /// never on a live rig.
+    async fn gc_root(
+        &self,
+        root_id: Uuid,
+        keep_newer_secs: Option<u64>,
+    ) -> Result<GcReport, FilesError>;
+
+    /// Every root-creation / checkpoint / version-curation event, as it
+    /// happens.
     #[subscribe]
     fn events(&self) -> FilesEvent;
 }

@@ -115,6 +115,7 @@ members = [
     "features/dawfile/dawfile-protools",
     "features/dawfile/dawfile-reaper",
     "features/dawfile/dawfile-standalone",
+    "features/expression-editor/expression-editor-demo",
     # ── features/reaper ───────────────────────────────────────────────
     "features/reaper/daw-reaper",
     "features/reaper/daw-bridge",
@@ -638,6 +639,7 @@ expression-editor-audio = { path = "features/expression-editor/expression-editor
 expression-editor-core = { path = "features/expression-editor/expression-editor-core" }
 expression-editor-corpus = { path = "features/expression-editor/expression-editor-corpus" }
 expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
+expression-editor-demo = { path = "features/expression-editor/expression-editor-demo" }
 expression-editor-guitarpro = { path = "features/expression-editor/expression-editor-guitarpro" }
 expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
 expression-editor-standalone = { path = "features/expression-editor/expression-editor-standalone" }
@@ -692,6 +694,15 @@ blake3 = { version = "1.8" }
 # implemented over the chunk store above. Pinned (jj-lib is pre-1.0 per the
 # ADR); vendor-patch here if/when we need to carry a local fix.
 jj-lib = { version = "=0.44.0" }
+# Software File Roots (issue #273) are colocated git: the `files` feature
+# talks to the root's real `.git` directly (branch refs, index) alongside
+# jj-lib's `GitBackend`. Same version jj-lib itself pins, so there is one
+# gix in the tree; features are a subset of jj-lib's own.
+gix = { version = "0.85", default-features = false, features = [
+    "index",
+    "max-performance-safe",
+    "sha1",
+] }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
 # Embeds the staged fasttrackstudio web bundle into the native binary
@@ -855,6 +866,18 @@ tokio = { version = "1.48", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 
+# ── Filesystem watching ───────────────────────────────────────────────
+# crates.io `notify` — the cross-platform filesystem watcher, used by the
+# Files cadence engine (issue #260) for activity *hints* (a full stat-scan
+# is what certifies a checkpoint). Renamed: `notify` the workspace-
+# dependency name is already taken by the in-tree `features/task/notify`
+# member (the notifications feature), and one name can only mean one crate
+# in `[workspace.dependencies]`.
+notify-fs = { package = "notify", version = "8" }
+# Glob matching for a File Root's Ignore set (issue #260 / glossary
+# "Ignore set" — shared verbatim by versioning and selective sync).
+globset = "0.4"
+
 # ── Serialization ─────────────────────────────────────────────────────
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -972,13 +995,20 @@ task-files-chunk-store = { path = "crates/task/files-chunk-store" }
 # chunk store above — per-file version chains, recorded renames, divergent
 # concurrent writes.
 task-files-version-store = { path = "crates/task/files-version-store" }
+# Shared Files primitives: path confinement + the blocking seam (#284 review).
+task-files-util = { path = "crates/task/files-util" }
 # Files RPC surface v1 (issue #259/ADR 0001): create-root / browse /
 # chain / checkpoint-now over the version store above.
 files-proto = { path = "features/task/files/files-proto", default-features = false }
 files = { path = "features/task/files/files" }
+files-ui = { path = "features/task/files/files-ui" }
 # The WebDAV compat bridge (issue #274): mount a root's live tree from
 # any OS file manager. Current heads only, never the sync path.
 files-webdav = { path = "features/task/files/files-webdav" }
+# Files placement layer (issue #262): Storage Locations, Storage grants,
+# the storage-agent protocol, and the in-server hosting.
+files-storage-proto = { path = "features/task/files/files-storage-proto", default-features = false }
+files-storage = { path = "features/task/files/files-storage" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }

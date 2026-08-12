@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 files = { workspace = true }
 files-proto = { workspace = true }
+task-files-util = { workspace = true }
 dav-server = { version = "0.11", default-features = false, features = ["localfs"] }
 futures-util = { workspace = true }
 http = "1"
@@ -18,6 +19,7 @@ http-body = "1"
 bytes = "1"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 

@@ -22,7 +22,9 @@ checkpoint, exactly like a DAW saving over NFS.
 
 The mount always authenticates. Use your Task account's email as the
 username, and either your password or a Task session token as the
-password.
+password. A password is verified against the store on every request —
+no session is created, so a rotated password takes effect immediately
+and a left-up mount does not accumulate sessions.
 
 **macOS (Finder)** — ⌘K, then:
 
@@ -97,6 +99,11 @@ force) rather than silently un-hiding anything.
 - **Cross-root moves are not supported.** Each root is served as its
   own WebDAV namespace; a `MOVE` between two roots is refused. Within a
   root, moves and copies work normally.
+- **A root itself cannot be deleted or moved through the mount.**
+  Dragging a mounted root folder to the Trash is refused with `403`.
+  A File Root has an identity, a marker and a version store; it is
+  removed through Files, not by a drag. Anything *inside* a root
+  deletes normally.
 - **This is not the sync path.** For a real local replica with offline
   versioning, use the sync daemon. WebDAV is for the machine that does
   not have it.

@@ -37,8 +37,21 @@ use futures_util::StreamExt as _;
 /// marker file and its version store.
 const HIDDEN: [&str; 2] = [files::MARKER_FILE, files::STORE_DIR];
 
+/// Is `name` one of a root's internals?
+///
+/// **Case-insensitively**, because this bridge exists for macOS (APFS)
+/// and Windows (NTFS), which are case-insensitive: a byte-exact
+/// comparison let `.FTS-FILES` sail past the name check while the OS
+/// happily resolved it to the real `.fts-files`, handing the whole jj
+/// repo + CAS to the mount — readable and recursively deletable — and
+/// the name never had to be *listed* to be guessed (PR #287 review).
+/// Case-folding on Linux too is deliberate: it costs nothing, and the
+/// guarantee should not depend on which filesystem a root happens to
+/// sit on.
 fn is_hidden(name: &[u8]) -> bool {
-    HIDDEN.iter().any(|h| h.as_bytes() == name)
+    HIDDEN
+        .iter()
+        .any(|h| h.as_bytes().eq_ignore_ascii_case(name))
 }
 
 #[derive(Clone)]
@@ -46,6 +59,13 @@ pub struct LiveTreeFs {
     inner: LocalFs,
     /// Canonicalized live tree — the confinement boundary.
     base: PathBuf,
+    /// Canonicalized version store, when it exists — the *resolved*
+    /// boundary the name check above approximates. Held so
+    /// [`LiveTreeFs::confine`] can reject a target that lands inside
+    /// the store however it got there: a case variant on a
+    /// case-insensitive volume, a symlink planted in the live tree, or
+    /// any future spelling nobody thought of.
+    store: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for LiveTreeFs {
@@ -62,6 +82,7 @@ impl LiveTreeFs {
     /// (and org-confined) it at `create_root` time.
     pub fn new(base: impl Into<PathBuf>) -> Self {
         let base = base.into();
+        let store = base.join(files::STORE_DIR).canonicalize().ok();
         Self {
             // `public = false`: files the bridge creates are the
             // server user's own (0600/0700), matching how the rest of
@@ -69,6 +90,7 @@ impl LiveTreeFs {
             // (documented as "a *lot* of overhead"), `macos = false`.
             inner: *LocalFs::new(&base, false, false, false),
             base,
+            store,
         }
     }
 
@@ -89,7 +111,15 @@ impl LiveTreeFs {
 
     /// Canonicalize `target` — falling back to its parent when the
     /// target does not exist yet (a `PUT`/`MKCOL` destination) — and
-    /// require the result to stay under [`LiveTreeFs::base`].
+    /// require the result to stay under [`LiveTreeFs::base`] and
+    /// *outside* the version store.
+    ///
+    /// The store check is the one that actually holds: it runs on the
+    /// resolved path, so it catches every route into the store the
+    /// textual name check cannot — a case variant on APFS/NTFS, a
+    /// symlink inside the live tree pointing at `.fts-files`, a
+    /// hardlinked directory. The name check stays as the cheap first
+    /// pass and as what makes the internals invisible in listings.
     fn confine(&self, target: &Path) -> FsResult<()> {
         let resolved = match target.canonicalize() {
             Ok(p) => p,
@@ -104,11 +134,17 @@ impl LiveTreeFs {
                 }
             }
         };
-        if resolved == self.base || resolved.starts_with(&self.base) {
-            Ok(())
-        } else {
-            Err(FsError::Forbidden)
+        if resolved != self.base && !resolved.starts_with(&self.base) {
+            return Err(FsError::Forbidden);
         }
+        if let Some(store) = &self.store
+            && (resolved == *store || resolved.starts_with(store))
+        {
+            // `NotFound`, matching the name check: the store is not
+            // part of this tree, by whatever spelling it was reached.
+            return Err(FsError::NotFound);
+        }
+        Ok(())
     }
 }
 

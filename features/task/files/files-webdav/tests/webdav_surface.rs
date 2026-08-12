@@ -31,9 +31,12 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("data tempdir");
-        let data_dir = dir.path().to_path_buf();
-        let backend = FilesBackend::new(&data_dir).expect("backend");
-        let bridge = WebdavBridge::new(backend.clone()).expect("bridge");
+        let data_dir = dir.path().join("files");
+        let vault_root = dir.path().join("vault");
+        std::fs::create_dir_all(&data_dir).expect("files dir");
+        std::fs::create_dir_all(&vault_root).expect("vault dir");
+        let backend = FilesBackend::new(&data_dir, &vault_root).expect("backend");
+        let bridge = WebdavBridge::new(backend.clone());
         Self {
             _dir: dir,
             data_dir,
@@ -489,6 +492,263 @@ async fn a_move_between_two_roots_is_refused() {
         !std::path::Path::new(&b.path).join("take.wav").exists(),
         "nothing was written into the other root"
     );
+}
+
+/// PR #287 review, finding 2: two roots whose segments share a prefix
+/// (`Mix` / `Mix Stems` — both unique, so neither gets an id suffix).
+///
+/// `DavPath::set_prefix` is a raw byte `starts_with`, so the prefix
+/// `…/dav/Mix` also matched `…/dav/Mix Stems/…`: a cross-root `MOVE`
+/// stripped to ` Stems/take.wav` and `as_rel_ospath` dropped the
+/// leading byte, landing the write **inside the source root**. The
+/// earlier cross-root test passed only because `Root A`/`Root B` share
+/// no prefix.
+#[tokio::test(flavor = "multi_thread")]
+async fn roots_whose_names_share_a_prefix_do_not_bleed_into_each_other() {
+    let h = Harness::new();
+    let mix = h.root("Mix").await;
+    let stems = h.root("Mix Stems").await;
+    h.send("PUT", "/org/acme/dav/Mix/take.wav", b"take one")
+        .await;
+
+    // The MOVE is refused, and — the part that actually matters —
+    // nothing lands anywhere it should not.
+    let (status, _) = h
+        .send_with(
+            "MOVE",
+            "/org/acme/dav/Mix/take.wav",
+            b"",
+            &[("Destination", "/org/acme/dav/Mix%20Stems/take.wav")],
+        )
+        .await;
+    assert!(!status.is_success(), "cross-root MOVE succeeded: {status}");
+    assert!(
+        !std::path::Path::new(&mix.path).join("Stems").exists(),
+        "the write was re-resolved inside the SOURCE root"
+    );
+    assert!(
+        !std::path::Path::new(&stems.path).join("take.wav").exists(),
+        "the write crossed into the other root"
+    );
+    assert!(
+        std::path::Path::new(&mix.path).join("take.wav").exists(),
+        "the source file survives a refused move"
+    );
+
+    // The same root cause was a reachable panic: a *shorter* sibling
+    // (`…/dav/Mix2`) left `pfxlen` past the end of the shortened path in
+    // `DavPath::parent`. Reaching this assertion at all is the test.
+    h.root("Mix2").await;
+    let (status, _) = h
+        .send_with(
+            "MOVE",
+            "/org/acme/dav/Mix/take.wav",
+            b"",
+            &[("Destination", "/org/acme/dav/Mix2")],
+        )
+        .await;
+    assert!(!status.is_success(), "cross-root MOVE succeeded: {status}");
+
+    // Each root still serves its own tree, addressed by its own name.
+    let (status, body) = h.propfind_depth1("/org/acme/dav/Mix/").await;
+    assert_eq!(status, StatusCode::MULTI_STATUS);
+    assert!(body.contains("take.wav"), "{body}");
+    let (status, body) = h.propfind_depth1("/org/acme/dav/Mix%20Stems/").await;
+    assert_eq!(status, StatusCode::MULTI_STATUS);
+    assert!(
+        !body.contains("take.wav"),
+        "leaked into the sibling: {body}"
+    );
+}
+
+/// PR #287 review, finding 3: dragging a mounted root to the Trash.
+///
+/// A `DELETE` on the root collection resolves to `/` inside the root's
+/// own filesystem, and dav-server defaults a header-less DELETE to
+/// `Depth: Infinity` — so it recursed the entire live tree. A File Root
+/// is an entity with an identity, a marker and a version store; it is
+/// not deleted by a drag.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_root_collection_cannot_be_deleted_or_moved_through_the_mount() {
+    let h = Harness::new();
+    let root = h.root("Whole Project").await;
+    h.send("PUT", "/org/acme/dav/Whole%20Project/mix.wav", b"take one")
+        .await;
+    h.send("MKCOL", "/org/acme/dav/Whole%20Project/stems", b"")
+        .await;
+    h.send(
+        "PUT",
+        "/org/acme/dav/Whole%20Project/stems/kick.wav",
+        b"boom",
+    )
+    .await;
+
+    for (method, headers) in [
+        ("DELETE", vec![]),
+        ("DELETE", vec![("Depth", "infinity")]),
+        (
+            "MOVE",
+            vec![("Destination", "/org/acme/dav/Somewhere%20Else")],
+        ),
+    ] {
+        for url in [
+            "/org/acme/dav/Whole%20Project",
+            "/org/acme/dav/Whole%20Project/",
+        ] {
+            let (status, _) = h.send_with(method, url, b"", &headers).await;
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "{method} {url} must be refused"
+            );
+        }
+    }
+
+    // Every byte still there.
+    let base = std::path::Path::new(&root.path);
+    assert!(base.join("mix.wav").exists(), "the live tree survived");
+    assert!(base.join("stems").join("kick.wav").exists());
+    assert!(base.join(".fts-files").is_dir(), "the store survived");
+
+    // And the root still works — this is a refusal, not a wedged mount.
+    let (status, body) = h.propfind_depth1("/org/acme/dav/Whole%20Project/").await;
+    assert_eq!(status, StatusCode::MULTI_STATUS);
+    assert!(body.contains("mix.wav"), "{body}");
+    // Deleting something *inside* the root is still ordinary business.
+    let (status, _) = h
+        .send("DELETE", "/org/acme/dav/Whole%20Project/mix.wav", b"")
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+/// PR #287 review, finding 4: the internals guard compared name bytes
+/// exactly, but this bridge exists for APFS and NTFS, which are
+/// case-insensitive. `.FTS-FILES` passed the name check and the OS
+/// resolved it to the real store — the whole jj repo readable, and
+/// recursively deletable, over the mount.
+///
+/// Two defences are asserted: the name check now folds case, and
+/// `confine` re-checks the *resolved* path against the store directory,
+/// which is what catches every other route in (a symlink, a hardlink, a
+/// spelling nobody thought of).
+#[tokio::test(flavor = "multi_thread")]
+async fn case_variants_of_the_internals_are_still_hidden() {
+    let h = Harness::new();
+    let root = h.root("Case Test").await;
+    h.send("PUT", "/org/acme/dav/Case%20Test/mix.wav", b"take one")
+        .await;
+    h.backend
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("checkpoint_now");
+    assert!(std::path::Path::new(&root.path).join(".fts-files").is_dir());
+
+    for name in [
+        ".FTS-FILES",
+        ".Fts-Files",
+        ".fts-FILES",
+        ".FTS-ROOT.JSON",
+        ".Fts-Root.json",
+    ] {
+        let (status, _) = h
+            .send(
+                "PROPFIND",
+                &format!("/org/acme/dav/Case%20Test/{name}"),
+                b"",
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "PROPFIND {name}");
+        let (status, _) = h
+            .send("GET", &format!("/org/acme/dav/Case%20Test/{name}"), b"")
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "GET {name}");
+        let (status, _) = h
+            .send("DELETE", &format!("/org/acme/dav/Case%20Test/{name}"), b"")
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "DELETE {name}");
+    }
+
+    // A symlink inside the live tree pointing at the store: the textual
+    // name is innocent, so only the post-canonicalize check catches it.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            std::path::Path::new(&root.path).join(".fts-files"),
+            std::path::Path::new(&root.path).join("innocent"),
+        )
+        .unwrap();
+        let (status, _) = h
+            .propfind_depth1("/org/acme/dav/Case%20Test/innocent/")
+            .await;
+        assert_ne!(
+            status,
+            StatusCode::MULTI_STATUS,
+            "a symlink to the store must not open it"
+        );
+    }
+
+    assert!(
+        std::path::Path::new(&root.path).join(".fts-files").is_dir(),
+        "the version store survived every spelling"
+    );
+}
+
+/// PR #287 review, finding 5: an unreadable policy file must not mean
+/// "nothing hidden".
+///
+/// Every read failure used to collapse to the empty policy *and* get
+/// cached, so one permissions blip published a deliberately hidden root
+/// to every org member until the mtime next changed.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_policy_fails_closed() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let h = Harness::new();
+    h.root("Public").await;
+    let secret = h.root("Client Masters").await;
+    h.bridge
+        .policy()
+        .set_hidden(secret.id, true)
+        .expect("hide the root");
+
+    // Sanity: hidden while the policy is readable.
+    let (_, body) = h.propfind_depth1(&format!("{MOUNT}/")).await;
+    assert!(!body.contains("Client%20Masters"), "{body}");
+
+    // Bump the mtime first, while the file is still readable, so the
+    // cache is guaranteed to attempt a re-read; then make it
+    // unreadable. Together that is the blip being modelled: the policy
+    // changed on disk, and we cannot see what it says.
+    let policy_path = h.bridge.policy().path().to_path_buf();
+    let original = std::fs::metadata(&policy_path).unwrap().permissions();
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+    std::fs::File::options()
+        .write(true)
+        .open(&policy_path)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(future))
+        .unwrap();
+    std::fs::set_permissions(&policy_path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    // Running as root defeats mode 0o000; skip rather than assert a
+    // guarantee the environment cannot express.
+    if std::fs::read(&policy_path).is_ok() {
+        std::fs::set_permissions(&policy_path, original).unwrap();
+        eprintln!("skipping: this process can read a 0o000 file (running as root?)");
+        return;
+    }
+
+    let (status, body) = h.propfind_depth1(&format!("{MOUNT}/")).await;
+    assert!(
+        !body.contains("Client%20Masters"),
+        "an unreadable policy must not un-hide a root: {status} {body}"
+    );
+    // The readable roots keep working — failing closed on the policy is
+    // not the same as failing the whole mount.
+    assert!(body.contains("Public"), "{body}");
+
+    std::fs::set_permissions(&policy_path, original).unwrap();
 }
 
 /// Roots are created through `FilesService::create_root` — which mints

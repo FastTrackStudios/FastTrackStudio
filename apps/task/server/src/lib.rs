@@ -36,6 +36,7 @@ pub mod presence;
 pub mod server_mgmt;
 pub mod share;
 pub mod snapshot;
+pub mod storage;
 pub mod watch_bridge;
 pub mod webdav;
 #[cfg(feature = "plugin-forge")]
@@ -157,6 +158,12 @@ pub struct OrgAppState {
     /// Holds this org's per-root WebDAV policy and lock managers, so it
     /// is built once per org rather than per request.
     pub files_webdav: files_webdav::WebdavBridge,
+    /// This org's lane onto the Files placement layer (issue #262) — the
+    /// Storage Locations it was granted, and where its roots are placed.
+    /// The registry underneath is deployment-scoped and shared by every
+    /// org (see [`crate::storage`]); this backend is the org-confined
+    /// view of it.
+    pub storage: files_storage::StorageBackend,
     /// Task backend — walks every `type: task` page in the
     /// vault.
     pub tasks: task::TaskBackend,
@@ -375,6 +382,18 @@ pub struct AppState {
     /// it that way: clone the `OrgAppState` (see [`AppState::org`])
     /// rather than working under the guard.
     pub orgs: Arc<std::sync::RwLock<std::collections::HashMap<String, OrgAppState>>>,
+    /// The Files placement layer's coordinator (issue #262): the
+    /// deployment's Storage Location registry, its grants, its
+    /// placements, and the in-server Storage agent enrolled against
+    /// this data root.
+    ///
+    /// **One per process, owned here.** It is deployment-scoped — one
+    /// registry serving every org — so it belongs beside the data root
+    /// it was opened against rather than in a process-global that a
+    /// second `AppState` with a different data root would silently
+    /// inherit (PR #284 review). `build_org_state` and
+    /// `server_layer_router` both take it from here.
+    pub storage: Arc<files_storage::StorageCore>,
     /// Source data root. Held for `.well-known/task-server.json`
     /// discovery, manifest re-scans, and the keypair path.
     pub data_root: org_proto::DataRoot,
@@ -530,19 +549,25 @@ impl AppState {
             .map_err(|e| eyre::eyre!("load server keypair: {e}"))?;
 
         let scope = architect::Scope::new();
+        // The deployment's storage coordinator, opened once against the
+        // data root we just ensured. Fatal on failure: a registry that
+        // cannot be opened means placement is broken for every org, and
+        // half-mounting it was the policy split the review flagged.
+        let storage = crate::storage::open(data_root.path())?;
         let org_roots = pick_server_orgs(&data_root, slug_filter)?;
         let mut orgs = std::collections::HashMap::new();
         for org_root in org_roots {
             let slug = org_root.slug().to_owned();
             let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
             let auth = AuthState::open(&auth_db_url, &auth_secret()).await?;
-            let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
+            let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage).await?;
             orgs.insert(slug, org_state);
         }
 
         let state = Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
+            storage,
             data_root,
             scope,
             write_gate: snapshot::WriteGate::new(),
@@ -567,17 +592,19 @@ impl AppState {
             .ensure()
             .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
         let scope = architect::Scope::new();
+        let storage = crate::storage::open(data_root.path())?;
         let mut org_roots = pick_server_orgs(&data_root, None)?;
         let org_root = org_roots
             .pop()
             .ok_or_else(|| eyre::eyre!("no org to host"))?;
         let slug = org_root.slug().to_owned();
-        let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
+        let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage).await?;
         let mut orgs = std::collections::HashMap::new();
         orgs.insert(slug, org_state);
         Ok(Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
+            storage,
             data_root,
             scope,
             write_gate: snapshot::WriteGate::new(),
@@ -597,13 +624,15 @@ impl AppState {
         let data_root =
             org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
         let scope = architect::Scope::new();
+        let storage = crate::storage::open(data_root.path())?;
         let slug = org_root.slug().to_owned();
-        let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
+        let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage).await?;
         let mut orgs = std::collections::HashMap::new();
         orgs.insert(slug, org_state);
         Ok(Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
+            storage,
             data_root,
             scope,
             write_gate: snapshot::WriteGate::new(),
@@ -683,6 +712,7 @@ pub(crate) async fn build_org_state(
     keypair: &ServerKeypair,
     org_root: org_proto::OrgRoot,
     scope: &std::sync::Arc<architect::Scope>,
+    storage: &Arc<files_storage::StorageCore>,
 ) -> eyre::Result<OrgAppState> {
     {
         // The org's effective plugin set, resolved once from the
@@ -1163,10 +1193,22 @@ pub(crate) async fn build_org_state(
         let goals = goal::GoalBackend::new(vault_root.clone());
         let milestones = milestone::MilestoneBackend::new(vault_root.clone());
         let workstreams = workstream::WorkstreamBackend::new(vault_root.clone());
-        let files = files::FilesBackend::new(org_root.path().join("files"))
+        // Root content lives outside the vault (`<org>/files/`); the
+        // Named / Project Version entities that reference it are
+        // ordinary vault pages, so the backend gets both paths.
+        let files = files::FilesBackend::new(org_root.path().join("files"), vault_root.clone())
             .map_err(|e| eyre::eyre!("files backend: {e}"))?;
-        let files_webdav = files_webdav::WebdavBridge::new(files.clone())
-            .map_err(|e| eyre::eyre!("files webdav bridge: {e}"))?;
+        let files_webdav = files_webdav::WebdavBridge::new(files.clone());
+        // Placement lane. The coordinator is the deployment's, owned by
+        // `AppState` and passed in — this is just this org's view of it.
+        let storage = files_storage::StorageBackend::new(storage.clone(), org_root.slug());
+        // The Files cadence engine (issue #260): one driver task ticks
+        // the engine, and every root gets an inotify watch feeding it
+        // activity hints. The interval only bounds how promptly a due
+        // capture happens — the cadence itself (10-minute auto-
+        // snapshots, 30-minute quiescence) is the engine's.
+        files.enable_watching().await;
+        files.spawn_cadence_driver(std::time::Duration::from_secs(30));
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.
@@ -1391,6 +1433,7 @@ pub(crate) async fn build_org_state(
             workstreams,
             files,
             files_webdav,
+            storage,
             tasks,
             #[cfg(feature = "plugin-home")]
             locations,
@@ -2001,19 +2044,6 @@ pub fn router(state: AppState) -> Router {
         // can reach, instead of one registration per org.
         .route("/mcp", axum::routing::post(mcp::mcp_account_handler))
         .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
-        // Files WebDAV bridge (issue #274) — mount an org's File Roots
-        // from Finder/Explorer. `any` because WebDAV's verbs (PROPFIND,
-        // MKCOL, MOVE, LOCK, …) are not in axum's method router, and
-        // both shapes because a mount addresses the collection itself
-        // (`/dav`) as well as everything under it.
-        // All three shapes: a WebDAV collection is addressed with a
-        // trailing slash (`/dav/` is what a client PROPFINDs at mount
-        // time), which axum's wildcard does not match — it needs at
-        // least one character — and `/dav` without one is what a user
-        // types into the mount dialog.
-        .route("/org/{slug}/dav", any(webdav::webdav_handler))
-        .route("/org/{slug}/dav/", any(webdav::webdav_handler))
-        .route("/org/{slug}/dav/{*path}", any(webdav::webdav_handler))
         .with_state(state.clone());
 
     // Server-management vox: `OrgManagementService` +
@@ -2058,7 +2088,34 @@ pub fn router(state: AppState) -> Router {
     };
     #[cfg(feature = "plugin-forge")]
     let router = router.merge(webhook_routes);
-    router.layer(cors_layer()).with_state(state)
+
+    // Files WebDAV bridge (issue #274) — mount an org's File Roots from
+    // Finder/Explorer. `any` because WebDAV's verbs (PROPFIND, MKCOL,
+    // MOVE, LOCK, …) are not in axum's method router, and all three
+    // path shapes because a collection is addressed with a trailing
+    // slash (`/dav/` is what a client PROPFINDs at mount time), which
+    // axum's wildcard does not match — it needs at least one character
+    // — while `/dav` without one is what a user types into the dialog.
+    //
+    // Merged AFTER `cors_layer()` so these routes sit outside it.
+    // tower-http's `Cors` short-circuits *any* request whose method is
+    // `OPTIONS` — it does not require an `Origin` or
+    // `Access-Control-Request-Method` header — returning a bare 200 and
+    // never calling the inner service. Finder/Explorer/gvfs begin a
+    // mount with exactly that: `OPTIONS /org/{slug}/dav/` with no CORS
+    // headers, and they read `DAV:` and `Allow:` off the response to
+    // decide whether this is a WebDAV server at all. Under the layer
+    // they got a bare 200 with neither header and refused to mount, and
+    // `webdav_handler` was never reached — so nothing authenticated
+    // either. WebDAV clients are not browsers; CORS has nothing to say
+    // about them (PR #287 review).
+    let dav = Router::new()
+        .route("/org/{slug}/dav", any(webdav::webdav_handler))
+        .route("/org/{slug}/dav/", any(webdav::webdav_handler))
+        .route("/org/{slug}/dav/{*path}", any(webdav::webdav_handler))
+        .with_state(state.clone());
+
+    router.layer(cors_layer()).merge(dav).with_state(state)
 }
 
 /// CORS policy. **Default is unchanged**: with `TASK_CORS_ALLOWED_ORIGINS`
@@ -2342,6 +2399,27 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
             crate::identity_mgmt::IdentityServiceImpl::new(state.clone()),
         )
     };
+    // The Files placement layer's operator + agent lanes (issue #262).
+    // Both are deployment-scoped, so they belong here rather than on any
+    // org router: the operator registers locations and admits orgs onto
+    // them, and Storage agents enroll, heartbeat, take directives and
+    // report outcomes.
+    //
+    // Neither is unauthenticated. `/server/vox` has no permission gate
+    // in front of it, so — exactly like the three services below — the
+    // operator lane validates a session token itself (against the home
+    // org, or trusting the in-process transport), and the agent lane
+    // requires the per-agent enrollment secret on every call after
+    // enrollment (PR #284 review).
+    let storage_admin = if local_trusted {
+        files_storage::StorageAdminBackend::new_local_trusted(state.storage.clone())
+    } else {
+        files_storage::StorageAdminBackend::new(
+            state.storage.clone(),
+            std::sync::Arc::new(crate::storage::HomeOrgOperator::new(state.clone())),
+        )
+    };
+
     architect::LayerRouter::new()
         .with(
             org_proto::org_management_descriptor(),
@@ -2355,6 +2433,19 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
             identity_proto::identity_descriptor(),
             identity_proto::serve_identity(identity),
         )
+        .with(
+            files_storage::storage_admin_descriptor(),
+            files_storage::serve_storage_admin(storage_admin),
+        )
+        .with(
+            files_storage::storage_agent_descriptor(),
+            files_storage::serve_storage_agent(files_storage::StorageAgentBackend::new(
+                state.storage.clone(),
+            )),
+        )
+        .merge(files_storage::storage_agent_stream_layer(
+            files_storage::StorageAgentBackend::new(state.storage.clone()),
+        ))
 }
 
 /// `/vox` — legacy single-org alias. Dispatches into the
@@ -2871,6 +2962,17 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         // `#[subscribe]` stream sibling, served from the hub on the
         // `FilesBackend` above.
         .merge(files::files_service_stream_layer(org.files.clone()))
+        // Placement — Storage Locations this org was granted, where its
+        // roots live, and blob replicas (issue #262). The operator and
+        // agent lanes of the same layer sit on the SERVER router, not
+        // here: the registry is deployment-scoped.
+        .with(
+            files_storage::storage_service_descriptor(),
+            files_storage::serve_storage_service(org.storage.clone()),
+        )
+        .merge(files_storage::storage_service_stream_layer(
+            org.storage.clone(),
+        ))
         .with(
             task::task_service_descriptor(),
             // The raw backend serves directly. There used to be a

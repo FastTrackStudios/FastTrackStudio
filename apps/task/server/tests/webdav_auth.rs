@@ -66,6 +66,38 @@ async fn boot() -> eyre::Result<(String, AuthState, tempfile::TempDir)> {
     Ok((format!("http://127.0.0.1:{port}"), auth, tmp))
 }
 
+async fn seed_user(auth_state: &AuthState) -> eyre::Result<()> {
+    auth_state
+        .auth
+        .create_email_password_user(CreateEmailPasswordUser {
+            email: EMAIL.into(),
+            password: PASSWORD.into(),
+            name: Some("Producer".into()),
+            username: None,
+            image: None,
+            metadata_json: None,
+            ip_address: None,
+            user_agent: None,
+        })
+        .await
+        .map_err(|e| eyre::eyre!("seed user: {e:?}"))?;
+    Ok(())
+}
+
+async fn sign_in(auth_state: &AuthState) -> eyre::Result<String> {
+    Ok(auth_state
+        .auth
+        .sign_in_email_password(SignInEmailPassword {
+            email: EMAIL.into(),
+            password: PASSWORD.into(),
+            ip_address: None,
+            user_agent: None,
+        })
+        .await
+        .map_err(|e| eyre::eyre!("sign in: {e:?}"))?
+        .token)
+}
+
 fn basic_header(user: &str, secret: &str) -> String {
     format!(
         "Basic {}",
@@ -94,6 +126,76 @@ async fn propfind(
     (status, headers, res.text().await.unwrap_or_default())
 }
 
+/// PR #287 review, finding 1 — the mount handshake, **through the
+/// router**.
+///
+/// The `files-webdav` OPTIONS test calls `bridge.handle()` directly, so
+/// it could not see that `router.layer(cors_layer())` wrapped these
+/// routes: tower-http's `Cors` short-circuits *any* `OPTIONS` — no
+/// `Origin` or `Access-Control-Request-Method` required — with a bare
+/// 200 and never calls the inner service. Finder/Explorer/gvfs open a
+/// mount with exactly that request and read `DAV:`/`Allow:` off the
+/// reply, so every OS client refused to mount and `webdav_handler` was
+/// never reached (nothing authenticated either). This test only passes
+/// with the dav routes outside the CORS layer.
+#[tokio::test(flavor = "multi_thread")]
+async fn options_through_the_router_advertises_webdav() -> eyre::Result<()> {
+    let (base, auth_state, _data_root) = boot().await?;
+    seed_user(&auth_state).await?;
+    let token = sign_in(&auth_state).await?;
+
+    for url in [
+        format!("{base}/org/dav-test/dav"),
+        format!("{base}/org/dav-test/dav/"),
+        format!("{base}/org/dav-test/dav/Mix%20Session/"),
+    ] {
+        let res = reqwest::Client::new()
+            .request(reqwest::Method::OPTIONS, &url)
+            .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
+            .send()
+            .await?;
+        assert_eq!(res.status().as_u16(), 200, "OPTIONS {url}");
+        let headers = res.headers().clone();
+        let dav = headers
+            .get("DAV")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            dav.contains('1') && dav.contains('2'),
+            "OPTIONS {url} must advertise WebDAV classes 1 and 2, got {dav:?}"
+        );
+        let allow = headers
+            .get(reqwest::header::ALLOW)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        for verb in ["PROPFIND", "LOCK", "UNLOCK"] {
+            assert!(
+                allow.contains(verb),
+                "OPTIONS {url}: {verb} not in {allow:?}"
+            );
+        }
+    }
+
+    // And the route is still authenticated on OPTIONS — moving it out
+    // from under CORS must not have moved it out from under auth.
+    let res = reqwest::Client::new()
+        .request(
+            reqwest::Method::OPTIONS,
+            format!("{base}/org/dav-test/dav/"),
+        )
+        .send()
+        .await?;
+    assert_eq!(
+        res.status().as_u16(),
+        401,
+        "an unauthenticated OPTIONS must still be refused"
+    );
+
+    Ok(())
+}
+
 /// One test, sequenced against one server: the credential cases are
 /// about the *same* mount, and booting a server per case would say
 /// nothing extra while multiplying the env-var dance.
@@ -103,31 +205,8 @@ async fn webdav_mount_requires_an_existing_task_credential() -> eyre::Result<()>
     let mount = format!("{base}/org/dav-test/dav/");
     let root = format!("{base}/org/dav-test/dav/Mix%20Session/");
 
-    auth_state
-        .auth
-        .create_email_password_user(CreateEmailPasswordUser {
-            email: EMAIL.into(),
-            password: PASSWORD.into(),
-            name: Some("Producer".into()),
-            username: None,
-            image: None,
-            metadata_json: None,
-            ip_address: None,
-            user_agent: None,
-        })
-        .await
-        .map_err(|e| eyre::eyre!("seed user: {e:?}"))?;
-    let token = auth_state
-        .auth
-        .sign_in_email_password(SignInEmailPassword {
-            email: EMAIL.into(),
-            password: PASSWORD.into(),
-            ip_address: None,
-            user_agent: None,
-        })
-        .await
-        .map_err(|e| eyre::eyre!("sign in: {e:?}"))?
-        .token;
+    seed_user(&auth_state).await?;
+    let token = sign_in(&auth_state).await?;
 
     // ── Anonymous: refused, and the refusal is a Basic challenge. A
     //    bare 401 without this header makes Finder fail the mount
@@ -169,10 +248,13 @@ async fn webdav_mount_requires_an_existing_task_credential() -> eyre::Result<()>
     assert_eq!(status, 207, "email/password must authenticate");
     assert!(body.contains("mix.wav"), "live tree not listed: {body}");
 
-    // ── …and a burst of them costs ONE sign-in, not one per request.
-    //    A file manager opening a folder issues dozens; minting a live
-    //    session for each would fill the session table with credentials
-    //    nobody will ever present again.
+    // ── …and a burst of them mints NO sessions at all. A Basic client
+    //    re-presents its credential on every request and has nowhere to
+    //    keep a token, so signing in per request would pile up live
+    //    sessions (a left-up Finder mount is ~288/user/day, never
+    //    signed out) and caching a minted session would let a rotated
+    //    password keep working until the cache expired. The password is
+    //    verified against the stored hash instead (PR #287 review).
     let sessions_before = auth_state
         .auth
         .list_sessions(architect_auth::ListSessions {
@@ -195,9 +277,34 @@ async fn webdav_mount_requires_an_existing_task_credential() -> eyre::Result<()>
         .len();
     assert_eq!(
         sessions_after, sessions_before,
-        "ten password-authenticated requests must re-use the cached session, \
-         not mint ten more"
+        "password-authenticated WebDAV requests must not mint sessions"
     );
+
+    // ── A rotated password takes effect on the very next request —
+    //    there is no window in which the old one still works.
+    let user_id = auth_state
+        .auth
+        .find_user_by_email(EMAIL)
+        .await
+        .map_err(|e| eyre::eyre!("find user: {e:?}"))?
+        .ok_or_else(|| eyre::eyre!("seeded user missing"))?
+        .id;
+    auth_state
+        .auth
+        .set_user_password_local_trusted(user_id, "a-completely-different-passphrase")
+        .await
+        .map_err(|e| eyre::eyre!("rotate password: {e:?}"))?;
+    let (status, _, _) = propfind(&root, Some(&basic_header(EMAIL, PASSWORD))).await;
+    assert_eq!(
+        status, 401,
+        "the old password must stop working immediately after rotation"
+    );
+    let (status, _, _) = propfind(
+        &root,
+        Some(&basic_header(EMAIL, "a-completely-different-passphrase")),
+    )
+    .await;
+    assert_eq!(status, 207, "the new password must work immediately");
 
     // ── An org this server does not host answers exactly like a bad
     //    credential — a caller does not get to enumerate orgs.

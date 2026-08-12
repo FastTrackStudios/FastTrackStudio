@@ -39,11 +39,17 @@ impl Registry {
         })
     }
 
+    /// Write the index atomically: a bare `fs::write` that is interrupted
+    /// (a crash, a full disk) leaves a truncated `roots.json` and every
+    /// root's identity with it, which is a bad trade for one rename
+    /// (PR #284 review — `files-storage`'s registry already did this).
     fn persist(&self, roots: &HashMap<Uuid, FileRootInfo>) -> Result<()> {
         let mut list: Vec<&FileRootInfo> = roots.values().collect();
         list.sort_by(|a, b| a.id.cmp(&b.id));
         let bytes = serde_json::to_vec_pretty(&list)?;
-        std::fs::write(&self.path, bytes)?;
+        let tmp = self.path.with_extension("json.tmp");
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(&tmp, &self.path)?;
         Ok(())
     }
 

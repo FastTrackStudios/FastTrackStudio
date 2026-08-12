@@ -327,6 +327,7 @@ pub fn App() -> Element {
         let registry = task_widgets::WidgetRegistry::new();
         registry.register(task_player_ui::widgets());
         registry.register(task_note_tabs::widgets());
+        registry.register(files_ui::widgets());
         registry
     });
     // Keep the registry pointed at the ACTIVE org's enabled plugin set

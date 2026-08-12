@@ -243,9 +243,9 @@ enum Commands {
     /// rate cascade.
     #[command(subcommand)]
     Timer(TimerCmd),
-    /// Files RPC surface v1 (issue #259, ADR 0001): turn a folder into
-    /// a File Root, browse it, read a file's version chain, checkpoint
-    /// on demand.
+    /// Files RPC surface (issue #259/#261, ADR 0001): turn a folder
+    /// into a File Root, browse it, read a file's version chain,
+    /// checkpoint on demand, and curate Named / Project Versions.
     #[command(subcommand)]
     Files(FilesCmd),
     /// Finance — reports + invoice generation from billable

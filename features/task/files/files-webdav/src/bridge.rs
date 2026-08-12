@@ -48,7 +48,7 @@ use dav_server::davpath::DavPath;
 use dav_server::memls::MemLs;
 use dav_server::{DavConfig, DavHandler, DavMethodSet};
 use files::{FilesBackend, FilesService as _};
-use files_proto::FileRootInfo;
+use files_proto::{FileRootInfo, FilesError};
 use http::{Request, Response, StatusCode};
 use http_body::Body as HttpBody;
 use uuid::Uuid;
@@ -78,8 +78,9 @@ impl std::fmt::Debug for WebdavBridge {
 impl WebdavBridge {
     /// Bridge over `backend`'s roots, with its policy file living
     /// beside that backend's registry.
-    pub fn new(backend: FilesBackend) -> std::io::Result<Self> {
-        let policy = WebdavPolicy::open(backend.data_dir())?;
+    #[must_use]
+    pub fn new(backend: FilesBackend) -> Self {
+        let policy = WebdavPolicy::open(backend.data_dir());
         let handler = DavHandler::builder()
             // Every method the OS clients need, and nothing that would
             // hand out a second, version-shaped view of the tree.
@@ -96,12 +97,12 @@ impl WebdavBridge {
             // about what it will actually serve.
             .hide_symlinks(true)
             .build_handler();
-        Ok(Self {
+        Self {
             backend,
             policy: Arc::new(policy),
             handler,
             locks: Arc::new(Mutex::new(HashMap::new())),
-        })
+        }
     }
 
     /// The per-root visibility policy — an operator's "hide this root
@@ -113,15 +114,26 @@ impl WebdavBridge {
 
     /// Roots this bridge may expose right now, in registry order,
     /// paired with their URL segments.
-    async fn visible(&self) -> Vec<naming::RootSegment> {
-        let roots = self.backend.list_roots().await.unwrap_or_default();
+    ///
+    /// Errors propagate. A registry read that fails transiently —
+    /// `roots.json` caught mid-rewrite, EMFILE under load, a
+    /// permissions blip — must not be reported to a file manager as an
+    /// empty root list: a mounted volume that suddenly lists no
+    /// projects reads as *every project deleted*, and a client syncing
+    /// or caching against the mount can act on that (PR #287 review).
+    /// A 5xx is a mount hiccup; an empty multistatus is a catastrophe.
+    async fn visible(&self) -> Result<Vec<naming::RootSegment>, FilesError> {
+        let roots = self.backend.list_roots().await?;
         // One policy read for the whole request, not one per root.
-        let hidden = self.policy.hidden_set();
+        let hidden = self
+            .policy
+            .hidden_set()
+            .map_err(|e| FilesError::Io(e.to_string()))?;
         let visible: Vec<FileRootInfo> = roots
             .into_iter()
             .filter(|r| !hidden.contains(&r.id))
             .collect();
-        naming::segments(&visible)
+        Ok(naming::segments(&visible))
     }
 
     fn lock_system(&self, root_id: Uuid) -> MemLs {
@@ -152,7 +164,18 @@ impl WebdavBridge {
             return status(StatusCode::NOT_FOUND);
         };
 
-        let entries = self.visible().await;
+        let entries = match self.visible().await {
+            Ok(entries) => entries,
+            Err(e) => {
+                tracing::error!(
+                    target: "files_webdav::bridge",
+                    error = %e,
+                    "listing this org's roots failed — refusing rather than \
+                     reporting an empty mount",
+                );
+                return status(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
         if segment.is_empty() {
             let config = DavConfig::new()
                 .strip_prefix(mount.to_string())
@@ -176,19 +199,86 @@ impl WebdavBridge {
         // Belt and braces on top of the registry's own canonicalization:
         // a root's live tree must still sit inside this org's Files area
         // before we hand a filesystem view of it to a network client.
-        if !self.backend.is_confined(&root.path) {
-            tracing::error!(
+        //
+        // The error *kind* is kept, not collapsed to a bool: `Escapes`
+        // is a genuine confinement breach and deserves the alert, while
+        // `Io` is a temporarily-unmounted volume or an EIO and is a 5xx.
+        // Reporting the second as the first was both a false alarm and
+        // the wrong status (PR #287 review).
+        let base = match task_files_util::confine(
+            std::path::Path::new(&root.path),
+            self.backend.confine_root(),
+        ) {
+            Ok(base) => base,
+            Err(task_files_util::PathError::Io(e)) => {
+                tracing::warn!(
+                    target: "files_webdav::bridge",
+                    root = %root.id,
+                    path = %root.path,
+                    error = %e,
+                    "a root's live tree could not be resolved — transient, not a breach",
+                );
+                return status(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "files_webdav::bridge",
+                    root = %root.id,
+                    path = %root.path,
+                    error = %e,
+                    "refusing to mount a root whose live tree is outside the org's files area",
+                );
+                return status(StatusCode::FORBIDDEN);
+            }
+        };
+
+        // Destroying a whole project is not a file-manager gesture.
+        //
+        // A `DELETE`/`MOVE` addressed at the root collection itself
+        // resolves to path `/` in the root's own filesystem, and
+        // dav-server defaults a header-less DELETE to `Depth: Infinity`
+        // — so dragging a mounted root to the Trash in Finder would
+        // recurse the entire live tree. (The internals survive the
+        // filtered `read_dir`, so the final `remove_dir` fails
+        // ENOTEMPTY and the client reports an error *after* the data is
+        // gone.) A root is a first-class entity with an identity, a
+        // marker and a version store; it is removed through Files, not
+        // by a drag (PR #287 review).
+        let prefix = format!("{mount}/{segment}");
+        let addresses_root = addresses_collection_itself(req.uri(), &prefix);
+        if addresses_root && matches!(req.method().as_str(), "DELETE" | "MOVE") {
+            tracing::info!(
                 target: "files_webdav::bridge",
                 root = %root.id,
-                path = %root.path,
-                "refusing to mount a root whose live tree is outside the org's files area",
+                method = %req.method(),
+                "refusing to delete or move a File Root through the WebDAV mount",
             );
             return status(StatusCode::FORBIDDEN);
         }
 
+        // The prefix below ends in `/`, which `DavPath::set_prefix`
+        // requires the path to actually carry. A client addressing the
+        // collection as `…/dav/Mix` (no trailing slash) is asking for
+        // the same thing as `…/dav/Mix/`, so normalize rather than
+        // reject it.
+        let req = if addresses_root {
+            with_trailing_slash(req)
+        } else {
+            req
+        };
+
         let config = DavConfig::new()
-            .strip_prefix(format!("{mount}/{segment}"))
-            .filesystem(Box::new(LiveTreeFs::new(&root.path)))
+            // Trailing slash on purpose: `DavPath::set_prefix` is a raw
+            // byte `starts_with`, so the prefix `…/dav/Mix` also matches
+            // `…/dav/Mix Stems/…` — a `MOVE` between two roots whose
+            // segments share a prefix would strip to ` Stems/take.wav`
+            // and land the write back inside the *source* root, and a
+            // shorter sibling (`…/dav/Mix2`) panics `DavPath::parent`
+            // by leaving `pfxlen` past the end of the shortened path.
+            // With the slash, dav-server verifies the boundary byte for
+            // us (PR #287 review).
+            .strip_prefix(format!("{mount}/{segment}/"))
+            .filesystem(Box::new(LiveTreeFs::new(base)))
             .locksystem(Box::new(self.lock_system(root.id)));
         self.handler.handle_with(config, req).await
     }
@@ -215,6 +305,37 @@ impl WebdavBridge {
         };
         Some(rest.split('/').next().unwrap_or("").to_string())
     }
+}
+
+/// Does `uri` address the collection at `prefix` itself, rather than
+/// something inside it? Compared after [`DavPath`] normalization, so
+/// `…/Mix/`, `…/Mix`, and `…/Mix/sub/..` are all the same answer.
+fn addresses_collection_itself(uri: &http::Uri, prefix: &str) -> bool {
+    let Ok(path) = DavPath::new(uri.path()) else {
+        return false;
+    };
+    let Ok(full) = std::str::from_utf8(path.with_prefix().as_bytes()) else {
+        return false;
+    };
+    full == prefix || full == format!("{prefix}/")
+}
+
+/// The same request with a `/` appended to its URI path.
+fn with_trailing_slash<B>(req: Request<B>) -> Request<B> {
+    let (mut parts, body) = req.into_parts();
+    let path = parts.uri.path();
+    if path.ends_with('/') {
+        return Request::from_parts(parts, body);
+    }
+    let query = parts
+        .uri
+        .query()
+        .map(|q| format!("?{q}"))
+        .unwrap_or_default();
+    if let Ok(uri) = format!("{path}/{query}").parse::<http::Uri>() {
+        parts.uri = uri;
+    }
+    Request::from_parts(parts, body)
 }
 
 fn status(code: StatusCode) -> Response<Body> {

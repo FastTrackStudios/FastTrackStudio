@@ -119,6 +119,7 @@ mod tests {
             path: format!("/tmp/{name}"),
             flavor: RootFlavor::Media,
             created_at: Utc::now(),
+            project_version: None,
         }
     }
 

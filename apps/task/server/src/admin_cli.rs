@@ -429,10 +429,9 @@ fn webdav(args: &[String]) -> eyre::Result<()> {
     if !files_dir.is_dir() {
         bail!("org `{slug}` has no Files area at {}", files_dir.display());
     }
-    let backend = files::FilesBackend::new(&files_dir)
+    let backend = files::FilesBackend::new(&files_dir, data_root.org(&slug).path().join("vault"))
         .map_err(|e| eyre::eyre!("open files backend for `{slug}`: {e}"))?;
-    let policy = files_webdav::WebdavPolicy::open(&files_dir)
-        .wrap_err_with(|| format!("open webdav policy for `{slug}`"))?;
+    let policy = files_webdav::WebdavPolicy::open(&files_dir);
 
     for (name, hide) in [("--hide", true), ("--show", false)] {
         if let Some(raw) = flag(args, name) {
@@ -463,7 +462,9 @@ fn webdav(args: &[String]) -> eyre::Result<()> {
         println!("{slug}: no File Roots");
         return Ok(());
     }
-    let hidden = policy.hidden_set();
+    let hidden = policy
+        .hidden_set()
+        .wrap_err_with(|| format!("read webdav policy for `{slug}`"))?;
     println!("{slug}: WebDAV policy at {}", policy.path().display());
     for root in roots {
         println!(

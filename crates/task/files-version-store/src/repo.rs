@@ -8,9 +8,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use jj_lib::backend::Backend;
+use jj_lib::backend::{Backend, BackendLoadError};
 use jj_lib::config::{ConfigLayer, ConfigSource, StackedConfig};
-use jj_lib::repo::{ReadonlyRepo, RepoInitError};
+use jj_lib::default_backend_factories::default_backend_factories;
+use jj_lib::repo::{ReadonlyRepo, RepoInitError, RepoLoader};
 use jj_lib::settings::UserSettings;
 use jj_lib::signing::Signer;
 
@@ -82,4 +83,54 @@ pub async fn init_repo_with_gc_interval(
     )
     .await
     .map_err(|e: RepoInitError| Error::Repo(e.to_string()))
+}
+
+/// `ReadonlyRepo::init` requires a directory with no existing repo
+/// internals; jj lays those out under `store/` on init, so its presence
+/// is what distinguishes "never touched" from "reopen".
+fn already_initialized(repo_path: &Path) -> bool {
+    repo_path.join("store").exists()
+}
+
+/// Open the version-store repo at `repo_path`, initializing it on first
+/// touch and going through jj-lib's own [`RepoLoader`] on every
+/// subsequent one — with [`VersionStoreBackend`] layered onto jj-lib's
+/// stock op-store / op-heads-store / index / submodule-store factories.
+/// This is what makes a root's history survive a process restart rather
+/// than only the lifetime of the process that created it.
+///
+/// **Sync, not async, deliberately.** jj-lib's `load_at_head` holds a
+/// `&dyn Repo` across an await point on the divergent-op-heads-merge
+/// path, and `dyn Repo` isn't `Sync`, so that future isn't `Send` —
+/// awaiting it from inside an `#[architect::rpc]` method's future would
+/// poison that future's own `Send` bound. Driving jj-lib to completion
+/// with `pollster::block_on` inside a plain sync fn (the same pattern
+/// [`VersionStoreBackend`]'s own `Backend` impl uses) keeps the non-Send
+/// future off every async call stack above it. Callers run it on a
+/// blocking thread (`tokio::task::spawn_blocking`).
+pub fn open_or_init_repo_blocking(repo_path: &Path) -> Result<Arc<ReadonlyRepo>> {
+    if already_initialized(repo_path) {
+        open_existing_blocking(repo_path)
+    } else {
+        pollster::block_on(init_repo(repo_path))
+    }
+}
+
+fn open_existing_blocking(repo_path: &Path) -> Result<Arc<ReadonlyRepo>> {
+    let settings = default_settings()?;
+
+    let mut factories = default_backend_factories();
+    factories.add_backend(
+        VersionStoreBackend::NAME,
+        Box::new(|_settings, store_path| {
+            let store_path = store_path.to_path_buf();
+            pollster::block_on(VersionStoreBackend::open(&store_path))
+                .map(|backend| Box::new(backend) as Box<dyn Backend>)
+                .map_err(|e| BackendLoadError(e.into()))
+        }),
+    );
+
+    let loader = RepoLoader::init_from_file_system(&settings, repo_path, &factories)
+        .map_err(|e| Error::Repo(e.to_string()))?;
+    pollster::block_on(loader.load_at_head()).map_err(|e| Error::Repo(e.to_string()))
 }

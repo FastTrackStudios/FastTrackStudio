@@ -16,8 +16,17 @@
 //! 2. `Authorization: Basic <user:secret>` — what Finder and Explorer
 //!    actually send. The password is tried first as a session token
 //!    (paste what `task` already holds, no password on disk in a
-//!    keychain entry), then as an email/password sign-in, which is what
-//!    a human typing into the OS mount dialog will do.
+//!    keychain entry), then as an email/password pair, which is what a
+//!    human typing into the OS mount dialog will do.
+//!
+//! The password path *verifies* rather than signs in
+//! (`ArchitectAuth::verify_email_password`): no session is issued. A
+//! Basic client re-presents its credential on every request and has
+//! nowhere to keep a token, so minting per request would grow the
+//! session table without bound and caching a minted session would let
+//! a rotated password keep working until the cache expired. Checking
+//! the presented password against the current stored hash every time
+//! is both cheaper and stricter (PR #287 review).
 //!
 //! Deliberately *not* accepted: `/media`'s signed `?token=` grants. A
 //! `BlobToken` is scoped to a path under the org's `resources/` tree,
@@ -44,10 +53,6 @@
 //! `WWW-Authenticate: Basic` challenge that makes an OS client prompt
 //! for credentials instead of silently failing to mount.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
 use axum::extract::State;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::{IntoResponse as _, Response};
@@ -58,52 +63,6 @@ use crate::AppState;
 /// The realm an OS mount dialog shows. Kept stable — macOS keys its
 /// keychain entries on it.
 const REALM: &str = "Task Files";
-
-/// How long a verified `Basic` email/password pair keeps re-using the
-/// session it minted. Short enough that a revoked account loses the
-/// mount within minutes; long enough that a Finder window's burst of
-/// `PROPFIND`s costs one sign-in, not one per request.
-const BASIC_SESSION_TTL: Duration = Duration::from_secs(300);
-
-/// Sessions minted for `Basic` email/password callers, keyed by a hash
-/// of `(org, Authorization header)`.
-///
-/// Without this, `sign_in_email_password` ran on *every* request from a
-/// password-authenticated client — and a file manager opening one
-/// folder issues dozens — so browsing a root filled the session table
-/// with live credentials nobody would ever use again. The cache holds
-/// the minted token and re-validates it through the ordinary session
-/// path, so a revoked session stops working immediately; only the
-/// *minting* is amortized. The password itself is never stored: the key
-/// is a SHA-256 of the header, and the value is a session token.
-static BASIC_SESSIONS: Mutex<Option<HashMap<[u8; 32], (String, Instant)>>> = Mutex::new(None);
-
-fn basic_session_key(slug: &str, header: &str) -> [u8; 32] {
-    use sha2::{Digest as _, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(slug.as_bytes());
-    hasher.update([0]);
-    hasher.update(header.as_bytes());
-    hasher.finalize().into()
-}
-
-/// The cached session for this credential, if it has not aged out.
-fn cached_basic_session(key: &[u8; 32]) -> Option<String> {
-    let mut guard = BASIC_SESSIONS.lock().expect("basic session cache poisoned");
-    let map = guard.get_or_insert_with(HashMap::new);
-    // Sweep here rather than on a timer: the map only ever grows on a
-    // successful sign-in, so the request that would grow it is the
-    // right moment to drop what has expired.
-    map.retain(|_, (_, minted)| minted.elapsed() < BASIC_SESSION_TTL);
-    map.get(key).map(|(token, _)| token.clone())
-}
-
-fn remember_basic_session(key: [u8; 32], token: String) {
-    let mut guard = BASIC_SESSIONS.lock().expect("basic session cache poisoned");
-    guard
-        .get_or_insert_with(HashMap::new)
-        .insert(key, (token, Instant::now()));
-}
 
 fn challenge() -> Response {
     (
@@ -192,50 +151,37 @@ async fn authorize(
             wide::set("dav.auth_via", "basic-session-token");
             return None;
         }
-        // Already signed this exact credential in recently — re-validate
-        // the session it minted instead of minting another.
-        let raw = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default();
-        let key = basic_session_key(slug, raw);
-        if let Some(cached) = cached_basic_session(&key)
-            && session_ok(state, slug, &cached).await
-        {
-            wide::set("dav.auth_via", "basic-password-cached");
-            return None;
-        }
         // Email/password — what a human types into the mount dialog.
-        let minted = match state.org(slug) {
+        //
+        // Verified against the stored hash on EVERY request, and no
+        // session is issued. A Basic client re-presents the same
+        // credential on every request and has nowhere to keep a token,
+        // so the two obvious alternatives both fail: minting a session
+        // per request grows the session table without bound (a left-up
+        // Finder mount is ~288 live sessions/user/day, never signed
+        // out), and caching a minted session means a *rotated or
+        // leaked* password keeps working until the cache expires,
+        // because what gets re-checked is the session rather than the
+        // password. Verifying directly is both cheaper and stricter
+        // (PR #287 review).
+        let verified = match state.org(slug) {
             Some(org) => org
                 .auth
                 .auth
-                .sign_in_email_password(architect_auth::SignInEmailPassword {
-                    email: user,
-                    password: secret,
-                    ip_address: None,
-                    user_agent: Some(format!("webdav/{REALM}")),
-                })
+                .verify_email_password(&user, &secret)
                 .await
-                .ok()
-                .map(|bundle| bundle.token),
-            None => None,
+                .is_ok(),
+            None => false,
         };
         wide::set(
             "dav.auth_via",
-            if minted.is_some() {
+            if verified {
                 "basic-password"
             } else {
                 "basic-invalid"
             },
         );
-        return match minted {
-            Some(token) => {
-                remember_basic_session(key, token);
-                None
-            }
-            None => Some(challenge()),
-        };
+        return if verified { None } else { Some(challenge()) };
     }
 
     wide::set("dav.auth_via", "absent");
