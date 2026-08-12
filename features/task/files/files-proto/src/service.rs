@@ -56,10 +56,14 @@ pub trait FilesService {
     /// file, mints a stable id, and initializes its version store.
     /// Fails with [`FilesError::AlreadyExists`] if `path` is already a
     /// root, and with [`FilesError::BadRequest`] if `path` doesn't
-    /// exist or isn't a directory. `flavor` is accepted for wire
-    /// stability but only `RootFlavor::Media` is implemented in v1 —
-    /// `RootFlavor::Software` fails with [`FilesError::BadRequest`]
-    /// (ADR 0001: software roots are colocated git, a distinct build).
+    /// exist or isn't a directory.
+    ///
+    /// `flavor` picks the versioning engine and is fixed for the root's
+    /// life (see [`crate::model::RootFlavor`]).
+    /// [`RootFlavor::Software`](crate::model::RootFlavor::Software)
+    /// initializes a colocated git repository in the folder — or
+    /// *adopts* the one already there, keeping its history and remotes
+    /// (issue #273).
     async fn create_root(
         &self,
         path: String,
@@ -153,7 +157,14 @@ pub trait FilesService {
     /// Run one GC pass over `root_id`'s version store with the protect
     /// set resolved from the Vault: everything Named/Project Versions
     /// reference is immortal regardless of age, on top of jj's own
-    /// index reachability. `keep_newer_secs` guards concurrent writers
+    /// index reachability.
+    ///
+    /// [`RootFlavor::Media`](crate::model::RootFlavor::Media) only. A
+    /// software root's objects belong to its colocated git repository,
+    /// which collects its own garbage (`git gc`); calling this on one
+    /// fails with [`FilesError::BadRequest`] rather than reaching into
+    /// a store Files does not own. Naming and Project Versions have no
+    /// such split — curation is flavor-agnostic. `keep_newer_secs` guards concurrent writers
     /// by refusing to sweep anything written within that many seconds
     /// (default 60).
     ///

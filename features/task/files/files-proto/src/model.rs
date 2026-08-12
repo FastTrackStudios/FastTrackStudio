@@ -11,11 +11,18 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A File Root's versioning mode, chosen at creation (ADR 0001). Only
-/// `Media` is implemented end-to-end by this ticket — `Software` is
-/// accepted so the wire shape is stable, but [`crate::FilesService`]'s
-/// v1 [`crate::service::FilesService::create_root`] rejects it as
-/// unimplemented rather than silently falling back to a media root.
+/// A File Root's versioning mode, chosen at creation and immutable
+/// afterwards (ADR 0001; flavor conversion, if ever wanted, is a
+/// deliberate relocation-style operation).
+///
+/// - `Media` — the default. The root's history lives in Files' own
+///   content-addressed store (FastCDC + BLAKE3), built for multi-GB
+///   binaries that dedup across versions.
+/// - `Software` — a colocated git repository (issue #273): the root
+///   carries an ordinary `.git`, so GitHub, CI, and IDEs see a normal
+///   checkout, while the Files RPC surface reads that same history.
+///   Heavy stray files are kept out of it by the flavor's Ignore set
+///   seed plus the tree's own `.gitignore`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 #[repr(u8)]
 pub enum RootFlavor {

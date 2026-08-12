@@ -1121,3 +1121,105 @@ async fn a_prefix_page_gcs_fine_and_an_empty_commit_id_does_not_wedge() {
 
     fx.finish().await;
 }
+
+/// Curation is flavor-agnostic — the surface this branch and #273's
+/// software roots create together, which neither side could test alone.
+///
+/// A Named Version references `(root id, change id)` and the store
+/// "knows nothing about names" (ADR 0001), so nothing about it should
+/// care whether those ids live in Files' own CAS or in a colocated git
+/// repository. What legitimately *is* flavor-specific is the sweep:
+/// a software root's objects are git's, and git collects its own
+/// garbage, so `gc_root` says so rather than failing obscurely.
+#[tokio::test(flavor = "multi_thread")]
+async fn curation_works_the_same_on_a_software_root() {
+    let data = tempfile::tempdir().expect("data tempdir");
+    let vault = tempfile::tempdir().expect("vault tempdir");
+    let root_dir = data.path().join("synth-plugin");
+    std::fs::create_dir(&root_dir).unwrap();
+    std::fs::write(root_dir.join("main.rs"), b"fn main() {}\n").unwrap();
+
+    let backend = FilesBackend::new(data.path(), vault.path()).expect("backend");
+    let scope = Scope::new();
+    let local = LocalServer::serve(
+        LayerRouter::new().merge(files_service_layer(backend.clone())),
+        scope.clone(),
+    );
+    let client: FilesServiceClient = local.establish().await.expect("establish client");
+
+    let root = client
+        .create_root(
+            root_dir.to_str().unwrap().to_string(),
+            "Synth Plugin".to_string(),
+            RootFlavor::Software,
+        )
+        .await
+        .expect("create_root(Software)");
+    let cp1 = client
+        .checkpoint_now(root.id, Some("v1".into()))
+        .await
+        .expect("checkpoint_now rpc");
+
+    // Naming resolves against git's objects through jj's `Backend`
+    // trait, exactly as the chain does.
+    let named = client
+        .name_version(root.id, cp1.commit_id.clone(), "v1 for review".into())
+        .await
+        .expect("name_version on a software root");
+    assert_eq!(named.commit_id, cp1.commit_id);
+    assert!(!named.change_id.is_empty());
+
+    // The name rides the chain, and the entity is an ordinary vault
+    // page — same as any media root.
+    std::fs::write(root_dir.join("main.rs"), b"fn main() { todo!() }\n").unwrap();
+    client
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("checkpoint_now rpc");
+    let chain = client
+        .chain(root.id, "main.rs".into())
+        .await
+        .expect("chain rpc");
+    assert_eq!(chain.len(), 2, "{chain:?}");
+    assert_eq!(
+        chain
+            .iter()
+            .find(|e| e.commit_id == cp1.commit_id)
+            .map(|e| e.names.clone()),
+        Some(vec!["v1 for review".to_string()]),
+    );
+    assert!(
+        vault_pages(vault.path())
+            .iter()
+            .any(|(p, _)| p.starts_with("Files/synth-plugin/versions/")),
+    );
+
+    // Project Versions too — numbering is Vault-side, not store-side.
+    let pv = client
+        .start_project_version(root.id, Some("rewrite".into()))
+        .await
+        .expect("start_project_version on a software root");
+    assert_eq!(pv.number, 1);
+
+    // Share-link targeting still resolves to the exact change.
+    let resolved = client
+        .resolve_named_version(named.id)
+        .await
+        .expect("resolve_named_version rpc");
+    assert_eq!(resolved.commit_id, cp1.commit_id);
+
+    // The sweep is the one verb that is genuinely media-only.
+    let err = client
+        .gc_root(root.id, None)
+        .await
+        .expect_err("gc_root must refuse a software root");
+    let message = format!("{err}");
+    assert!(
+        message.contains("software root") && message.contains("git gc"),
+        "the refusal has to say why and what collects instead: {message}"
+    );
+
+    backend.shutdown().await;
+    drop(client);
+    scope.close().await;
+}

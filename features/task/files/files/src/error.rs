@@ -11,6 +11,13 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("version store: {0}")]
     VersionStore(#[from] task_files_version_store::Error),
+    /// A failure reported by a jj backend itself — this crate talks to
+    /// both Root flavors' backends through the `Backend` trait (ADR
+    /// 0001: media on the CAS store, software on stock git), so their
+    /// errors arrive as `BackendError` rather than through the
+    /// version-store crate's own type.
+    #[error("jj backend: {0}")]
+    JjBackend(#[from] jj_lib::backend::BackendError),
     #[error("jj repo: {0}")]
     Repo(String),
     #[error("not found: {0}")]
