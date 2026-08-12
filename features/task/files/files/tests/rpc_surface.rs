@@ -10,6 +10,12 @@
 //! subpath, `..`, symlink), nested-root rejection, `changed_paths`
 //! accuracy, the concurrent-checkpoint race, and root identity
 //! surviving a genuine `FilesBackend` restart.
+//!
+//! The second `FilesBackend::new` argument is the org vault holding
+//! the curated version entities (issue #261) — irrelevant to
+//! everything here, so these tests point it at a directory beside the
+//! roots rather than staging a whole vault. The curation surface has
+//! its own file, `versions_rpc.rs`.
 
 use std::time::Duration;
 
@@ -51,7 +57,8 @@ async fn create_browse_chain_checkpoint_over_rpc() {
     std::fs::create_dir(root_dir.join("stems")).unwrap();
     std::fs::write(root_dir.join("stems").join("kick.wav"), b"boom").unwrap();
 
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend.clone()), scope.clone());
 
@@ -228,7 +235,8 @@ async fn filesystem_access_is_confined() {
     let outside = tempfile::tempdir().expect("outside tempdir");
     std::fs::write(outside.path().join("secret.txt"), b"org B's data").unwrap();
 
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -310,7 +318,8 @@ async fn filesystem_access_is_confined() {
 #[tokio::test(flavor = "multi_thread")]
 async fn nested_roots_are_rejected() {
     let data_dir = tempfile::tempdir().expect("data tempdir");
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -378,7 +387,8 @@ async fn concurrent_checkpoints_on_same_root_do_not_race() {
     let root_dir = data_dir.path().join("concurrent");
     std::fs::create_dir(&root_dir).unwrap();
 
-    let backend = FilesBackend::new(data_dir.path()).expect("backend");
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -450,7 +460,8 @@ async fn root_identity_survives_backend_restart() {
     std::fs::write(root_dir.join("session.rpp"), b"reaper project").unwrap();
 
     let created: FileRootInfo = {
-        let backend = FilesBackend::new(data_dir.path()).expect("backend");
+        let backend =
+            FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
         let scope = Scope::new();
         let local = LocalServer::serve(router(backend.clone()), scope.clone());
         let client: FilesServiceClient = local.establish().await.expect("establish client");
@@ -491,7 +502,8 @@ async fn root_identity_survives_backend_restart() {
     // chain — both the marker file and the registry entity, plus the
     // reopened jj repo, survive.
     let restart = tokio::time::timeout(Duration::from_secs(15), async {
-        let backend = FilesBackend::new(data_dir.path()).expect("backend");
+        let backend =
+            FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
         let scope = Scope::new();
         let local = LocalServer::serve(router(backend), scope.clone());
         let client: FilesServiceClient = local.establish().await.expect("establish client");

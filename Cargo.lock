@@ -9938,6 +9938,8 @@ dependencies = [
  "pollster 0.4.0",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "task-files-chunk-store",
  "task-files-version-store",
  "tempfile",
  "thiserror 2.0.18",
@@ -9945,6 +9947,8 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "vault",
+ "vault-entity",
  "vox",
 ]
 

@@ -25,7 +25,11 @@ fn router(backend: FilesBackend) -> LayerRouter {
 }
 
 async fn client_for(data_dir: &Path) -> (FilesBackend, FilesServiceClient, std::sync::Arc<Scope>) {
-    let backend = FilesBackend::new(data_dir).expect("backend");
+    // The second argument is the org vault holding curated version
+    // entities (issue #261) — nothing here touches curation, so it
+    // points at a directory beside the roots rather than staging a
+    // whole vault.
+    let backend = FilesBackend::new(data_dir, data_dir.join("vault")).expect("backend");
     let scope = Scope::new();
     let local = LocalServer::serve(router(backend.clone()), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");

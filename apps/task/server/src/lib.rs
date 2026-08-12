@@ -1157,7 +1157,10 @@ pub(crate) async fn build_org_state(
         let goals = goal::GoalBackend::new(vault_root.clone());
         let milestones = milestone::MilestoneBackend::new(vault_root.clone());
         let workstreams = workstream::WorkstreamBackend::new(vault_root.clone());
-        let files = files::FilesBackend::new(org_root.path().join("files"))
+        // Root content lives outside the vault (`<org>/files/`); the
+        // Named / Project Version entities that reference it are
+        // ordinary vault pages, so the backend gets both paths.
+        let files = files::FilesBackend::new(org_root.path().join("files"), vault_root.clone())
             .map_err(|e| eyre::eyre!("files backend: {e}"))?;
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own

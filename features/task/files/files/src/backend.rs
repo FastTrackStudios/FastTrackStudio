@@ -42,10 +42,10 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    RootFlavor,
+    GcReport, NamedVersion, ProjectVersion, RootFlavor, VersionRef,
 };
-use jj_lib::backend::CommitId;
-use jj_lib::object_id::ObjectId as _;
+use jj_lib::backend::{ChangeId, CommitId};
+use jj_lib::object_id::{HexPrefix, ObjectId as _, PrefixResolution};
 use jj_lib::repo::{ReadonlyRepo, Repo as _};
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use task_files_version_store::VersionStoreBackend;
@@ -57,6 +57,13 @@ use crate::git_root;
 use crate::registry::Registry;
 use crate::repo_open;
 use crate::scan;
+use crate::versions::VaultVersions;
+
+/// Default `keep_newer` window for [`FilesService::gc_root`]: nothing
+/// written in the last minute is ever swept, so a sweep can't race a
+/// checkpoint that is mid-write on another connection (the
+/// concurrent-writer guard `Backend::gc`'s own contract describes).
+const DEFAULT_GC_KEEP_NEWER_SECS: u64 = 60;
 
 /// One root's live jj state: the repo handle (reassigned after every
 /// `checkpoint_now`) and its current checkpoint head. `head` is tracked
@@ -77,12 +84,22 @@ pub struct FilesBackend {
     /// module doc's "Filesystem confinement" section).
     confine_root: PathBuf,
     registry: Arc<Registry>,
+    /// The org vault holding the curated version entities (issue
+    /// #261). Separate from `data_dir`: a File Root's *content* is
+    /// never vault-replicated, but the Named / Project Version pages
+    /// that reference it are ordinary vault files, and that is exactly
+    /// what carries them offline-first to every device.
+    versions: VaultVersions,
     repos: Arc<Mutex<HashMap<Uuid, RootRuntime>>>,
-    /// One lock per root, serializing `checkpoint_now` calls on that
-    /// root so two concurrent checkpoints can't both read the same
-    /// head and silently orphan one commit (PR #280 review) — created
-    /// lazily, never removed (roots are not deleted in v1).
-    checkpoint_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
+    /// One lock per root, serializing every write that reads this
+    /// root's state before changing it: `checkpoint_now` (two
+    /// concurrent checkpoints must not both read the same head and
+    /// silently orphan one commit — PR #280 review), the curation
+    /// writes (two namings must not claim one vault page path), and
+    /// `gc_root` (a sweep must not miss a name that lands after it
+    /// snapshotted its protect set). Created lazily, never removed
+    /// (roots are not deleted in v1).
+    root_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
     /// Fan-out hub behind `#[subscribe] fn events` — every successful
     /// root creation / checkpoint publishes here. Sliding mailbox: a
     /// slow subscriber loses its *oldest* queued events, correct for
@@ -130,7 +147,15 @@ where
 }
 
 impl FilesBackend {
-    pub fn new(data_dir: impl Into<PathBuf>) -> Result<Self, FilesError> {
+    /// `data_dir` holds the root registry and (for roots the server
+    /// hosts) their version stores; `vault_root` is the org vault the
+    /// Named / Project Version entities are written into and scanned
+    /// from. They are deliberately two directories: root *content* is
+    /// never vault-replicated, curation always is.
+    pub fn new(
+        data_dir: impl Into<PathBuf>,
+        vault_root: impl Into<PathBuf>,
+    ) -> Result<Self, FilesError> {
         let data_dir = data_dir.into();
         let registry = Registry::open(&data_dir).map_err(to_files_error)?;
         let confine_root = data_dir
@@ -140,8 +165,9 @@ impl FilesBackend {
             data_dir,
             confine_root,
             registry: Arc::new(registry),
+            versions: VaultVersions::new(vault_root),
             repos: Arc::new(Mutex::new(HashMap::new())),
-            checkpoint_locks: Arc::new(Mutex::new(HashMap::new())),
+            root_locks: Arc::new(Mutex::new(HashMap::new())),
             events: architect::PubSub::sliding(256),
         })
     }
@@ -149,6 +175,67 @@ impl FilesBackend {
     #[must_use]
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    /// The org vault the curated version entities live in.
+    #[must_use]
+    pub fn vault_root(&self) -> &Path {
+        self.versions.vault_root()
+    }
+
+    /// Run `f` against one root's live version-store backend — the
+    /// spec's "secondary harness" seam (Testing Decisions), for the
+    /// store-level properties that are invisible at the RPC surface:
+    /// chunk presence after a GC pass, dedup ratios, streaming.
+    ///
+    /// It hands out the *cached* repo's backend rather than opening a
+    /// second one, which matters: two `FsStore`s over one on-disk
+    /// chunk store in a single process is the shape that used to hang
+    /// (see `tests/rpc_surface.rs`). `f` is synchronous; drive any
+    /// async work in it with `pollster::block_on`, as this crate does
+    /// everywhere it touches jj-lib.
+    ///
+    /// Media roots only — a software root's objects are git's, and
+    /// there is no [`VersionStoreBackend`] under it. Use
+    /// [`FilesBackend::with_repo`] for anything flavor-agnostic.
+    pub fn with_version_store<R>(
+        &self,
+        root_id: Uuid,
+        f: impl FnOnce(&VersionStoreBackend) -> R,
+    ) -> Result<R, FilesError> {
+        self.with_repo(root_id, |repo| {
+            let backend = repo
+                .store()
+                .backend_impl::<VersionStoreBackend>()
+                .ok_or_else(|| {
+                    to_files_error(Error::Repo(
+                        "root's repo is not a VersionStoreBackend".into(),
+                    ))
+                })?;
+            Ok(f(backend))
+        })?
+    }
+
+    /// [`FilesBackend::with_version_store`] one level lower: the cached
+    /// jj repo handle itself, for the store-level properties that need
+    /// a transaction rather than just the backend.
+    ///
+    /// Deliberately the **cached** handle, never a reloaded one — a
+    /// test that writes a commit through it and doesn't touch the cache
+    /// reproduces exactly what a second process does to this one: the
+    /// op log on disk moves forward while this backend's handle stays
+    /// where it was. That is the condition [`FilesBackend::reload_repo`]
+    /// exists for, and it cannot be built with two `FilesBackend`s in
+    /// one process — two `FsStore`s over one store hangs (see
+    /// `tests/rpc_surface.rs`).
+    pub fn with_repo<R>(
+        &self,
+        root_id: Uuid,
+        f: impl FnOnce(&Arc<ReadonlyRepo>) -> R,
+    ) -> Result<R, FilesError> {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        let (repo, _head) = self.ensure_repo(&root).map_err(to_files_error)?;
+        Ok(f(&repo))
     }
 
     fn publish(&self, event: FilesEvent) {
@@ -255,6 +342,45 @@ impl FilesBackend {
         Ok((repo, head))
     }
 
+    /// [`FilesBackend::ensure_repo`], but re-read from the op log
+    /// first — the only honest input for anything that walks the DAG.
+    ///
+    /// The cache is only ever advanced by *this* process's own writes
+    /// (`create_root` / `checkpoint_now` call `set_head`), and
+    /// `root_locks` is a `Mutex` in this process's memory, not a lock
+    /// on disk. A second process writing the same store is a real,
+    /// shipped path: `establish_for_url` falls back to the CLI's own
+    /// embedded backend whenever the dial fails, so `task files
+    /// checkpoint` can write commits the server's cached handle has
+    /// never seen. Sweeping from that stale index would treat those
+    /// commits as unreachable garbage, and `keep_newer` doesn't save
+    /// them — it is a race guard against writes happening *now*, not
+    /// against a handle that has been stale for an hour.
+    ///
+    /// `reload_at_head` goes through the repo's own `RepoLoader`, so
+    /// it reuses this root's existing `Store` (and the one `FsStore`
+    /// under it) rather than opening a second one — see
+    /// `with_version_store`'s doc for why that distinction matters.
+    ///
+    /// **Software roots need nothing extra here.** Their authority is
+    /// git, and [`FilesBackend::ensure_repo`] already re-imports its
+    /// refs on every call for exactly the same reason this exists —
+    /// that flavor's "second author" is a developer running plain
+    /// `git`, ours is a second process on the same store. Re-reading
+    /// the op log on top of a fresh import would be a second answer to
+    /// a question git has already answered.
+    fn reload_repo(&self, root: &FileRootInfo) -> Result<(Arc<ReadonlyRepo>, CommitId), Error> {
+        let (cached, head) = self.ensure_repo(root)?;
+        if root.flavor == RootFlavor::Software {
+            return Ok((cached, head));
+        }
+        let repo = pollster::block_on(cached.reload_at_head())
+            .map_err(|e| Error::Repo(format!("reloading {} at head: {e}", root.id)))?;
+        let head = Self::head_of(&repo, root.flavor)?;
+        self.set_head(root.id, repo.clone(), head.clone());
+        Ok((repo, head))
+    }
+
     fn set_head(&self, root_id: Uuid, repo: Arc<ReadonlyRepo>, head: CommitId) {
         self.repos
             .lock()
@@ -262,10 +388,10 @@ impl FilesBackend {
             .insert(root_id, RootRuntime { repo, head });
     }
 
-    fn checkpoint_lock(&self, root_id: Uuid) -> Arc<Mutex<()>> {
-        self.checkpoint_locks
+    fn root_lock(&self, root_id: Uuid) -> Arc<Mutex<()>> {
+        self.root_locks
             .lock()
-            .expect("checkpoint lock map poisoned")
+            .expect("root lock map poisoned")
             .entry(root_id)
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
@@ -433,17 +559,352 @@ impl FilesBackend {
         let entries = pollster::block_on(task_files_version_store::chain::version_chain(
             backend, &head, &repo_path,
         ))?;
+        // Curated metadata (issue #261): the Vault, not the store, is
+        // where names live — so every chain read resolves them fresh
+        // from the vault pages rather than caching a projection. That
+        // costs one vault scan per call, the same live-scan bargain
+        // every other vault-backed slice makes (`WorkstreamBackend`);
+        // if it ever measures slow, the fix is a shared vault snapshot
+        // on the backend, never a second authority on names.
+        //
+        // Names are decoration on a store-owned answer, so a vault
+        // that can't be read degrades this call to an uncurated chain
+        // rather than failing it — the opposite of `protected_commits`,
+        // where an unreadable page must stop the sweep.
+        let mut names_by_commit: HashMap<String, Vec<String>> = HashMap::new();
+        match self.versions.named_versions(Some(root_id)) {
+            Ok(named) => {
+                for named in named {
+                    names_by_commit
+                        .entry(named.commit_id)
+                        .or_default()
+                        .push(named.name);
+                }
+            }
+            Err(e) => tracing::warn!(
+                %root_id,
+                ?e,
+                "reading Named Versions failed; serving the chain uncurated"
+            ),
+        }
         Ok(entries
             .into_iter()
-            .map(|e| ChainEntry {
-                commit_id: e.commit_id.hex(),
-                path: e.path.as_internal_file_string().to_string(),
-                file_id: e.file_id.hex(),
-                renamed_from: e
-                    .renamed_from
-                    .map(|p| p.as_internal_file_string().to_string()),
+            .map(|e| {
+                let commit_id = e.commit_id.hex();
+                let mut names = names_by_commit.get(&commit_id).cloned().unwrap_or_default();
+                names.sort();
+                ChainEntry {
+                    commit_id,
+                    path: e.path.as_internal_file_string().to_string(),
+                    file_id: e.file_id.hex(),
+                    renamed_from: e
+                        .renamed_from
+                        .map(|p| p.as_internal_file_string().to_string()),
+                    names,
+                }
             })
             .collect())
+    }
+
+    /// The `(commit, change)` pair `commit_ref` names in `root`'s
+    /// store — the validation every curation write does before writing
+    /// a Vault entity, so a reference can never name a commit that
+    /// isn't there.
+    ///
+    /// `commit_ref` may be a full hex id or an unambiguous hex prefix,
+    /// because a prefix is what every human-facing surface prints
+    /// (`task files chain` shows twelve characters, and jj itself is
+    /// prefix-addressed throughout). An ambiguous prefix is a bad
+    /// request, never a coin flip.
+    ///
+    /// Goes through jj's `Backend` trait rather than
+    /// [`VersionStoreBackend`], so curation works the same on both
+    /// flavors: a Named Version of a commit in a software root's
+    /// colocated git repo is an ordinary Vault entity like any other
+    /// (issue #273 generalized the chain and the checkpoint writer the
+    /// same way — naming is no different).
+    fn resolve_commit(
+        &self,
+        root: &FileRootInfo,
+        commit_ref: &str,
+    ) -> Result<(CommitId, ChangeId), Error> {
+        let (repo, _head) = self.ensure_repo(root)?;
+        let backend = repo.store().backend();
+
+        // A full id is just an even-length hex string as far as
+        // `CommitId::try_from_hex` is concerned — it happily decodes a
+        // twelve-character prefix into a six-byte id that no object
+        // will ever match. So the exact lookup has to be *tried*, not
+        // assumed, with prefix resolution as the fallback.
+        if let Some(id) = CommitId::try_from_hex(commit_ref) {
+            if let Ok(commit) = pollster::block_on(backend.read_commit(&id)) {
+                return Ok((id, commit.change_id));
+            }
+        }
+        let prefix = HexPrefix::try_from_hex(commit_ref)
+            .ok_or_else(|| Error::BadRequest(format!("{commit_ref:?}: not a hex commit id")))?;
+        let commit_id = match repo.index().resolve_commit_id_prefix(&prefix) {
+            Ok(PrefixResolution::SingleMatch(id)) => id,
+            Ok(PrefixResolution::AmbiguousMatch) => {
+                return Err(Error::BadRequest(format!(
+                    "{commit_ref:?}: ambiguous commit prefix in root {}",
+                    root.id
+                )));
+            }
+            Ok(PrefixResolution::NoMatch) => {
+                return Err(Error::NotFound(format!(
+                    "commit {commit_ref} in root {}",
+                    root.id
+                )));
+            }
+            Err(e) => return Err(Error::Repo(format!("resolving {commit_ref:?}: {e}"))),
+        };
+        let commit = pollster::block_on(backend.read_commit(&commit_id))
+            .map_err(|_| Error::NotFound(format!("commit {commit_ref} in root {}", root.id)))?;
+        Ok((commit_id, commit.change_id))
+    }
+
+    fn name_version_inner(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        name: String,
+    ) -> Result<NamedVersion, Error> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err(Error::BadRequest("a Named Version needs a name".into()));
+        }
+        let root = self.get_root_info(root_id)?;
+        // Same lock a checkpoint and a GC pass take: it serializes the
+        // read-then-write over the vault snapshot (so two namings can't
+        // both claim one page path) *and* keeps a naming from landing
+        // inside a sweep that has already snapshotted its protect set.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        let (commit_id, change_id) = self.resolve_commit(&root, &commit_id)?;
+        self.versions.create_named_version(
+            root_id,
+            &root.name,
+            name,
+            change_id.hex(),
+            commit_id.hex(),
+        )
+    }
+
+    fn unname_version_inner(&self, id: Uuid) -> Result<NamedVersion, Error> {
+        let named = self.versions.named_version(id)?;
+        let lock = self.root_lock(named.root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        self.versions.delete_named_version(id)?;
+        Ok(named)
+    }
+
+    /// Resolve a Named Version the way a share link must: prefer the
+    /// stable `change_id` (so a rewritten change still lands on its
+    /// current commit) and fall back to the recorded `commit_id`.
+    /// Either way the answer is one exact change in this root's store,
+    /// or [`Error::NotFound`].
+    fn resolve_named_version_inner(&self, id: Uuid) -> Result<VersionRef, Error> {
+        let named = self.versions.named_version(id)?;
+        let root = self.get_root_info(named.root_id)?;
+        let (repo, _head) = self.ensure_repo(&root)?;
+
+        let by_change = ChangeId::try_from_hex(&named.change_id).and_then(|change_id| {
+            repo.resolve_change_id(&change_id)
+                .ok()
+                .flatten()
+                .and_then(|targets| {
+                    targets
+                        .visible_with_offsets()
+                        .next()
+                        .map(|(_, id)| id.clone())
+                })
+        });
+        let (commit_id, change_id) = match by_change {
+            Some(commit_id) if !named.change_id.is_empty() => (commit_id, named.change_id.clone()),
+            // Either the change isn't in the current index (a Named
+            // Version pointing at a commit no view head descends from
+            // is a normal, supported shape — that's exactly what the GC
+            // protect set exists for), or the page recorded no change
+            // id to begin with. Both fall back to the exact commit the
+            // entity recorded, validated against the store — one
+            // lookup, which yields both halves of the answer.
+            _ => {
+                let (commit_id, change_id) = self.resolve_commit(&root, &named.commit_id)?;
+                (commit_id, change_id.hex())
+            }
+        };
+        Ok(VersionRef {
+            root_id: named.root_id,
+            change_id,
+            commit_id: commit_id.hex(),
+        })
+    }
+
+    fn start_project_version_inner(
+        &self,
+        root_id: Uuid,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, Error> {
+        let root = self.get_root_info(root_id)?;
+        // See `name_version_inner` for why curation writes take the
+        // root lock.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        let (_repo, head) = self.ensure_repo(&root)?;
+        let (commit_id, change_id) = self.resolve_commit(&root, &head.hex())?;
+        let label = label
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty());
+        self.versions.create_project_version(
+            root_id,
+            &root.name,
+            label,
+            change_id.hex(),
+            commit_id.hex(),
+        )
+    }
+
+    /// Every commit in `root_id`'s store the Vault currently
+    /// references — the protect set ADR 0001 calls "Vault-referenced",
+    /// resolved live from the vault pages on every pass so a name
+    /// deleted (or replicated in) since the last one is honored.
+    ///
+    /// Three failure modes matter here and they don't all pull the same
+    /// way, so each gets its own answer:
+    ///
+    /// - A page in **this root's own folder** that this process cannot
+    ///   read, or whose `commitId` isn't hex at all, is a reference we
+    ///   might be about to forfeit. It fails this root's pass
+    ///   (`protect_refs` does the strict half) — GC is destructive and
+    ///   unnamed content is cheap to keep one more day. Other roots
+    ///   sweep normally; a page that is not identifiably this root's is
+    ///   never allowed to wedge it.
+    /// - A page naming a commit the store **doesn't have** protects
+    ///   nothing: that content is already gone, and treating it as
+    ///   fatal would wedge GC for the root forever (one stale page from
+    ///   a replication reorder, and the store never gets swept again).
+    ///   Logged and skipped.
+    /// - A page with an **empty** `commitId` — which
+    ///   `ProjectVersions::from_page` tolerates, so it exists — names
+    ///   nothing at all. Same reasoning: logged and skipped, never
+    ///   fatal. (`create_project_version` refuses to write one, so this
+    ///   only ever arrives by hand or by replication.)
+    ///
+    /// Note what goes into `out`: the id `resolve_commit` **resolved**,
+    /// never the one parsed off the page. A page may legitimately carry
+    /// a twelve-character prefix — that is what every human-facing
+    /// surface prints — and `CommitId::try_from_hex` would decode it
+    /// into a six-byte id that the mark phase then chokes on. It also
+    /// makes the dedup work across a page storing a prefix and another
+    /// storing the full id of the same commit.
+    fn protected_commits(&self, root: &FileRootInfo) -> Result<Vec<CommitId>, Error> {
+        let (repo, _head) = self.ensure_repo(root)?;
+        let full_hex_len = repo.store().root_commit_id().as_bytes().len() * 2;
+        let mut out: Vec<CommitId> = Vec::new();
+        for reference in self.versions.protect_refs(root.id, &root.name)? {
+            if reference.commit_id.trim().is_empty() {
+                tracing::warn!(
+                    page = %reference.page,
+                    "a Files version page carries no commit id; nothing to protect"
+                );
+                continue;
+            }
+            match self.resolve_commit(root, &reference.commit_id) {
+                Ok((resolved, _change_id)) => {
+                    if !out.contains(&resolved) {
+                        out.push(resolved);
+                    }
+                }
+                // "Not here" only means "already gone" for a full id.
+                // An *abbreviation* that resolves to nothing means we
+                // failed to interpret it — prefix lookup goes through
+                // the index, and a Named Version's whole purpose is to
+                // point at commits the index no longer reaches — so
+                // treating it as stale would forfeit exactly the
+                // content this set exists to keep. Fatal instead, with
+                // the page named so a human can write the full id.
+                Err(Error::NotFound(_)) if reference.commit_id.len() == full_hex_len => {
+                    tracing::warn!(
+                        page = %reference.page,
+                        commit = %reference.commit_id,
+                        "a Files version page references a commit this root's store doesn't have; \
+                         nothing to protect"
+                    );
+                }
+                // Not hex, or an ambiguous prefix: we cannot tell what
+                // this page protects, so we refuse to sweep past it.
+                Err(e) => {
+                    return Err(Error::BadRequest(format!(
+                        "{}: {:?} does not name a commit ({e}) — refusing to compute a GC protect \
+                         set that might silently forfeit the version it references",
+                        reference.page, reference.commit_id
+                    )));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    fn gc_root_inner(
+        &self,
+        root_id: Uuid,
+        keep_newer_secs: Option<u64>,
+    ) -> Result<GcReport, Error> {
+        let root = self.get_root_info(root_id)?;
+        // A software root's objects are git's, and git collects its own
+        // garbage (`git gc`, and every host runs it server-side).
+        // Sweeping a colocated repository from here would mean deciding
+        // reachability for a store whose other author is git itself —
+        // exactly the thing issue #273's design refuses to do. Say so
+        // plainly rather than failing later with a backend-type
+        // mismatch, and leave the protect-set doctrine where it
+        // belongs: on the store Files actually owns.
+        if root.flavor == RootFlavor::Software {
+            return Err(Error::BadRequest(format!(
+                "root {root_id} is a software root: its objects live in a colocated git \
+                 repository, which collects its own garbage (`git gc`). Files' Vault-protected \
+                 sweep applies to media roots only."
+            )));
+        }
+        // Hold the root lock for the whole pass. It blocks that root's
+        // checkpoints (and curation writes) for the duration, which is
+        // the deliberate trade: a sweep that raced a checkpoint could
+        // read a head the checkpoint is still building on top of, or
+        // miss a name that landed after the protect set was read, and
+        // both of those lose data. GC is an occasional maintenance
+        // verb; a checkpoint waiting on it is a delay, not a loss.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+
+        // Re-read the op log before deciding what is reachable: a
+        // second process may have written checkpoints this handle has
+        // never seen, and sweeping from a stale index would delete
+        // them. See `reload_repo`.
+        let (repo, _head) = self.reload_repo(&root)?;
+        let protected = self.protected_commits(&root)?;
+        let backend = repo
+            .store()
+            .backend_impl::<VersionStoreBackend>()
+            .ok_or_else(|| Error::Repo("root's repo is not a VersionStoreBackend".into()))?;
+
+        let keep_newer = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(
+                keep_newer_secs.unwrap_or(DEFAULT_GC_KEEP_NEWER_SECS),
+            ))
+            .unwrap_or(std::time::UNIX_EPOCH);
+
+        let stats = pollster::block_on(task_files_version_store::gc::sweep(
+            backend,
+            repo.readonly_index().as_index(),
+            keep_newer,
+            &protected,
+        ))?;
+        Ok(GcReport {
+            objects_swept: stats.objects_swept as u64,
+            manifests_swept: stats.chunks.manifests_swept as u64,
+            protected_commits: protected.len() as u32,
+        })
     }
 
     fn checkpoint_now_inner(
@@ -457,10 +918,17 @@ impl FilesBackend {
         // can't both read the same head and each commit on top of it
         // (PR #280 review) — the second one now genuinely observes the
         // first's result as its parent instead of racing it.
-        let lock = self.checkpoint_lock(root_id);
+        let lock = self.root_lock(root_id);
         let _guard = lock.lock().expect("checkpoint lock poisoned");
 
-        let (repo, head) = self.ensure_repo(&root)?;
+        // Same staleness as `gc_root_inner`, with a different symptom:
+        // building on a cached head that another writer has already
+        // moved past forks the chain instead of extending it.
+        // `reload_repo` re-reads whichever authority this flavor has —
+        // git's refs for a software root, the op log for a media one.
+        let (repo, head) = self.reload_repo(&root)?;
+        // Both flavors write through jj's `Backend` trait, not either
+        // concrete backend (issue #273).
         let backend = repo.store().backend();
 
         let head_commit = pollster::block_on(backend.read_commit(&head))?;
@@ -550,6 +1018,66 @@ impl FilesService for FilesBackend {
     ) -> Result<CheckpointInfo, FilesError> {
         let this = self.clone();
         blocking(move || this.checkpoint_now_inner(root_id, description)).await
+    }
+
+    async fn name_version(
+        &self,
+        root_id: Uuid,
+        commit_id: String,
+        name: String,
+    ) -> Result<NamedVersion, FilesError> {
+        let this = self.clone();
+        let named = blocking(move || this.name_version_inner(root_id, commit_id, name)).await?;
+        self.publish(FilesEvent::VersionNamed(named.clone()));
+        Ok(named)
+    }
+
+    async fn list_named_versions(
+        &self,
+        root_id: Option<Uuid>,
+    ) -> Result<Vec<NamedVersion>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.named_versions(root_id)).await
+    }
+
+    async fn resolve_named_version(&self, id: Uuid) -> Result<VersionRef, FilesError> {
+        let this = self.clone();
+        blocking(move || this.resolve_named_version_inner(id)).await
+    }
+
+    async fn unname_version(&self, id: Uuid) -> Result<(), FilesError> {
+        let this = self.clone();
+        let removed = blocking(move || this.unname_version_inner(id)).await?;
+        self.publish(FilesEvent::VersionUnnamed(removed));
+        Ok(())
+    }
+
+    async fn start_project_version(
+        &self,
+        root_id: Uuid,
+        label: Option<String>,
+    ) -> Result<ProjectVersion, FilesError> {
+        let this = self.clone();
+        let pv = blocking(move || this.start_project_version_inner(root_id, label)).await?;
+        self.publish(FilesEvent::ProjectVersionStarted(pv.clone()));
+        Ok(pv)
+    }
+
+    async fn list_project_versions(
+        &self,
+        root_id: Uuid,
+    ) -> Result<Vec<ProjectVersion>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.project_versions(root_id)).await
+    }
+
+    async fn gc_root(
+        &self,
+        root_id: Uuid,
+        keep_newer_secs: Option<u64>,
+    ) -> Result<GcReport, FilesError> {
+        let this = self.clone();
+        blocking(move || this.gc_root_inner(root_id, keep_newer_secs)).await
     }
 }
 

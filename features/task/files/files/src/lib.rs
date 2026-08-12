@@ -10,25 +10,35 @@
 //! the plumbing it needs: [`registry`] (root identity, persisted
 //! alongside the version stores) and [`repo_open`] (opening/reopening
 //! a root's jj repo).
+//!
+//! Issue #261 adds the curated half: [`VaultVersions`] — Named
+//! Versions and Project Versions as ordinary Vault entities (see
+//! [`entity`]) referencing `(root id, change id)` — and the GC pass
+//! that resolves those references into the version store's protect
+//! set, which is what makes a named deliverable immortal.
 
 mod backend;
 mod checkpoint;
 mod consts;
 mod content;
+mod entity;
 mod error;
 mod git_root;
 mod ignore;
 mod registry;
 mod repo_open;
 mod scan;
+mod versions;
 
 pub use backend::FilesBackend;
+pub use entity::{NamedVersions, ProjectVersions};
 pub use error::{Error, Result};
 pub use files_proto::service;
+pub use versions::VaultVersions;
 
 pub use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    RootFlavor,
+    GcReport, NamedVersion, ProjectVersion, RootFlavor, VersionRef,
 };
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor
