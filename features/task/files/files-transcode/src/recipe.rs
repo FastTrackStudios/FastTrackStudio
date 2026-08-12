@@ -35,7 +35,9 @@ pub enum RenditionKind {
     Proxy720,
     /// AAC audio rendition (video → its audio track, or audio → AAC).
     Audio,
-    /// Waveform peaks as JSON (audio, and a video's audio track).
+    /// Waveform-peak source: mono s16le PCM (audio, and a video's audio
+    /// track), reduced to a peak array by the consumer. Not JSON yet —
+    /// the JSON shaping is a later pass that bumps [`RECIPE_VERSION`].
     Peaks,
     /// Filmstrip thumbnail strip (video only).
     Filmstrip,
@@ -92,7 +94,9 @@ impl RenditionKind {
         match self {
             RenditionKind::Proxy1080 | RenditionKind::Proxy720 => "video/mp4",
             RenditionKind::Audio => "audio/mp4",
-            RenditionKind::Peaks => "application/json",
+            // Raw mono s16le PCM the consumer reduces to peaks — not JSON
+            // until the shaping pass (see the `Peaks` variant doc).
+            RenditionKind::Peaks => "application/octet-stream",
             RenditionKind::Filmstrip => "image/jpeg",
         }
     }

@@ -85,7 +85,7 @@ async fn rendition_generates_and_caches_per_media_class() {
         .rendition(root_id, "mix.wav".into(), RenditionKind::Peaks)
         .await
         .expect("audio peaks");
-    assert_eq!(peaks.mime, "application/json");
+    assert_eq!(peaks.mime, "application/octet-stream");
     let err = client
         .rendition(root_id, "mix.wav".into(), RenditionKind::Filmstrip)
         .await
@@ -151,6 +151,16 @@ async fn gc_keeps_a_live_sources_renditions() {
             .unwrap(),
         "rendition cached in the CAS"
     );
+
+    // The bytes are streamable off the private rendition CAS — the read
+    // primitive the Review page (issue #270) serves from.
+    let mut bytes = Vec::new();
+    backend
+        .read_rendition(root_id, &proxy.file_id, &mut bytes)
+        .await
+        .unwrap();
+    assert_eq!(bytes.len() as u64, proxy.len, "streamed the full rendition");
+    assert!(!bytes.is_empty());
 
     // gc_root runs the version-store sweep + the source-tied rendition
     // GC. The source is still referenced (live), so its rendition is

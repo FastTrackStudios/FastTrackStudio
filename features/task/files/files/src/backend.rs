@@ -253,6 +253,12 @@ pub struct FilesBackend {
     /// dir; two opens of one `FsStore` hang). Held across the async
     /// open, so a `tokio` mutex.
     rendition_open_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Per-rendition generation locks (issue #269, AC 2: "generates once").
+    /// Two Review-page clients requesting the *same* uncached proxy would
+    /// otherwise both run the full ffmpeg encode; a per-key lock makes the
+    /// loser wait and hit the cache. Keyed `root:source:kind`; entries are
+    /// dropped once no one holds them, so the map stays bounded.
+    rendition_gen_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     /// Fan-out hub behind `#[subscribe] fn events` — every successful
     /// root creation / checkpoint publishes here. Sliding mailbox: a
     /// slow subscriber loses its *oldest* queued events, correct for
@@ -359,6 +365,7 @@ impl FilesBackend {
             flip_hook: Arc::new(Mutex::new(None)),
             transcoder: Arc::new(Mutex::new(None)),
             rendition_stores: Arc::new(Mutex::new(HashMap::new())),
+            rendition_gen_locks: Arc::new(Mutex::new(HashMap::new())),
             rendition_open_lock: Arc::new(tokio::sync::Mutex::new(())),
             events: architect::PubSub::sliding(256),
         })
@@ -3809,14 +3816,39 @@ impl FilesBackend {
             .await
             .map_err(from_files_error)?;
         let store = self.rendition_store(root_id, &root_path).await?;
+        let ekind = crate::transcode::engine_kind(kind);
+        // Generate-once (AC 2): hold a per-`(root, source, kind)` lock
+        // across the whole generate so a second concurrent request for
+        // the same uncached rendition waits and then hits the cache
+        // rather than running ffmpeg a second time.
+        let lock_key = format!("{root_id}:{}:{}", source_fid.to_hex(), ekind.tag());
+        let keyed = {
+            let mut locks = self
+                .rendition_gen_locks
+                .lock()
+                .expect("rendition gen locks");
+            locks.entry(lock_key.clone()).or_default().clone()
+        };
+        let _gen = keyed.lock().await;
         let pipe = files_transcode::TranscodePipeline::new(chunks, store, transcoder);
-        let rendition = pipe
-            .rendition(&source_fid, crate::transcode::engine_kind(kind))
-            .await
-            .map_err(|e| match e {
-                files_transcode::Error::NotMedia(m) => Error::BadRequest(m),
-                other => Error::Repo(format!("transcode: {other}")),
-            })?;
+        let result = pipe.rendition(&source_fid, ekind).await;
+        // Drop the entry once we're its last holder (only our `keyed`
+        // clone and the map's own), so the lock map stays bounded.
+        {
+            let mut locks = self
+                .rendition_gen_locks
+                .lock()
+                .expect("rendition gen locks");
+            if let Some(entry) = locks.get(&lock_key)
+                && Arc::strong_count(entry) <= 2
+            {
+                locks.remove(&lock_key);
+            }
+        }
+        let rendition = result.map_err(|e| match e {
+            files_transcode::Error::NotMedia(m) => Error::BadRequest(m),
+            other => Error::Repo(format!("transcode: {other}")),
+        })?;
         Ok(files_proto::RenditionInfo {
             file_id: rendition.file_id.to_hex(),
             len: rendition.len,
@@ -3900,6 +3932,33 @@ impl FilesBackend {
         Ok(store.has_content(fid).await)
     }
 
+    /// Stream a rendition's bytes (by hex CAS id, from the `rendition`
+    /// RPC's [`files_proto::RenditionInfo`]) to `dest`. Renditions live
+    /// in a *private* CAS, so the source-content read paths can't reach
+    /// them — this is how the Review page's streaming route (issue #270)
+    /// serves a proxy or filmstrip.
+    pub async fn read_rendition<W>(
+        &self,
+        root_id: Uuid,
+        file_id_hex: &str,
+        dest: &mut W,
+    ) -> Result<(), FilesError>
+    where
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        let store = self
+            .rendition_store(root_id, Path::new(&root.path))
+            .await
+            .map_err(to_files_error)?;
+        let fid = task_files_chunk_store::FileId::from_hex(file_id_hex)
+            .map_err(|e| FilesError::BadRequest(format!("{file_id_hex}: {e}")))?;
+        store
+            .read_to(fid, dest)
+            .await
+            .map_err(|e| FilesError::Io(format!("rendition {file_id_hex}: {e}")))
+    }
+
     /// Prune a root's renditions whose source content the store no
     /// longer holds, or whose recipe is superseded — the source-tied
     /// half of GC (AC 3/4). Called after `gc_root`'s version-store
@@ -3911,6 +3970,12 @@ impl FilesBackend {
             return Ok(0);
         }
         let root_path = PathBuf::from(&root.path);
+        // Nothing to sweep — and don't create a rendition store (its
+        // dirs, a private `FsStore`) on a server that never rendered
+        // anything (no transcoder configured, or nothing warmed yet).
+        if !crate::transcode::rendition_dir(&root_path).exists() {
+            return Ok(0);
+        }
         let chunks = self
             .with_version_store(root_id, |vs| vs.chunks().clone())
             .map_err(from_files_error)?;

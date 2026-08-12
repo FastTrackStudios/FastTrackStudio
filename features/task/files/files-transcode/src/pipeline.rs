@@ -126,15 +126,17 @@ impl TranscodePipeline {
     }
 
     /// Stage a source's bytes from the CAS to a temp file — ffmpeg reads
-    /// paths, not the chunk store. The temp file lives as long as the
-    /// returned guard.
+    /// paths, not the chunk store. The bytes are STREAMED chunk-by-chunk
+    /// into the file (never buffered whole in RAM — a source is a
+    /// multi-GB video). The temp file lives as long as the returned
+    /// guard; a `tokio` file handle written to its path streams into it.
     async fn stage_source(&self, source_file_id: &FileId) -> Result<tempfile::NamedTempFile> {
-        let mut tmp = tempfile::NamedTempFile::new()?;
-        let mut bytes = Vec::new();
+        let tmp = tempfile::NamedTempFile::new()?;
+        let mut file = tokio::fs::File::create(tmp.path()).await?;
         self.source_chunks
-            .read_to(*source_file_id, &mut bytes)
+            .read_to(*source_file_id, &mut file)
             .await?;
-        std::io::Write::write_all(&mut tmp, &bytes)?;
+        tokio::io::AsyncWriteExt::flush(&mut file).await?;
         Ok(tmp)
     }
 }

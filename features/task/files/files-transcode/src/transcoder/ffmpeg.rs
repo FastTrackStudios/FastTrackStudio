@@ -57,7 +57,7 @@ impl Transcoder for FfmpegTranscoder {
         let out = dir.path().join(match kind {
             RenditionKind::Proxy1080 | RenditionKind::Proxy720 => "out.mp4",
             RenditionKind::Audio => "out.m4a",
-            RenditionKind::Peaks => "out.json",
+            RenditionKind::Peaks => "out.pcm",
             RenditionKind::Filmstrip => "out.jpg",
         });
         let mut cmd = Command::new("ffmpeg");
