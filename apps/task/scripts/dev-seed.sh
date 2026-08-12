@@ -30,13 +30,13 @@ WEB_PORT="${WEB_PORT:-8765}"
 DEV_EMAIL="${DEV_EMAIL:-dev@fasttrackstudio.dev}"
 DEV_PASSWORD="${DEV_PASSWORD:-password}"
 
-build() { ( cd "$REPO_ROOT" && cargo build -p task-server ); }
-
+# `cargo run` (not a hardcoded ./target/debug path) so this respects
+# CARGO_TARGET_DIR / worktree-local target dirs (PR #295 review).
 seed() {
-  build
   echo ">> seeding dev vault → $DATA_ROOT"
-  TASK_DATA_ROOT="$DATA_ROOT" "$REPO_ROOT/target/debug/task-server" admin seed \
-    --email "$DEV_EMAIL" --password "$DEV_PASSWORD"
+  ( cd "$REPO_ROOT" && TASK_DATA_ROOT="$DATA_ROOT" \
+      cargo run --quiet -p task-server -- admin seed \
+      --email "$DEV_EMAIL" --password "$DEV_PASSWORD" )
 }
 
 fresh() {
@@ -50,13 +50,12 @@ serve() {
     echo "!! $DATA_ROOT not seeded yet — run '$0 seed' first" >&2
     exit 1
   fi
-  build
   echo ">> serving $DATA_ROOT on 127.0.0.1:$PORT"
   echo ">>   well-known: http://127.0.0.1:$PORT/.well-known/task-server.json"
   echo ">>   sign in with: $DEV_EMAIL / $DEV_PASSWORD"
   cd "$REPO_ROOT"
   exec env TASK_DATA_ROOT="$DATA_ROOT" TASK_SERVER_BIND="127.0.0.1:$PORT" \
-    ./target/debug/task-server
+    cargo run --quiet -p task-server
 }
 
 web() {

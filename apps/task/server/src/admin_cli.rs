@@ -40,6 +40,11 @@ pub async fn dispatch() -> eyre::Result<bool> {
         Some("delete-user") => delete_user(&args[2..]).await.map(|()| true),
         Some("set-role") => set_role(&args[2..]).await.map(|()| true),
         Some("create-user") => create_user(&args[2..]).await.map(|()| true),
+        // Dev-only: compiled OUT of release builds entirely, so the
+        // deployed (release) server can never seed a known-password
+        // admin (PR #295 review). In a release binary `seed` is just an
+        // unknown subcommand.
+        #[cfg(debug_assertions)]
         Some("seed") => seed(&args[2..]).await.map(|()| true),
         Some("webdav") => webdav(&args[2..]).map(|()| true),
         other => {
@@ -419,7 +424,20 @@ async fn email_history(args: &[String]) -> eyre::Result<()> {
 /// `dev-seed` wrapper does). Idempotent: an existing owner account or
 /// `Demo Project` root is left as-is, so re-running tops up what's
 /// missing rather than duplicating.
+#[cfg(debug_assertions)]
 async fn seed(args: &[String]) -> eyre::Result<()> {
+    // This verb plants a KNOWN-PASSWORD admin and mints default orgs, so
+    // it must never run against a real data root. Require TASK_DATA_ROOT
+    // to be set explicitly (the `dev-seed` wrapper points it at a
+    // throwaway dir) — refuse the `~/.task` default (PR #295 review).
+    match std::env::var("TASK_DATA_ROOT") {
+        Ok(v) if !v.trim().is_empty() => {}
+        _ => bail!(
+            "refusing to seed: set TASK_DATA_ROOT to a throwaway dir first \
+             (this plants a known-password admin — never point it at real data). \
+             `just dev-seed` does this for you."
+        ),
+    }
     let email = flag(args, "--email").unwrap_or_else(|| "dev@fasttrackstudio.dev".to_owned());
     let password = flag(args, "--password").unwrap_or_else(|| "password".to_owned());
     // A Files root with a divergence, so the #267 resolution UI has
@@ -479,6 +497,7 @@ async fn seed(args: &[String]) -> eyre::Result<()> {
 }
 
 /// `north-west-films` -> `North West Films`.
+#[cfg(debug_assertions)]
 fn title_case(slug: &str) -> String {
     slug.split(['-', '_'])
         .filter(|w| !w.is_empty())
@@ -494,6 +513,7 @@ fn title_case(slug: &str) -> String {
 }
 
 /// Create (idempotently) the org's owner account with the admin role.
+#[cfg(debug_assertions)]
 async fn seed_owner(
     org: &org_proto::OrgRoot,
     email: &str,
@@ -540,6 +560,7 @@ async fn seed_owner(
 }
 
 /// A couple of vault markdown notes so the org isn't empty.
+#[cfg(debug_assertions)]
 fn seed_vault_notes(org: &org_proto::OrgRoot, display: &str) -> eyre::Result<()> {
     let vault = org.vault_dir();
     std::fs::create_dir_all(&vault).wrap_err("create vault dir")?;
@@ -558,6 +579,7 @@ fn seed_vault_notes(org: &org_proto::OrgRoot, display: &str) -> eyre::Result<()>
     Ok(())
 }
 
+#[cfg(debug_assertions)]
 fn write_if_absent(path: &std::path::Path, content: &str) -> eyre::Result<()> {
     if !path.exists() {
         std::fs::write(path, content).wrap_err_with(|| format!("write {}", path.display()))?;
@@ -568,18 +590,52 @@ fn write_if_absent(path: &std::path::Path, content: &str) -> eyre::Result<()> {
 /// A Files root with real version history (three checkpoints + a Named
 /// Version) and a divergence — the demo the version-history / divergence
 /// UI (issue #267) is built to show.
+#[cfg(debug_assertions)]
 async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyre::Result<()> {
     let files_dir = org.path().join("files");
     let backend = files::FilesBackend::new(&files_dir, org.vault_dir())
         .map_err(|e| eyre::eyre!("open files backend: {e}"))?;
+    // Always shut the backend down — it holds jj repo handles + cadence
+    // tasks — whether the body succeeds or errors out (PR #295 review).
+    let result = seed_files_demo_inner(&backend, &files_dir, with_divergence).await;
+    backend.shutdown().await;
+    result
+}
 
-    // Idempotent: leave an already-seeded root alone.
-    let existing = files::FilesService::list_roots(&backend)
+#[cfg(debug_assertions)]
+async fn seed_files_demo_inner(
+    backend: &files::FilesBackend,
+    files_dir: &std::path::Path,
+    with_divergence: bool,
+) -> eyre::Result<()> {
+    let existing = files::FilesService::list_roots(backend)
         .await
         .map_err(|e| eyre::eyre!("list roots: {e:?}"))?;
-    if existing.iter().any(|r| r.name == "Demo Project") {
+    if let Some(root) = existing.iter().find(|r| r.name == "Demo Project") {
+        // Already seeded. Top up the divergence if it's wanted and not
+        // present yet (e.g. a prior `--no-divergence` run), so a re-run
+        // never reports success with nothing for the #267 UI to resolve.
+        if with_divergence {
+            let has_divergence = files::FilesService::divergences(backend, root.id)
+                .await
+                .map_err(|e| eyre::eyre!("divergences: {e:?}"))?
+                .iter()
+                .any(|d| d.path == "edit.mov");
+            if !has_divergence {
+                backend
+                    .seed_divergent_file(
+                        root.id,
+                        "edit.mov",
+                        b"reel v4 - warm grade",
+                        b"reel v4 - cool grade",
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("seed divergence: {e:?}"))?;
+                println!("  files: Demo Project present — added a divergence");
+                return Ok(());
+            }
+        }
         println!("  files: Demo Project already present");
-        backend.shutdown().await;
         return Ok(());
     }
 
@@ -599,14 +655,14 @@ async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyr
     )?;
 
     let root = files::FilesService::create_root(
-        &backend,
+        backend,
         root_dir.to_string_lossy().into_owned(),
         "Demo Project".to_owned(),
         files::RootFlavor::Media,
     )
     .await
     .map_err(|e| eyre::eyre!("create root: {e:?}"))?;
-    files::FilesService::checkpoint_now(&backend, root.id, Some("Initial import".to_owned()))
+    files::FilesService::checkpoint_now(backend, root.id, Some("Initial import".to_owned()))
         .await
         .map_err(|e| eyre::eyre!("checkpoint 1: {e:?}"))?;
 
@@ -616,11 +672,11 @@ async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyr
         root_dir.join("notes.md"),
         b"# Editorial notes\n\n- assembly cut\n- rough cut: tightened the intro\n",
     )?;
-    let cp2 = files::FilesService::checkpoint_now(&backend, root.id, Some("Rough cut".to_owned()))
+    let cp2 = files::FilesService::checkpoint_now(backend, root.id, Some("Rough cut".to_owned()))
         .await
         .map_err(|e| eyre::eyre!("checkpoint 2: {e:?}"))?;
     files::FilesService::name_version(
-        &backend,
+        backend,
         root.id,
         cp2.commit_id.clone(),
         "Rough Cut v1".to_owned(),
@@ -630,7 +686,7 @@ async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyr
 
     // A third revision.
     std::fs::write(root_dir.join("edit.mov"), b"reel v3 - color pass")?;
-    files::FilesService::checkpoint_now(&backend, root.id, Some("Color pass".to_owned()))
+    files::FilesService::checkpoint_now(backend, root.id, Some("Color pass".to_owned()))
         .await
         .map_err(|e| eyre::eyre!("checkpoint 3: {e:?}"))?;
 
@@ -648,7 +704,6 @@ async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyr
             .map_err(|e| eyre::eyre!("seed divergence: {e:?}"))?;
     }
 
-    backend.shutdown().await;
     println!(
         "  files: Demo Project (3 checkpoints, 1 named version{})",
         if with_divergence {
