@@ -56,7 +56,7 @@ pub async fn dispatch() -> eyre::Result<bool> {
                  task-server admin create-user --org <slug> --email <address> \\\n    \
                  [--name <display>] [--username <handle>] (reads the password from STDIN)\n  \
                  task-server admin seed [--orgs <a,b,c>] [--email <address>] \\\n    \
-                 [--password <pw>] (stands up a local multi-org dev vault with demo data)\n  \
+                 [--password <pw>] [--no-divergence] (stands up a local multi-org dev vault)\n  \
                  task-server admin webdav --org <slug> [--hide <root-id>|--show <root-id>]\n    \
                  (no flag lists the org's File Roots and their WebDAV visibility)\n"
             );
@@ -81,8 +81,7 @@ fn has(args: &[String], name: &str) -> bool {
 
 /// Open one org's auth store directly from the data root.
 async fn open_org_auth(slug: &str) -> eyre::Result<crate::AuthState> {
-    let data_root = org_proto::DataRoot::from_env()
-        .map_err(|e| eyre::eyre!("data root: {e}"))?;
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
     let org_root = data_root.org(slug);
     let db = org_root.auth_db();
     if !db.exists() {
@@ -99,9 +98,11 @@ async fn open_org_auth(slug: &str) -> eyre::Result<crate::AuthState> {
 }
 
 async fn migrate_email(args: &[String]) -> eyre::Result<()> {
-    let (Some(slug), Some(from), Some(to)) =
-        (flag(args, "--org"), flag(args, "--from"), flag(args, "--to"))
-    else {
+    let (Some(slug), Some(from), Some(to)) = (
+        flag(args, "--org"),
+        flag(args, "--from"),
+        flag(args, "--to"),
+    ) else {
         bail!("--org, --from and --to are all required");
     };
     let reason = flag(args, "--reason")
@@ -206,11 +207,7 @@ async fn list_users(args: &[String]) -> eyre::Result<()> {
     }
     println!("{slug}:");
     for u in users {
-        println!(
-            "  {}  {}",
-            u.id,
-            u.email.as_deref().unwrap_or("(no email)")
-        );
+        println!("  {}  {}", u.id, u.email.as_deref().unwrap_or("(no email)"));
     }
     Ok(())
 }
@@ -349,7 +346,9 @@ async fn set_password(args: &[String]) -> eyre::Result<()> {
         .wrap_err("read the new password from stdin")?;
     let new_password = new_password.trim_end_matches(['\n', '\r']).to_owned();
     if new_password.is_empty() {
-        bail!("no password on stdin — pipe it in, e.g. `kubectl exec -i … -- task-server admin set-password …`");
+        bail!(
+            "no password on stdin — pipe it in, e.g. `kubectl exec -i … -- task-server admin set-password …`"
+        );
     }
 
     let auth = open_org_auth(&slug).await?;
@@ -423,11 +422,12 @@ async fn email_history(args: &[String]) -> eyre::Result<()> {
 async fn seed(args: &[String]) -> eyre::Result<()> {
     let email = flag(args, "--email").unwrap_or_else(|| "dev@fasttrackstudio.dev".to_owned());
     let password = flag(args, "--password").unwrap_or_else(|| "password".to_owned());
-    // A divergent root is only browseable by a warm backend today — a
-    // freshly-opened server hangs its first `browse` on it — so seeding
-    // a divergence is off by default. `--with-divergence` opts in for
-    // exercising the resolution UI once that path is warm-safe.
-    let with_divergence = has(args, "--with-divergence");
+    // A Files root with a divergence, so the #267 resolution UI has
+    // something to resolve. On by default (`--no-divergence` opts out);
+    // browsing/resolving a divergent root works fine — the earlier
+    // belief that it wedged a cold server's browse was a misdiagnosis
+    // (see cold_open_browse_on_a_divergent_root_completes).
+    let with_divergence = !has(args, "--no-divergence");
     let orgs: Vec<(String, String)> = match flag(args, "--orgs") {
         Some(list) => list
             .split(',')
@@ -532,7 +532,10 @@ async fn seed_owner(
         .set_user_role_local_trusted(bundle.user.id, Some("admin".to_owned()))
         .await
         .map_err(|e| eyre::eyre!("set admin role: {e:?}"))?;
-    println!("  owner: {email} created ({}) with admin role", bundle.user.id);
+    println!(
+        "  owner: {email} created ({}) with admin role",
+        bundle.user.id
+    );
     Ok(())
 }
 
@@ -586,8 +589,14 @@ async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyr
     let root_dir = files_dir.join("demo-project");
     std::fs::create_dir_all(&root_dir).wrap_err("create demo root dir")?;
     std::fs::write(root_dir.join("edit.mov"), b"reel v1 - assembly cut")?;
-    std::fs::write(root_dir.join("graphics.png"), b"\x89PNG\r\n\x1a\n seeded-demo")?;
-    std::fs::write(root_dir.join("notes.md"), b"# Editorial notes\n\n- assembly cut\n")?;
+    std::fs::write(
+        root_dir.join("graphics.png"),
+        b"\x89PNG\r\n\x1a\n seeded-demo",
+    )?;
+    std::fs::write(
+        root_dir.join("notes.md"),
+        b"# Editorial notes\n\n- assembly cut\n",
+    )?;
 
     let root = files::FilesService::create_root(
         &backend,
@@ -610,9 +619,14 @@ async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyr
     let cp2 = files::FilesService::checkpoint_now(&backend, root.id, Some("Rough cut".to_owned()))
         .await
         .map_err(|e| eyre::eyre!("checkpoint 2: {e:?}"))?;
-    files::FilesService::name_version(&backend, root.id, cp2.commit_id.clone(), "Rough Cut v1".to_owned())
-        .await
-        .map_err(|e| eyre::eyre!("name version: {e:?}"))?;
+    files::FilesService::name_version(
+        &backend,
+        root.id,
+        cp2.commit_id.clone(),
+        "Rough Cut v1".to_owned(),
+    )
+    .await
+    .map_err(|e| eyre::eyre!("name version: {e:?}"))?;
 
     // A third revision.
     std::fs::write(root_dir.join("edit.mov"), b"reel v3 - color pass")?;
@@ -620,8 +634,8 @@ async fn seed_files_demo(org: &org_proto::OrgRoot, with_divergence: bool) -> eyr
         .await
         .map_err(|e| eyre::eyre!("checkpoint 3: {e:?}"))?;
 
-    // A divergence on edit.mov, for the resolution UI — opt-in, since a
-    // divergent root currently wedges a cold server's first browse.
+    // A divergence on edit.mov, for the #267 resolution UI (on by
+    // default; `--no-divergence` skips it).
     if with_divergence {
         backend
             .seed_divergent_file(
