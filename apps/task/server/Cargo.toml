@@ -74,6 +74,7 @@ workstream = { workspace = true, features = ["vox"] }
 # Files RPC surface v1 (issue #259/ADR 0001): create-root / browse /
 # chain / checkpoint-now over `task-files-version-store`.
 files = { workspace = true }
+files-storage = { workspace = true }
 # Entity-CRUD services additionally mounted on `/org/<slug>/vox`.
 # All four expose architect-generated clients agents + the CLI
 # consume directly.

@@ -238,6 +238,15 @@ impl std::fmt::Debug for FilesBackend {
     }
 }
 
+/// A shared-confinement refusal, in this crate's vocabulary. A rejected
+/// or escaping path is a bad request; an I/O fault underneath is one.
+fn confinement(err: task_files_util::PathError) -> Error {
+    match err {
+        task_files_util::PathError::Io(e) => Error::BadRequest(e.to_string()),
+        other => Error::BadRequest(other.to_string()),
+    }
+}
+
 fn to_files_error(err: Error) -> FilesError {
     match err {
         Error::NotFound(m) => FilesError::NotFound(m),
@@ -256,14 +265,16 @@ fn to_files_error(err: Error) -> FilesError {
 /// closure captures a cheap `Clone` of `self` (every field is an
 /// `Arc`/`PathBuf`), never `self` by reference, so it satisfies
 /// `spawn_blocking`'s `'static` bound.
+///
+/// The seam itself lives in `task-files-util`, shared with
+/// `files-storage` — it was a verbatim copy in both (PR #284 review).
 async fn blocking<T, F>(f: F) -> Result<T, FilesError>
 where
     F: FnOnce() -> Result<T, Error> + Send + 'static,
     T: Send + 'static,
 {
-    tokio::task::spawn_blocking(f)
+    task_files_util::blocking(f, |e| Error::Io(std::io::Error::other(e)))
         .await
-        .map_err(|e| FilesError::Io(format!("blocking task panicked: {e}")))?
         .map_err(to_files_error)
 }
 
@@ -483,18 +494,13 @@ impl FilesBackend {
     /// `create_root` (a not-yet-existing marker means `requested`
     /// itself must exist as a directory, checked by the caller first)
     /// and `drive_browse`.
+    ///
+    /// The check itself is `task_files_util::confine`, shared with
+    /// `files-storage`'s grant-prefix enforcement: it was written three
+    /// times across the platform, so a hardening fix to one copy left
+    /// the others escapable (PR #284 review).
     fn confine(&self, requested: &Path) -> Result<PathBuf, Error> {
-        let canonical = requested
-            .canonicalize()
-            .map_err(|e| Error::BadRequest(format!("{}: {e}", requested.display())))?;
-        if canonical != self.confine_root && !canonical.starts_with(&self.confine_root) {
-            return Err(Error::BadRequest(format!(
-                "{}: outside this org's files area ({})",
-                requested.display(),
-                self.confine_root.display()
-            )));
-        }
-        Ok(canonical)
+        task_files_util::confine(requested, &self.confine_root).map_err(confinement)
     }
 
     /// The commit a checkpoint on this root builds on. Media roots read
@@ -923,11 +929,16 @@ impl FilesBackend {
             Err(e) => return Err(Error::Io(e)),
         };
         if let Some(target) = &canonical_target {
-            if target != &root_path && !target.starts_with(&root_path) {
-                return Err(Error::BadRequest(format!(
-                    "subpath escapes the root: {subpath}"
-                )));
-            }
+            // The resident case still goes through the platform's one
+            // confinement check (PR #284 review) rather than an inline
+            // prefix compare — same guard `files-storage` applies to a
+            // Storage grant's prefix, so a hardening fix reaches both.
+            task_files_util::confine(target, &root_path).map_err(|e| match e {
+                task_files_util::PathError::Escapes { .. } => {
+                    Error::BadRequest(format!("subpath escapes the root: {subpath}"))
+                }
+                other => Error::BadRequest(other.to_string()),
+            })?;
             if !std::fs::metadata(target)?.is_dir() {
                 return Err(Error::BadRequest(format!("{subpath}: not a directory")));
             }
