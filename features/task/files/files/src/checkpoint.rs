@@ -35,7 +35,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use jj_lib::backend::{
-    Backend, BackendError, CommitId, CopyHistory, CopyId, Tree, TreeId, TreeValue,
+    Backend, BackendError, CommitId, CopyHistory, CopyId, FileId, Tree, TreeId, TreeValue,
 };
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::ObjectId as _;
@@ -44,9 +44,32 @@ use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 use jj_lib::tree_builder::TreeBuilder;
 use task_files_version_store::chain::lookup_dyn;
 
+use crate::certify::{MidHashHook, Settled, StatGuard};
 use crate::content::ContentStore;
 use crate::error::{Error, Result};
 use crate::scan::LiveFile;
+
+/// Everything one capture commit needs. A struct rather than a dozen
+/// positional arguments because issues #260 and #273 both added to this
+/// call and the next one will too.
+pub struct Capture<'a> {
+    pub repo: &'a Arc<ReadonlyRepo>,
+    pub backend: &'a dyn Backend,
+    /// Commit this capture is parented on: the checkpoint head for a
+    /// checkpoint, the snapshot branch's tip for an auto-snapshot
+    /// (issue #260 — see [`crate::cadence`] on why snapshots branch).
+    pub parent_id: CommitId,
+    pub base_tree_id: TreeId,
+    pub base_tree: &'a Tree,
+    pub disk_files: &'a [LiveFile],
+    pub base_paths: &'a BTreeSet<RepoPathBuf>,
+    pub description: String,
+    /// How many times to re-read a file that changed while it was being
+    /// hashed before requeueing it (issue #260).
+    pub attempts: u32,
+    /// Test seam only — see [`crate::certify::MidHashHook`].
+    pub hook: Option<MidHashHook>,
+}
 
 pub struct CheckpointResult {
     pub repo: Arc<ReadonlyRepo>,
@@ -56,6 +79,12 @@ pub struct CheckpointResult {
     /// checkpoint (a file whose streamed content hashes to the same
     /// `FileId` as the head's is never written).
     pub changed_paths: Vec<String>,
+    /// Paths the certifying scan found still being written — the file
+    /// changed between the stat taken before hashing it and the one
+    /// taken after, on every attempt. They keep their previous
+    /// versioned state in this capture and ride into the next one,
+    /// sorted (issue #260).
+    pub requeued_paths: Vec<String>,
 }
 
 /// Streams every file in `disk_files` into the backend, skipping any whose
@@ -69,27 +98,8 @@ pub struct CheckpointResult {
 /// already tracked in `head_paths`, in which case they keep being
 /// versioned. An Ignore set decides what *starts* being versioned; it
 /// never retroactively deletes history (see [`crate::ignore`]).
-#[allow(clippy::too_many_arguments)]
-pub fn write_checkpoint(
-    repo: &Arc<ReadonlyRepo>,
-    backend: &dyn Backend,
-    parent_id: CommitId,
-    base_tree_id: TreeId,
-    head_tree: &Tree,
-    disk_files: &[LiveFile],
-    head_paths: &BTreeSet<RepoPathBuf>,
-    description: String,
-) -> Result<CheckpointResult> {
-    pollster::block_on(write_checkpoint_async(
-        repo,
-        backend,
-        parent_id,
-        base_tree_id,
-        head_tree,
-        disk_files,
-        head_paths,
-        description,
-    ))
+pub fn write_checkpoint(capture: Capture<'_>) -> Result<CheckpointResult> {
+    pollster::block_on(write_checkpoint_async(capture))
 }
 
 /// A fresh copy-history record for a file with no recorded ancestry, or
@@ -107,21 +117,24 @@ async fn origin_copy_id(backend: &dyn Backend, path: &RepoPath, salt: Vec<u8>) -
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn write_checkpoint_async(
-    repo: &Arc<ReadonlyRepo>,
-    backend: &dyn Backend,
-    parent_id: CommitId,
-    base_tree_id: TreeId,
-    head_tree: &Tree,
-    disk_files: &[LiveFile],
-    head_paths: &BTreeSet<RepoPathBuf>,
-    description: String,
-) -> Result<CheckpointResult> {
+async fn write_checkpoint_async(capture: Capture<'_>) -> Result<CheckpointResult> {
+    let Capture {
+        repo,
+        backend,
+        parent_id,
+        base_tree_id,
+        base_tree: head_tree,
+        disk_files,
+        base_paths: head_paths,
+        description,
+        attempts,
+        hook,
+    } = capture;
     let store = repo.store().clone();
     let content = ContentStore::for_repo(repo, backend)?;
     let mut builder = TreeBuilder::new(store.clone(), base_tree_id);
     let mut changed_paths = Vec::new();
+    let mut requeued_paths = Vec::new();
     let mut present: BTreeSet<RepoPathBuf> = BTreeSet::new();
 
     for file in disk_files {
@@ -151,26 +164,71 @@ async fn write_checkpoint_async(
             )
         };
 
-        // Probe the content id before writing anything: an untouched file
-        // is then skipped without any object write at all (see
-        // `crate::content`). `None` means this backend can't know the id
-        // in advance, and the write below establishes it.
-        let probed = content.probe(&file.disk_path)?;
-        if let (
-            Some(new_id),
-            Some(TreeValue::File {
-                id: old_id,
-                executable: old_exec,
-                ..
-            }),
-        ) = (&probed, &existing)
-            && old_id == new_id
-            && *old_exec == executable
-        {
-            continue;
-        }
+        // Certified read (issue #260): a file being written *right now*
+        // must never be committed torn. Each attempt stats the file,
+        // reads it, and stats again; a file that moved is re-read, and
+        // one that is still moving after `attempts` tries is requeued —
+        // it keeps its previous versioned state here and rides into the
+        // next capture, which is what keeps a running bounce from
+        // failing everyone else's checkpoint.
+        let mut certified: Option<Option<FileId>> = None;
+        for _ in 0..attempts.max(1) {
+            let guard = StatGuard::begin(&file.disk_path)?;
+            if let Some(hook) = &hook {
+                hook(&file.disk_path);
+            }
 
-        let new_id = content.write(repo_path, &file.disk_path, probed).await?;
+            // Probe the content id before writing anything: an untouched
+            // file is then skipped without any object write at all (see
+            // `crate::content`). `None` means this backend can't know
+            // the id in advance, and the write below establishes it.
+            let probed = content.probe(&file.disk_path)?;
+            if let (
+                Some(new_id),
+                Some(TreeValue::File {
+                    id: old_id,
+                    executable: old_exec,
+                    ..
+                }),
+            ) = (&probed, &existing)
+                && old_id == new_id
+                && *old_exec == executable
+            {
+                // Identical to what is already versioned. Whether the
+                // file is settled or not is moot: there is nothing to
+                // record either way.
+                certified = Some(None);
+                break;
+            }
+
+            let new_id = content.write(repo_path, &file.disk_path, probed).await?;
+            match guard.check(&file.disk_path)? {
+                Settled::Stable => {
+                    certified = Some(Some(new_id));
+                    break;
+                }
+                Settled::Moved => continue,
+                Settled::Coarse => {
+                    // Timestamps too coarse to prove anything (the NAS
+                    // case — see `crate::certify`): prove it by content
+                    // instead. Two independent reads that produce the
+                    // same id had no write between them.
+                    let probed = content.probe(&file.disk_path)?;
+                    let again = content.write(repo_path, &file.disk_path, probed).await?;
+                    if again == new_id && guard.check(&file.disk_path)? != Settled::Moved {
+                        certified = Some(Some(new_id));
+                        break;
+                    }
+                }
+            }
+        }
+        let Some(certified) = certified else {
+            requeued_paths.push(repo_path.as_internal_file_string().to_string());
+            continue;
+        };
+        let Some(new_id) = certified else {
+            continue;
+        };
 
         let copy_id = match &existing {
             Some(TreeValue::File {
@@ -205,6 +263,7 @@ async fn write_checkpoint_async(
         }
     }
     changed_paths.sort();
+    requeued_paths.sort();
 
     let new_tree_id = builder
         .write_tree()
@@ -235,5 +294,6 @@ async fn write_checkpoint_async(
         repo: new_repo,
         commit_id,
         changed_paths,
+        requeued_paths,
     })
 }

@@ -342,6 +342,9 @@ table!(WORKSTREAM_STREAM, "workstream-stream", "workstreams/**", [rd "events"]);
 table!(FILES, "files", "files/**", [
     wr "create_root", rd "list_roots", rd "get_root", rd "browse", rd "drive_browse",
     rd "chain", wr "checkpoint_now",
+    // Cadence engine (issue #260): activity hints and the per-root
+    // Ignore set. A hint can cause a capture, so it is a write.
+    wr "hint_activity", rd "snapshots", rd "ignore_set", wr "set_ignore_set",
     // Curation (issue #261). Naming and starting an iteration are
     // ordinary writes; dropping a name and running GC carry an audit
     // line even on allow (`wa`, like every `delete` above) because both

@@ -16,16 +16,24 @@
 //! [`entity`]) referencing `(root id, change id)` — and the GC pass
 //! that resolves those references into the version store's protect
 //! set, which is what makes a named deliverable immortal.
+//!
+//! Issue #260 adds the automatic half: [`cadence`] decides when a
+//! root's session takes an auto-snapshot and when it ends in a Session
+//! checkpoint, [`ignore`] holds the per-root Ignore set that keeps junk
+//! out of the store entirely, and [`certify`] is the stat sandwich that
+//! stops a file being written right now from entering a version torn.
 
 mod backend;
 mod badges;
+pub mod cadence;
+pub mod certify;
 mod checkpoint;
 mod consts;
 mod content;
 mod entity;
 mod error;
 mod git_root;
-mod ignore;
+pub mod ignore;
 mod registry;
 /// Opening (and reopening) a root's version-store repo. Public so a
 /// test — or a future sibling crate, e.g. the cadence engine (#260) —
@@ -35,7 +43,8 @@ pub mod repo_open;
 mod scan;
 mod versions;
 
-pub use backend::FilesBackend;
+pub use backend::{Captured, FilesBackend};
+pub use cadence::{CadenceConfig, CadenceEngine, Clock, SystemClock, TestClock};
 pub use entity::{NamedVersions, ProjectVersions};
 pub use error::{Error, Result};
 pub use files_proto::service;
@@ -43,7 +52,7 @@ pub use versions::VaultVersions;
 
 pub use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    GcReport, NamedVersion, ProjectVersion, RootFlavor, VersionRef,
+    GcReport, NamedVersion, ProjectVersion, RootFlavor, SavePoint, SnapshotInfo, VersionRef,
 };
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor

@@ -46,9 +46,10 @@ pub struct LiveFile {
 /// media flavor is unchanged by this ticket. Symlinks are skipped (v1
 /// has no symlink writer wired through yet).
 ///
-/// `flavor` selects the Ignore set: its seed, and whether the tree's own
-/// `.gitignore` files are chained in as the walk descends (software roots
-/// only — see [`crate::ignore`]).
+/// `ignores` is the root's whole Ignore set already composed — flavor
+/// seed plus the root's stored patterns ([`crate::ignore::for_root`]) —
+/// and `flavor` decides whether the tree's own `.gitignore` files are
+/// chained onto it as the walk descends (software roots only).
 ///
 /// `tracked` is the checkpoint head's path set, and it is what makes
 /// ignoring safe: an ignored directory is normally pruned unvisited (both
@@ -63,11 +64,11 @@ pub struct LiveFile {
 pub fn walk_live_tree(
     root_path: &Path,
     flavor: RootFlavor,
+    ignores: &Arc<GitIgnoreFile>,
     tracked: &BTreeSet<RepoPathBuf>,
 ) -> Result<Vec<LiveFile>> {
     let mut out = Vec::new();
-    let ignores = ignore::seed(flavor)?;
-    let ignores = chain_dir_gitignore(&ignores, RepoPath::root(), root_path, flavor)?;
+    let ignores = chain_dir_gitignore(ignores, RepoPath::root(), root_path, flavor)?;
     let ctx = WalkCtx { flavor, tracked };
     walk_dir(root_path, RepoPath::root(), &ignores, false, &ctx, &mut out)?;
     Ok(out)

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::model::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, NamedVersion, ProjectVersion,
-    VersionRef,
+    SnapshotInfo, VersionRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
@@ -41,6 +41,9 @@ pub enum FilesEvent {
     RootCreated(FileRootInfo),
     /// A root's session ended in a certified checkpoint.
     Checkpointed(CheckpointInfo),
+    /// The cadence engine took an ephemeral auto-snapshot during
+    /// activity (issue #260). Not a version — see [`SnapshotInfo`].
+    Snapshotted(SnapshotInfo),
     /// A version was curated with a name (issue #261).
     VersionNamed(NamedVersion),
     /// A Named Version's curation was dropped — the entity that was
@@ -95,16 +98,60 @@ pub trait FilesService {
     async fn chain(&self, root_id: Uuid, path: String) -> Result<Vec<ChainEntry>, FilesError>;
 
     /// Scan-certify a Session checkpoint right now (glossary: the
-    /// explicit-trigger half of "Session checkpoint" — the
-    /// quiescence/debounce cadence engine is future work): full-scan
-    /// the root's live tree, diff against the current head, and write
-    /// one commit. `description` defaults to `"checkpoint now"` when
-    /// `None`.
+    /// explicit-trigger half of "Session checkpoint" — the other half
+    /// is per-root quiescence, driven by the cadence engine of issue
+    /// #260): full-scan the root's live tree, diff against the current
+    /// head, and write one commit. `description` defaults to
+    /// `"checkpoint now"` when `None`. Ends the root's open session, so
+    /// a quiescence checkpoint never lands straight on top of an
+    /// explicit one.
     async fn checkpoint_now(
         &self,
         root_id: Uuid,
         description: Option<String>,
     ) -> Result<CheckpointInfo, FilesError>;
+
+    /// Feed the cadence engine activity hints for `root_id` — the
+    /// root-relative paths a watcher saw written (issue #260). Hints
+    /// are exactly that: they open/extend a session and mark save
+    /// points, but nothing they claim is trusted as content — a full
+    /// stat-scan certifies every capture. The server-side watcher calls
+    /// the same engine path; this method exists so a sync daemon (or a
+    /// DAW-side integration that knows it just saved) can report
+    /// activity the server can't see. Paths matching the root's Ignore
+    /// set are dropped; the return value is how many hints survived
+    /// that filter.
+    async fn hint_activity(&self, root_id: Uuid, paths: Vec<String>) -> Result<u32, FilesError>;
+
+    /// The root's auto-snapshots (glossary), newest first — the
+    /// ephemeral captures a mid-session mistake is recovered from.
+    /// Never version-chain entries.
+    async fn snapshots(&self, root_id: Uuid) -> Result<Vec<SnapshotInfo>, FilesError>;
+
+    /// The root's **editable** Ignore-set patterns (glossary: the
+    /// patterns that are neither versioned nor synced). Gitignore
+    /// syntax. These are layered *on top of* the root's flavor seed —
+    /// REAPER backup/peak churn on a media root, build scaffolding and
+    /// stray heavy media on a software root — which is why an untouched
+    /// root reports an empty list while still ignoring plenty.
+    async fn ignore_set(&self, root_id: Uuid) -> Result<Vec<String>, FilesError>;
+
+    /// Replace the root's editable Ignore-set patterns, returning them
+    /// as stored (trimmed and deduplicated; order is preserved, because
+    /// in gitignore the last matching rule wins and a `!` re-include
+    /// must be able to follow what it re-includes). Fails with
+    /// [`FilesError::BadRequest`] on a pattern carrying a line break or
+    /// written as a comment — both would mean something other than the
+    /// one rule it claims to be.
+    ///
+    /// Already-versioned paths that a new pattern now covers are not
+    /// retroactively removed from history — an Ignore set governs what
+    /// *starts* being versioned; it never ends it.
+    async fn set_ignore_set(
+        &self,
+        root_id: Uuid,
+        patterns: Vec<String>,
+    ) -> Result<Vec<String>, FilesError>;
 
     /// Curate `commit_id` in `root_id` as a [`NamedVersion`] — writes
     /// the Vault entity that references `(root id, change id)`. The

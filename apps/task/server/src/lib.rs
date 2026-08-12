@@ -1195,6 +1195,13 @@ pub(crate) async fn build_org_state(
         // Placement lane. The coordinator is the deployment's, owned by
         // `AppState` and passed in — this is just this org's view of it.
         let storage = files_storage::StorageBackend::new(storage.clone(), org_root.slug());
+        // The Files cadence engine (issue #260): one driver task ticks
+        // the engine, and every root gets an inotify watch feeding it
+        // activity hints. The interval only bounds how promptly a due
+        // capture happens — the cadence itself (10-minute auto-
+        // snapshots, 30-minute quiescence) is the engine's.
+        files.enable_watching().await;
+        files.spawn_cadence_driver(std::time::Duration::from_secs(30));
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.

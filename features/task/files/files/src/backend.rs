@@ -42,7 +42,7 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use files_proto::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, FilesError, FilesEvent, FilesService,
-    GcReport, NamedVersion, ProjectVersion, RootFlavor, VersionRef,
+    GcReport, NamedVersion, ProjectVersion, RootFlavor, SavePoint, SnapshotInfo, VersionRef,
 };
 use jj_lib::backend::{ChangeId, CommitId};
 use jj_lib::object_id::{HexPrefix, ObjectId as _, PrefixResolution};
@@ -52,9 +52,17 @@ use task_files_version_store::VersionStoreBackend;
 use uuid::Uuid;
 
 use crate::badges;
+use crate::cadence::journal::{CheckpointRecord, SnapshotRecord};
+use crate::cadence::{
+    ActivitySink, CadenceConfig, CadenceEngine, Clock, Due, DueKind, Journal, RootWatcher,
+    SystemClock,
+};
+use crate::certify::MidHashHook;
+use crate::checkpoint::Capture;
 use crate::consts::{GIT_DIR, MARKER_FILE, STORE_DIR};
 use crate::error::Error;
 use crate::git_root;
+use crate::ignore;
 use crate::registry::Registry;
 use crate::repo_open;
 use crate::scan;
@@ -75,6 +83,103 @@ const DEFAULT_GC_KEEP_NEWER_SECS: u64 = 60;
 struct RootRuntime {
     repo: Arc<ReadonlyRepo>,
     head: CommitId,
+    /// Tip of the auto-snapshot branch hanging off `head`, or `None`
+    /// when the session has taken none since the last checkpoint
+    /// (issue #260 — snapshots branch off the checkpoint line rather
+    /// than extending it, see [`crate::cadence`]).
+    snapshot_head: Option<CommitId>,
+}
+
+/// Which kind of capture a write is — the one difference that decides
+/// what it parents on and how it is recorded (issue #260).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureKind {
+    /// Ephemeral auto-snapshot: parented on the snapshot branch, never
+    /// a chain entry.
+    Snapshot,
+    /// Certified Session checkpoint: parented on the checkpoint head.
+    Checkpoint,
+}
+
+impl From<DueKind> for CaptureKind {
+    fn from(kind: DueKind) -> Self {
+        match kind {
+            DueKind::Snapshot => Self::Snapshot,
+            DueKind::Checkpoint => Self::Checkpoint,
+        }
+    }
+}
+
+/// What one performed capture produced — the wire payload plus which
+/// kind it was, so [`FilesBackend::tick`] can report a cadence pass.
+#[derive(Debug, Clone)]
+pub enum Captured {
+    Snapshot(SnapshotInfo),
+    Checkpoint(CheckpointInfo),
+}
+
+/// Exactly the state a watcher hint needs: which roots exist, their
+/// Ignore sets, and the cadence engine to report into.
+///
+/// This is a *slice* of [`FilesBackend`] rather than a clone of it, and
+/// deliberately so. A watcher lives in the backend's `watchers` map and
+/// its callback holds this sink; handing it a whole backend clone would
+/// close a reference cycle (watchers map → watcher → callback → backend
+/// clone → the same watchers map `Arc`) that no drop could ever break,
+/// so a released org would leak its backend and keep watching (PR #283
+/// review). `Hints` holds no watcher map and no driver handle, so the
+/// cycle simply does not exist.
+struct Hints {
+    registry: Arc<Registry>,
+    ignores: Arc<Mutex<HashMap<Uuid, Arc<jj_lib::gitignore::GitIgnoreFile>>>>,
+    cadence: Arc<CadenceEngine>,
+}
+
+impl Hints {
+    /// The root's whole Ignore set (flavor seed + its stored patterns),
+    /// compiled on first touch and cached.
+    fn ignore_of(
+        ignores: &Mutex<HashMap<Uuid, Arc<jj_lib::gitignore::GitIgnoreFile>>>,
+        root: &FileRootInfo,
+    ) -> Result<Arc<jj_lib::gitignore::GitIgnoreFile>, Error> {
+        if let Some(set) = ignores
+            .lock()
+            .expect("ignore cache lock poisoned")
+            .get(&root.id)
+        {
+            return Ok(set.clone());
+        }
+        let set = ignore::for_root(&repo_open::store_dir(Path::new(&root.path)), root.flavor)?;
+        ignores
+            .lock()
+            .expect("ignore cache lock poisoned")
+            .insert(root.id, set.clone());
+        Ok(set)
+    }
+
+    /// Note `paths` as activity on `root_id`, returning how many
+    /// survived the root's Ignore set.
+    fn note(&self, root_id: Uuid, paths: &[String]) -> Result<u32, Error> {
+        let root = self
+            .registry
+            .get(root_id)
+            .ok_or_else(|| Error::NotFound(root_id.to_string()))?;
+        let ignores = Self::ignore_of(&self.ignores, &root)?;
+        Ok(self
+            .cadence
+            .note_activity(root_id, paths, &ignores, root.flavor))
+    }
+}
+
+/// Watcher hints land here (see [`crate::cadence::watcher`]): the
+/// backend is what knows a root's flavor and Ignore set, so it is what
+/// turns a raw path list into cadence activity.
+impl ActivitySink for Hints {
+    fn note_activity(&self, root_id: Uuid, paths: Vec<String>) {
+        if let Err(err) = self.note(root_id, &paths) {
+            tracing::debug!(%root_id, %err, "files watcher hint dropped");
+        }
+    }
 }
 
 #[derive(Clone, architect::HasDispatcher)]
@@ -101,6 +206,21 @@ pub struct FilesBackend {
     /// snapshotted its protect set). Created lazily, never removed
     /// (roots are not deleted in v1).
     root_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
+    /// The cadence state machine (issue #260): when each root's session
+    /// snapshots, and when it ends in a checkpoint.
+    cadence: Arc<CadenceEngine>,
+    /// Per-root Ignore sets, compiled on first touch.
+    ignores: Arc<Mutex<HashMap<Uuid, Arc<jj_lib::gitignore::GitIgnoreFile>>>>,
+    /// Live filesystem watchers, one per watched root.
+    watchers: Arc<Mutex<HashMap<Uuid, RootWatcher>>>,
+    /// Set by [`FilesBackend::enable_watching`]: newly created roots
+    /// start watched too, rather than only on the next restart.
+    watch_new_roots: Arc<std::sync::atomic::AtomicBool>,
+    /// The cadence driver task, kept so it can be stopped — see
+    /// [`FilesBackend::spawn_cadence_driver`].
+    driver: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Test seam — see [`FilesBackend::set_mid_hash_hook`].
+    hook: Arc<Mutex<Option<MidHashHook>>>,
     /// Fan-out hub behind `#[subscribe] fn events` — every successful
     /// root creation / checkpoint publishes here. Sliding mailbox: a
     /// slow subscriber loses its *oldest* queued events, correct for
@@ -168,6 +288,24 @@ impl FilesBackend {
         data_dir: impl Into<PathBuf>,
         vault_root: impl Into<PathBuf>,
     ) -> Result<Self, FilesError> {
+        Self::with_cadence(
+            data_dir,
+            vault_root,
+            CadenceConfig::default(),
+            Arc::new(SystemClock),
+        )
+    }
+
+    /// A backend whose cadence engine (issue #260) runs on `config` and
+    /// `clock`. Tests use this with a [`crate::cadence::TestClock`]:
+    /// quiescence and debounce are simulated, never slept (spec #255's
+    /// Testing Decisions).
+    pub fn with_cadence(
+        data_dir: impl Into<PathBuf>,
+        vault_root: impl Into<PathBuf>,
+        config: CadenceConfig,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, FilesError> {
         let data_dir = data_dir.into();
         let registry = Registry::open(&data_dir).map_err(to_files_error)?;
         let confine_root = data_dir
@@ -180,8 +318,30 @@ impl FilesBackend {
             versions: VaultVersions::new(vault_root),
             repos: Arc::new(Mutex::new(HashMap::new())),
             root_locks: Arc::new(Mutex::new(HashMap::new())),
+            cadence: Arc::new(CadenceEngine::new(config, clock)),
+            ignores: Arc::new(Mutex::new(HashMap::new())),
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+            watch_new_roots: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            driver: Arc::new(Mutex::new(None)),
+            hook: Arc::new(Mutex::new(None)),
             events: architect::PubSub::sliding(256),
         })
+    }
+
+    /// The cadence engine driving this backend's sessions.
+    #[must_use]
+    pub fn cadence(&self) -> &Arc<CadenceEngine> {
+        &self.cadence
+    }
+
+    /// Install the certification test seam (see
+    /// [`crate::certify::MidHashHook`]): a callback run between the
+    /// pre-read `stat` of each file and the read itself, so a test can
+    /// make a file change mid-hash deterministically. Production never
+    /// calls this.
+    #[doc(hidden)]
+    pub fn set_mid_hash_hook(&self, hook: Option<MidHashHook>) {
+        *self.hook.lock().expect("hook lock poisoned") = hook;
     }
 
     #[must_use]
@@ -262,7 +422,15 @@ impl FilesBackend {
     /// already durable — but iroh-blobs' `FsStore` may hold buffered
     /// writes / file-backed resources open until this (or the process)
     /// actually exits; see `ChunkStore::shutdown`'s own doc.
+    /// Also stops the cadence (issue #260): the driver task is aborted
+    /// and every watcher dropped, so a backend that has been shut down
+    /// is inert rather than still ticking against a store the next
+    /// backend is about to open (PR #283 review).
     pub async fn shutdown(&self) {
+        if let Some(driver) = self.driver.lock().expect("driver lock poisoned").take() {
+            driver.abort();
+        }
+        self.watchers.lock().expect("watcher map poisoned").clear();
         let repos: Vec<Arc<ReadonlyRepo>> = self
             .repos
             .lock()
@@ -376,15 +544,97 @@ impl FilesBackend {
             (Some((repo, _)), RootFlavor::Software) => git_root::import_from_git(repo)?,
             (None, _) => repo_open::open_or_init_repo(Path::new(&root.path), root.flavor)?,
         };
-        let head = Self::head_of(&repo, root.flavor)?;
+        let (head, snapshot_head) = Self::heads_of(&repo, root)?;
         self.repos.lock().expect("repo cache lock poisoned").insert(
             root.id,
             RootRuntime {
                 repo: repo.clone(),
                 head: head.clone(),
+                snapshot_head,
             },
         );
         Ok((repo, head))
+    }
+
+    /// The root's `(checkpoint head, snapshot-branch tip)`.
+    ///
+    /// The cadence journal, not the view, is what says which head is the
+    /// *checkpoint* head (issue #260): a root mid-session carries a
+    /// snapshot branch alongside its checkpoint line, so "the first view
+    /// head" is a coin flip between them — and picking the snapshot
+    /// would put ephemeral captures straight into every version chain,
+    /// which is exactly what branching them was for. The journal is also
+    /// the right authority across processes: whoever writes a checkpoint
+    /// rewrites it atomically in the same breath, so a second writer's
+    /// checkpoint is visible here the moment it lands.
+    ///
+    /// Media only. Git is a software root's authority — [`head_of`]
+    /// already follows its checked-out branch, and that flavor takes no
+    /// auto-snapshots at all (see [`FilesBackend::capture_inner`]).
+    fn heads_of(
+        repo: &Arc<ReadonlyRepo>,
+        root: &FileRootInfo,
+    ) -> Result<(CommitId, Option<CommitId>), Error> {
+        if root.flavor == RootFlavor::Software {
+            return Ok((Self::head_of(repo, root.flavor)?, None));
+        }
+        let journal = Self::journal_of(root)?;
+        let snapshot_head = journal
+            .snapshot_head
+            .as_deref()
+            .and_then(CommitId::try_from_hex);
+        let Some(recorded) = journal
+            .checkpoint_head
+            .as_deref()
+            .and_then(CommitId::try_from_hex)
+        else {
+            // No journal (a root that has never captured, or one whose
+            // journal was lost): the view is all there is.
+            return Ok((Self::head_of(repo, root.flavor)?, snapshot_head));
+        };
+
+        // The journal names where *our* checkpoint line was; the view
+        // may have moved past it. A writer with no journal of its own —
+        // raw `jj`, a test writing straight through the `Backend` trait
+        // — leaves a view head that descends from the recorded one, and
+        // that head is the honest answer (#286's "a checkpoint written
+        // behind the cache" case). Snapshot commits are excluded by id
+        // rather than by ancestry: they descend from the recorded head
+        // too, and following one would put every ephemeral capture back
+        // into the version chain.
+        let known_snapshots: std::collections::HashSet<String> = journal
+            .snapshots
+            .iter()
+            .map(|s| s.snapshot_id.clone())
+            .chain(journal.snapshot_head.clone())
+            .collect();
+        let mut head = recorded;
+        for candidate in repo.view().heads() {
+            if *candidate == head || known_snapshots.contains(&candidate.hex()) {
+                continue;
+            }
+            let descends = pollster::block_on(repo.index().is_ancestor(&head, candidate))
+                .map_err(|e| Error::Repo(format!("comparing heads: {e}")))?;
+            if descends {
+                head = candidate.clone();
+            }
+        }
+        Ok((head, snapshot_head))
+    }
+
+    /// The root's cadence journal (issue #260).
+    fn journal_of(root: &FileRootInfo) -> Result<Journal, Error> {
+        Journal::load(&repo_open::store_dir(Path::new(&root.path)))
+    }
+
+    /// The tip of the root's auto-snapshot branch, if its session has
+    /// taken one since the last checkpoint.
+    fn snapshot_head_of(&self, root_id: Uuid) -> Option<CommitId> {
+        self.repos
+            .lock()
+            .expect("repo cache lock poisoned")
+            .get(&root_id)
+            .and_then(|rt| rt.snapshot_head.clone())
     }
 
     /// [`FilesBackend::ensure_repo`], but re-read from the op log
@@ -421,8 +671,8 @@ impl FilesBackend {
         }
         let repo = pollster::block_on(cached.reload_at_head())
             .map_err(|e| Error::Repo(format!("reloading {} at head: {e}", root.id)))?;
-        let head = Self::head_of(&repo, root.flavor)?;
-        self.set_head(root.id, repo.clone(), head.clone());
+        let (head, snapshot_head) = Self::heads_of(&repo, root)?;
+        self.set_heads(root.id, repo.clone(), head.clone(), snapshot_head);
         Ok((repo, head))
     }
 
@@ -466,16 +716,45 @@ impl FilesBackend {
                 None => return Ok(None),
             },
         };
-        let head = Self::head_of(&repo, root.flavor)?;
-        self.set_head(root.id, repo.clone(), head.clone());
+        let (head, snapshot_head) = Self::heads_of(&repo, root)?;
+        self.set_heads(root.id, repo.clone(), head.clone(), snapshot_head);
         Ok(Some((repo, head)))
     }
 
+    /// Advance the cached checkpoint head, leaving the snapshot branch
+    /// where it is — every caller here is a checkpoint-line move, and a
+    /// mid-session reload must not forget the session's snapshots.
     fn set_head(&self, root_id: Uuid, repo: Arc<ReadonlyRepo>, head: CommitId) {
-        self.repos
-            .lock()
-            .expect("repo cache lock poisoned")
-            .insert(root_id, RootRuntime { repo, head });
+        let mut repos = self.repos.lock().expect("repo cache lock poisoned");
+        let snapshot_head = repos.get(&root_id).and_then(|rt| rt.snapshot_head.clone());
+        repos.insert(
+            root_id,
+            RootRuntime {
+                repo,
+                head,
+                snapshot_head,
+            },
+        );
+    }
+
+    /// Set both heads at once — what a capture does (issue #260): a
+    /// checkpoint moves the line and closes the branch, a snapshot
+    /// leaves the line alone and extends the branch.
+    fn set_heads(
+        &self,
+        root_id: Uuid,
+        repo: Arc<ReadonlyRepo>,
+        head: CommitId,
+        snapshot_head: Option<CommitId>,
+    ) {
+        self.repos.lock().expect("repo cache lock poisoned").insert(
+            root_id,
+            RootRuntime {
+                repo,
+                head,
+                snapshot_head,
+            },
+        );
     }
 
     fn root_lock(&self, root_id: Uuid) -> Arc<Mutex<()>> {
@@ -546,7 +825,19 @@ impl FilesBackend {
             project_version: None,
         };
         self.registry.insert(root.clone())?;
-        self.set_head(id, repo, head);
+        self.set_heads(id, repo, head, None);
+        // Compile the Ignore set now, at creation, so the very first
+        // capture already excludes the flavor's junk (glossary: "seeded
+        // by root flavor, edited per root").
+        self.ignore_of(&root)?;
+        if self
+            .watch_new_roots
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            if let Err(err) = self.watch_root(id) {
+                tracing::warn!(root_id = %id, ?err, "files: new root not watched");
+            }
+        }
         self.publish(FilesEvent::RootCreated(root.clone()));
         Ok(root)
     }
@@ -746,6 +1037,12 @@ impl FilesBackend {
                 "reading Named Versions failed; serving the chain uncurated"
             ),
         }
+        // Save points are the automatic counterpart of names: also
+        // metadata the commit graph does not hold (glossary — "display
+        // metadata, not a version"), joined on here from the root's
+        // cadence journal, which records them against the checkpoint
+        // that closed the session they were marked in (issue #260).
+        let journal = Self::journal_of(&root).unwrap_or_default();
         Ok(entries
             .into_iter()
             .map(|e| {
@@ -753,6 +1050,7 @@ impl FilesBackend {
                 let mut names = names_by_commit.get(&commit_id).cloned().unwrap_or_default();
                 names.sort();
                 ChainEntry {
+                    save_points: journal.save_points_for(&commit_id),
                     commit_id,
                     path: e.path.as_internal_file_string().to_string(),
                     file_id: e.file_id.hex(),
@@ -1066,13 +1364,28 @@ impl FilesBackend {
         })
     }
 
-    fn checkpoint_now_inner(
+    /// The one write path behind every capture (issue #260): an
+    /// explicit `checkpoint_now`, a quiescence checkpoint, and a
+    /// mid-session auto-snapshot all come through here. A checkpoint
+    /// parents on the checkpoint head; a snapshot parents on the
+    /// snapshot branch's tip (or, for a session's first, on the
+    /// checkpoint head — which is what starts the branch). See
+    /// [`crate::cadence`] on why snapshots branch rather than extend.
+    ///
+    /// Auto-snapshots are a **media-flavor** concept: a software root's
+    /// history is git's, and hanging ephemeral commits off a branch a
+    /// developer shares would be a surprise in `git log`. The cadence
+    /// engine still checkpoints software roots at quiescence — that is
+    /// an ordinary commit on the checked-out branch.
+    fn capture_inner(
         &self,
         root_id: Uuid,
-        description: Option<String>,
-    ) -> Result<CheckpointInfo, Error> {
+        kind: CaptureKind,
+        description: String,
+        save_points: Vec<SavePoint>,
+    ) -> Result<Captured, Error> {
         let root = self.get_root_info(root_id)?;
-        // Serialize checkpoints on this root: held across the whole
+        // Serialize captures on this root: held across the whole
         // read-diff-commit-publish sequence so two concurrent callers
         // can't both read the same head and each commit on top of it
         // (PR #280 review) — the second one now genuinely observes the
@@ -1090,49 +1403,335 @@ impl FilesBackend {
         // concrete backend (issue #273).
         let backend = repo.store().backend();
 
-        let head_commit = pollster::block_on(backend.read_commit(&head))?;
-        let head_tree_id = head_commit.root_tree.clone().into_resolved().map_err(|_| {
-            Error::Repo("checkpoint onto a conflicted tree is unsupported (v1)".into())
-        })?;
-        let head_tree = pollster::block_on(backend.read_tree(RepoPath::root(), &head_tree_id))?;
-        let mut head_paths: BTreeSet<RepoPathBuf> = BTreeSet::new();
+        let kind = match (kind, root.flavor) {
+            // A snapshot on a software root would be a stray commit in
+            // someone's git history: checkpoint instead (see the doc).
+            (CaptureKind::Snapshot, RootFlavor::Software) => CaptureKind::Checkpoint,
+            (kind, _) => kind,
+        };
+        let snapshot_head = self.snapshot_head_of(root_id);
+        let parent_id = match kind {
+            CaptureKind::Checkpoint => head.clone(),
+            CaptureKind::Snapshot => snapshot_head.unwrap_or_else(|| head.clone()),
+        };
+
+        let parent_commit = pollster::block_on(backend.read_commit(&parent_id))?;
+        let base_tree_id = parent_commit
+            .root_tree
+            .clone()
+            .into_resolved()
+            .map_err(|_| {
+                Error::Repo("capturing onto a conflicted tree is unsupported (v1)".into())
+            })?;
+        let base_tree = pollster::block_on(backend.read_tree(RepoPath::root(), &base_tree_id))?;
+        let mut base_paths: BTreeSet<RepoPathBuf> = BTreeSet::new();
         pollster::block_on(scan::walk_tree_paths(
             backend,
-            &head_tree,
+            &base_tree,
             RepoPath::root(),
-            &mut head_paths,
+            &mut base_paths,
         ))?;
 
-        let disk_files = scan::walk_live_tree(Path::new(&root.path), root.flavor, &head_paths)?;
-        let description = description.unwrap_or_else(|| "checkpoint now".to_string());
-        let result = crate::checkpoint::write_checkpoint(
-            &repo,
+        // The certifying full scan, with the root's Ignore set applied
+        // at enumeration: an ignored *untracked* path is never offered
+        // to the store, while an ignored path that is already tracked
+        // keeps being versioned (see `crate::ignore`).
+        let ignores = self.ignore_of(&root)?;
+        let disk_files =
+            scan::walk_live_tree(Path::new(&root.path), root.flavor, &ignores, &base_paths)?;
+        let hook = self.hook.lock().expect("hook lock poisoned").clone();
+        let result = crate::checkpoint::write_checkpoint(Capture {
+            repo: &repo,
             backend,
-            head,
-            head_tree_id,
-            &head_tree,
-            &disk_files,
-            &head_paths,
-            description.clone(),
-        )?;
-        // Software roots are colocated git: move the checked-out branch
-        // and rewrite the index so the commit we just wrote is what
-        // `git log` / `git status` / `git push` see (issue #273).
-        let repo = match root.flavor {
-            RootFlavor::Software => git_root::publish_checkpoint(result.repo, &result.commit_id)?,
-            RootFlavor::Media => result.repo,
-        };
-        self.set_head(root_id, repo, result.commit_id.clone());
+            parent_id,
+            base_tree_id,
+            base_tree: &base_tree,
+            disk_files: &disk_files,
+            base_paths: &base_paths,
+            description: description.clone(),
+            attempts: self.cadence.config().certify_attempts,
+            hook,
+        })?;
 
-        let info = CheckpointInfo {
-            root_id,
-            commit_id: result.commit_id.hex(),
-            description,
-            at: Utc::now(),
-            changed_paths: result.changed_paths,
+        let at = self.cadence.now();
+        let commit_hex = result.commit_id.hex();
+        let store_dir = repo_open::store_dir(Path::new(&root.path));
+        let mut journal = Journal::load(&store_dir)?;
+
+        let captured = match kind {
+            CaptureKind::Snapshot => {
+                let checkpoint_head = head.hex();
+                self.set_heads(root_id, result.repo, head, Some(result.commit_id));
+                journal.record_snapshot(
+                    SnapshotRecord {
+                        snapshot_id: commit_hex.clone(),
+                        at,
+                        changed_paths: result.changed_paths.clone(),
+                        save_points: save_points.clone(),
+                    },
+                    &checkpoint_head,
+                    at,
+                );
+                Captured::Snapshot(SnapshotInfo {
+                    root_id,
+                    snapshot_id: commit_hex,
+                    at,
+                    changed_paths: result.changed_paths,
+                    save_points,
+                })
+            }
+            CaptureKind::Checkpoint => {
+                // Software roots are colocated git: move the checked-out
+                // branch and rewrite the index so the commit we just
+                // wrote is what `git log` / `git status` / `git push`
+                // see (issue #273).
+                let repo = match root.flavor {
+                    RootFlavor::Software => {
+                        git_root::publish_checkpoint(result.repo, &result.commit_id)?
+                    }
+                    RootFlavor::Media => result.repo,
+                };
+                self.set_heads(root_id, repo, result.commit_id.clone(), None);
+                journal.record_checkpoint(CheckpointRecord {
+                    commit_id: commit_hex.clone(),
+                    at,
+                    save_points: save_points.clone(),
+                    requeued_paths: result.requeued_paths.clone(),
+                });
+                Captured::Checkpoint(CheckpointInfo {
+                    root_id,
+                    commit_id: commit_hex,
+                    description,
+                    at,
+                    changed_paths: result.changed_paths,
+                    save_points,
+                    requeued_paths: result.requeued_paths,
+                })
+            }
         };
-        self.publish(FilesEvent::Checkpointed(info.clone()));
-        Ok(info)
+        journal.save(&store_dir)?;
+
+        self.publish(match &captured {
+            Captured::Snapshot(info) => FilesEvent::Snapshotted(info.clone()),
+            Captured::Checkpoint(info) => FilesEvent::Checkpointed(info.clone()),
+        });
+        Ok(captured)
+    }
+
+    fn checkpoint_now_inner(
+        &self,
+        root_id: Uuid,
+        description: Option<String>,
+    ) -> Result<CheckpointInfo, Error> {
+        // An explicit checkpoint certifies the same live tree a
+        // quiescence checkpoint would, so it ends the session: the save
+        // points it collected ride onto this checkpoint, and the root
+        // goes quiet until someone writes again.
+        //
+        // The session comes out of the engine *before* the capture that
+        // needs its save points, so a failed capture has to put it back
+        // — the out-of-band twin of `tick`'s `cadence.failed`. Without
+        // this, a transient I/O error would silently cost the root both
+        // its save points and its pending quiescence checkpoint (PR
+        // #283 review).
+        let ended = self.cadence.end_session(root_id);
+        let save_points = ended.save_points();
+        let description = description.unwrap_or_else(|| "checkpoint now".to_string());
+        let captured =
+            match self.capture_inner(root_id, CaptureKind::Checkpoint, description, save_points) {
+                Ok(captured) => captured,
+                Err(err) => {
+                    self.cadence.restore_session(ended);
+                    return Err(err);
+                }
+            };
+        match captured {
+            Captured::Checkpoint(info) => Ok(info),
+            Captured::Snapshot(_) => unreachable!("a checkpoint capture returns a checkpoint"),
+        }
+    }
+
+    /// The root's whole Ignore set, compiled on first touch and cached.
+    fn ignore_of(
+        &self,
+        root: &FileRootInfo,
+    ) -> Result<Arc<jj_lib::gitignore::GitIgnoreFile>, Error> {
+        Hints::ignore_of(&self.ignores, root)
+    }
+
+    /// The registry + Ignore-set + cadence slice of this backend, as an
+    /// [`ActivitySink`] a watcher can hold.
+    fn hints(&self) -> Arc<Hints> {
+        Arc::new(Hints {
+            registry: self.registry.clone(),
+            ignores: self.ignores.clone(),
+            cadence: self.cadence.clone(),
+        })
+    }
+
+    fn snapshots_inner(&self, root_id: Uuid) -> Result<Vec<SnapshotInfo>, Error> {
+        let root = self.get_root_info(root_id)?;
+        Ok(Self::journal_of(&root)?.snapshot_infos(root_id))
+    }
+
+    fn hint_activity_inner(&self, root_id: Uuid, paths: Vec<String>) -> Result<u32, Error> {
+        self.hints().note(root_id, &paths)
+    }
+
+    fn ignore_set_inner(&self, root_id: Uuid) -> Result<Vec<String>, Error> {
+        let root = self.get_root_info(root_id)?;
+        ignore::stored_patterns(&repo_open::store_dir(Path::new(&root.path)))
+    }
+
+    fn set_ignore_set_inner(
+        &self,
+        root_id: Uuid,
+        patterns: Vec<String>,
+    ) -> Result<Vec<String>, Error> {
+        let root = self.get_root_info(root_id)?;
+        let stored = ignore::save_patterns(&repo_open::store_dir(Path::new(&root.path)), patterns)?;
+        // Drop the compiled cache so the next capture (and the next
+        // hint) matches against the edit.
+        self.ignores
+            .lock()
+            .expect("ignore cache lock poisoned")
+            .remove(&root_id);
+        Ok(stored)
+    }
+
+    /// Run one cadence pass: perform every capture that has fallen due
+    /// as of the engine's clock. This is what the driver task calls on
+    /// a timer in production, and what a test calls after advancing its
+    /// [`crate::cadence::TestClock`] — the same code path either way.
+    pub async fn tick(&self) -> Vec<Captured> {
+        let mut performed = Vec::new();
+        for due in self.cadence.take_due() {
+            match self.perform_due(&due).await {
+                Ok(captured) => {
+                    self.cadence.completed(&due);
+                    performed.push(captured);
+                }
+                Err(err) => {
+                    // Nothing is consumed on failure: the same capture
+                    // falls due again next tick, so a transient I/O
+                    // error costs a tick, not a session.
+                    tracing::warn!(root_id = %due.root_id, kind = ?due.kind, %err, "files cadence capture failed");
+                    self.cadence.failed(&due);
+                }
+            }
+        }
+        performed
+    }
+
+    async fn perform_due(&self, due: &Due) -> Result<Captured, FilesError> {
+        let this = self.clone();
+        let due = due.clone();
+        let description = match due.kind {
+            DueKind::Snapshot => "auto-snapshot".to_string(),
+            DueKind::Checkpoint => "session checkpoint".to_string(),
+        };
+        blocking(move || {
+            this.capture_inner(due.root_id, due.kind.into(), description, due.save_points)
+        })
+        .await
+    }
+
+    /// Drive the cadence forever on `interval` — one background task
+    /// per backend, the production counterpart of a test calling
+    /// [`FilesBackend::tick`] by hand. The interval only bounds how
+    /// promptly a due capture happens; the cadence itself is the
+    /// engine's, so a coarse interval is cheap.
+    ///
+    /// The handle is kept on the backend (and aborted by
+    /// [`FilesBackend::shutdown`], or by a second call to this) rather
+    /// than left to the caller: two drivers ticking one on-disk store
+    /// would resurrect exactly the dual-capture race PR #280 closed, and
+    /// a driver nobody holds is a driver nobody can stop (PR #283
+    /// review).
+    pub fn spawn_cadence_driver(&self, interval: std::time::Duration) {
+        let this = self.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(interval).await;
+                let _ = this.tick().await;
+            }
+        });
+        if let Some(previous) = self
+            .driver
+            .lock()
+            .expect("driver lock poisoned")
+            .replace(handle)
+        {
+            previous.abort();
+        }
+    }
+
+    /// Start the server-side watcher for `root_id` — activity hints
+    /// into the cadence engine (see [`crate::cadence::watcher`]).
+    /// Idempotent: watching an already-watched root is a no-op.
+    ///
+    /// Blocking: establishing a recursive watch walks the whole tree
+    /// (inotify is per-directory, so one watch per directory), which on
+    /// a multi-GB media root with thousands of directories is real
+    /// filesystem work. Callers on an async runtime must reach it
+    /// through [`FilesBackend::enable_watching`] or their own
+    /// `spawn_blocking` (PR #283 review). The watchers map is locked
+    /// only around the lookup and the insert, never across that walk.
+    pub fn watch_root(&self, root_id: Uuid) -> Result<(), FilesError> {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        if self
+            .watchers
+            .lock()
+            .expect("watcher map poisoned")
+            .contains_key(&root_id)
+        {
+            return Ok(());
+        }
+        let watcher = RootWatcher::spawn(root_id, Path::new(&root.path), self.hints())
+            .map_err(to_files_error)?;
+        // Another caller may have won the race while the walk ran; the
+        // first watch installed wins and ours is dropped (which stops
+        // it), so a root never ends up with two.
+        self.watchers
+            .lock()
+            .expect("watcher map poisoned")
+            .entry(root_id)
+            .or_insert(watcher);
+        Ok(())
+    }
+
+    /// Watch every root this backend already knows about, and every
+    /// root created from here on — what a server does at startup so
+    /// sessions are detected without anyone having to call
+    /// `hint_activity`. A root whose watch can't be established (an
+    /// offline removable location, a platform limit) is logged and
+    /// skipped: it still checkpoints on an explicit trigger, which is
+    /// the whole reason watchers are hints.
+    ///
+    /// Async because [`FilesBackend::watch_root`] is blocking work: the
+    /// whole sweep runs on `spawn_blocking` so establishing watches over
+    /// a NAS full of media roots cannot stall an async worker during org
+    /// startup (PR #283 review).
+    pub async fn enable_watching(&self) {
+        let this = self.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            this.watch_new_roots
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            for root in this.registry.list() {
+                if let Err(err) = this.watch_root(root.id) {
+                    tracing::warn!(root_id = %root.id, path = %root.path, %err, "files: root not watched");
+                }
+            }
+        })
+        .await;
+    }
+
+    /// Stop watching `root_id`.
+    pub fn unwatch_root(&self, root_id: Uuid) {
+        self.watchers
+            .lock()
+            .expect("watcher map poisoned")
+            .remove(&root_id);
     }
 }
 
@@ -1189,6 +1788,32 @@ impl FilesService for FilesBackend {
     ) -> Result<CheckpointInfo, FilesError> {
         let this = self.clone();
         blocking(move || this.checkpoint_now_inner(root_id, description)).await
+    }
+
+    async fn hint_activity(&self, root_id: Uuid, paths: Vec<String>) -> Result<u32, FilesError> {
+        // On the blocking pool like its neighbours: the first hint for a
+        // root compiles (and may seed) its Ignore set off disk.
+        let this = self.clone();
+        blocking(move || this.hint_activity_inner(root_id, paths)).await
+    }
+
+    async fn snapshots(&self, root_id: Uuid) -> Result<Vec<SnapshotInfo>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.snapshots_inner(root_id)).await
+    }
+
+    async fn ignore_set(&self, root_id: Uuid) -> Result<Vec<String>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.ignore_set_inner(root_id)).await
+    }
+
+    async fn set_ignore_set(
+        &self,
+        root_id: Uuid,
+        patterns: Vec<String>,
+    ) -> Result<Vec<String>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.set_ignore_set_inner(root_id, patterns)).await
     }
 
     async fn name_version(
