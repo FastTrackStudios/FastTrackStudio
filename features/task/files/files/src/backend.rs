@@ -3959,6 +3959,53 @@ impl FilesBackend {
             .map_err(|e| FilesError::Io(format!("rendition {file_id_hex}: {e}")))
     }
 
+    /// A rendition's total byte length — the Review page's streaming
+    /// route (issue #270) needs it to build a `Content-Range`.
+    pub async fn rendition_len(
+        &self,
+        root_id: Uuid,
+        file_id_hex: &str,
+    ) -> Result<u64, FilesError> {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        let store = self
+            .rendition_store(root_id, Path::new(&root.path))
+            .await
+            .map_err(to_files_error)?;
+        let fid = task_files_chunk_store::FileId::from_hex(file_id_hex)
+            .map_err(|e| FilesError::BadRequest(format!("{file_id_hex}: {e}")))?;
+        store
+            .content_len(fid)
+            .await
+            .map_err(|e| FilesError::Io(format!("rendition {file_id_hex}: {e}")))
+    }
+
+    /// Stream a byte range of a rendition (the `<video>`-seek path, issue
+    /// #270) — reads only the overlapping chunks, so a seek doesn't pull
+    /// the whole proxy.
+    pub async fn read_rendition_range<W>(
+        &self,
+        root_id: Uuid,
+        file_id_hex: &str,
+        start: u64,
+        len: u64,
+        dest: &mut W,
+    ) -> Result<(), FilesError>
+    where
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        let root = self.get_root_info(root_id).map_err(to_files_error)?;
+        let store = self
+            .rendition_store(root_id, Path::new(&root.path))
+            .await
+            .map_err(to_files_error)?;
+        let fid = task_files_chunk_store::FileId::from_hex(file_id_hex)
+            .map_err(|e| FilesError::BadRequest(format!("{file_id_hex}: {e}")))?;
+        store
+            .read_range(fid, start, len, dest)
+            .await
+            .map_err(|e| FilesError::Io(format!("rendition {file_id_hex}: {e}")))
+    }
+
     /// Prune a root's renditions whose source content the store no
     /// longer holds, or whose recipe is superseded — the source-tied
     /// half of GC (AC 3/4). Called after `gc_root`'s version-store
