@@ -35,8 +35,8 @@
 
 use dioxus::prelude::*;
 use files_proto::{
-    BrowseEntry, ChainEntry, FileRootInfo, FilesEvent, FilesServiceClient,
-    FilesServiceStreamClient, ProjectVersion,
+    BrowseEntry, ChainEntry, DivergenceChoice, DivergenceInfo, FileRootInfo, FilesEvent,
+    FilesServiceClient, FilesServiceStreamClient, ProjectVersion,
 };
 use fts_ui::prelude::*;
 use task_ui_core::orgs::{OrgMeta, OrgSelection};
@@ -74,6 +74,53 @@ async fn fetch_chain(org: &str, root: Uuid, path: String) -> Result<Vec<ChainEnt
         .await?
         .chain(root, path)
         .await
+        .map_err(|e| e.to_string())
+}
+
+// ── History & divergence mutations (issue #267) ───────────────────
+
+async fn fetch_divergences(org: &str, root: Uuid) -> Result<Vec<DivergenceInfo>, String> {
+    client(org)
+        .await?
+        .divergences(root)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Restore one file's state from a past checkpoint into the live tree
+/// (the `copy_forward` verb). `path` is the file's path *in that commit*.
+async fn restore_file(org: &str, root: Uuid, commit: String, path: String) -> Result<(), String> {
+    client(org)
+        .await?
+        .copy_forward(root, commit, vec![path])
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Name a checkpoint — creates the Named Version Vault entity.
+async fn name_a_version(org: &str, root: Uuid, commit: String, name: String) -> Result<(), String> {
+    client(org)
+        .await?
+        .name_version(root, commit, name)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Resolve a divergent file — Pick a side or KeepBoth — writing the
+/// merge checkpoint that carries the decision.
+async fn resolve_a_divergence(
+    org: &str,
+    root: Uuid,
+    path: String,
+    choice: DivergenceChoice,
+) -> Result<(), String> {
+    client(org)
+        .await?
+        .resolve_divergence(root, path, choice)
+        .await
+        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
@@ -227,57 +274,12 @@ pub fn Explorer(props: ExplorerProps) -> Element {
         })
     };
 
-    // Live: a checkpoint (or a new root) anywhere re-reads this
-    // listing, so a save on another device lands here without a
-    // refresh.
-    {
-        let org = org.clone();
-        architect::use_stream(
-            move |tx| {
-                let org = org.clone();
-                async move {
-                    let Ok(stream) =
-                        task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
-                            .await
-                    else {
-                        return false;
-                    };
-                    stream.events(tx).await.is_ok()
-                }
-            },
-            move |event: FilesEvent| {
-                let mut entries = entries;
-                let touched = match &event {
-                    FilesEvent::Checkpointed(info) => Some(info.root_id),
-                    FilesEvent::RootCreated(root) => Some(root.id),
-                    // Curation (issue #261) doesn't move a live tree,
-                    // but it does move the badges this pane renders
-                    // (a chain's names, a root's lineage), so it is a
-                    // reason to re-read too.
-                    FilesEvent::VersionNamed(v) | FilesEvent::VersionUnnamed(v) => Some(v.root_id),
-                    FilesEvent::ProjectVersionStarted(pv) => Some(pv.root_id),
-                    // Snapshots are ephemeral captures, never listing
-                    // changes — but the snapshots panel re-reads (#260).
-                    FilesEvent::Snapshotted(snap) => Some(snap.root_id),
-                    // A file flipping between resident and stub is a
-                    // listing change in exactly one root (issue #263).
-                    FilesEvent::HydrationChanged(change) => Some(change.root_id),
-                };
-                // Drive listings have no root id, so any Files event is
-                // a reason to re-read (loose files move under roots).
-                match location.peek().root_id() {
-                    Some(id) if touched != Some(id) => {}
-                    _ => entries.restart(),
-                }
-            },
-        );
-    }
-
     // The opened file's version chain — fetched on demand, because a
     // chain is derived per file (ADR 0001) and a listing must not pay
-    // for it.
+    // for it. Declared before the stream so a checkpoint / naming event
+    // (which changes a chain's entries and names) can refresh it too.
     let mut opened = use_signal(|| Option::<String>::None);
-    let chain = {
+    let mut chain = {
         let org = org.clone();
         use_resource(move || {
             let org = org.clone();
@@ -298,12 +300,70 @@ pub fn Explorer(props: ExplorerProps) -> Element {
         })
     };
 
+    // Live: a checkpoint (or a new root) anywhere re-reads this
+    // listing, so a save on another device lands here without a
+    // refresh.
+    {
+        let org = org.clone();
+        architect::use_stream(
+            move |tx| {
+                let org = org.clone();
+                async move {
+                    let Ok(stream) =
+                        task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
+                            .await
+                    else {
+                        return false;
+                    };
+                    stream.events(tx).await.is_ok()
+                }
+            },
+            move |event: FilesEvent| {
+                let mut entries = entries;
+                let mut chain = chain;
+                let touched = match &event {
+                    FilesEvent::Checkpointed(info) => Some(info.root_id),
+                    FilesEvent::RootCreated(root) => Some(root.id),
+                    // Curation (issue #261) doesn't move a live tree,
+                    // but it does move the badges this pane renders
+                    // (a chain's names, a root's lineage), so it is a
+                    // reason to re-read too.
+                    FilesEvent::VersionNamed(v) | FilesEvent::VersionUnnamed(v) => Some(v.root_id),
+                    FilesEvent::ProjectVersionStarted(pv) => Some(pv.root_id),
+                    // Snapshots are ephemeral captures, never listing
+                    // changes — but the snapshots panel re-reads (#260).
+                    FilesEvent::Snapshotted(snap) => Some(snap.root_id),
+                    // A file flipping between resident and stub is a
+                    // listing change in exactly one root (issue #263).
+                    FilesEvent::HydrationChanged(change) => Some(change.root_id),
+                };
+                // Drive listings have no root id, so any Files event is
+                // a reason to re-read (loose files move under roots).
+                match location.peek().root_id() {
+                    Some(id) if touched != Some(id) => {}
+                    // The open file's chain moves with the same events
+                    // (a checkpoint adds an entry, a naming adds a name),
+                    // so refresh it alongside the listing.
+                    _ => {
+                        entries.restart();
+                        chain.restart();
+                    }
+                }
+            },
+        );
+    }
+
     let listing = entries.read_unchecked().clone();
     // Hoisted out of the row loop: reading a signal per row would hold
     // a `Ref` across the comparison (and re-read N times).
     let opened_name: Option<String> = opened.read().clone();
     let opened_chain: Option<Result<Vec<ChainEntry>, String>> =
         chain.read_unchecked().clone().flatten();
+    // The current root and folder — a row's version actions (issue #267)
+    // need the file's full root-relative path, and only Root browsing has
+    // a version store (Drive files aren't versioned).
+    let here_root: Option<Uuid> = location.read().root_id();
+    let here_base: String = location.read().path().to_string();
     let crumb_items = crumbs(&location.read().clone(), &floor);
     let at_floor = crumb_items.is_empty();
     let padding = if props.embedded { "p-3" } else { "p-4" };
@@ -363,6 +423,13 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                             EntryRow {
                                 key: "{entry.name}",
                                 entry: entry.clone(),
+                                org: org.clone(),
+                                root_id: here_root,
+                                path: if here_base.is_empty() {
+                                    entry.name.clone()
+                                } else {
+                                    format!("{here_base}/{}", entry.name)
+                                },
                                 open: opened_name.as_deref() == Some(entry.name.as_str()),
                                 onopen: {
                                     let entry = entry.clone();
@@ -377,6 +444,10 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                                             opened.set(Some(entry.name.clone()));
                                         }
                                     }
+                                },
+                                on_mutated: move |()| {
+                                    entries.restart();
+                                    chain.restart();
                                 },
                                 chain: if opened_name.as_deref() == Some(entry.name.as_str()) {
                                     opened_chain.clone()
@@ -411,12 +482,21 @@ fn RootHeader(root: FileRootInfo, slice: String) -> Element {
 }
 
 /// One listing row: name, badges, size, and — while open — the file's
-/// version chain.
+/// version history and (when divergent) its resolution controls.
 #[component]
 fn EntryRow(
     entry: BrowseEntry,
+    /// Org slug (for the row's version actions).
+    org: String,
+    /// The root being browsed — `None` on the Drive, where loose files
+    /// aren't versioned.
+    root_id: Option<Uuid>,
+    /// The file's full root-relative path.
+    path: String,
     open: bool,
     onopen: EventHandler<()>,
+    /// Re-read the listing + chain after a mutation lands.
+    on_mutated: EventHandler<()>,
     chain: Option<Result<Vec<ChainEntry>, String>>,
 ) -> Element {
     let icon = if entry.is_dir { "📁" } else { "📄" };
@@ -435,8 +515,8 @@ fn EntryRow(
                     Badge { variant: BadgeVariant::Outline, "Stub" }
                 }
                 if entry.divergent {
-                    // Concurrent saves survive side by side; resolution
-                    // (pick A / pick B / keep both) is issue #267.
+                    // Concurrent saves survive side by side; open the row
+                    // to resolve them (issue #267).
                     Badge { variant: BadgeVariant::Destructive, "Divergent" }
                 }
                 span { class: "ml-auto tabular-nums text-xs text-muted-foreground",
@@ -444,39 +524,364 @@ fn EntryRow(
                 }
             }
             if open && !entry.is_dir {
-                {match chain {
-                    None => rsx! {
-                        Text { variant: TextVariant::Muted, class: "pl-6 text-xs", "Reading version chain…" }
-                    },
-                    Some(Err(e)) => rsx! {
-                        div { class: "pl-6 text-xs text-destructive", "No chain: {e}" }
-                    },
-                    Some(Ok(versions)) if versions.is_empty() => rsx! {
-                        div { class: "pl-6 text-xs text-muted-foreground",
-                            "No saved versions yet — this file has never been checkpointed."
-                        }
-                    },
-                    Some(Ok(versions)) => rsx! {
-                        div { class: "pl-6 flex flex-col gap-0.5",
-                            div { class: "flex items-center gap-2",
-                                Badge { variant: BadgeVariant::Secondary,
-                                    "{versions.len()} version"
-                                    if versions.len() != 1 { "s" }
-                                }
+                if let Some(root) = root_id {
+                    OpenFileDetail {
+                        org,
+                        root_id: root,
+                        path,
+                        divergent: entry.divergent,
+                        chain,
+                        on_mutated,
+                    }
+                } else {
+                    div { class: "pl-6 text-xs text-muted-foreground",
+                        "Loose files on the Drive aren't versioned."
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The open file's body (issue #267): the divergence-resolution panel
+/// when the file is divergent, then its version history with per-version
+/// Restore and Name actions.
+#[component]
+fn OpenFileDetail(
+    org: String,
+    root_id: Uuid,
+    path: String,
+    divergent: bool,
+    chain: Option<Result<Vec<ChainEntry>, String>>,
+    on_mutated: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div { class: "pl-6 flex flex-col gap-2",
+            if divergent {
+                DivergencePanel {
+                    org: org.clone(),
+                    root_id,
+                    path: path.clone(),
+                    on_mutated,
+                }
+            }
+            {match chain {
+                None => rsx! {
+                    Text { variant: TextVariant::Muted, class: "text-xs", "Reading version chain…" }
+                },
+                Some(Err(e)) => rsx! {
+                    div { class: "text-xs text-destructive", "No chain: {e}" }
+                },
+                Some(Ok(versions)) if versions.is_empty() => rsx! {
+                    div { class: "text-xs text-muted-foreground",
+                        "No saved versions yet — this file has never been checkpointed."
+                    }
+                },
+                Some(Ok(versions)) => rsx! {
+                    div { class: "flex flex-col gap-1",
+                        div { class: "flex items-center gap-2",
+                            Badge { variant: BadgeVariant::Secondary,
+                                "{versions.len()} version"
+                                if versions.len() != 1 { "s" }
                             }
-                            for version in versions.iter().take(10) {
-                                div { class: "flex items-center gap-2 text-xs text-muted-foreground tabular-nums",
-                                    span { class: "font-mono", "{short_id(&version.commit_id)}" }
-                                    span { class: "truncate", "{version.path}" }
-                                    if let Some(from) = &version.renamed_from {
-                                        Badge { variant: BadgeVariant::Outline, "renamed from {from}" }
+                        }
+                        for version in versions.iter().take(20).cloned() {
+                            ChainRow {
+                                key: "{version.commit_id}",
+                                org: org.clone(),
+                                root_id,
+                                version,
+                                on_mutated,
+                            }
+                        }
+                    }
+                },
+            }}
+        }
+    }
+}
+
+/// One checkpoint in a file's chain, with its kind distinguished
+/// (Checkpoint / Named Version / save points) and Restore + Name
+/// actions (issue #267).
+#[component]
+fn ChainRow(
+    org: String,
+    root_id: Uuid,
+    version: ChainEntry,
+    on_mutated: EventHandler<()>,
+) -> Element {
+    let mut naming = use_signal(|| false);
+    let name_input = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+    let toast = use_toast();
+
+    let commit = version.commit_id.clone();
+    let vpath = version.path.clone();
+
+    let do_restore = {
+        let org = org.clone();
+        let commit = commit.clone();
+        let vpath = vpath.clone();
+        move |_| {
+            if *busy.peek() {
+                return;
+            }
+            busy.set(true);
+            let (org, commit, vpath) = (org.clone(), commit.clone(), vpath.clone());
+            spawn(async move {
+                match restore_file(&org, root_id, commit.clone(), vpath.clone()).await {
+                    Ok(()) => {
+                        toast.success(
+                            "File restored".into(),
+                            ToastOptions::new()
+                                .description(format!("{vpath} from {}", short_id(&commit))),
+                        );
+                        on_mutated.call(());
+                    }
+                    Err(e) => {
+                        toast.error("Restore failed".into(), ToastOptions::new().description(e));
+                    }
+                }
+                busy.set(false);
+            });
+        }
+    };
+
+    let do_name = {
+        let org = org.clone();
+        let commit = commit.clone();
+        move |_| {
+            let name = name_input.peek().trim().to_string();
+            if name.is_empty() || *busy.peek() {
+                return;
+            }
+            busy.set(true);
+            let (org, commit) = (org.clone(), commit.clone());
+            let mut name_input = name_input;
+            spawn(async move {
+                match name_a_version(&org, root_id, commit.clone(), name.clone()).await {
+                    Ok(()) => {
+                        toast.success(
+                            "Version named".into(),
+                            ToastOptions::new().description(name),
+                        );
+                        naming.set(false);
+                        name_input.set(String::new());
+                        on_mutated.call(());
+                    }
+                    Err(e) => {
+                        toast.error(
+                            "Couldn't name version".into(),
+                            ToastOptions::new().description(e),
+                        );
+                    }
+                }
+                busy.set(false);
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-1 rounded-md border border-border/30 px-2 py-1.5",
+            div { class: "flex items-center gap-2 text-xs text-muted-foreground tabular-nums flex-wrap",
+                // Every chain entry is a Session checkpoint — the unit
+                // the chain is built from.
+                Badge { variant: BadgeVariant::Outline, "Checkpoint" }
+                span { class: "font-mono", "{short_id(&version.commit_id)}" }
+                span { class: "truncate", "{version.path}" }
+                if let Some(from) = &version.renamed_from {
+                    Badge { variant: BadgeVariant::Outline, "renamed from {from}" }
+                }
+                // A checkpoint the Vault curates is a Named Version.
+                for nm in version.names.iter() {
+                    Badge { variant: BadgeVariant::Secondary, "★ {nm}" }
+                }
+                // Save points recorded during the session this checkpoint
+                // closed (not versions themselves — display metadata).
+                if !version.save_points.is_empty() {
+                    Badge { variant: BadgeVariant::Outline,
+                        "{version.save_points.len()} save point"
+                        if version.save_points.len() != 1 { "s" }
+                    }
+                }
+                div { class: "ml-auto flex items-center gap-1",
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        disabled: busy(),
+                        on_click: do_restore,
+                        "Restore"
+                    }
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        disabled: busy(),
+                        on_click: move |_| {
+                            let next = !*naming.peek();
+                            naming.set(next);
+                        },
+                        if naming() { "Cancel" } else { "Name…" }
+                    }
+                }
+            }
+            if naming() {
+                div { class: "flex items-center gap-2",
+                    Input {
+                        value: name_input,
+                        size: InputSize::Small,
+                        placeholder: "Version name (e.g. Final Mix)".to_string(),
+                    }
+                    Button {
+                        variant: ButtonVariant::Secondary,
+                        size: ButtonSize::Small,
+                        disabled: busy(),
+                        on_click: do_name,
+                        "Save name"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The divergence-resolution panel (issue #267): both sides of a
+/// divergent file, and the Pick-a-side / Keep-both choices that write
+/// the merge checkpoint. Fetched fresh on open (divergences are a
+/// root-level query); resolving refreshes the listing, which clears the
+/// Divergent badge and unmounts this panel.
+#[component]
+fn DivergencePanel(
+    org: String,
+    root_id: Uuid,
+    path: String,
+    on_mutated: EventHandler<()>,
+) -> Element {
+    let mut busy = use_signal(|| false);
+    let toast = use_toast();
+
+    let info = {
+        let org = org.clone();
+        use_resource(move || {
+            let org = org.clone();
+            async move { fetch_divergences(&org, root_id).await }
+        })
+    };
+
+    // The resolver: a `DivergenceChoice`, run + toast + refresh.
+    let resolve = {
+        let org = org.clone();
+        let path = path.clone();
+        move |choice: DivergenceChoice, label: String| {
+            if *busy.peek() {
+                return;
+            }
+            busy.set(true);
+            let (org, path) = (org.clone(), path.clone());
+            spawn(async move {
+                match resolve_a_divergence(&org, root_id, path.clone(), choice).await {
+                    Ok(()) => {
+                        toast.success(
+                            "Divergence resolved".into(),
+                            ToastOptions::new().description(format!("{path}: {label}")),
+                        );
+                        on_mutated.call(());
+                    }
+                    Err(e) => {
+                        toast.error(
+                            "Couldn't resolve".into(),
+                            ToastOptions::new().description(e),
+                        );
+                    }
+                }
+                busy.set(false);
+            });
+        }
+    };
+
+    let state = info.read_unchecked().clone();
+    let mine: Option<DivergenceInfo> = match &state {
+        Some(Ok(list)) => list.iter().find(|d| d.path == path).cloned(),
+        _ => None,
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-2",
+            div { class: "flex items-center gap-2",
+                Badge { variant: BadgeVariant::Destructive, "Divergent" }
+                Text { variant: TextVariant::Muted, class: "text-xs",
+                    "Concurrent saves survive side by side. Keep one, or keep both."
+                }
+            }
+            {match &state {
+                None => rsx! {
+                    Text { variant: TextVariant::Muted, class: "text-xs", "Reading both sides…" }
+                },
+                Some(Err(e)) => rsx! {
+                    div { class: "text-xs text-destructive", "Couldn't read divergence: {e}" }
+                },
+                Some(Ok(_)) if mine.is_none() => rsx! {
+                    // Resolved elsewhere between listing and open.
+                    Text { variant: TextVariant::Muted, class: "text-xs", "No longer divergent." }
+                },
+                Some(Ok(_)) => {
+                    let info = mine.clone().expect("mine is Some");
+                    rsx! {
+                        div { class: "flex flex-col gap-1",
+                            for (i , side) in info.sides.iter().enumerate() {
+                                div { class: "flex items-center gap-2 text-xs tabular-nums flex-wrap",
+                                    Badge { variant: BadgeVariant::Outline,
+                                        if i == 0 { "This device" } else { "Side {i + 1}" }
+                                    }
+                                    span { class: "font-mono text-muted-foreground",
+                                        "{short_id(&side.commit_id)}"
+                                    }
+                                    match &side.file_id {
+                                        Some(fid) => rsx! {
+                                            span { class: "font-mono text-muted-foreground truncate",
+                                                "{short_id(fid)}"
+                                            }
+                                        },
+                                        None => rsx! {
+                                            Badge { variant: BadgeVariant::Outline, "deleted here" }
+                                        },
+                                    }
+                                    div { class: "ml-auto",
+                                        Button {
+                                            variant: ButtonVariant::Secondary,
+                                            size: ButtonSize::Small,
+                                            disabled: busy(),
+                                            on_click: {
+                                                let mut resolve = resolve.clone();
+                                                let commit = side.commit_id.clone();
+                                                move |_| {
+                                                    resolve(
+                                                        DivergenceChoice::Pick { commit_id: commit.clone() },
+                                                        format!("kept {}", short_id(&commit)),
+                                                    );
+                                                }
+                                            },
+                                            "Keep this side"
+                                        }
                                     }
                                 }
                             }
+                            div { class: "flex justify-end pt-1",
+                                Button {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Small,
+                                    disabled: busy(),
+                                    on_click: {
+                                        let mut resolve = resolve.clone();
+                                        move |_| resolve(DivergenceChoice::KeepBoth, "kept both".into())
+                                    },
+                                    "Keep both"
+                                }
+                            }
                         }
-                    },
-                }}
-            }
+                    }
+                },
+            }}
         }
     }
 }
