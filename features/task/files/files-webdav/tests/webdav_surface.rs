@@ -812,3 +812,19 @@ async fn a_get_of_a_stub_hydrates_and_serves_the_content() {
         "the file is resident after the access"
     );
 }
+
+/// The serve path fails CLOSED: a stub-sized file with the magic line
+/// but an unparseable body is refused with 502, never served as if it
+/// were the media it stands in for (PR #289 review).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broken_stub_is_refused_not_served() {
+    let h = Harness::new();
+    let _root = h.root("Session").await;
+    let disk = h.data_dir.join("Session").join("broken.wav");
+    std::fs::write(&disk, format!("{}corrupt body", files::stub::MAGIC)).expect("stage");
+
+    let (status, _body) = h
+        .send("GET", &format!("{MOUNT}/Session/broken.wav"), b"")
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+}

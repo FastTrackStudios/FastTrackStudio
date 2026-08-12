@@ -310,3 +310,72 @@ async fn dirty_files_are_never_dehydrated() {
 
     rig.backend.shutdown().await;
 }
+
+/// One malformed stub-shaped file (magic line, garbage body) must
+/// never take down checkpoints or listings for the whole root — it is
+/// handled as the ordinary content its bytes are (PR #289 review).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_malformed_stub_shaped_file_is_ordinary_content() {
+    let rig = rig().await;
+    let weird = rig.root_dir.join("notes.txt");
+    let bytes = format!("{}not json at all", files::stub::MAGIC);
+    std::fs::write(&weird, &bytes).unwrap();
+
+    // Checkpoint versions it as its literal bytes rather than erroring.
+    let info = rig
+        .client
+        .checkpoint_now(rig.root_id, None)
+        .await
+        .expect("checkpoint with a malformed stub-shaped file present");
+    assert_eq!(info.changed_paths, vec!["notes.txt".to_string()]);
+
+    // Browse lists it unflagged, with its literal size.
+    let listed = rig.client.browse(rig.root_id, String::new()).await.unwrap();
+    let it = entry(&listed, "notes.txt");
+    assert!(!it.stub);
+    assert_eq!(it.size, Some(bytes.len() as u64));
+}
+
+/// Stubs don't exist on the software flavor: a stub-shaped file in a
+/// git root is versioned as its literal bytes, never silently excluded
+/// (PR #289 review) — and dehydrate refuses the flavor outright.
+#[tokio::test(flavor = "multi_thread")]
+async fn software_roots_have_no_stubs() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let root_dir = data_dir.path().join("repo");
+    std::fs::create_dir(&root_dir).unwrap();
+    let stubish = files::stub::Stub::new(&jj_lib::backend::FileId::new(vec![0xab; 32]), 999, false);
+    std::fs::write(root_dir.join("fixture.stub"), stubish.to_bytes()).unwrap();
+
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(backend.clone()), scope.clone());
+    let client: FilesServiceClient = local.establish().await.expect("client");
+    let root = client
+        .create_root(
+            root_dir.to_string_lossy().into_owned(),
+            "repo".into(),
+            RootFlavor::Software,
+        )
+        .await
+        .expect("create_root");
+    let info = client
+        .checkpoint_now(root.id, None)
+        .await
+        .expect("checkpoint");
+    assert_eq!(info.changed_paths, vec!["fixture.stub".to_string()]);
+
+    let listed = client.browse(root.id, String::new()).await.unwrap();
+    assert!(
+        !entry(&listed, "fixture.stub").stub,
+        "no stubs on git roots"
+    );
+
+    let err = client
+        .dehydrate(root.id, "fixture.stub".into())
+        .await
+        .expect_err("dehydrate is media-only");
+    assert!(err.to_string().contains("media-only"), "{err}");
+    backend.shutdown().await;
+}

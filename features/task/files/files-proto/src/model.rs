@@ -286,7 +286,7 @@ pub struct HydrationChange {
 
 /// Result of [`crate::service::FilesService::apply_hydration_policy`]:
 /// what one policy pass changed, root-relative paths, sorted.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
 #[repr(C)]
 pub struct HydrationReport {
     /// Stubs the policy matched and restored to resident content.
@@ -298,4 +298,10 @@ pub struct HydrationReport {
     /// dehydration never destroys unversioned work. Checkpoint, then
     /// re-apply, to complete the pass.
     pub skipped_dirty: Vec<String>,
+    /// Paths whose hydrate/dehydrate errored (details in the server
+    /// log). The pass is per-file fault tolerant: one unhydratable stub
+    /// — normal on a partial replica missing chunks — never aborts the
+    /// pass or discards this report.
+    #[facet(default)]
+    pub failed: Vec<String>,
 }

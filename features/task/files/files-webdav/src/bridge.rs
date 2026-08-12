@@ -279,9 +279,30 @@ impl WebdavBridge {
         if matches!(req.method().as_str(), "GET" | "HEAD") && !addresses_root {
             if let Some(rel) = rel_inside(req.uri(), &prefix) {
                 let target = base.join(&rel);
+                // Fail CLOSED on a stub that can't be read or parsed:
+                // `.ok().flatten()` here would serve the ~100-byte
+                // placeholder as the media file with a 200 — the exact
+                // fail-open shape the stub module's own doc forbids
+                // (PR #289 review). A candidate-sized file that errors
+                // is refused, not served.
                 let is_stub = match std::fs::metadata(&target) {
-                    Ok(m) if files::stub::candidate_len(m.len()) => {
-                        files::stub::read(&target).ok().flatten().is_some()
+                    // Regular files only: a directory (including the
+                    // hidden store dir itself, which the guard 404s
+                    // downstream) is never a stub candidate.
+                    Ok(m) if m.is_file() && files::stub::candidate_len(m.len()) => {
+                        match files::stub::read(&target) {
+                            Ok(found) => found.is_some(),
+                            Err(err) => {
+                                tracing::warn!(
+                                    target: "files_webdav::bridge",
+                                    root = %root.id,
+                                    path = %rel,
+                                    error = %err,
+                                    "unreadable stub-sized file; refusing to serve it",
+                                );
+                                return status(StatusCode::BAD_GATEWAY);
+                            }
+                        }
                     }
                     _ => false,
                 };

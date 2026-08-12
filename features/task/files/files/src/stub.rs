@@ -115,6 +115,30 @@ pub fn candidate_len(len: u64) -> bool {
     len <= MAX_LEN && len >= MAGIC.len() as u64
 }
 
+/// The **lenient** twin of [`read`], for enumeration paths (listings,
+/// checkpoint scans) where one odd small file must never take down the
+/// whole operation (PR #289 review): any error — unreadable, vanished
+/// mid-listing, magic with a garbage body — logs and answers "not a
+/// stub", so the file is handled as the ordinary content its bytes are.
+/// Surfaces that *act* on stub-ness (dehydrate/hydrate, the WebDAV
+/// serve path) keep the strict [`read`] and fail closed instead: there,
+/// mistaking a broken stub for content would serve or destroy
+/// placeholder bytes.
+#[must_use]
+pub fn probe(path: &Path) -> Option<Stub> {
+    match read(path) {
+        Ok(found) => found,
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "unreadable or malformed stub-shaped file treated as ordinary content",
+            );
+            None
+        }
+    }
+}
+
 /// Atomically write `stub` over `path` (tmp + rename in the same
 /// directory, fsynced — a crash mid-dehydrate must leave either the
 /// original content or a whole stub, never a torn one).

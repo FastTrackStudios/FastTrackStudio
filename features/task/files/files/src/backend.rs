@@ -93,6 +93,15 @@ struct RootRuntime {
     snapshot_head: Option<CommitId>,
 }
 
+/// What one dehydrate attempt did (issue #263). `Dirty` — on-disk
+/// content differs from the checkpoint head — is an outcome, not an
+/// error: the policy apply pass classifies it structurally and moves
+/// on, rather than matching error-message substrings (PR #289 review).
+enum DehydrateOutcome {
+    Done(BrowseEntry),
+    Dirty,
+}
+
 /// Which kind of capture a write is — the one difference that decides
 /// what it parents on and how it is recorded (issue #260).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -980,16 +989,22 @@ impl FilesBackend {
                 // placeholder's own few bytes. Detection is stat-bounded —
                 // only a file small enough to be a stub has its header
                 // read, so listing a directory of media opens nothing.
-                for entry in &mut listed {
-                    if entry.is_dir {
-                        continue;
-                    }
-                    if let Some(len) = entry.size
-                        && stub::candidate_len(len)
-                        && let Some(s) = stub::read(&target.join(&entry.name))?
-                    {
-                        entry.stub = true;
-                        entry.size = Some(s.size);
+                // Lenient per file: one vanished/unreadable/malformed
+                // small file lists as the ordinary file it appears to
+                // be rather than failing the whole directory (PR #289
+                // review). Media only — software roots have no stubs.
+                if root.flavor == RootFlavor::Media {
+                    for entry in &mut listed {
+                        if entry.is_dir {
+                            continue;
+                        }
+                        if let Some(len) = entry.size
+                            && stub::candidate_len(len)
+                            && let Some(s) = stub::probe(&target.join(&entry.name))
+                        {
+                            entry.stub = true;
+                            entry.size = Some(s.size);
+                        }
                     }
                 }
                 listed
@@ -1720,9 +1735,22 @@ impl FilesBackend {
     }
 
     fn dehydrate_inner(&self, root_id: Uuid, path: String) -> Result<BrowseEntry, Error> {
+        match self.try_dehydrate_inner(root_id, &path)? {
+            DehydrateOutcome::Done(entry) => Ok(entry),
+            DehydrateOutcome::Dirty => Err(Error::BadRequest(format!(
+                "{path}: on-disk content differs from the checkpoint head — checkpoint first, then dehydrate"
+            ))),
+        }
+    }
+
+    /// [`FilesBackend::dehydrate_inner`] with the dirty case as a typed
+    /// outcome instead of an error, so the policy apply pass classifies
+    /// it structurally rather than by matching error-message substrings
+    /// (PR #289 review).
+    fn try_dehydrate_inner(&self, root_id: Uuid, path: &str) -> Result<DehydrateOutcome, Error> {
         let root = self.get_root_info(root_id)?;
         Self::require_media(&root, "dehydrate")?;
-        let (disk_path, repo_path) = self.resolve_root_file(&root, &path)?;
+        let (disk_path, repo_path) = self.resolve_root_file(&root, path)?;
         let lock = self.root_lock(root_id);
         let _guard = lock.lock().expect("root lock poisoned");
 
@@ -1732,7 +1760,7 @@ impl FilesBackend {
         // Idempotent: already a stub — report it, touch nothing.
         let len = std::fs::metadata(&disk_path)?.len();
         if stub::candidate_len(len) && stub::read(&disk_path)?.is_some() {
-            return Self::entry_for(&disk_path, &path);
+            return Ok(DehydrateOutcome::Done(Self::entry_for(&disk_path, path)?));
         }
 
         // Reloaded head, not the cache: dehydration compares against
@@ -1745,18 +1773,50 @@ impl FilesBackend {
         };
 
         // The one rule that makes dehydration safe: on-disk content
-        // must BE the committed content. Streaming the file through the
-        // content store re-derives its id (a dedup no-op when it is
-        // already there); any difference means unversioned work, which
-        // a placeholder must never overwrite.
+        // must BE the committed content. `probe` derives the id without
+        // writing anything, so a refused dehydrate persists nothing —
+        // the dirty bytes never enter the store as orphaned chunks (PR
+        // #289 review).
+        //
+        // The root lock serializes THIS backend's writers, but a DAW or
+        // the WebDAV bridge writes straight to disk under nobody's lock
+        // — so the hash rides the same stat sandwich every checkpoint
+        // read does (`crate::certify`): a file that moved while being
+        // hashed, or whose timestamps are too coarse to prove anything
+        // without a second matching read, is refused rather than
+        // stubbed over (PR #289 review — the TOCTOU where a mid-hash
+        // save was destroyed by `stub::write`).
         let backend = repo.store().backend();
         let content = crate::content::ContentStore::for_repo(&repo, backend)?;
-        let probed = content.probe(&disk_path)?;
-        let disk_id = pollster::block_on(content.write(&repo_path, &disk_path, probed))?;
+        let guard = crate::certify::StatGuard::begin(&disk_path)?;
+        let Some(disk_id) = content.probe(&disk_path)? else {
+            return Err(Error::Repo(
+                "this root's backend cannot derive content ids without writing".into(),
+            ));
+        };
         if disk_id != head_id {
-            return Err(Error::BadRequest(format!(
-                "{path}: on-disk content differs from the checkpoint head — checkpoint first, then dehydrate"
-            )));
+            return Ok(DehydrateOutcome::Dirty);
+        }
+        match guard.check(&disk_path)? {
+            crate::certify::Settled::Stable => {}
+            crate::certify::Settled::Moved => {
+                return Err(Error::BadRequest(format!(
+                    "{path}: the file is being written right now — try again when the writer settles"
+                )));
+            }
+            crate::certify::Settled::Coarse => {
+                // Prove stability by content, like the checkpoint path
+                // does on coarse-mtime filesystems: two independent
+                // reads deriving the same id had no write between them.
+                let again = content.probe(&disk_path)?;
+                if again != Some(disk_id)
+                    || guard.check(&disk_path)? == crate::certify::Settled::Moved
+                {
+                    return Err(Error::BadRequest(format!(
+                        "{path}: the file is being written right now — try again when the writer settles"
+                    )));
+                }
+            }
         }
 
         stub::write(&disk_path, &stub::Stub::new(&head_id, len, executable))?;
@@ -1765,7 +1825,7 @@ impl FilesBackend {
             path: repo_path.as_internal_file_string().to_string(),
             stub: true,
         }));
-        Self::entry_for(&disk_path, &path)
+        Ok(DehydrateOutcome::Done(Self::entry_for(&disk_path, path)?))
     }
 
     fn hydrate_inner(&self, root_id: Uuid, path: String) -> Result<BrowseEntry, Error> {
@@ -1854,8 +1914,9 @@ impl FilesBackend {
         // bytes' id through the same content store and require it to be
         // the id we asked for.
         let content = crate::content::ContentStore::for_repo(repo, backend)?;
-        let probed = content.probe(tmp.path())?;
-        let restored_id = pollster::block_on(content.write(repo_path, tmp.path(), probed))?;
+        let restored_id = content.probe(tmp.path())?.ok_or_else(|| {
+            Error::Repo("this root's backend cannot derive content ids without writing".into())
+        })?;
         if restored_id != *target_id {
             return Err(Error::Repo(format!(
                 "{}: restored content re-derives to {} but the stub promised {} — store damage, stub left in place",
@@ -1898,11 +1959,7 @@ impl FilesBackend {
         let store_dir = repo_open::store_dir(Path::new(&root.path));
         let Some(policy) = hydration::matcher(&store_dir)? else {
             // Empty policy: opt-in means touch nothing.
-            return Ok(HydrationReport {
-                hydrated: Vec::new(),
-                dehydrated: Vec::new(),
-                skipped_dirty: Vec::new(),
-            });
+            return Ok(HydrationReport::default());
         };
 
         // One live-tree walk decides the whole pass; the per-file ops
@@ -1914,34 +1971,41 @@ impl FilesBackend {
         let tracked = self.tracked_paths(&root, &head)?;
         let files = scan::walk_live_tree(Path::new(&root.path), root.flavor, &ignores, &tracked)?;
 
-        let mut report = HydrationReport {
-            hydrated: Vec::new(),
-            dehydrated: Vec::new(),
-            skipped_dirty: Vec::new(),
-        };
+        let mut report = HydrationReport::default();
+        // Per-file fault tolerance: one unhydratable stub (a partial
+        // replica missing chunks — hydrate's own docs call that
+        // normal) or one racing writer must not abort the pass and
+        // discard the report of mutations already performed (PR #289
+        // review). Every per-file failure lands in `failed` with its
+        // path; the pass itself only errors on setup.
         for file in files {
             let rel = file.repo_path.as_internal_file_string().to_string();
             let keep = hydration::keeps_hydrated(&policy, &rel);
             if file.stub.is_some() {
                 if keep {
-                    self.hydrate_inner(root_id, rel.clone())?;
-                    report.hydrated.push(rel);
+                    match self.hydrate_inner(root_id, rel.clone()) {
+                        Ok(_) => report.hydrated.push(rel),
+                        Err(err) => {
+                            tracing::warn!(%root_id, path = %rel, %err, "policy hydrate failed");
+                            report.failed.push(rel);
+                        }
+                    }
                 }
             } else if !keep && !file.ignored && tracked.contains(&file.repo_path) {
-                match self.dehydrate_inner(root_id, rel.clone()) {
-                    Ok(_) => report.dehydrated.push(rel),
-                    // Dirty content is the expected, reportable case —
-                    // everything else is a real fault.
-                    Err(Error::BadRequest(m)) if m.contains("differs from the checkpoint head") => {
-                        report.skipped_dirty.push(rel);
+                match self.try_dehydrate_inner(root_id, &rel) {
+                    Ok(DehydrateOutcome::Done(_)) => report.dehydrated.push(rel),
+                    Ok(DehydrateOutcome::Dirty) => report.skipped_dirty.push(rel),
+                    Err(err) => {
+                        tracing::warn!(%root_id, path = %rel, %err, "policy dehydrate failed");
+                        report.failed.push(rel);
                     }
-                    Err(e) => return Err(e),
                 }
             }
         }
         report.hydrated.sort();
         report.dehydrated.sort();
         report.skipped_dirty.sort();
+        report.failed.sort();
         Ok(report)
     }
 

@@ -335,6 +335,36 @@ impl ChunkStore {
         Ok(file_id)
     }
 
+    /// Derive the [`FileId`] `source` *would* have in this store,
+    /// writing nothing — no chunks, no manifest, no locks. The pure
+    /// half of [`ChunkStore::write_stream`]: same chunker config, same
+    /// per-chunk blake3, same manifest encoding, so the answer is
+    /// exactly the id a real write of the same bytes returns. This is
+    /// what lets an is-this-content-already-versioned comparison run
+    /// without persisting never-versioned bytes as orphaned store data
+    /// (PR #289 review).
+    pub async fn probe_stream<R>(&self, source: R) -> Result<FileId>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        let mut chunker = AsyncStreamCDC::new(
+            source,
+            self.chunker_config.min_size,
+            self.chunker_config.avg_size,
+            self.chunker_config.max_size,
+        );
+        let mut stream = std::pin::pin!(chunker.as_stream());
+        let mut chunks: Vec<ChunkRef> = Vec::new();
+        while let Some(item) = stream.next().await {
+            let data = item.map_err(|e| Error::Io(e.into()))?.data;
+            chunks.push(ChunkRef {
+                hash: blake3::hash(&data),
+                len: data.len() as u64,
+            });
+        }
+        Ok(Manifest::new(chunks).file_id())
+    }
+
     /// Stream the file named by `file_id` to `dest`, one chunk at a time.
     /// Bounded memory: chunks are copied to `dest` and dropped as they are
     /// read, never assembled into a whole-file buffer.
