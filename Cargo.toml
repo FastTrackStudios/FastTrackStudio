@@ -983,11 +983,17 @@ task-files-chunk-store = { path = "crates/task/files-chunk-store" }
 # chunk store above — per-file version chains, recorded renames, divergent
 # concurrent writes.
 task-files-version-store = { path = "crates/task/files-version-store" }
+# Shared Files primitives: path confinement + the blocking seam (#284 review).
+task-files-util = { path = "crates/task/files-util" }
 # Files RPC surface v1 (issue #259/ADR 0001): create-root / browse /
 # chain / checkpoint-now over the version store above.
 files-proto = { path = "features/task/files/files-proto", default-features = false }
 files = { path = "features/task/files/files" }
 files-ui = { path = "features/task/files/files-ui" }
+# Files placement layer (issue #262): Storage Locations, Storage grants,
+# the storage-agent protocol, and the in-server hosting.
+files-storage-proto = { path = "features/task/files/files-storage-proto", default-features = false }
+files-storage = { path = "features/task/files/files-storage" }
 # features/task/vault — file-backed vault layer + CRDT reconciliation
 vault = { path = "features/task/vault/vault" }
 vault-entity = { path = "features/task/vault/vault-entity" }

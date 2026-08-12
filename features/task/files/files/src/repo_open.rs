@@ -3,9 +3,10 @@
 //! - **Media** roots wrap `task_files_version_store::repo::init_repo`
 //!   (first touch) with a reopen path through jj-lib's own `RepoLoader`
 //!   (every subsequent touch, including after a process restart) — the
-//!   version-store crate only ships the init side (issue #257's own
-//!   scope), so the reopen plumbing lives here rather than there, per
-//!   this ticket's "consume the version-store API as-is" boundary.
+//!   version-store crate owns both halves for media roots
+//!   (`repo::open_or_init_repo_blocking`, moved down there in issue #262
+//!   because every Storage agent hosting a live tree performs exactly
+//!   the same open), so the media branches below delegate to it.
 //! - **Software** roots (issue #273) are stock **colocated git**: the jj
 //!   metadata lives in the root's [`STORE_DIR`](crate::consts::STORE_DIR)
 //!   while the objects live in a perfectly ordinary `.git` at the root's
@@ -101,7 +102,7 @@ pub fn open_or_init_repo(root_path: &Path, flavor: RootFlavor) -> Result<Arc<Rea
     } else {
         match flavor {
             RootFlavor::Media => {
-                pollster::block_on(task_files_version_store::repo::init_repo(&repo_path))
+                task_files_version_store::repo::open_or_init_repo_blocking(&repo_path)
                     .map_err(Error::from)?
             }
             RootFlavor::Software => init_software_repo(&repo_path, root_path)?,
@@ -189,6 +190,16 @@ fn init_software_repo(repo_path: &Path, root_path: &Path) -> Result<Arc<Readonly
 }
 
 fn open_existing(repo_path: &Path, flavor: RootFlavor) -> Result<Arc<ReadonlyRepo>> {
+    // A media root's reopen is the version store's own — same settings,
+    // same factories — so it is called rather than re-implemented here
+    // (issue #262 moved it down for the Storage agents, which do the
+    // identical open when they host a live tree). Callers only reach
+    // this once `already_initialized` holds, so the shared function's
+    // init branch is unreachable from here.
+    if flavor == RootFlavor::Media {
+        return task_files_version_store::repo::open_or_init_repo_blocking(repo_path)
+            .map_err(Error::from);
+    }
     let settings = settings_for(flavor)?;
 
     let mut factories = default_backend_factories();

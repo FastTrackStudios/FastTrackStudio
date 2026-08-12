@@ -16,9 +16,11 @@
 //! on top and owns the version-store-backed [`FilesBackend`](../files/struct.FilesBackend.html)
 //! side, exactly like `milestone` sits on top of `milestone-proto`.
 
+pub mod consts;
 pub mod model;
 pub mod service;
 
+pub use consts::{GIT_DIR, MARKER_FILE, STORE_DIR};
 pub use model::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, NamedVersion, ProjectVersion,
     RootFlavor, VersionRef,

@@ -4,21 +4,12 @@
 //! through [`files_proto::FilesService::drive_browse`] ("Drive"
 //! browsing shows the raw tree, internals included — that's the
 //! distinction the glossary draws between the two).
+//!
+//! The constants themselves live in `files-proto` (issue #262): a
+//! Storage agent hosting a root's live tree has to create the same
+//! `STORE_DIR` this crate hides, so the names belong to the shared wire
+//! crate rather than to one backend. `GIT_DIR` moved there with them
+//! when software roots landed (issue #273) — a software root placed on a
+//! Storage Location is the same agreement.
 
-/// Marker file at a root's top level recording its stable id (ADR 0001
-/// / glossary "File Root": "identified by a stable id in its entity
-/// plus a marker file in the tree").
-pub const MARKER_FILE: &str = ".fts-root.json";
-
-/// Directory at a root's top level holding its version-store repo
-/// (`task-files-version-store`'s jj repo + CAS chunk store; on a
-/// software root, the jj metadata colocated with the real git repo —
-/// see [`GIT_DIR`]).
-pub const STORE_DIR: &str = ".fts-files";
-
-/// A software File Root's real git repository (ADR 0001's `software`
-/// flavor: "a perfectly normal `.git` for GitHub, CI, IDEs"). It is the
-/// root's object store, so — exactly like [`STORE_DIR`] — it is skipped
-/// at every walk depth and hidden from root browsing, never ingested as
-/// ordinary content.
-pub const GIT_DIR: &str = ".git";
+pub use files_proto::consts::{GIT_DIR, MARKER_FILE, STORE_DIR};

@@ -1,6 +1,6 @@
 [package]
-name = "files"
-description = "Files feature server-side backend (issue #259/ADR 0001): `FilesBackend` implements `files-proto`'s `FilesService` over `task-files-version-store`'s jj-lib-on-CAS engine — create a File Root from an existing folder (marker file + stable id), browse its live tree, derive a file's version chain, and trigger a Session checkpoint on demand."
+name = "files-storage"
+description = "Files placement layer, server side (issue #262/ADR 0001): the deployment-scoped Storage Location registry, per-org Storage grants (capability classes, logical-byte quota, path prefix), root placement across two axes (live tree + blob replicas), and the storage-agent protocol with its in-server hosting — an agent that creates a root's live tree, initializes the authoritative version-store repo, measures logical bytes, and carries blob replication between locations."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,33 +11,24 @@ repository.workspace = true
 [dependencies]
 architect = { workspace = true }
 files-proto = { workspace = true, features = ["vox"] }
+files-storage-proto = { workspace = true, features = ["vox"] }
+blake3 = { workspace = true }
+task-files-chunk-store = { workspace = true }
 task-files-util = { workspace = true }
 task-files-version-store = { workspace = true }
-async-trait = "0.1"
 chrono = { workspace = true, features = ["clock", "serde"] }
-gix = { workspace = true }
 jj-lib = { workspace = true }
 pollster = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
-# Named / Project Versions are Vault entities (issue #261/ADR 0001):
-# markdown pages under the org vault, read and written through the
-# shared vault-entity slice layer.
-vault = { workspace = true }
-vault-entity = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "rt"] }
-tokio-util = { workspace = true, features = ["compat"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 vox = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
-# Chunk-level survival after a GC pass is invisible at the RPC seam —
-# the spec's "secondary harness" (issue #261's AC 2).
-task-files-chunk-store = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 architect = { workspace = true, features = ["local"] }
 

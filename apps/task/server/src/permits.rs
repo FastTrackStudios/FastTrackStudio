@@ -352,6 +352,19 @@ table!(FILES, "files", "files/**", [
     wa "gc_root",
 ]);
 table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
+// The Files placement layer's ORG lane (issue #262). The operator and
+// agent lanes are not here on purpose: they live on the server router,
+// which this gate does not cover, because the Storage Location registry
+// is deployment-scoped and admitting an org onto a location is an
+// operator act rather than a member one. What a member may do is place
+// their own org's roots inside grants the operator already issued —
+// every method below is refused by the backend itself unless a grant
+// covers it.
+table!(FILES_STORAGE, "storage", "files/**", [
+    rd "list_locations", rd "list_grants", rd "placement", rd "list_placements", rd "usage",
+    wr "place_root", wr "add_blob_replica", wr "refresh_usage",
+]);
+table!(FILES_STORAGE_STREAM, "storage-stream", "files/**", [rd "events"]);
 table!(TASK, "task", "tasks/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "try_claim",
     rd "reverse_relations", rd "reverse_relations_batch", rd "query", wr "rename", wa "delete",
@@ -794,6 +807,16 @@ pub fn mounts() -> Vec<Mount> {
         ),
         m("core", files::files_service_descriptor(), FILES),
         m("core", files::files_stream_descriptor(), FILES_STREAM),
+        m(
+            "core",
+            files_storage::storage_service_descriptor(),
+            FILES_STORAGE,
+        ),
+        m(
+            "core",
+            files_storage::storage_stream_descriptor(),
+            FILES_STORAGE_STREAM,
+        ),
         m("core", task::task_service_descriptor(), TASK),
         m("core", task::task_stream_descriptor(), TASK_STREAM),
         m(
