@@ -3401,7 +3401,7 @@ impl FilesBackend {
         &self,
         root_id: Uuid,
         tree_hex: &str,
-    ) -> Result<(Vec<String>, Vec<(String, Option<String>)>), FilesError> {
+    ) -> Result<SyncTreeMeta, FilesError> {
         let id = jj_lib::backend::TreeId::try_from_hex(tree_hex)
             .ok_or_else(|| FilesError::BadRequest(format!("{tree_hex}: not a tree id")))?;
         self.with_repo(root_id, |repo| {
@@ -3411,16 +3411,17 @@ impl FilesBackend {
             let mut subtrees = Vec::new();
             let mut files = Vec::new();
             for name in tree.names() {
+                let name_str = name.as_internal_str().to_string();
                 match tree.value(name) {
-                    Some(jj_lib::backend::TreeValue::Tree(t)) => subtrees.push(t.hex()),
+                    Some(jj_lib::backend::TreeValue::Tree(t)) => subtrees.push((name_str, t.hex())),
                     Some(jj_lib::backend::TreeValue::File { id, copy_id, .. }) => {
                         let copy = (!copy_id.as_bytes().is_empty()).then(|| copy_id.hex());
-                        files.push((id.hex(), copy));
+                        files.push((name_str, id.hex(), copy));
                     }
                     _ => {}
                 }
             }
-            Ok((subtrees, files))
+            Ok(SyncTreeMeta { subtrees, files })
         })?
     }
 
@@ -3629,6 +3630,17 @@ pub struct MaterializeReport {
     /// Left untouched: on-disk content the store holds nowhere —
     /// unversioned work materialization must never destroy.
     pub kept_dirty: Vec<String>,
+}
+
+/// One tree level, decoded for the replica-sync walk (issue #264/#265):
+/// child subtrees and files by NAME, so the reconcile can build each
+/// file's full root-relative path for per-file progress reporting.
+#[derive(Debug, Clone)]
+pub struct SyncTreeMeta {
+    /// `(entry name, subtree id hex)`.
+    pub subtrees: Vec<(String, String)>,
+    /// `(entry name, file id hex, copy id hex)`.
+    pub files: Vec<(String, String, Option<String>)>,
 }
 
 fn bytes_to_hex(bytes: &[u8]) -> String {

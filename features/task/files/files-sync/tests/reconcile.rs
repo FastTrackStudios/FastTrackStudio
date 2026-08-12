@@ -252,8 +252,8 @@ async fn interrupted_transfer_resumes_at_chunk_level() {
             .sync_commit_meta(root.id, &heads[0])
             .unwrap()
     };
-    let (_, files) = primary.backend.sync_tree_meta(root.id, &tree).unwrap();
-    let (file_id, _) = files.first().expect("one file").clone();
+    let meta = primary.backend.sync_tree_meta(root.id, &tree).unwrap();
+    let (_, file_id, _) = meta.files.first().expect("one file").clone();
     let manifest = primary.backend.sync_manifest(root.id, &file_id).unwrap();
     assert!(
         manifest.len() >= 3,
@@ -471,18 +471,18 @@ async fn an_interrupted_pull_completes_on_retry() {
             // manifest + chunks.
             let tree_bytes = pb.sync_object(root_id, &tree).unwrap();
             rb.sync_import_object(root_id, &tree, tree_bytes).unwrap();
-            let (subtrees, files) = pb.sync_tree_meta(root_id, &tree).unwrap();
-            let mut trees = subtrees;
-            let mut all_files = files;
+            let meta = pb.sync_tree_meta(root_id, &tree).unwrap();
+            let mut trees: Vec<String> = meta.subtrees.into_iter().map(|(_, id)| id).collect();
+            let mut all_files: Vec<String> = meta.files.into_iter().map(|(_, id, _)| id).collect();
             while let Some(t) = trees.pop() {
                 let tb = pb.sync_object(root_id, &t).unwrap();
                 rb.sync_import_object(root_id, &t, tb).unwrap();
-                let (st, fs) = pb.sync_tree_meta(root_id, &t).unwrap();
-                trees.extend(st);
-                all_files.extend(fs);
+                let m = pb.sync_tree_meta(root_id, &t).unwrap();
+                trees.extend(m.subtrees.into_iter().map(|(_, id)| id));
+                all_files.extend(m.files.into_iter().map(|(_, id, _)| id));
             }
             let _g = rb.sync_gc_quiesce(root_id).unwrap();
-            for (fid, _copy) in all_files {
+            for fid in all_files {
                 let m = pb.sync_manifest(root_id, &fid).unwrap();
                 for (hash, _len) in &m {
                     let bytes = pb.sync_read_chunk(root_id, hash).unwrap();

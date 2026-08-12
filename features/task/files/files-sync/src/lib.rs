@@ -215,6 +215,49 @@ impl SyncService for SyncHost {
     }
 }
 
+/// Live progress from a running [`reconcile_with_progress`] pull —
+/// what the sync daemon (issue #265) turns into per-file status so a
+/// user sees "big.wav: 340/512 chunks" rather than a bare "syncing".
+/// Callbacks fire from the reconcile task; keep them cheap
+/// (a lock + map update), never blocking.
+pub trait SyncObserver: Send + Sync {
+    /// The pull began scanning `root_id`'s remote heads.
+    fn scan_started(&self, root_id: Uuid) {
+        let _ = root_id;
+    }
+    /// A file's content transfer began — `total_chunks` to move,
+    /// `resident_chunks` already local (a resumed transfer starts
+    /// partway), `logical_bytes` the file's full size.
+    fn file_started(
+        &self,
+        root_id: Uuid,
+        path: &str,
+        total_chunks: usize,
+        resident_chunks: usize,
+        logical_bytes: u64,
+    ) {
+        let _ = (root_id, path, total_chunks, resident_chunks, logical_bytes);
+    }
+    /// `chunks_done` of the file's chunks are now local (fetched or
+    /// already-resident), carrying `bytes_done` logical bytes.
+    fn file_progress(&self, root_id: Uuid, path: &str, chunks_done: usize, bytes_done: u64) {
+        let _ = (root_id, path, chunks_done, bytes_done);
+    }
+    /// A file's content is fully local.
+    fn file_finished(&self, root_id: Uuid, path: &str) {
+        let _ = (root_id, path);
+    }
+    /// The pull finished (or failed — `error` set).
+    fn pull_finished(&self, root_id: Uuid, error: Option<&str>) {
+        let _ = (root_id, error);
+    }
+}
+
+/// A [`SyncObserver`] that does nothing — the default for a plain
+/// [`reconcile`] with no daemon watching.
+pub struct NoObserver;
+impl SyncObserver for NoObserver {}
+
 /// What one [`reconcile`] pull did.
 #[derive(Debug, Default, Clone)]
 pub struct ReconcileReport {
@@ -245,6 +288,33 @@ pub async fn reconcile(
     remote: &SyncServiceClient,
     root_id: Uuid,
 ) -> Result<ReconcileReport, SyncError> {
+    reconcile_with_progress(local, remote, root_id, &NoObserver).await
+}
+
+/// [`reconcile`] with live per-file progress reported to `observer` —
+/// what the sync daemon (issue #265) drives so its status surface can
+/// show each file's chunk progress instead of one opaque "syncing".
+pub async fn reconcile_with_progress(
+    local: &FilesBackend,
+    remote: &SyncServiceClient,
+    root_id: Uuid,
+    observer: &dyn SyncObserver,
+) -> Result<ReconcileReport, SyncError> {
+    observer.scan_started(root_id);
+    let result = reconcile_inner(local, remote, root_id, observer).await;
+    observer.pull_finished(
+        root_id,
+        result.as_ref().err().map(|e| e.to_string()).as_deref(),
+    );
+    result
+}
+
+async fn reconcile_inner(
+    local: &FilesBackend,
+    remote: &SyncServiceClient,
+    root_id: Uuid,
+    observer: &dyn SyncObserver,
+) -> Result<ReconcileReport, SyncError> {
     let mut report = ReconcileReport::default();
     let remote_heads = remote
         .heads(root_id)
@@ -257,7 +327,7 @@ pub async fn reconcile(
             off_thread(move || l.sync_has_object(root_id, &h).map_err(from_files)).await?
         };
         if !known {
-            import_commit_closure(local, remote, root_id, &head, &mut report).await?;
+            import_commit_closure(local, remote, root_id, &head, &mut report, observer).await?;
             report.heads_imported += 1;
         }
         // Always (re)assert visibility: a previous pull may have
@@ -282,6 +352,7 @@ async fn import_commit_closure(
     root_id: Uuid,
     head: &str,
     report: &mut ReconcileReport,
+    observer: &dyn SyncObserver,
 ) -> Result<(), SyncError> {
     // Post-order: a commit's object is imported only after its tree
     // closure and every parent are present, so a commit's presence in
@@ -317,7 +388,7 @@ async fn import_commit_closure(
             let (l, b) = (local.clone(), bytes.clone());
             off_thread(move || l.sync_decode_commit(&b).map_err(from_files)).await?
         };
-        import_tree_closure(local, remote, root_id, &tree, report).await?;
+        import_tree_closure(local, remote, root_id, &tree, "", report, observer).await?;
         cached.insert(commit_hex.clone(), bytes);
         // Revisit this commit to import its object after its parents.
         stack.push((commit_hex, true));
@@ -333,10 +404,14 @@ async fn import_tree_closure(
     remote: &SyncServiceClient,
     root_id: Uuid,
     tree_hex: &str,
+    prefix: &str,
     report: &mut ReconcileReport,
+    observer: &dyn SyncObserver,
 ) -> Result<(), SyncError> {
-    let mut pending: Vec<String> = vec![tree_hex.to_string()];
-    while let Some(tree) = pending.pop() {
+    // `(tree id, root-relative dir prefix)` so each file's full path is
+    // known for progress reporting.
+    let mut pending: Vec<(String, String)> = vec![(tree_hex.to_string(), prefix.to_string())];
+    while let Some((tree, dir)) = pending.pop() {
         let had = {
             let (l, t) = (local.clone(), tree.clone());
             off_thread(move || l.sync_has_object(root_id, &t).map_err(from_files)).await?
@@ -344,12 +419,19 @@ async fn import_tree_closure(
         if !had {
             fetch_object(local, remote, root_id, &tree, report).await?;
         }
-        let (subtrees, files) = {
+        let meta = {
             let (l, t) = (local.clone(), tree.clone());
             off_thread(move || l.sync_tree_meta(root_id, &t).map_err(from_files)).await?
         };
-        pending.extend(subtrees);
-        for (file_id, copy_id) in files {
+        for (name, subtree) in meta.subtrees {
+            let child_dir = if dir.is_empty() {
+                name
+            } else {
+                format!("{dir}/{name}")
+            };
+            pending.push((subtree, child_dir));
+        }
+        for (name, file_id, copy_id) in meta.files {
             if let Some(copy) = copy_id {
                 let (l, c) = (local.clone(), copy.clone());
                 let has =
@@ -358,7 +440,12 @@ async fn import_tree_closure(
                     fetch_object(local, remote, root_id, &copy, report).await?;
                 }
             }
-            import_file(local, remote, root_id, &file_id, report).await?;
+            let path = if dir.is_empty() {
+                name
+            } else {
+                format!("{dir}/{name}")
+            };
+            import_file(local, remote, root_id, &file_id, &path, report, observer).await?;
         }
     }
     Ok(())
@@ -393,7 +480,9 @@ async fn import_file(
     remote: &SyncServiceClient,
     root_id: Uuid,
     file_id: &str,
+    path: &str,
     report: &mut ReconcileReport,
+    observer: &dyn SyncObserver,
 ) -> Result<(), SyncError> {
     let have = {
         let (l, f) = (local.clone(), file_id.to_string());
@@ -407,16 +496,49 @@ async fn import_file(
         .await
         .map_err(|e| SyncError::Io(format!("manifest rpc: {e}")))?;
 
+    let total_chunks = manifest.chunks.len();
+    let logical_bytes: u64 = manifest.chunks.iter().map(|c| c.len).sum();
+    let chunk_len: std::collections::HashMap<&str, u64> = manifest
+        .chunks
+        .iter()
+        .map(|c| (c.hash.as_str(), c.len))
+        .collect();
+
+    // Accounting is per manifest ENTRY, not per unique chunk hash — a
+    // manifest may repeat a hash (silence/padding dedups to one stored
+    // chunk), and the report's `fetched + skipped == total` invariant
+    // is entry-based (PR #292 review). `missing` is the set of UNIQUE
+    // hashes to actually pull; `entries_for` maps each to how many
+    // entries it satisfies, so importing it advances progress by that
+    // many.
     let mut missing: Vec<String> = Vec::new();
+    let mut resident = 0usize;
+    let mut entries_for: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     for entry in &manifest.chunks {
         let (l, h) = (local.clone(), entry.hash.clone());
         let present = off_thread(move || l.sync_has_chunk(root_id, &h).map_err(from_files)).await?;
         if present {
             report.chunks_skipped += 1;
-        } else if !missing.contains(&entry.hash) {
-            missing.push(entry.hash.clone());
+            resident += 1;
+        } else {
+            *entries_for.entry(entry.hash.clone()).or_default() += 1;
+            if !missing.contains(&entry.hash) {
+                missing.push(entry.hash.clone());
+            }
         }
     }
+
+    // Per-file progress (issue #265): the resumed transfer starts at
+    // `resident` entries, the bytes already local.
+    let mut done = resident;
+    let mut bytes_done: u64 = manifest
+        .chunks
+        .iter()
+        .filter(|c| !entries_for.contains_key(&c.hash))
+        .map(|c| c.len)
+        .sum();
+    observer.file_started(root_id, path, total_chunks, resident, logical_bytes);
+    observer.file_progress(root_id, path, done, bytes_done);
 
     // Hold GC quiescent from the first imported chunk through the
     // manifest write: a synced chunk has no manifest protecting it
@@ -440,13 +562,19 @@ async fn import_file(
             .await
             .map_err(|e| SyncError::Io(format!("chunks rpc: {e}")))?;
         for chunk in wire {
+            let len = chunk_len.get(chunk.hash.as_str()).copied().unwrap_or(0);
+            // How many manifest entries this one unique chunk satisfies.
+            let satisfied = entries_for.get(chunk.hash.as_str()).copied().unwrap_or(1);
             let l = local.clone();
             off_thread(move || {
                 l.sync_import_chunk(root_id, &chunk.hash, chunk.bytes)
                     .map_err(from_files)
             })
             .await?;
-            report.chunks_fetched += 1;
+            report.chunks_fetched += satisfied;
+            done += satisfied as usize;
+            bytes_done += len * u64::from(satisfied);
+            observer.file_progress(root_id, path, done, bytes_done);
         }
     }
 
@@ -465,5 +593,6 @@ async fn import_file(
     // the quiesce guard can release.
     drop(_quiesce);
     report.manifests_imported += 1;
+    observer.file_finished(root_id, path);
     Ok(())
 }
