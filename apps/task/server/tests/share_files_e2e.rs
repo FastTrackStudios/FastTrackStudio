@@ -74,13 +74,14 @@ fn svc(state: &AppState) -> task_server::share::ShareServiceImpl {
         org.shares.clone(),
         "share-test".into(),
         "http://test".into(),
+        Some(org.files.clone()),
     )
 }
 
 fn options(caps: ShareCapabilities) -> NewShareLink {
     NewShareLink {
         label: "client link".into(),
-        capabilities: caps,
+        capabilities: Some(caps),
         password: None,
         expires_unix: None,
     }
@@ -170,6 +171,41 @@ async fn share_links_scope_gate_and_receipt() -> eyre::Result<()> {
         "rendition stream logged"
     );
 
+    // A partial edit (capabilities: None) KEEPS the grant — "just
+    // relabel" must not silently rewrite download.
+    share
+        .update_link(
+            dl.token.clone(),
+            NewShareLink {
+                label: "relabeled".into(),
+                capabilities: None,
+                password: None,
+                expires_unix: None,
+            },
+        )
+        .await
+        .expect("partial edit");
+    let r = reqwest::get(format!("{dl_base}/download/cut.mov")).await?;
+    assert_eq!(
+        r.status().as_u16(),
+        200,
+        "None capabilities keeps the download grant"
+    );
+
+    // A negative expiry is a caller bug, refused — not "never expires".
+    share
+        .update_link(
+            dl.token.clone(),
+            NewShareLink {
+                label: String::new(),
+                capabilities: None,
+                password: None,
+                expires_unix: Some(-5),
+            },
+        )
+        .await
+        .expect_err("negative expiry refused");
+
     // ── AC 2: a Named Version link resolves the exact change — even
     //    after the live tree moves on.
     let org = state.org("share-test").expect("org");
@@ -251,7 +287,7 @@ async fn share_links_scope_gate_and_receipt() -> eyre::Result<()> {
             slice.token.clone(),
             NewShareLink {
                 label: String::new(),
-                capabilities: ShareCapabilities::default(),
+                capabilities: None,
                 password: Some("hunter2".into()),
                 expires_unix: None,
             },
@@ -264,6 +300,10 @@ async fn share_links_scope_gate_and_receipt() -> eyre::Result<()> {
     assert!(!body.contains("cut.mov"), "no listing before the password");
     let (status, _) = get(&format!("{link_base}?pw=wrong")).await;
     assert_eq!(status, 401);
+    // Byte routes must never answer a missing password with a 200 HTML
+    // form — a curl would save the form as the file and exit 0.
+    let (status, _) = get(&format!("{link_base}/rendition/proxy-720/cut.mov")).await;
+    assert_eq!(status, 401, "missing password on a byte route is a 401");
     let (status, body) = get(&format!("{link_base}?pw=hunter2")).await;
     assert_eq!(status, 200);
     assert!(body.contains("cut.mov"), "right password serves: {body}");
@@ -274,7 +314,7 @@ async fn share_links_scope_gate_and_receipt() -> eyre::Result<()> {
             slice.token.clone(),
             NewShareLink {
                 label: String::new(),
-                capabilities: ShareCapabilities::default(),
+                capabilities: None,
                 password: Some(String::new()),
                 expires_unix: Some(chrono::Utc::now().timestamp() - 60),
             },

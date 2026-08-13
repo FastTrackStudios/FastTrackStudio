@@ -2834,6 +2834,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.shares.clone(),
                 org.slug.clone(),
                 share_public_base(),
+                Some(org.files.clone()),
             )),
         );
 

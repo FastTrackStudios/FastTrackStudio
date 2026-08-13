@@ -126,19 +126,38 @@ impl ShareStore {
     pub fn open(org_dir: &std::path::Path) -> Self {
         let path = org_dir.join("shares.json");
         let log_path = org_dir.join("shares-access.jsonl");
-        let state = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| {
-                serde_json::from_str::<StoreFile>(&s).ok().or_else(|| {
-                    serde_json::from_str::<Vec<StoredLink>>(&s)
+        let state = match std::fs::read_to_string(&path) {
+            Err(_) => StoreFile::default(),
+            Ok(body) => serde_json::from_str::<StoreFile>(&body)
+                .ok()
+                .or_else(|| {
+                    // Pre-#271 shape: a bare array of links.
+                    serde_json::from_str::<Vec<StoredLink>>(&body)
                         .ok()
                         .map(|links| StoreFile {
                             links,
                             sharing_disabled: false,
                         })
                 })
-            })
-            .unwrap_or_default();
+                .unwrap_or_else(|| {
+                    // An unreadable store must NOT silently become an
+                    // empty one — the next save would destroy every
+                    // link and fail the kill switch open. Preserve the
+                    // bytes aside, loudly, and start fresh.
+                    let backup = path.with_extension(format!(
+                        "json.unreadable-{}",
+                        chrono::Utc::now().timestamp()
+                    ));
+                    let moved = std::fs::rename(&path, &backup);
+                    tracing::error!(
+                        path = %path.display(),
+                        backup = %backup.display(),
+                        moved = moved.is_ok(),
+                        "shares.json is unreadable — preserved aside; links must be re-minted"
+                    );
+                    StoreFile::default()
+                }),
+        };
         Self {
             path,
             log_path,
@@ -146,10 +165,10 @@ impl ShareStore {
         }
     }
 
-    fn save(&self, file: &StoreFile) -> Result<(), ShareError> {
+    fn save_locked(path: &std::path::Path, file: &StoreFile) -> Result<(), ShareError> {
         let json =
             serde_json::to_string_pretty(file).map_err(|e| ShareError::Storage(e.to_string()))?;
-        std::fs::write(&self.path, json).map_err(|e| ShareError::Storage(e.to_string()))
+        std::fs::write(path, json).map_err(|e| ShareError::Storage(e.to_string()))
     }
 
     pub fn resolve(&self, token: &str) -> Option<StoredLink> {
@@ -169,14 +188,20 @@ impl ShareStore {
             .sharing_disabled
     }
 
-    fn with_state<R>(&self, f: impl FnOnce(&mut StoreFile) -> R) -> (R, StoreFile) {
+    /// Mutate and persist under ONE lock hold: two concurrent mutations
+    /// must not race their `fs::write`s, or the older snapshot can land
+    /// last and silently undo a revocation across restart.
+    fn mutate<R>(&self, f: impl FnOnce(&mut StoreFile) -> R) -> Result<R, ShareError> {
         let mut guard = self.state.lock().expect("share store poisoned");
         let r = f(&mut guard);
-        let snapshot = StoreFile {
-            links: guard.links.clone(),
-            sharing_disabled: guard.sharing_disabled,
-        };
-        (r, snapshot)
+        Self::save_locked(&self.path, &guard)?;
+        Ok(r)
+    }
+
+    /// Read-only view (no save).
+    fn with_state<R>(&self, f: impl FnOnce(&StoreFile) -> R) -> R {
+        let guard = self.state.lock().expect("share store poisoned");
+        f(&guard)
     }
 
     /// Append one access row — landing views, browses, rendition
@@ -218,7 +243,26 @@ impl ShareStore {
             #[serde(default)]
             path: String,
         }
-        let Ok(body) = std::fs::read_to_string(&self.log_path) else {
+        // Tail-bounded: the log grows without limit (anonymous token
+        // holders append on every hit), so read at most the last 512 KB
+        // and drop the first (possibly partial) line.
+        const TAIL: u64 = 512 * 1024;
+        let body = (|| -> std::io::Result<String> {
+            use std::io::{Read as _, Seek as _, SeekFrom};
+            let mut f = std::fs::File::open(&self.log_path)?;
+            let len = f.metadata()?.len();
+            let start = len.saturating_sub(TAIL);
+            f.seek(SeekFrom::Start(start))?;
+            let mut s = String::new();
+            f.read_to_string(&mut s)?;
+            if start > 0 {
+                if let Some(nl) = s.find('\n') {
+                    s.drain(..=nl);
+                }
+            }
+            Ok(s)
+        })();
+        let Ok(body) = body else {
             return Vec::new();
         };
         let mut out: Vec<ShareAccess> = body
@@ -247,14 +291,23 @@ pub struct ShareServiceImpl {
     /// Public base URL links are composed against
     /// (`TASK_SHARE_PUBLIC_BASE`, default derived from the bind address).
     public_base: String,
+    /// The org's Files backend — Slice mints validate the root's flavor
+    /// against it. `None` only in contexts with no Files mounted.
+    files: Option<files::FilesBackend>,
 }
 
 impl ShareServiceImpl {
-    pub fn new(store: std::sync::Arc<ShareStore>, slug: String, public_base: String) -> Self {
+    pub fn new(
+        store: std::sync::Arc<ShareStore>,
+        slug: String,
+        public_base: String,
+        files: Option<files::FilesBackend>,
+    ) -> Self {
         Self {
             store,
             slug,
             public_base,
+            files,
         }
     }
 
@@ -292,9 +345,18 @@ fn validate_target(target: &ShareTarget) -> Result<(), ShareError> {
     }
 }
 
-/// Apply mint/edit options onto a link. `existing` distinguishes the
+/// Apply mint/edit options onto a link. `fresh` distinguishes the
 /// update contract (None keeps, sentinel clears) from a fresh mint.
-fn apply_options(link: &mut StoredLink, options: NewShareLink, fresh: bool) {
+fn apply_options(
+    link: &mut StoredLink,
+    options: NewShareLink,
+    fresh: bool,
+) -> Result<(), ShareError> {
+    if options.expires_unix.is_some_and(|t| t < 0) {
+        return Err(ShareError::Invalid(
+            "expires_unix must be a unix timestamp (or 0 to clear)".into(),
+        ));
+    }
     if !options.label.is_empty() || fresh {
         link.label = if options.label.is_empty() {
             "share link".into()
@@ -302,7 +364,13 @@ fn apply_options(link: &mut StoredLink, options: NewShareLink, fresh: bool) {
             options.label
         };
     }
-    link.capabilities = Some(options.capabilities);
+    // `None` keeps on update — a partial edit ("just set a password")
+    // must not silently rewrite the download grant.
+    match options.capabilities {
+        Some(caps) => link.capabilities = Some(caps),
+        None if fresh => link.capabilities = Some(ShareCapabilities::default()),
+        None => {}
+    }
     match options.password.as_deref() {
         Some("") => link.password_sha256 = None,
         Some(pw) => link.password_sha256 = Some(sha256_hex(pw)),
@@ -315,6 +383,7 @@ fn apply_options(link: &mut StoredLink, options: NewShareLink, fresh: bool) {
         None if fresh => link.expires_unix = 0,
         None => {}
     }
+    Ok(())
 }
 
 impl ShareService for ShareServiceImpl {
@@ -329,6 +398,25 @@ impl ShareService for ShareServiceImpl {
             return Err(ShareError::SharingDisabled);
         }
         validate_target(&target)?;
+        // A Slice link's byte-serving paths (rendition + download) only
+        // exist on Media roots — minting one for a software root would
+        // hand out a link where every file 404s. Refuse at the mint.
+        if let ShareTarget::Slice { root_id, .. } = &target {
+            let Some(files) = &self.files else {
+                return Err(ShareError::Invalid(
+                    "slice links need the Files backend mounted".into(),
+                ));
+            };
+            let root = files
+                .get_root(*root_id)
+                .await
+                .map_err(|e| ShareError::Invalid(format!("root: {e}")))?;
+            if root.flavor != files::RootFlavor::Media {
+                return Err(ShareError::Invalid(
+                    "only Media roots can be shared as slices (software roots come later)".into(),
+                ));
+            }
+        }
         // 32 hex chars of UUIDv4 randomness — unguessable, URL-safe.
         let token = uuid::Uuid::new_v4().simple().to_string();
         let mut link = StoredLink {
@@ -343,13 +431,11 @@ impl ShareService for ShareServiceImpl {
             disabled: false,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        apply_options(&mut link, options, true);
-        let (info, file) = self.store.with_state(|s| {
+        apply_options(&mut link, options, true)?;
+        self.store.mutate(|s| {
             s.links.insert(0, link.clone());
             self.info(&link)
-        });
-        self.store.save(&file)?;
-        Ok(info)
+        })
     }
 
     async fn update_link(
@@ -357,78 +443,79 @@ impl ShareService for ShareServiceImpl {
         token: String,
         options: NewShareLink,
     ) -> Result<ShareLinkInfo, ShareError> {
-        let (info, file) = self.store.with_state(|s| {
-            s.links.iter_mut().find(|l| l.token == token).map(|l| {
-                apply_options(l, options, false);
-                self.info(l)
-            })
-        });
-        let Some(info) = info else {
-            return Err(ShareError::NotFound);
-        };
-        self.store.save(&file)?;
-        Ok(info)
+        let info = self.store.mutate(|s| {
+            s.links
+                .iter_mut()
+                .find(|l| l.token == token)
+                .map(|l| apply_options(l, options, false).map(|()| self.info(l)))
+        })?;
+        match info {
+            Some(result) => result,
+            None => Err(ShareError::NotFound),
+        }
     }
 
     async fn list_links(&self) -> Result<Vec<ShareLinkInfo>, ShareError> {
-        let (out, _) = self
+        Ok(self
             .store
-            .with_state(|s| s.links.iter().map(|l| self.info(l)).collect());
-        Ok(out)
+            .with_state(|s| s.links.iter().map(|l| self.info(l)).collect()))
     }
 
     async fn links_for_target(
         &self,
         target: ShareTarget,
     ) -> Result<Vec<ShareLinkInfo>, ShareError> {
-        let (out, _) = self.store.with_state(|s| {
+        Ok(self.store.with_state(|s| {
             s.links
                 .iter()
                 .filter(|l| l.target() == target)
                 .map(|l| self.info(l))
                 .collect()
-        });
-        Ok(out)
+        }))
     }
 
     async fn set_link_disabled(&self, token: String, disabled: bool) -> Result<(), ShareError> {
-        let (found, file) =
-            self.store
-                .with_state(|s| match s.links.iter_mut().find(|l| l.token == token) {
-                    Some(l) => {
-                        l.disabled = disabled;
-                        true
-                    }
-                    None => false,
-                });
+        let found = self
+            .store
+            .mutate(|s| match s.links.iter_mut().find(|l| l.token == token) {
+                Some(l) => {
+                    l.disabled = disabled;
+                    true
+                }
+                None => false,
+            })?;
         if !found {
             return Err(ShareError::NotFound);
         }
-        self.store.save(&file)
+        Ok(())
     }
 
     async fn delete_link(&self, token: String) -> Result<(), ShareError> {
-        let (found, file) = self.store.with_state(|s| {
+        let found = self.store.mutate(|s| {
             let before = s.links.len();
             s.links.retain(|l| l.token != token);
             s.links.len() != before
-        });
+        })?;
         if !found {
             return Err(ShareError::NotFound);
         }
-        self.store.save(&file)
+        Ok(())
     }
 
     async fn access_log(&self, token: String) -> Result<Vec<ShareAccess>, ShareError> {
         if self.store.resolve(&token).is_none() {
             return Err(ShareError::NotFound);
         }
-        Ok(self.store.read_access(&token))
+        // The log is an unbounded append-only file that anonymous token
+        // holders grow — read its tail off the async worker.
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || store.read_access(&token))
+            .await
+            .map_err(|e| ShareError::Storage(format!("log read: {e}")))
     }
 
     async fn set_sharing_disabled(&self, disabled: bool) -> Result<(), ShareError> {
-        let ((), file) = self.store.with_state(|s| s.sharing_disabled = disabled);
-        self.store.save(&file)
+        self.store.mutate(|s| s.sharing_disabled = disabled)
     }
 
     async fn sharing_disabled(&self) -> Result<bool, ShareError> {
@@ -452,14 +539,18 @@ pub struct ShareQuery {
 }
 
 /// The gate every share hit passes: resolve, disabled/expired → 410,
-/// password → form (absent) or 401 (wrong). `Ok` carries the link.
-/// (The refusal Response is boxed — clippy's `result_large_err`; every
-/// caller immediately unboxes into its return.)
+/// password → form/401. `Ok` carries the link. `interactive` marks
+/// HTML pages, where a MISSING password renders the form as 200; byte
+/// routes (download / rendition) must instead refuse with 401 — a curl
+/// or a `<video>` would otherwise save the form HTML as the file and
+/// call it success. (The refusal Response is boxed — clippy's
+/// `result_large_err`; every caller immediately unboxes.)
 fn gate(
     state: &AppState,
     slug: &str,
     token: &str,
     pw: Option<&str>,
+    interactive: bool,
 ) -> Result<(crate::OrgAppState, StoredLink), Box<Response>> {
     let Some(org) = state.org(slug) else {
         return Err(Box::new(
@@ -482,15 +573,22 @@ fn gate(
         ));
     }
     if !link.password_ok(pw) {
-        return Err(Box::new(match pw {
+        return Err(Box::new(match (pw, interactive) {
             // Wrong password ≠ no password: the former is a refusal,
-            // the latter is the form.
-            Some(_) => (
+            // the latter is the form (on HTML pages only).
+            (Some(_), _) => (
                 StatusCode::UNAUTHORIZED,
                 Html(password_html(&link.label, true)),
             )
                 .into_response(),
-            None => (StatusCode::OK, Html(password_html(&link.label, false))).into_response(),
+            (None, true) => {
+                (StatusCode::OK, Html(password_html(&link.label, false))).into_response()
+            }
+            (None, false) => (
+                StatusCode::UNAUTHORIZED,
+                "this share link is password-protected — pass ?pw=",
+            )
+                .into_response(),
         }));
     }
     Ok((org, link))
@@ -519,7 +617,10 @@ fn join_scope(subpath: &str, rel: &str) -> String {
 struct FilesScope {
     root_id: uuid::Uuid,
     subpath: String,
-    /// `None` = the checkpoint head (slice links follow the live root).
+    /// `None` = the checkpoint head, re-resolved per request (a slice
+    /// link follows the root as it moves; a Named Version link pins).
+    /// Browse LISTINGS resolve the head too ([`render_browse`]), so a
+    /// link never lists a file its byte routes can't serve.
     at: Option<String>,
 }
 
@@ -537,21 +638,13 @@ async fn files_scope(
         })),
         ShareTarget::NamedVersion { id } => {
             // Resolve the curated entity to its exact change — the
-            // whole point of a Named Version link (AC 2).
+            // whole point of a Named Version link (AC 2). The
+            // `VersionRef` carries the root too; no org-wide scan.
             let version = org.files.resolve_named_version(id).await.map_err(|e| {
                 (StatusCode::NOT_FOUND, format!("named version: {e}")).into_response()
             })?;
-            let named = org
-                .files
-                .list_named_versions(None)
-                .await
-                .ok()
-                .and_then(|all| all.into_iter().find(|v| v.id == id));
-            let Some(named) = named else {
-                return Err((StatusCode::NOT_FOUND, "named version entity gone").into_response());
-            };
             Ok(Some(FilesScope {
-                root_id: named.root_id,
+                root_id: version.root_id,
                 subpath: String::new(),
                 at: Some(version.commit_id),
             }))
@@ -573,7 +666,7 @@ pub async fn share_landing_handler(
     AxPath((slug, token)): AxPath<(String, String)>,
     Query(q): Query<ShareQuery>,
 ) -> Response {
-    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref()) {
+    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref(), true) {
         Ok(v) => v,
         Err(resp) => return *resp,
     };
@@ -594,7 +687,7 @@ pub async fn share_browse_handler(
     AxPath((slug, token, rel)): AxPath<(String, String, String)>,
     Query(q): Query<ShareQuery>,
 ) -> Response {
-    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref()) {
+    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref(), true) {
         Ok(v) => v,
         Err(resp) => return *resp,
     };
@@ -620,7 +713,7 @@ pub async fn share_rendition_handler(
     Query(q): Query<ShareQuery>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref()) {
+    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref(), false) {
         Ok(v) => v,
         Err(resp) => return *resp,
     };
@@ -665,7 +758,7 @@ pub async fn share_download_handler(
     AxPath((slug, token, rel)): AxPath<(String, String, String)>,
     Query(q): Query<ShareQuery>,
 ) -> Response {
-    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref()) {
+    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref(), false) {
         Ok(v) => v,
         Err(resp) => return *resp,
     };
@@ -686,23 +779,31 @@ pub async fn share_download_handler(
         Err(resp) => return resp,
     };
     let full = join_scope(&scope.subpath, &rel);
-    let len = match org
+    // Pin the exact bytes BEFORE any header leaves: `resolve_source`
+    // returns (len, CAS id) in one resolution and the stream then reads
+    // by that immutable id — a checkpoint landing mid-request can't
+    // produce a Content-Length/body mismatch. A slice link (at = None)
+    // pins the current head; a Named Version link pins its commit.
+    let (len, content_id) = match org
         .files
-        .source_len_at(scope.root_id, full.clone(), scope.at.clone())
+        .resolve_source(scope.root_id, full.clone(), scope.at.clone())
         .await
     {
-        Ok(n) => n,
+        Ok(v) => v,
         Err(e) => return (StatusCode::NOT_FOUND, format!("download: {e}")).into_response(),
     };
     // The receipt (AC 4) — written before the stream starts, so an
     // aborted transfer still shows who pulled the trigger.
     org.shares.log_access(&token, "download", &rel);
-    let filename = rel.rsplit('/').next().unwrap_or("download").to_string();
+    let filename = sanitize_filename(rel.rsplit('/').next().unwrap_or("download"));
     let (mut writer, reader) = tokio::io::duplex(64 * 1024);
     let files = org.files.clone();
-    let (root_id, at) = (scope.root_id, scope.at.clone());
+    let root_id = scope.root_id;
     tokio::spawn(async move {
-        if let Err(e) = files.read_source_at(root_id, full, at, &mut writer).await {
+        if let Err(e) = files
+            .read_source_content(root_id, &content_id, &mut writer)
+            .await
+        {
             tracing::warn!(?e, "share download: read failed mid-stream");
         }
     });
@@ -714,12 +815,29 @@ pub async fn share_download_handler(
             (header::CONTENT_LENGTH, len.to_string()),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{}\"", filename.replace('"', "")),
+                format!("attachment; filename=\"{filename}\""),
             ),
         ],
         body,
     )
         .into_response()
+}
+
+/// A `Content-Disposition`-safe filename: control bytes would make the
+/// header value unbuildable (a bare 500 after the receipt logged), and
+/// `"`/`\` break the quoted-string. Conservative allowlist; empty
+/// results fall back to "download".
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || " ._-()[]".contains(*c))
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        "download".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn rendition_kind_from_tag(tag: &str) -> Option<files_proto::RenditionKind> {
@@ -746,14 +864,23 @@ async fn render_browse(
     q: &ShareQuery,
 ) -> Response {
     let full = join_scope(&scope.subpath, rel);
-    let listing = match &scope.at {
-        Some(commit) => {
-            org.files
-                .browse_at(scope.root_id, commit.clone(), full.clone())
-                .await
-        }
-        None => org.files.browse(scope.root_id, full.clone()).await,
+    // List the CHECKPOINT tree, never the live directory: the byte
+    // routes (download / rendition) serve checkpointed content, and a
+    // listing must not show a file they would 404 on (or serve stale
+    // bytes for). A slice link resolves the head fresh per request.
+    let commit = match &scope.at {
+        Some(commit) => commit.clone(),
+        None => match org.files.head_commit_hex(scope.root_id).await {
+            Ok(head) => head,
+            Err(e) => {
+                return (StatusCode::NOT_FOUND, format!("root: {e}")).into_response();
+            }
+        },
     };
+    let listing = org
+        .files
+        .browse_at(scope.root_id, commit, full.clone())
+        .await;
     let base = format!("/org/{slug}/share/{token}");
     let pw = pw_suffix(q);
     match listing {

@@ -7,7 +7,7 @@
 use dioxus::prelude::*;
 
 use crate::vox_clients::share_client;
-use share_proto::{NewShareLink, ShareCapabilities, ShareLinkInfo, ShareTarget};
+use share_proto::{NewShareLink, ShareLinkInfo, ShareTarget};
 
 /// Copy `text` to the clipboard (browser only; ignored on native).
 fn copy_to_clipboard(text: &str) {
@@ -63,7 +63,7 @@ pub fn SharePanel(slug: String, path: Option<String>) -> Element {
                                 ShareTarget::Note { path },
                                 NewShareLink {
                                     label: "share link".into(),
-                                    capabilities: ShareCapabilities::default(),
+                                    capabilities: None,
                                     password: None,
                                     expires_unix: None,
                                 },

@@ -140,7 +140,7 @@ async fn mint_share_link(org: &str, target: share_proto::ShareTarget) -> Result<
             target,
             share_proto::NewShareLink {
                 label: String::new(),
-                capabilities: share_proto::ShareCapabilities::default(),
+                capabilities: None,
                 password: None,
                 expires_unix: None,
             },
@@ -598,13 +598,19 @@ fn RootHeader(org: String, root: FileRootInfo, slice: String) -> Element {
                 Badge { variant: BadgeVariant::Outline, "slice: {slice}" }
             }
             span { class: "text-xs text-muted-foreground truncate", "{root.path}" }
-            div { class: "ml-auto",
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    disabled: busy(),
-                    on_click: share,
-                    "Share…"
+            // Slice links serve bytes from the Media CAS — a software
+            // root would mint a link where every download 404s, so the
+            // affordance only exists where it works (the server refuses
+            // the mint too).
+            if root.flavor == files_proto::RootFlavor::Media {
+                div { class: "ml-auto",
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        disabled: busy(),
+                        on_click: share,
+                        "Share…"
+                    }
                 }
             }
         }

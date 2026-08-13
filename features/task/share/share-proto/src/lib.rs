@@ -52,12 +52,16 @@ pub struct ShareCapabilities {
 pub struct NewShareLink {
     /// Human label ("band link", "client cut").
     pub label: String,
-    pub capabilities: ShareCapabilities,
+    /// `None` on update keeps the current capabilities (a partial edit
+    /// must not silently rewrite the download grant); `None` on create
+    /// mints view-only.
+    pub capabilities: Option<ShareCapabilities>,
     /// Plaintext over the (TLS) wire; stored hashed, never returned.
     /// `None` on update keeps the current password; `Some("")` clears it.
     pub password: Option<String>,
     /// Unix seconds after which the link stops resolving. `None` on
-    /// update keeps the current expiry; `Some(0)` clears it.
+    /// update keeps the current expiry; `Some(0)` clears it. Negative
+    /// values are refused.
     pub expires_unix: Option<i64>,
 }
 
