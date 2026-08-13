@@ -43,6 +43,12 @@ Key callouts (all detailed in AGENTS.md):
   `-p task-ui`) and `cargo check -p task-app-web --target
   wasm32-unknown-unknown` clean. One cargo command at a time per
   worktree.
+- **Logging = wide events, always**: load the `logging-best-practices`
+  skill before writing any log/debug output. The request span is the
+  wide event — enrich via `task_telemetry::wide::set`, never scatter
+  log lines, never `println!`/`eprintln!`/`dbg!` (not even as debug
+  scaffolding — write a failing test instead). See the root CLAUDE.md
+  section and `.claude/skills/logging-best-practices/rules/fts-rust.md`.
 
 Everything else — workflow, hard rules, gotchas, the request path,
 where things live, and what's known-stale — is in
