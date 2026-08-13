@@ -9,7 +9,9 @@
 //! `<video src>` can't set an `Authorization` header and can't await an
 //! RPC, so the player mints one signed media grant over vox — prefix
 //! `files/renditions/{root_id}`, covering the file's whole rendition
-//! ladder — and appends it as `?token=`. A failed mint yields an empty
+//! ladder — and appends it as `?token=`. Minting goes through the
+//! shared [`task_ui_core::media_grant`] cache (one grant per (org,
+//! prefix), refresh margin included); a failed mint yields an empty
 //! suffix, which still plays while `TASK_ENFORCE_MEDIA_TOKEN` is off
 //! (the same rollout contract as the stem player's grants).
 //!
@@ -51,6 +53,8 @@ fn rendition_url(
 }
 
 /// Parse a timecode — `ss(.f)`, `mm:ss`, or `h:mm:ss` — to seconds.
+/// (The `links_proto` timecode parser is whole-second; a review seek
+/// wants fractional precision, hence the f64 twin.)
 pub fn parse_timecode(s: &str) -> Option<f64> {
     let s = s.trim();
     if s.is_empty() {
@@ -71,40 +75,11 @@ pub fn parse_timecode(s: &str) -> Option<f64> {
     Some(total)
 }
 
-/// Render seconds as `m:ss` (or `h:mm:ss` past the hour) — the
-/// player's timecode display.
-pub fn format_timecode(secs: f64) -> String {
-    let secs = if secs.is_finite() && secs > 0.0 {
-        secs
-    } else {
-        0.0
-    };
-    let whole = secs as u64;
-    let (h, m, s) = (whole / 3600, (whole / 60) % 60, whole % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m}:{s:02}")
-    }
-}
-
-/// Mint the `?token=` suffix for this root's rendition URLs. Empty on
-/// failure, on purpose — see the module docs.
-async fn grant_suffix(org: &str, root_id: Uuid) -> String {
-    use media_proto::MediaServiceClient;
-    let Ok(client) = task_ui_core::vox_clients::establish_for::<MediaServiceClient>(org).await
-    else {
-        return String::new();
-    };
-    match client
-        .media_grant(format!("files/renditions/{root_id}"))
-        .await
-    {
-        Ok(grant) => format!("?token={}", grant.token),
-        // Not fatal: without a grant the URL still serves while
-        // TASK_ENFORCE_MEDIA_TOKEN is off.
-        Err(_) => String::new(),
-    }
+/// The player's clock display — the shared playback-clock spelling
+/// (`m:ss` / `h:mm:ss`), saturated from the element's float seconds.
+fn display_timecode(secs: f64) -> String {
+    // f64→u32 `as` saturates and maps NaN to 0.
+    task_ui_core::format::duration_hms(secs as u32)
 }
 
 /// What the player streams: the proxy URL, and the filmstrip URL when
@@ -130,7 +105,9 @@ async fn resolve_sources(org: &str, root_id: Uuid, path: &str) -> Result<Sources
         .rendition(root_id, path.to_owned(), RenditionKind::Filmstrip)
         .await
         .ok();
-    let tok = grant_suffix(org, root_id).await;
+    let tok =
+        task_ui_core::media_grant::suffix_for_prefix(org, &format!("files/renditions/{root_id}"))
+            .await;
     Ok(Sources {
         proxy: rendition_url(org, root_id, RenditionKind::Proxy720, &proxy.file_id, &tok),
         filmstrip: filmstrip
@@ -166,20 +143,26 @@ async fn read_time(video_id: &str) -> f64 {
 
 /// The review player for one opened media file: proxy playback,
 /// timecode display + seek, filmstrip scrub.
+///
+/// Props are `ReadSignal`s so the resource re-resolves when the
+/// mount is reused with a different file (a root swap can hand this
+/// instance a new `(root_id, path)` in place — plain props would keep
+/// streaming the old file's proxy).
 #[component]
-pub fn ReviewPlayer(org: String, root_id: Uuid, path: String) -> Element {
+pub fn ReviewPlayer(
+    org: ReadSignal<String>,
+    root_id: ReadSignal<Uuid>,
+    path: ReadSignal<String>,
+) -> Element {
     // Stable per-mount element ids — the eval seams address the live
     // elements by id, and two open files must not cross wires.
     let video_id = use_hook(|| format!("review-video-{}", Uuid::new_v4().simple()));
     let strip_id = use_hook(|| format!("review-strip-{}", Uuid::new_v4().simple()));
 
-    let sources = {
-        let (org, path) = (org.clone(), path.clone());
-        use_resource(move || {
-            let (org, path) = (org.clone(), path.clone());
-            async move { resolve_sources(&org, root_id, &path).await }
-        })
-    };
+    let sources = use_resource(move || {
+        let (org, root_id, path) = (org(), root_id(), path());
+        async move { resolve_sources(&org, root_id, &path).await }
+    });
 
     let mut now = use_signal(|| 0.0f64);
     let timecode_input = use_signal(String::new);
@@ -221,7 +204,7 @@ pub fn ReviewPlayer(org: String, root_id: Uuid, path: String) -> Element {
                         },
                     }
                     div { class: "flex items-center gap-2",
-                        Badge { variant: BadgeVariant::Outline, "{format_timecode(now())}" }
+                        Badge { variant: BadgeVariant::Outline, "{display_timecode(now())}" }
                         Input {
                             value: timecode_input,
                             size: InputSize::Small,
@@ -283,10 +266,11 @@ mod tests {
 
     #[test]
     fn timecodes_render_readably() {
-        assert_eq!(format_timecode(0.0), "0:00");
-        assert_eq!(format_timecode(90.4), "1:30");
-        assert_eq!(format_timecode(3605.0), "1:00:05");
-        assert_eq!(format_timecode(f64::NAN), "0:00");
+        assert_eq!(display_timecode(0.0), "0:00");
+        assert_eq!(display_timecode(90.4), "1:30");
+        assert_eq!(display_timecode(3605.0), "1:00:05");
+        assert_eq!(display_timecode(f64::NAN), "0:00");
+        assert_eq!(display_timecode(-3.0), "0:00");
     }
 
     #[test]

@@ -53,7 +53,10 @@
 
 pub mod context;
 pub mod keyflow_chart_editor;
-pub mod media_grant;
+// Signed media grants moved to the shared UI seam so any surface that
+// builds `/org/{slug}/media`-style URLs (the review player, the stem
+// player) shares one cache; re-exported so callers keep their path.
+pub use task_ui_core::media_grant;
 pub mod now_playing;
 pub mod session_chart_pane;
 pub mod session_engine;

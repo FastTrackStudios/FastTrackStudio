@@ -2062,19 +2062,36 @@ async fn files_rendition_handler(
         Some((start, end)) => (start, end - start + 1),
         None => (0, total),
     };
-    let mut body = Vec::with_capacity(usize::try_from(len).unwrap_or_default());
-    if let Err(e) = org
-        .files
-        .read_rendition_range(root_id, &file_id, start, len, &mut body)
-        .await
-    {
-        tracing::error!(%root_id, file_id, ?e, "rendition: ranged read failed");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "rendition store error").into_response();
-    }
+    // Stream, never buffer: a rendition can be a full-length proxy, and
+    // `read_rendition_range` takes an `AsyncWrite` precisely so memory
+    // stays bounded to one chunk. The status is already on the wire when
+    // the read runs, so a mid-stream failure (e.g. the source-tied GC
+    // sweeping this rendition between the stat above and here) can only
+    // truncate the body — the client sees a short read against the
+    // advertised Content-Length, not a 500.
+    let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+    let files = org.files.clone();
+    let read_file_id = file_id.clone();
+    tokio::spawn(async move {
+        if let Err(e) = files
+            .read_rendition_range(root_id, &read_file_id, start, len, &mut writer)
+            .await
+        {
+            match e {
+                files::FilesError::NotFound(_) => {
+                    tracing::debug!(%root_id, file_id = read_file_id, "rendition: swept mid-stream");
+                }
+                other => {
+                    tracing::warn!(%root_id, file_id = read_file_id, ?other, "rendition: ranged read failed");
+                }
+            }
+        }
+    });
+    let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(reader));
     let base_headers = [
         (header::CONTENT_TYPE, kind.mime().to_string()),
         (header::ACCEPT_RANGES, "bytes".to_string()),
-        (header::CONTENT_LENGTH, body.len().to_string()),
+        (header::CONTENT_LENGTH, len.to_string()),
     ];
     match range {
         Some((start, end)) => (

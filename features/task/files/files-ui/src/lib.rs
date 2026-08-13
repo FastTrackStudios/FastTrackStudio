@@ -265,9 +265,17 @@ pub fn Explorer(props: ExplorerProps) -> Element {
     let org = props.org.clone();
     let floor = props.floor.clone();
     let mut location = use_signal(|| props.start.clone());
+    // The opened file's name — declared up here so the root-swap effect
+    // below can close it (its chain and review player belong to the old
+    // scope; carrying them across a swap would pair one root's video
+    // with another's history).
+    let mut opened = use_signal(|| Option::<String>::None);
     // Follow prop changes (the pane swaps roots underneath us).
     let start = props.start.clone();
-    use_effect(use_reactive!(|start| location.set(start)));
+    use_effect(use_reactive!(|start| {
+        location.set(start);
+        opened.set(None);
+    }));
 
     let mut entries = {
         let org = org.clone();
@@ -282,7 +290,6 @@ pub fn Explorer(props: ExplorerProps) -> Element {
     // chain is derived per file (ADR 0001) and a listing must not pay
     // for it. Declared before the stream so a checkpoint / naming event
     // (which changes a chain's entries and names) can refresh it too.
-    let mut opened = use_signal(|| Option::<String>::None);
     let mut chain = {
         let org = org.clone();
         use_resource(move || {

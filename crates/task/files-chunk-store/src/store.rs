@@ -452,6 +452,11 @@ impl ChunkStore {
             // Overlap of [start,end) with this chunk, relative to it.
             let from = start.saturating_sub(chunk_start) as usize;
             let to = (end.min(chunk_end) - chunk_start) as usize;
+            // A blob shorter than the manifest claims must error like
+            // `read_to`'s length check, not panic on the slice.
+            if bytes.len() < to {
+                return Err(Error::MissingChunk(chunk.hash.to_hex().to_string()));
+            }
             dest.write_all(&bytes[from..to]).await.map_err(Error::Io)?;
         }
         Ok(())
