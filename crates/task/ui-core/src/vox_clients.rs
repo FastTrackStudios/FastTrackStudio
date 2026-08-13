@@ -151,10 +151,8 @@ fn subprotocols(bearer: Option<&str>) -> Vec<String> {
 async fn dial_ws_native(
     url: &str,
     bearer: Option<&str>,
-) -> Result<
-    vox_websocket::WsLink<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
-    String,
-> {
+) -> Result<vox_websocket::WsLink<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, String>
+{
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
     let mut request = url
@@ -337,6 +335,22 @@ fn org_ws_url(slug: &str) -> Result<String, String> {
         return Err("no vox URL configured (set TASK_VOX_URL[_WEB])".to_owned());
     }
     let trimmed = base.trim_end_matches("/vox").trim_end_matches('/');
+    // Share-guest mode (issue #272): the app was opened from a review
+    // link and holds no account — every org connection dials the
+    // token-scoped guest lane instead. Same wire contract, so every
+    // typed client works unchanged.
+    if let Some(guest) = crate::vox_session::guest_share()
+        && guest.org == slug
+    {
+        let pw = match &guest.pw {
+            Some(pw) if !pw.is_empty() => format!("?pw={pw}"),
+            _ => String::new(),
+        };
+        return Ok(format!(
+            "{trimmed}/org/{slug}/share/{}/vox{pw}",
+            guest.token
+        ));
+    }
     Ok(format!("{trimmed}/org/{slug}/vox"))
 }
 

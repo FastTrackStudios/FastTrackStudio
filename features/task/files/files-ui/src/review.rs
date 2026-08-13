@@ -29,6 +29,10 @@ use files_proto::{
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
+// The guest entry page (shell) reads the scoped review's shape without
+// its own files-proto dependency.
+pub use files_proto::Review as ReviewInfo;
+
 /// Extensions the review player mounts for. Matching is by name only —
 /// the `rendition` RPC is the authority (a misnamed file simply resolves
 /// no proxy and the player says so).
@@ -128,6 +132,21 @@ async fn resolve_sources(
         filmstrip: filmstrip
             .map(|f| rendition_url(org, root_id, RenditionKind::Filmstrip, &f.file_id, &tok)),
     })
+}
+
+/// The review a share-guest connection is scoped to (issue #272): the
+/// guest lane answers `list_reviews` with exactly its one review, so
+/// the guest entry page resolves (root, file) from the connection
+/// itself rather than carrying them in the URL.
+pub async fn guest_scoped_review(org: &str) -> Result<Review, String> {
+    crate::client(org)
+        .await?
+        .list_reviews(None)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "this link no longer resolves to a review".to_string())
 }
 
 /// The file's review if it exists — a pure read (follows renames
@@ -847,6 +866,77 @@ fn CommentsPanel(
                             div { class: "flex items-center gap-2",
                                 Badge { variant: BadgeVariant::Secondary, "Review" }
                                 Text { variant: TextVariant::Muted, class: "text-xs", "{review.title}" }
+                                // Minting and deleting are member
+                                // actions — the guest lane denies both,
+                                // so guests never see the controls.
+                                if task_ui_core::vox_session::guest_share().is_none() {
+                                div { class: "ml-auto",
+                                    // Mint the guest link (issue #272):
+                                    // an anonymous reviewer gets this
+                                    // review — comment capability on —
+                                    // and nothing else in the org.
+                                    Button {
+                                        variant: ButtonVariant::Ghost,
+                                        size: ButtonSize::Small,
+                                        disabled: busy(),
+                                        on_click: {
+                                            let review_id = review.id;
+                                            move |_| {
+                                                if *busy.peek() {
+                                                    return;
+                                                }
+                                                busy.set(true);
+                                                let org = org.peek().clone();
+                                                spawn(async move {
+                                                    let target = share_proto::ShareTarget::Review { id: review_id };
+                                                    let result = async {
+                                                        let client = task_ui_core::vox_clients::establish_for::<
+                                                            share_proto::ShareServiceClient,
+                                                        >(&org)
+                                                        .await?;
+                                                        client
+                                                            .create_link(
+                                                                target,
+                                                                share_proto::NewShareLink {
+                                                                    label: String::new(),
+                                                                    capabilities: Some(share_proto::ShareCapabilities {
+                                                                        comment: true,
+                                                                        download: false,
+                                                                        file_request: false,
+                                                                    }),
+                                                                    password: None,
+                                                                    expires_unix: None,
+                                                                },
+                                                            )
+                                                            .await
+                                                            .map(|link| link.url)
+                                                            .map_err(|e| e.to_string())
+                                                    }
+                                                    .await;
+                                                    match result {
+                                                        Ok(url) => {
+                                                            crate::copy_to_clipboard(&url);
+                                                            toast.success(
+                                                                "Review link minted".into(),
+                                                                ToastOptions::new()
+                                                                    .description(format!("Copied: {url}")),
+                                                            );
+                                                        }
+                                                        Err(e) => {
+                                                            toast.error(
+                                                                "Couldn't mint link".into(),
+                                                                ToastOptions::new().description(e),
+                                                            );
+                                                        }
+                                                    }
+                                                    busy.set(false);
+                                                });
+                                            }
+                                        },
+                                        "Share review…"
+                                    }
+                                }
+                                }
                             }
                             {match &*comments.read_unchecked() {
                                 Some(Some(Ok(list))) if list.is_empty() => rsx! {
@@ -1001,13 +1091,15 @@ fn CommentRow(
                 }
                 span { class: "whitespace-pre-wrap break-words", "{comment.body}" }
             }
-            div { class: "ml-auto",
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    disabled: busy(),
-                    on_click: delete,
-                    "✕"
+            if task_ui_core::vox_session::guest_share().is_none() {
+                div { class: "ml-auto",
+                    Button {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Small,
+                        disabled: busy(),
+                        on_click: delete,
+                        "✕"
+                    }
                 }
             }
         }

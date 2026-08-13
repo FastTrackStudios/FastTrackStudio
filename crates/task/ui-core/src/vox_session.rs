@@ -155,6 +155,35 @@ pub fn active_server() -> Option<ActiveServer> {
 ///
 /// Native: `TASK_VOX_URL` at runtime, empty when unset.
 #[must_use]
+/// A share-guest session (issue #272): the app was opened from a
+/// review share link, holds no account, and every org connection must
+/// dial the scoped guest lane instead of the org lane.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GuestShare {
+    pub org: String,
+    /// The share-link token — the whole grant.
+    pub token: String,
+    /// The link password the visitor entered, if any.
+    pub pw: Option<String>,
+}
+
+fn guest_share_slot() -> &'static std::sync::Mutex<Option<GuestShare>> {
+    static SLOT: std::sync::OnceLock<std::sync::Mutex<Option<GuestShare>>> =
+        std::sync::OnceLock::new();
+    SLOT.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Enter (or leave, with `None`) share-guest mode. Set once at boot by
+/// the guest entry page, before any connection is established.
+pub fn set_guest_share(session: Option<GuestShare>) {
+    *guest_share_slot().lock().expect("guest share slot") = session;
+}
+
+#[must_use]
+pub fn guest_share() -> Option<GuestShare> {
+    guest_share_slot().lock().expect("guest share slot").clone()
+}
+
 pub fn vox_url() -> String {
     // A user-selected server (multi-server registry) always wins.
     if let Some(server) = active_server() {

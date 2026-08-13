@@ -3382,7 +3382,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
 }
 
 /// Public base URL share links are composed against.
-fn share_public_base() -> String {
+pub(crate) fn share_public_base() -> String {
     std::env::var("TASK_SHARE_PUBLIC_BASE")
         .or_else(|_| std::env::var("TASK_SERVER_PUBLIC_URL"))
         .ok()

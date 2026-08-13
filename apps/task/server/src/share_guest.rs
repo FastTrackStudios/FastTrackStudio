@@ -423,8 +423,12 @@ impl FilesService for GuestFilesService {
     ) -> Result<CheckpointInfo, FilesError> {
         denied()
     }
+    /// The guest's "what can I see" call: exactly the one review this
+    /// link scopes to — the entry page resolves its (root, file) from
+    /// here rather than carrying them in the URL.
     async fn list_reviews(&self, _root_id: Option<Uuid>) -> Result<Vec<Review>, FilesError> {
-        denied()
+        self.live_link()?;
+        Ok(vec![self.review.clone()])
     }
     async fn delete_review_comment(&self, _id: Uuid) -> Result<(), FilesError> {
         denied()

@@ -1220,11 +1220,28 @@ async fn render_browse(
 ) -> Response {
     // A Review link is one file, not a tree: the landing (rel = "")
     // IS the file page, any other path 404s, and there is no listing.
+    // The page carries "Open review" — the real app booting in guest
+    // mode over the scoped vox lane (issue #272), where commenting and
+    // drawing live.
     if let Some(only) = &scope.file_only {
         let base = format!("/org/{slug}/share/{token}");
         let pw = pw_suffix(q);
         return if rel.is_empty() || rel == *only {
-            Html(file_html(link, &base, only, &pw)).into_response()
+            let app_origin = std::env::var("TASK_SHARE_APP_ORIGIN").unwrap_or_default();
+            let pw_param = match &q.pw {
+                Some(pw) if !pw.is_empty() => format!("&pw={}", urlencoding_encode(pw)),
+                _ => String::new(),
+            };
+            // `server` tells the guest app where its vox lane lives —
+            // a fresh visitor has no server registry, and same-origin
+            // fallback only holds when app and server share an origin
+            // (prod). Dev splits them (dx vs task-server).
+            let open_review = format!(
+                "{}/share-review?org={slug}&token={token}{pw_param}&server={}",
+                app_origin.trim_end_matches('/'),
+                urlencoding_encode(&crate::share_public_base()),
+            );
+            Html(file_html_with_review(link, &base, only, &pw, &open_review)).into_response()
         } else {
             (StatusCode::NOT_FOUND, "this link serves one file").into_response()
         };
@@ -1352,6 +1369,24 @@ fn is_video_name(name: &str) -> bool {
         ext.as_str(),
         "mov" | "mp4" | "m4v" | "mkv" | "webm" | "avi" | "mxf" | "mts"
     )
+}
+
+/// [`file_html`] plus the "Open review" button — the review landing's
+/// door into the real app on the guest lane (issue #272).
+fn file_html_with_review(
+    link: &StoredLink,
+    base: &str,
+    rel: &str,
+    pw: &str,
+    open_review: &str,
+) -> String {
+    let page_body = file_html(link, base, rel, pw);
+    // Inject the button ahead of the closing card div — the page
+    // builder is a plain string; one anchor keeps it that way.
+    let button = format!(
+        r#"<a class="btn" style="margin-left:.6rem" href="{open_review}">Open review — comment &amp; draw</a></div></body></html>"#,
+    );
+    page_body.replace("</div></body></html>", &button)
 }
 
 fn file_html(link: &StoredLink, base: &str, rel: &str, pw: &str) -> String {
