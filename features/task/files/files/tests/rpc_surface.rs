@@ -897,3 +897,71 @@ async fn browse_never_initializes_a_missing_store() {
 
     scope.close().await;
 }
+
+/// REPRO (divergent-root cold-open browse hang): a divergence written by
+/// one process, then a *fresh* backend opens the root cold and browses.
+/// The dev seed does exactly this (seed process → server process), and
+/// the UI wedges. Asserts the cold-open browse completes.
+#[tokio::test(flavor = "multi_thread")]
+async fn cold_open_browse_on_a_divergent_root_completes() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let root_dir = data_dir.path().join("split");
+    std::fs::create_dir(&root_dir).unwrap();
+    std::fs::write(root_dir.join("mix.wav"), b"base take").unwrap();
+
+    // Process 1: create + checkpoint + seed a divergence, then shut down.
+    {
+        let backend =
+            FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
+        let scope = Scope::new();
+        let local = LocalServer::serve(router(backend.clone()), scope.clone());
+        let client: FilesServiceClient = local.establish().await.expect("client");
+        let root = client
+            .create_root(
+                root_dir.to_str().unwrap().to_string(),
+                "Split".to_string(),
+                RootFlavor::Media,
+            )
+            .await
+            .expect("create_root");
+        client
+            .checkpoint_now(root.id, Some("base".to_string()))
+            .await
+            .expect("checkpoint");
+        backend
+            .seed_divergent_file(root.id, "mix.wav", b"take A", b"take B")
+            .await
+            .expect("seed divergence");
+        backend.shutdown().await;
+        scope.close().await;
+    }
+
+    // Process 2: a cold backend opens the same store and browses —
+    // faithfully to the server, with cadence watching + driver running.
+    let backend2 =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend2");
+    backend2.enable_watching().await;
+    backend2.spawn_cadence_driver(Duration::from_secs(30));
+    let scope2 = Scope::new();
+    let local2 = LocalServer::serve(router(backend2.clone()), scope2.clone());
+    let client2: FilesServiceClient = local2.establish().await.expect("client2");
+    let roots = client2.list_roots().await.expect("list_roots");
+    let root_id = roots.first().expect("a root").id;
+
+    let browsed = tokio::time::timeout(
+        Duration::from_secs(20),
+        client2.browse(root_id, String::new()),
+    )
+    .await;
+    assert!(
+        browsed.is_ok(),
+        "cold-open browse on a divergent root hung (>20s)"
+    );
+    let entries = browsed.unwrap().expect("browse rpc");
+    assert!(
+        entries.iter().any(|e| e.name == "mix.wav" && e.divergent),
+        "mix.wav should be divergent: {entries:?}"
+    );
+    backend2.shutdown().await;
+    scope2.close().await;
+}

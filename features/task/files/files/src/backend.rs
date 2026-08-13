@@ -486,6 +486,65 @@ impl FilesBackend {
         Ok(f(&repo))
     }
 
+    /// Fabricate a divergence for DEV/DEMO SEEDING: two checkpoints off
+    /// the current head, each writing `path` differently, so the file
+    /// ends up divergent and `divergences` / `resolve_divergence` have
+    /// something to operate on. The ordinary write path never produces
+    /// this — concurrent saves on two replicas do — so this is the
+    /// deterministic stand-in a seed needs, built on the same public
+    /// `with_repo` + version-store `checkpoint` primitive the divergence
+    /// tests use.
+    pub async fn seed_divergent_file(
+        &self,
+        root_id: Uuid,
+        path: &str,
+        side_a: &[u8],
+        side_b: &[u8],
+    ) -> Result<(), FilesError> {
+        use jj_lib::repo_path::RepoPathBuf;
+        use task_files_version_store::checkpoint::{Change, checkpoint};
+
+        let this = self.clone();
+        let path = path.to_string();
+        let (a, b) = (side_a.to_vec(), side_b.to_vec());
+        tokio::task::spawn_blocking(move || {
+            this.with_repo(root_id, |repo| {
+                let base = repo
+                    .view()
+                    .heads()
+                    .iter()
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| FilesError::NotFound("no checkpoint head to diverge".into()))?;
+                let rp = RepoPathBuf::from_internal_string(&path)
+                    .map_err(|e| FilesError::BadRequest(format!("{path}: {e:?}")))?;
+                pollster::block_on(checkpoint(
+                    repo,
+                    base.clone(),
+                    vec![Change::Write {
+                        path: rp.clone(),
+                        content: a,
+                    }],
+                    "seed: side A",
+                ))
+                .map_err(|e| FilesError::Io(format!("seed side A: {e}")))?;
+                pollster::block_on(checkpoint(
+                    repo,
+                    base,
+                    vec![Change::Write {
+                        path: rp,
+                        content: b,
+                    }],
+                    "seed: side B",
+                ))
+                .map_err(|e| FilesError::Io(format!("seed side B: {e}")))?;
+                Ok::<(), FilesError>(())
+            })?
+        })
+        .await
+        .map_err(|e| FilesError::Io(format!("seed join: {e}")))?
+    }
+
     fn publish(&self, event: FilesEvent) {
         self.events.publish(event);
     }

@@ -92,6 +92,20 @@ dev:
     just web 2>&1 | sed 's/^/[web] /' &
     wait
 
+# ── Dev seed ─────────────────────────────────────────────────────────────
+
+# A throwaway LOCAL multi-org dev vault with a known owner login + demo
+# data (including a Files root with version history + a divergence, for
+# the issue #267 UI). Isolated from prod — its own $TASK_DATA_ROOT under
+# ~/.local/share/task-dev-seed. See scripts/dev-seed.sh for env knobs.
+#
+#   just dev-seed          # build + seed (tops up; idempotent)
+#   just dev-seed fresh    # wipe + reseed from scratch
+#   just dev-seed serve    # run task-server against the dev vault (:9099)
+#   just dev-seed web      # run the web app pointed at it (:8765)
+dev-seed *ARGS="seed":
+    scripts/dev-seed.sh {{ARGS}}
+
 # ── Build & Test ─────────────────────────────────────────────────────────
 
 # All recipes assume the repo-root dev shell is already loaded (the
