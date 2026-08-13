@@ -260,6 +260,17 @@ impl OrgRoot {
         self.path.join("identity.sqlite")
     }
 
+    /// Which orgs on this server a principal belongs to, and with what
+    /// role in each. Only the HOME org's copy is consulted — it is the
+    /// server's identity authority — so this file is absent in every
+    /// other org, and a non-home org keeps its own `auth.sqlite` as the
+    /// local identity it would fall back to if detached onto its own
+    /// server. See `apps/task/plans/one-account-per-server.md`.
+    #[must_use]
+    pub fn memberships_db(&self) -> PathBuf {
+        self.path.join("memberships.sqlite")
+    }
+
     #[must_use]
     pub fn timer_db(&self) -> PathBuf {
         self.path.join("timer.sqlite")

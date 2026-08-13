@@ -136,10 +136,7 @@ pub(crate) async fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
             // org router's gates apply). Display the on-disk path
             // when the org lives on this machine, else the
             // wiki-relative path.
-            let slug = match crate::resolve_active_org(None) {
-                Ok(s) => s,
-                Err(_) => crate::org_ctx::resolve_active(None)?.root.slug().to_owned(),
-            };
+            let slug = crate::resolve_slug(None)?;
             let filename = format!("{}-Q{}-C{}.md", target.year, target.quarter, target.ordinal);
             let rel = format!("cycles/{filename}");
             let display = org_proto::DataRoot::from_env().ok().map_or_else(

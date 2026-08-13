@@ -31,6 +31,21 @@ pub struct Manifest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileId(blake3::Hash);
 
+// `blake3::Hash` has no `Ord`/`PartialOrd` impl of its own; order by raw
+// bytes so `FileId` can key a `BTreeSet`/`BTreeMap` (e.g. `ChunkStore::gc`'s
+// `protected` set).
+impl PartialOrd for FileId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FileId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.as_bytes().cmp(other.0.as_bytes())
+    }
+}
+
 const MAGIC: &[u8; 4] = b"FTSM";
 const VERSION: u8 = 1;
 /// magic(4) + version(1) + chunk count(4)

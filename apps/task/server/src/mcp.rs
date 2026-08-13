@@ -1474,15 +1474,18 @@ fn date_of(stamp: &str) -> &str {
 
 /// Parse a UUID argument with an error naming the field.
 fn parse_uuid(value: &str, what: &str) -> Result<uuid::Uuid, ToolFailure> {
-    value
-        .parse::<uuid::Uuid>()
-        .map_err(|_| ToolFailure::Message(format!("`{value}` is not a {what} id (expected a UUID)")))
+    value.parse::<uuid::Uuid>().map_err(|_| {
+        ToolFailure::Message(format!("`{value}` is not a {what} id (expected a UUID)"))
+    })
 }
 
 /// `YYYY-MM-DD` → `NaiveDate`, with an actionable error.
 fn parse_date(value: &str, key: &str) -> Result<chrono::NaiveDate, ToolFailure> {
-    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
-        .map_err(|_| ToolFailure::Message(format!("`{key}` must be an ISO date (YYYY-MM-DD), got `{value}`")))
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
+        ToolFailure::Message(format!(
+            "`{key}` must be an ISO date (YYYY-MM-DD), got `{value}`"
+        ))
+    })
 }
 
 /// `"agent:NAME"` / `"human:USER_ID"` / bare name (= agent) → the
@@ -1603,9 +1606,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
     use milestone::MilestoneService as _;
     use project::ProjectService as _;
     #[cfg(feature = "plugin-scheduling")]
-    use scheduling_proto::{
-        Bookings as _, CalendarEvents as _, DayPlans as _, Slots as _,
-    };
+    use scheduling_proto::{Bookings as _, CalendarEvents as _, DayPlans as _, Slots as _};
     use task::TaskService as _;
     use vault_proto::VaultSync as _;
 
@@ -2419,9 +2420,10 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                 let end = b.get("end").and_then(Value::as_str).ok_or_else(|| {
                     ToolFailure::Message("every block needs an `end` ('HH:MM')".into())
                 })?;
-                let label = b.get("label").and_then(Value::as_str).ok_or_else(|| {
-                    ToolFailure::Message("every block needs a `label`".into())
-                })?;
+                let label = b
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolFailure::Message("every block needs a `label`".into()))?;
                 planned.push(scheduling_proto::PlannedBlock {
                     id: scheduling_proto::TimeBlockId(uuid::Uuid::new_v4().to_string()),
                     start: parse_hhmm(start, "start")?,
@@ -2431,10 +2433,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                         Some(c) => parse_block_category(c)?,
                         None => scheduling_proto::BlockCategory::Other,
                     },
-                    note: b
-                        .get("note")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
+                    note: b.get("note").and_then(Value::as_str).map(str::to_owned),
                     assignment: None,
                     fixed: b.get("fixed").and_then(Value::as_bool).unwrap_or(false),
                 });
@@ -2457,16 +2456,17 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                 .list_bookings()
                 .map_err(|e| ToolFailure::Message(format!("{e:?}")))?;
             rows.sort_by(|a, b| a.start_utc.cmp(&b.start_utc));
-            let out: Vec<Value> = rows.iter().take(arg_limit(args)).map(booking_json).collect();
+            let out: Vec<Value> = rows
+                .iter()
+                .take(arg_limit(args))
+                .map(booking_json)
+                .collect();
             Ok(json!({ "count": out.len(), "bookings": out }))
         }
 
         "list_open_slots" => {
             let query = scheduling_proto::SlotQuery {
-                event_type_id: scheduling_proto::EventTypeId(required_str(
-                    args,
-                    "event_type_id",
-                )?),
+                event_type_id: scheduling_proto::EventTypeId(required_str(args, "event_type_id")?),
                 from_utc: required_str(args, "from")?,
                 to_utc: required_str(args, "to")?,
             };
@@ -2484,10 +2484,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
 
         "book_slot" => {
             let new = scheduling_proto::NewBooking {
-                event_type_id: scheduling_proto::EventTypeId(required_str(
-                    args,
-                    "event_type_id",
-                )?),
+                event_type_id: scheduling_proto::EventTypeId(required_str(args, "event_type_id")?),
                 start_utc: required_str(args, "start")?,
                 end_utc: required_str(args, "end")?,
                 attendee_name: required_str(args, "attendee_name")?,
@@ -2583,10 +2580,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
 
         // ── Email (read + draft; no send by design) ──────────────
         "list_email_accounts" => {
-            let accounts = org
-                .email
-                .accounts()
-                .map_err(email_err)?;
+            let accounts = org.email.accounts().map_err(email_err)?;
             let out: Vec<Value> = accounts
                 .iter()
                 .map(|a| {
@@ -2661,7 +2655,9 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
             let account = required_str(args, "account")?;
             let to = arg_str_list(args, "to")?.unwrap_or_default();
             if to.is_empty() {
-                return Err(ToolFailure::Message("`to` needs at least one address".into()));
+                return Err(ToolFailure::Message(
+                    "`to` needs at least one address".into(),
+                ));
             }
             let draft = email_proto::Draft {
                 from: account_addr(org, &account)?,
@@ -2679,10 +2675,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                 references: Vec::new(),
                 attachments: Vec::new(),
             };
-            let id = org
-                .email
-                .append_draft(&account, draft)
-                .map_err(email_err)?;
+            let id = org.email.append_draft(&account, draft).map_err(email_err)?;
             Ok(json!({
                 "draft_id": id,
                 "note": "saved to Drafts — the user reviews and sends it from their mail client",
@@ -2720,10 +2713,7 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
                 references,
                 attachments: Vec::new(),
             };
-            let id = org
-                .email
-                .append_draft(&account, draft)
-                .map_err(email_err)?;
+            let id = org.email.append_draft(&account, draft).map_err(email_err)?;
             Ok(json!({
                 "draft_id": id,
                 "in_reply_to": message_id,
@@ -2814,20 +2804,14 @@ fn call_tool(org: &crate::OrgAppState, name: &str, args: &Value) -> Result<Value
 }
 
 /// The sender identity for a draft: the account's own address.
-fn account_addr(
-    org: &crate::OrgAppState,
-    account: &str,
-) -> Result<email_proto::Addr, ToolFailure> {
+fn account_addr(org: &crate::OrgAppState, account: &str) -> Result<email_proto::Addr, ToolFailure> {
     use email_proto::EmailSync as _;
     let accounts = org.email.accounts().map_err(email_err)?;
-    let acct = accounts
-        .iter()
-        .find(|a| a.id.0 == account)
-        .ok_or_else(|| {
-            ToolFailure::Message(format!(
-                "no mail account `{account}` — call list_email_accounts first"
-            ))
-        })?;
+    let acct = accounts.iter().find(|a| a.id.0 == account).ok_or_else(|| {
+        ToolFailure::Message(format!(
+            "no mail account `{account}` — call list_email_accounts first"
+        ))
+    })?;
     Ok(email_proto::Addr {
         name: acct.display_name.clone(),
         email: acct.address.clone(),

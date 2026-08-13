@@ -219,8 +219,17 @@ table!(VAULT_GRAPH, "vault-graph", "vault/**", [
 ]);
 
 table!(SHARE, "share", "shares/**", [
-    wa "create_link", rd "list_links", rd "links_for_note",
+    // Minting and revoking are outward-facing — audited even on allow,
+    // like every capability-granting write. Retroactive edits (issue
+    // #271 AC 5) change what an existing link can do, so they audit too.
+    wa "create_link", wa "update_link", rd "list_links", rd "links_for_target",
     wa "set_link_disabled", wa "delete_link",
+    // The per-link access log (views + download receipts) is a read;
+    // the org kill switch is the org's biggest sharing decision.
+    rd "access_log", wa "set_sharing_disabled", rd "sharing_disabled",
+    // The file-request inbox (issue #272): listing the queue is a
+    // read; promotion writes into the versioned tree — audited.
+    rd "list_incoming", wa "promote_incoming",
 ]);
 
 // Per-file CRDT: `sync` mutates the doc; presence is ephemeral and never
@@ -339,6 +348,64 @@ table!(WORKSTREAM, "workstream", "workstreams/**", [
     wr "set_status", wa "delete", rd "rollup",
 ]);
 table!(WORKSTREAM_STREAM, "workstream-stream", "workstreams/**", [rd "events"]);
+table!(FILES, "files", "files/**", [
+    wr "create_root", rd "list_roots", rd "get_root", rd "browse", rd "drive_browse", rd "tree_browse",
+    rd "chain", wr "checkpoint_now",
+    // Cadence engine (issue #260): activity hints and the per-root
+    // Ignore set. A hint can cause a capture, so it is a write.
+    wr "hint_activity", rd "snapshots", rd "ignore_set", wr "set_ignore_set",
+    // Curation (issue #261). Naming and starting an iteration are
+    // ordinary writes; dropping a name and running GC carry an audit
+    // line even on allow (`wa`, like every `delete` above) because both
+    // can end an object's protection. Still member tier — this lane has
+    // no admin permits at all (see the module doc).
+    wr "name_version", rd "list_named_versions", rd "resolve_named_version",
+    wa "unname_version", wr "start_project_version", rd "list_project_versions",
+    wa "gc_root",
+    // Hydration (issue #263). Dehydrate carries an audit line even on
+    // allow (`wa`): it replaces live-tree content with a stub, and
+    // although the content survives in the store, it is the one write
+    // here that makes files non-resident. Hydrate restores content —
+    // an ordinary write. Applying policy does both in bulk.
+    wa "dehydrate", wr "hydrate", rd "hydration_policy", wr "set_hydration_policy",
+    wa "apply_hydration_policy",
+    // Project Version restart (issue #268). Restarting reshapes the
+    // whole live tree and copy-forward can overwrite versioned files —
+    // audited writes; time-travel browsing is an ordinary read.
+    wa "restart_project_version", rd "browse_at", wa "copy_forward",
+    // Divergent versions (issue #264): listing is a read; settling
+    // writes a merge checkpoint and rewrites live-tree files (audited).
+    rd "divergences", wa "resolve_divergence",
+    // Derived media (issue #269). Requesting a rendition may generate
+    // it (an expensive transcode) and cache it, but it never mutates
+    // the versioned tree — a read from the caller's point of view.
+    // `rendition_at` is the same call pinned to a past version (the
+    // Review page's switcher, issue #270).
+    rd "rendition", rd "rendition_at",
+    // Reviews (issue #270). The Review page's audience includes
+    // share-link guests, so the feedback verbs sit at comment tier
+    // (`cm`, like `add_comment` / `post_message`): get-or-create runs
+    // when feedback starts, and posting writes a comment page. Pure
+    // lookups are reads. Deleting a comment removes someone's
+    // feedback, so it carries an audit line even on allow, like the
+    // other `delete` verbs.
+    rd "find_review", cm "review_for_file", rd "list_reviews", rd "review_comments",
+    cm "add_review_comment", wa "delete_review_comment",
+]);
+table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
+// The Files placement layer's ORG lane (issue #262). The operator and
+// agent lanes are not here on purpose: they live on the server router,
+// which this gate does not cover, because the Storage Location registry
+// is deployment-scoped and admitting an org onto a location is an
+// operator act rather than a member one. What a member may do is place
+// their own org's roots inside grants the operator already issued —
+// every method below is refused by the backend itself unless a grant
+// covers it.
+table!(FILES_STORAGE, "storage", "files/**", [
+    rd "list_locations", rd "list_grants", rd "placement", rd "list_placements", rd "usage",
+    wr "place_root", wr "add_blob_replica", wr "refresh_usage",
+]);
+table!(FILES_STORAGE_STREAM, "storage-stream", "files/**", [rd "events"]);
 table!(TASK, "task", "tasks/**", [
     rd "list", rd "get", rd "get_by_path", wr "create", wr "update", wr "try_claim",
     rd "reverse_relations", rd "reverse_relations_batch", rd "query", wr "rename", wa "delete",
@@ -778,6 +845,18 @@ pub fn mounts() -> Vec<Mount> {
             "core",
             workstream::workstream_stream_descriptor(),
             WORKSTREAM_STREAM,
+        ),
+        m("core", files::files_service_descriptor(), FILES),
+        m("core", files::files_stream_descriptor(), FILES_STREAM),
+        m(
+            "core",
+            files_storage::storage_service_descriptor(),
+            FILES_STORAGE,
+        ),
+        m(
+            "core",
+            files_storage::storage_stream_descriptor(),
+            FILES_STORAGE_STREAM,
         ),
         m("core", task::task_service_descriptor(), TASK),
         m("core", task::task_stream_descriptor(), TASK_STREAM),
@@ -1459,6 +1538,98 @@ impl<R> AuditedIdentityResolver<R> {
             inner,
             slug: slug.into(),
         }
+    }
+}
+
+/// Accept a home-org token for THIS org — but only with a membership row.
+///
+/// The org's own store answers first, so nothing about single-org
+/// behaviour changes and a token issued here keeps working after the
+/// home org is gone. Only when that yields no user do we ask the home
+/// org, and a home principal is admitted **only** if
+/// `memberships.role_for(user, slug)` returns a row.
+///
+/// That row is the entire fence. Before this existed, a `codywright`
+/// token was simply meaningless to `cbu` — the wrong database, no
+/// decision to get wrong. Now it is meaningful everywhere on the server
+/// and the row is what says no, which is why a missing row must fail
+/// closed rather than fall through to `DEFAULT_ORG_ROLE`. See
+/// `plans/one-account-per-server.md`.
+pub struct HomeFallbackResolver<R, H> {
+    own: R,
+    home: H,
+    memberships: std::sync::Arc<crate::memberships::Memberships>,
+    slug: String,
+}
+
+impl<R, H> HomeFallbackResolver<R, H> {
+    pub fn new(
+        own: R,
+        home: H,
+        memberships: std::sync::Arc<crate::memberships::Memberships>,
+        slug: impl Into<String>,
+    ) -> Self {
+        Self {
+            own,
+            home,
+            memberships,
+            slug: slug.into(),
+        }
+    }
+}
+
+impl<R: IdentityResolver, H: IdentityResolver> IdentityResolver for HomeFallbackResolver<R, H> {
+    fn resolve<'a>(&'a self, bearer_token: Option<&'a str>) -> BoxIdentityFuture<'a> {
+        Box::pin(async move {
+            use task_telemetry::wide;
+
+            let own = self.own.resolve(bearer_token).await;
+            if matches!(own, Principal::User { .. }) {
+                return own;
+            }
+            let Principal::User { user_id } = self.home.resolve(bearer_token).await else {
+                return Principal::Anonymous;
+            };
+            // A home principal exists. Membership decides.
+            let Ok(uuid) = user_id.parse::<uuid::Uuid>() else {
+                // Ids are uuids everywhere in architect-auth; a token that
+                // resolves to something else is not a shape we admit
+                // across orgs.
+                wide::set("auth.cross_org", "unparsable_user_id");
+                return Principal::Anonymous;
+            };
+            match self.memberships.role_for(uuid, &self.slug).await {
+                Ok(Some(m)) => {
+                    wide::set("auth.cross_org", "member");
+                    wide::set(
+                        "auth.membership_role",
+                        m.role.unwrap_or_else(|| "(member)".into()),
+                    );
+                    Principal::User { user_id }
+                }
+                Ok(None) => {
+                    // Signed in, and not a member here. ONE warn line:
+                    // this is a refusal, and refusals are alertable.
+                    wide::set("auth.cross_org", "not_a_member");
+                    tracing::warn!(
+                        org.slug = self.slug,
+                        "cross-org: home principal has no membership row for this org"
+                    );
+                    Principal::Anonymous
+                }
+                Err(e) => {
+                    // Fail closed: an unreadable membership table must not
+                    // become "everyone is a member".
+                    wide::set("auth.cross_org", "lookup_failed");
+                    tracing::warn!(
+                        org.slug = self.slug,
+                        error = %e,
+                        "cross-org: membership lookup failed — refusing"
+                    );
+                    Principal::Anonymous
+                }
+            }
+        })
     }
 }
 

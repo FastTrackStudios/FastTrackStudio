@@ -3,15 +3,19 @@
 //! DAG-range copy-record walk that backs
 //! [`jj_lib::backend::Backend::get_copy_records`].
 //!
-//! This crate assumes single-parent (linear) checkpoint history for the
-//! chain walk in [`version_chain`] — Files' own checkpoint cadence never
-//! creates merge commits, only jj's automatic op-log reconciliation does
-//! (see `checkpoint.rs`'s divergence demo), and a divergent file's history
-//! is presented as sibling versions, not walked through as one chain.
+//! [`version_chain`] walks first-parent: Files' own checkpoint cadence
+//! never creates merge commits (only jj's automatic op-log reconciliation
+//! does — see `checkpoint.rs`'s divergence demo), but an adopted software
+//! root's git history is full of them, and a chain that stopped at the
+//! first merge would report a decade-old file as having one version. A
+//! divergent file's history is still presented as sibling versions, not
+//! walked through as one chain.
 
 use std::collections::BTreeSet;
 
-use jj_lib::backend::{CommitId, CopyRecord, Tree, TreeValue};
+use jj_lib::backend::{
+    Backend, BackendError, CommitId, CopyHistory, CopyId, CopyRecord, Tree, TreeValue,
+};
 use jj_lib::repo_path::{RepoPath, RepoPathBuf};
 
 use crate::backend::VersionStoreBackend;
@@ -37,8 +41,14 @@ async fn resolved_tree_id(commit: &jj_lib::backend::Commit) -> Result<jj_lib::ba
 }
 
 /// Look up `path` inside `tree`, descending through subtrees as needed.
-pub(crate) async fn lookup(
-    backend: &VersionStoreBackend,
+///
+/// Written against the `Backend` trait rather than this crate's own type,
+/// so a software File Root's stock `GitBackend` (ADR 0001's other Root
+/// flavor, issue #273) is walked by exactly this descent — and public so
+/// that Files' own checkpoint writer uses it too rather than keeping a
+/// second copy in step by hand (PR #282 review).
+pub async fn lookup_dyn(
+    backend: &dyn Backend,
     tree: &Tree,
     path: &RepoPath,
 ) -> Result<Option<TreeValue>> {
@@ -48,12 +58,16 @@ pub(crate) async fn lookup(
     if dir.as_internal_file_string().is_empty() {
         return Ok(tree.value(basename).cloned());
     }
-    // Descend one component at a time from the root.
+    // Descend one component at a time from the root, carrying the path so
+    // far — backends that key trees by path (unlike this crate's own, which
+    // is purely content-addressed) get the location they expect.
     let mut current = tree.clone();
+    let mut prefix = RepoPathBuf::root();
     for component in dir.components() {
+        prefix = prefix.join(component);
         match current.value(component) {
             Some(TreeValue::Tree(id)) => {
-                current = backend.tree(id).await?;
+                current = backend.read_tree(&prefix, id).await?;
             }
             _ => return Ok(None),
         }
@@ -61,9 +75,29 @@ pub(crate) async fn lookup(
     Ok(current.value(basename).cloned())
 }
 
+/// Read `copy_id`'s history, or `None` when the backend doesn't track
+/// copies at all. Stock git is such a backend (`BackendError::Unsupported`
+/// from every copy method), so on a software File Root a file that isn't in
+/// its parent commit at the same path is simply the file's origin — there is
+/// no recorded-rename link to follow. On the media backend, which does
+/// record copies (ADR 0001: "recorded renames in backend v1"), this always
+/// returns `Some`.
+async fn copy_history_opt(backend: &dyn Backend, copy_id: &CopyId) -> Result<Option<CopyHistory>> {
+    match backend.read_copy(copy_id).await {
+        Ok(history) => Ok(Some(history)),
+        Err(BackendError::Unsupported(_)) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
 /// Derive the version chain for `path` as seen from `head`, newest first.
+///
+/// Written against the `Backend` trait, not this crate's own backend type:
+/// both Root flavors (ADR 0001 — media on the CAS backend, software on
+/// stock colocated git) derive chains through this one walk, which is what
+/// makes the Files chain/history RPC behave identically on either.
 pub async fn version_chain(
-    backend: &VersionStoreBackend,
+    backend: &dyn Backend,
     head: &CommitId,
     path: &RepoPath,
 ) -> Result<Vec<VersionEntry>> {
@@ -72,19 +106,17 @@ pub async fn version_chain(
     let mut tracked_path = path.to_owned();
 
     loop {
-        let commit = backend.commit(&commit_id).await?;
+        let commit = backend.read_commit(&commit_id).await?;
         let tree_id = resolved_tree_id(&commit).await?;
-        let tree = backend.tree(&tree_id).await?;
+        let tree = backend.read_tree(RepoPath::root(), &tree_id).await?;
         let Some(TreeValue::File { id, copy_id, .. }) =
-            lookup(backend, &tree, &tracked_path).await?
+            lookup_dyn(backend, &tree, &tracked_path).await?
         else {
             break;
         };
 
-        if commit.parents.len() != 1 {
-            // Root, or a merge commit — either way this chain walk (linear
-            // by design, see module doc) stops here; this is the file's
-            // earliest known state on this line of history.
+        let Some(parent_id) = commit.parents.first().cloned() else {
+            // The root commit: this is the file's earliest known state.
             entries.push(VersionEntry {
                 commit_id: commit_id.clone(),
                 path: tracked_path.clone(),
@@ -92,12 +124,17 @@ pub async fn version_chain(
                 renamed_from: None,
             });
             break;
-        }
-        let parent_id = commit.parents[0].clone();
-        let parent_commit = backend.commit(&parent_id).await?;
+        };
+        // Merges are followed along their FIRST parent rather than stopping
+        // the walk (PR #282 review): Files' own cadence never merges, but an
+        // adopted git repo's history is full of them, and truncating there
+        // would report "this file has one version" for a file with years of
+        // history. First-parent is git's own `--first-parent` convention:
+        // the mainline this branch's saves actually happened on.
+        let parent_commit = backend.read_commit(&parent_id).await?;
         let parent_tree_id = resolved_tree_id(&parent_commit).await?;
-        let parent_tree = backend.tree(&parent_tree_id).await?;
-        let parent_value = lookup(backend, &parent_tree, &tracked_path).await?;
+        let parent_tree = backend.read_tree(RepoPath::root(), &parent_tree_id).await?;
+        let parent_value = lookup_dyn(backend, &parent_tree, &tracked_path).await?;
 
         let (is_new_state, next_path, renamed_from) = match &parent_value {
             Some(TreeValue::File {
@@ -112,11 +149,16 @@ pub async fn version_chain(
             _ => {
                 // Not present with the same lineage at this path in the
                 // parent — follow the recorded copy history to see whether
-                // this is a rename rather than a fresh origin.
-                let history = backend.copy_history(&copy_id).await?;
-                match history.parents.first() {
+                // this is a rename rather than a fresh origin. A backend
+                // with no copy tracking at all (stock git) reports no
+                // ancestry, so the file is treated as born here.
+                let history = copy_history_opt(backend, &copy_id).await?;
+                match history.as_ref().and_then(|h| h.parents.first()) {
                     Some(source_copy_id) => {
-                        let source_history = backend.copy_history(source_copy_id).await?;
+                        let source_history = backend
+                            .read_copy(source_copy_id)
+                            .await
+                            .map_err(Error::from)?;
                         let source_path = source_history.current_path.clone();
                         (true, source_path.clone(), Some(source_path))
                     }
@@ -303,7 +345,7 @@ pub async fn copy_records_between(
                     // rather than inventing one.
                     let Some(TreeValue::File {
                         id: source_file, ..
-                    }) = lookup(backend, &parent_tree, &source_path).await?
+                    }) = lookup_dyn(backend, &parent_tree, &source_path).await?
                     else {
                         continue;
                     };
@@ -331,7 +373,7 @@ mod tests {
     use jj_lib::tree_builder::TreeBuilder;
 
     use super::copy_records_between;
-    use super::lookup;
+    use super::lookup_dyn;
     use crate::backend::VersionStoreBackend;
     use crate::checkpoint::{Change, checkpoint};
     use crate::repo::init_repo;
@@ -386,7 +428,7 @@ mod tests {
         let commit1_tree = backend.tree(&commit1_tree_id).await.unwrap();
         let Some(TreeValue::File {
             copy_id: a_copy_id, ..
-        }) = lookup(backend, &commit1_tree, &a).await.unwrap()
+        }) = lookup_dyn(backend, &commit1_tree, &a).await.unwrap()
         else {
             panic!("a should be a file in commit1's tree");
         };

@@ -5945,6 +5945,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "dav-server"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88e9e4e7a3546a5b348518694e9f3ed5cf3fc8856e50141c197f54d79b5714a8"
+dependencies = [
+ "bytes",
+ "chrono",
+ "derive-where",
+ "dyn-clone",
+ "futures-channel",
+ "futures-util",
+ "headers",
+ "htmlescape",
+ "http",
+ "http-body",
+ "http-body-util",
+ "libc",
+ "log",
+ "lru 0.16.4",
+ "mime_guess",
+ "parking_lot",
+ "percent-encoding",
+ "pin-project-lite",
+ "reflink-copy",
+ "tokio",
+ "url",
+ "uuid",
+ "xml-rs 1.0.0",
+ "xmltree 0.12.0",
+]
+
+[[package]]
 name = "daw"
 version = "0.1.0"
 dependencies = [
@@ -6702,6 +6734,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "derive-where"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d08b3a0bcc0d079199cd476b2cae8435016ec11d1c0986c6901c5ac223041534"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -9136,7 +9179,9 @@ dependencies = [
 name = "expression-editor-demo"
 version = "0.1.0"
 dependencies = [
+ "daw",
  "daw-proto",
+ "dawfile-reaper",
  "dawfile-standalone",
  "expression-editor-audio",
  "expression-editor-core",
@@ -9144,6 +9189,8 @@ dependencies = [
  "expression-editor-daw",
  "expression-editor-guitarpro",
  "expression-editor-tools",
+ "hound",
+ "midly",
 ]
 
 [[package]]
@@ -9922,6 +9969,189 @@ dependencies = [
 ]
 
 [[package]]
+name = "files"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "async-trait",
+ "chrono",
+ "files-proto",
+ "files-transcode",
+ "futures-util",
+ "gix",
+ "globset",
+ "jj-lib",
+ "notify 8.2.0",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "task-files-chunk-store",
+ "task-files-util",
+ "task-files-version-store",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "vault",
+ "vault-entity",
+ "vox",
+]
+
+[[package]]
+name = "files-daemon"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "axum",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "files",
+ "files-proto",
+ "files-sync",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "vox",
+]
+
+[[package]]
+name = "files-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "files-storage"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "blake3",
+ "chrono",
+ "files-proto",
+ "files-storage-proto",
+ "jj-lib",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+ "task-files-chunk-store",
+ "task-files-util",
+ "task-files-version-store",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vox",
+]
+
+[[package]]
+name = "files-storage-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet 0.50.0-rc.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "files-sync"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet 0.50.0-rc.5",
+ "files",
+ "files-proto",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vox",
+]
+
+[[package]]
+name = "files-transcode"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "facet 0.50.0-rc.5",
+ "serde",
+ "serde_json",
+ "task-files-chunk-store",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "files-ui"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "dioxus",
+ "files-proto",
+ "fts-ui",
+ "share-proto",
+ "task-ui-core",
+ "task-widgets",
+ "uuid",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "files-webdav"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "dav-server",
+ "files",
+ "files-proto",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "task-files-util",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10445,9 +10675,12 @@ dependencies = [
  "clap",
  "daw",
  "daw-standalone",
+ "dynamic-template",
  "engine-launcher",
  "eyre",
  "keyflow-cli",
+ "serde",
+ "serde_json",
  "session",
  "signal-sampler",
  "tokio",
@@ -12328,7 +12561,7 @@ checksum = "1a95dfc23a2b4a9a2f5ab41d194f8bfda3cabec42af4e39f08c339eb2a0c124d"
 dependencies = [
  "khronos_api",
  "log",
- "xml-rs",
+ "xml-rs 0.8.28",
 ]
 
 [[package]]
@@ -13329,6 +13562,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "htmlescape"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9025058dae765dee5070ec375f591e2ba14638c63feff74f13805a72e523163"
+
+[[package]]
 name = "http"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13989,7 +14228,7 @@ dependencies = [
  "rand 0.10.2",
  "tokio",
  "url",
- "xmltree",
+ "xmltree 0.10.3",
 ]
 
 [[package]]
@@ -20788,7 +21027,7 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "image",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "js-sys",
  "libloading 0.8.9",
  "log",
@@ -25186,7 +25425,9 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "facet 0.50.0-rc.5",
+ "serde",
  "thiserror 2.0.18",
+ "uuid",
  "vox",
 ]
 
@@ -27940,6 +28181,7 @@ dependencies = [
  "email-secret",
  "exercises",
  "eyre",
+ "files-proto",
  "finance",
  "finance-db",
  "finance-proto",
@@ -28018,6 +28260,14 @@ dependencies = [
  "proptest",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "task-files-util"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
  "tokio",
 ]
 
@@ -28146,10 +28396,16 @@ dependencies = [
  "exercises",
  "eyre",
  "facet 0.50.0-rc.5",
+ "files",
+ "files-proto",
+ "files-storage",
+ "files-transcode",
+ "files-webdav",
  "finance",
  "finance-db",
  "finance-proto",
  "futures",
+ "futures-util",
  "git-config",
  "git-forgejo",
  "git-proto",
@@ -28172,6 +28428,7 @@ dependencies = [
  "org-proto",
  "org-snapshot",
  "pantry",
+ "pollster 0.4.0",
  "prefs",
  "prefs-proto",
  "project",
@@ -28204,6 +28461,7 @@ dependencies = [
  "timer-proto",
  "tokio",
  "tokio-tungstenite 0.29.0",
+ "tokio-util",
  "tower 0.5.3",
  "tower-http",
  "tracing",
@@ -28262,6 +28520,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "js-sys",
+ "media-proto",
  "serde",
  "task-plugin",
  "tokio",
@@ -30054,7 +30313,7 @@ dependencies = [
  "lzfse",
  "plist",
  "thiserror 2.0.18",
- "xml-rs",
+ "xml-rs 0.8.28",
  "xz2",
 ]
 
@@ -30114,6 +30373,7 @@ dependencies = [
  "editor-crdt",
  "email-ui",
  "fake",
+ "files-ui",
  "finance-proto",
  "fitness-proto",
  "fts-ui",
@@ -33615,10 +33875,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
+name = "xml"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f45bb2c13fec6a6cb4c0f76a7e94839e110a14ec803ec2940777a94c347bc52"
+
+[[package]]
 name = "xml-rs"
 version = "0.8.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
+
+[[package]]
+name = "xml-rs"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3a56132a0d6ecbe77352edc10232f788fc4ceefefff4cab784a98e0e16b6b51"
+dependencies = [
+ "xml",
+]
 
 [[package]]
 name = "xml5ever"
@@ -33652,7 +33927,16 @@ version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7d8a75eaf6557bb84a65ace8609883db44a29951042ada9b393151532e41fcb"
 dependencies = [
- "xml-rs",
+ "xml-rs 0.8.28",
+]
+
+[[package]]
+name = "xmltree"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbc04313cab124e498ab1724e739720807b6dc405b9ed0edc5860164d2e4ff70"
+dependencies = [
+ "xml",
 ]
 
 [[package]]

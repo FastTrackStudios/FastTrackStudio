@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use futures::AsyncRead;
@@ -110,13 +110,41 @@ impl std::fmt::Debug for VersionStoreBackend {
     }
 }
 
+/// Chunk-level GC interval [`VersionStoreBackend::open`] uses by default —
+/// a File Root's backend is server-hosted and long-lived (ADR 0001), so
+/// there is no latency pressure on iroh-blobs' own background sweep; a test
+/// that needs to observe reclamation within its own runtime should use
+/// [`VersionStoreBackend::open_with_gc_interval`] with a much shorter one.
+/// Re-exports `task_files_chunk_store::gc::DEFAULT_INTERVAL` rather than
+/// hardcoding its own copy, so the two layers' production cadence can't
+/// silently diverge.
+pub const DEFAULT_GC_INTERVAL: Duration = task_files_chunk_store::gc::DEFAULT_INTERVAL;
+
 impl VersionStoreBackend {
     /// Open (creating if absent) a version store rooted at `root`: a
-    /// `chunks/` chunk store (file content) beside an `objects/` tree/
-    /// commit/copy-history store.
+    /// `chunks/` chunk store (file content, GC-enabled at
+    /// [`DEFAULT_GC_INTERVAL`]) beside an `objects/` tree/commit/
+    /// copy-history store.
     pub async fn open(root: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_gc_interval(root, DEFAULT_GC_INTERVAL).await
+    }
+
+    /// Open with a non-default chunk-level GC interval (see
+    /// [`DEFAULT_GC_INTERVAL`]) — the seam tests use to observe iroh-blobs'
+    /// background chunk reclamation without a multi-minute wait.
+    pub async fn open_with_gc_interval(
+        root: impl AsRef<Path>,
+        gc_interval: Duration,
+    ) -> Result<Self> {
         let root = root.as_ref();
-        let chunks = task_files_chunk_store::ChunkStore::open(root.join("chunks")).await?;
+        let chunks = task_files_chunk_store::ChunkStore::open_with_gc(
+            root.join("chunks"),
+            task_files_chunk_store::ChunkerConfig::default(),
+            task_files_chunk_store::GcConfig {
+                interval: gc_interval,
+            },
+        )
+        .await?;
         let objects = ObjectStore::open(root.join("objects")).await?;
 
         let empty_tree_bytes = codec::encode_tree(&Tree::default());
@@ -190,6 +218,63 @@ impl VersionStoreBackend {
     /// directly rather than through jj-lib's `Backend::write_file`.
     pub fn chunks(&self) -> &Arc<task_files_chunk_store::ChunkStore> {
         &self.chunks
+    }
+
+    /// One structural object's **raw encoded bytes** (a tree, commit, or
+    /// copy-history record) by its id. The replica-sync wire format
+    /// (issue #264): objects are content-addressed (id = blake3 of the
+    /// bytes), so shipping the bytes verbatim is what guarantees the
+    /// receiver derives the identical id — no re-encode, no drift.
+    pub async fn read_raw_object(&self, id: &[u8]) -> Result<Vec<u8>> {
+        self.read_object(id).await
+    }
+
+    /// Decode a raw commit's `(parent ids, root tree id)` **without
+    /// storing it** — the seam replica sync (issue #264) needs to
+    /// import a commit's whole closure *before* the commit object
+    /// itself, so that a commit's presence in the store means its
+    /// closure is present too (the same manifest-last durability
+    /// invariant the chunk store upholds). Returns each id as raw
+    /// bytes.
+    pub fn decode_commit_meta(bytes: &[u8]) -> Result<(Vec<Vec<u8>>, Vec<u8>)> {
+        let commit = codec::decode_commit(bytes)?;
+        let tree = commit
+            .root_tree
+            .as_resolved()
+            .ok_or_else(|| Error::Object("conflicted root tree in synced commit".into()))?
+            .as_bytes()
+            .to_vec();
+        let parents = commit
+            .parents
+            .iter()
+            .map(|p| p.as_bytes().to_vec())
+            .collect();
+        Ok((parents, tree))
+    }
+
+    /// Store one structural object received from a peer, **verified**:
+    /// the bytes must hash to `expected_id` — a sync peer is never
+    /// trusted about content addresses. Also verifies the bytes decode
+    /// as one of the three object kinds, so a peer can't park arbitrary
+    /// data in the object store under a valid hash.
+    pub async fn import_raw_object(&self, expected_id: &[u8], bytes: Vec<u8>) -> Result<()> {
+        let expected = Self::object_hash(expected_id)?;
+        let actual = blake3::hash(&bytes);
+        if actual != expected {
+            return Err(Error::Object(format!(
+                "object bytes hash to {actual}, peer claimed {expected}"
+            )));
+        }
+        if codec::decode_commit(&bytes).is_err()
+            && codec::decode_tree(&bytes).is_err()
+            && codec::decode_copy_history(&bytes).is_err()
+        {
+            return Err(Error::Object(format!(
+                "object {expected} decodes as no known kind — refusing to store it"
+            )));
+        }
+        self.objects.write(&bytes).await?;
+        Ok(())
     }
 
     /// The tree/commit/copy-history object store, for `gc.rs`'s sweep.
@@ -505,7 +590,19 @@ impl Backend for VersionStoreBackend {
     }
 
     fn gc(&self, index: &dyn Index, keep_newer: SystemTime) -> BackendResult<()> {
-        self.block_on(crate::gc::sweep(self, index, keep_newer))
+        // `Backend::gc`'s trait signature has no room for a protect
+        // callback (see `gc.rs`'s module doc), and this is jj-lib's own
+        // generic entry point — reachable by any jj-lib-native caller, not
+        // just ones that know about Vault-referenced protection. Rather
+        // than sweeping the chunk store with an implicit, always-empty
+        // `protected_commits` (which would durably delete manifests for
+        // any commit that's Vault-referenced but not currently
+        // index-reachable), this calls the structural-only sweep, which
+        // never touches the chunk store. The Vault-facing entry point
+        // (future RPC work) calls `crate::gc::sweep` directly with its own
+        // resolved protected-commit set.
+        self.block_on(crate::gc::sweep_objects_only(self, index, keep_newer))
+            .map(|_objects_swept| ())
             .map_err(to_backend_err)
     }
 }

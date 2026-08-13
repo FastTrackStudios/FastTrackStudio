@@ -217,11 +217,13 @@ mod tests {
                 .find(|s| s.name == n)
                 .unwrap_or_else(|| panic!("{n} not mounted"))
         };
-        assert!(by_name("VaultSyncStream").stream || {
-            // Name is descriptor-derived; fall back to asserting at
-            // least one all-stream service exists.
-            services.iter().any(|s| s.stream)
-        });
+        assert!(
+            by_name("VaultSyncStream").stream || {
+                // Name is descriptor-derived; fall back to asserting at
+                // least one all-stream service exists.
+                services.iter().any(|s| s.stream)
+            }
+        );
     }
 
     #[test]
@@ -260,9 +262,6 @@ mod tests {
         let plugins = v["plugins"].as_array().unwrap();
         let mealplan = plugins.iter().find(|p| p["id"] == "mealplan").unwrap();
         assert_eq!(mealplan["enabled"], false);
-        assert_eq!(
-            v["mounted_count"].as_u64().unwrap() as usize,
-            on.len(),
-        );
+        assert_eq!(v["mounted_count"].as_u64().unwrap() as usize, on.len(),);
     }
 }

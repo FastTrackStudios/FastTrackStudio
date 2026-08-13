@@ -14,6 +14,9 @@ publish = false
 
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
+# `ReaderStream` — the rendition route streams a duplex pipe as its
+# response body instead of buffering the window in RAM.
+tokio-util = { workspace = true, features = ["io"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
 # Forwarding client for the OTLP proxy (src/otlp.rs).
@@ -71,6 +74,20 @@ project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
 milestone = { workspace = true, features = ["vox"] }
 workstream = { workspace = true, features = ["vox"] }
+# Files RPC surface v1 (issue #259/ADR 0001): create-root / browse /
+# chain / checkpoint-now over `task-files-version-store`.
+files = { workspace = true }
+files-webdav = { workspace = true }
+files-storage = { workspace = true }
+# The real ffmpeg/ffprobe rendition driver (issue #269) — wired at org
+# boot when the toolchain is on PATH.
+files-transcode = { workspace = true, features = ["ffmpeg"] }
+# Wire types the share serving routes name directly (issue #271):
+# BrowseEntry listings and RenditionKind tags.
+files-proto = { workspace = true, features = ["vox"] }
+# `TryStreamExt::map_err` — the share upload streams its body to disk.
+futures-util = { workspace = true }
+pollster = { workspace = true }
 # Entity-CRUD services additionally mounted on `/org/<slug>/vox`.
 # All four expose architect-generated clients agents + the CLI
 # consume directly.
@@ -245,6 +262,10 @@ vault-proto = { workspace = true, features = ["vox"] }
 project = { workspace = true, features = ["vox"] }
 collection-proto = { workspace = true, features = ["vox"] }
 media-proto = { workspace = true, features = ["vox"] }
+# The rendition-route e2e drives the deterministic `FakeTranscoder`
+# (no ffmpeg) and names wire `RenditionKind`s directly.
+files-proto = { workspace = true, features = ["vox"] }
+files-transcode = { workspace = true, features = ["ffmpeg", "test-transcoder"] }
 vox-core = { workspace = true }
 # `connection_identity` dials with a hand-built handshake (subprotocol /
 # Authorization header) — `vox::connect_lane` only takes a URL.

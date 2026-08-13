@@ -61,7 +61,10 @@ pub struct DevAccount {
 #[cfg(not(debug_assertions))]
 pub const DEV_ACCOUNTS: [DevAccount; 0] = [];
 
-/// The four dev accounts seeded into the home org's `auth.sqlite`.
+/// The four dev accounts seeded into the home org's `auth.sqlite` —
+/// `task-server admin seed` plants exactly this roster (keep the two
+/// lists in lockstep), so a debug web build against a seeded server
+/// boots straight into Guest with no login.
 #[cfg(debug_assertions)]
 pub const DEV_ACCOUNTS: [DevAccount; 4] = [
     DevAccount {
@@ -116,7 +119,10 @@ pub struct ActiveAccount {
 pub enum AuthAction {
     Switch(String),
     /// Real credential sign-in from the login form.
-    SignIn { email: String, password: String },
+    SignIn {
+        email: String,
+        password: String,
+    },
     /// Self-serve account creation (architect-auth `sign_up_email_password`).
     SignUp {
         email: String,
@@ -275,9 +281,11 @@ fn sync_active_server_entry(
         return;
     };
     let (token, uid, mail) = match account {
-        Some(a) if a.email != GUEST_EMAIL => {
-            (Some(a.token.clone()), Some(a.user_id), Some(a.email.clone()))
-        }
+        Some(a) if a.email != GUEST_EMAIL => (
+            Some(a.token.clone()),
+            Some(a.user_id),
+            Some(a.email.clone()),
+        ),
         _ => (None, None, None),
     };
     if entry.session_token == token && entry.my_user_id == uid && entry.my_email == mail {
@@ -328,7 +336,10 @@ async fn pull_locker(mut st: AuthState, account: &ActiveAccount) {
             .into_iter()
             .find(|e| e.server_url == link.remote_url)
             .unwrap_or_else(|| {
-                crate::server_registry::ServerEntry::new(link.label.clone(), link.remote_url.clone())
+                crate::server_registry::ServerEntry::new(
+                    link.label.clone(),
+                    link.remote_url.clone(),
+                )
             });
         entry.session_token = link.token;
         entry.my_user_id = link.remote_user_id;
@@ -372,8 +383,10 @@ async fn push_link(st: AuthState, account: &ActiveAccount) {
                 .to_owned()
         });
     let remote_slug = home_slug(&st.orgs.peek());
-    let client = match crate::vox_clients::establish_server::<IdentityServiceClient>(Some(&home.url))
-        .await
+    let client = match crate::vox_clients::establish_server::<IdentityServiceClient>(Some(
+        &home.url,
+    ))
+    .await
     {
         Ok(c) => c,
         Err(_) => return,
@@ -768,47 +781,12 @@ fn account_from(user: AuthUser, email: &str, token: String) -> ActiveAccount {
 }
 
 // ── avatars ─────────────────────────────────────────────────────────
+// The identity system (gradients + hash + initials) lives in
+// task-ui-core::avatar so surfaces outside this crate (the review
+// rail in files-ui) render the SAME person the same way.
 
-/// Tasteful gradient palette — `(from, to)` CSS colors. Six entries;
-/// [`gradient_index`] picks one deterministically per account.
-const AVATAR_GRADIENTS: [(&str, &str); 6] = [
-    ("#f59e0b", "#ef4444"), // amber → red
-    ("#8b5cf6", "#6366f1"), // violet → indigo
-    ("#06b6d4", "#3b82f6"), // cyan → blue
-    ("#10b981", "#14b8a6"), // emerald → teal
-    ("#ec4899", "#f43f5e"), // pink → rose
-    ("#84cc16", "#22c55e"), // lime → green
-];
-
-/// FNV-1a over the key, mod the palette size. Deterministic across
-/// targets and sessions — the same account always gets the same
-/// gradient, with no external requests or asset files.
-#[must_use]
-pub fn gradient_index(key: &str) -> usize {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in key.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    (hash % AVATAR_GRADIENTS.len() as u64) as usize
-}
-
-/// Two-letter initials: first letters of the first two words, or the
-/// first two characters of a single word. Uppercased; `?` when empty.
-#[must_use]
-pub fn initials(name: &str) -> String {
-    let mut words = name.split_whitespace();
-    match (words.next(), words.next()) {
-        (Some(a), Some(b)) => {
-            let mut s = String::new();
-            s.extend(a.chars().next().map(|c| c.to_ascii_uppercase()));
-            s.extend(b.chars().next().map(|c| c.to_ascii_uppercase()));
-            s
-        }
-        (Some(a), None) => a.chars().take(2).map(|c| c.to_ascii_uppercase()).collect(),
-        _ => "?".to_owned(),
-    }
-}
+pub use task_ui_core::avatar::{gradient_index, initials};
+use task_ui_core::avatar::AVATAR_GRADIENTS;
 
 /// Round initials avatar with a deterministic per-account gradient.
 /// `email` keys the gradient; when it's empty the name keys it
@@ -935,7 +913,11 @@ pub fn ChangePasswordForm() -> Element {
     let mut busy = use_signal(|| false);
 
     let submit = move |_| {
-        let (cur, new, conf) = (current.peek().clone(), next.peek().clone(), confirm.peek().clone());
+        let (cur, new, conf) = (
+            current.peek().clone(),
+            next.peek().clone(),
+            confirm.peek().clone(),
+        );
         let Some(account) = active.peek().clone() else {
             status.set(Some(Err("sign in first".to_owned())));
             return;
@@ -1533,7 +1515,8 @@ fn tokens_dir() -> Option<std::path::PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 fn token_store(email: &str) -> Option<architect_auth::client::FileTokenStore> {
     let safe = email.replace(['/', '\\'], "_");
-    tokens_dir().map(|d| architect_auth::client::FileTokenStore::new(d.join(format!("{safe}.json"))))
+    tokens_dir()
+        .map(|d| architect_auth::client::FileTokenStore::new(d.join(format!("{safe}.json"))))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

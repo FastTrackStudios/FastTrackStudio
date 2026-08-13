@@ -194,8 +194,10 @@ Every org gets its own `OrgAppState` + `LayerRouter`. Server-management
 services (org lifecycle, identity, snapshot) live on a separate
 `/server/vox` router. Non-vox HTTP surfaces are deliberate exceptions:
 `/health`, `/.well-known/task-server.json`, `/org/{slug}/mcp`,
-`/org/{slug}/share/{token}`, `/watch/v1/*`, and the `/media` file
-routes.
+`/org/{slug}/share/{token}`, `/watch/v1/*`, the `/media` file routes,
+and `/org/{slug}/dav[/…]` (the Files WebDAV bridge — WebDAV clients
+speak plain HTTP, so identity cannot ride the WS upgrade; see
+`docs/files-webdav.md`).
 
 ---
 
@@ -474,6 +476,7 @@ Others that may prompt: `scp`/`ssh` (`-o BatchMode=yes`), `apt-get`
 | architect crdt codec helpers | `libs/architect/crdt/crdt/src/codec.rs` |
 | Env var reference | `.env.example` (complete inventory) |
 | Vault ⇄ CRDT design | `docs/architecture/vault-crdt-reconciliation.md` |
+| Dev demo seed (studio dataset, deterministic names) | `docs/dev-seed.md` |
 | Crate topology + request path | `ARCHITECTURE.md` |
 | Plans + their status convention | `plans/README.md` |
 
