@@ -193,6 +193,37 @@ impl files_storage::OperatorAuth for HomeOrgOperator {
     }
 }
 
+/// This org's view of the deployment's Storage Locations, as the Files
+/// backend's confinement boundary (issue #262).
+///
+/// A File Root may live under `<org>/files` — always — or under any
+/// location the org holds a live-tree grant on. Without the second half
+/// media on a NAS is unregisterable: the boundary check refuses a path
+/// outside the org directory, which is on the server's own disk and was
+/// never going to hold a 236 GiB video project.
+///
+/// Deliberately holds the registry rather than a resolved list. Grants
+/// are issued at runtime, and a boundary snapshotted at boot would mean
+/// a new Storage Location only takes effect after a restart — the kind
+/// of staleness that gets diagnosed as "the mount is broken".
+pub struct GrantedBoundaries {
+    core: Arc<StorageCore>,
+    org: String,
+}
+
+impl GrantedBoundaries {
+    #[must_use]
+    pub fn new(core: Arc<StorageCore>, org: String) -> Self {
+        Self { core, org }
+    }
+}
+
+impl files::LocationBoundaries for GrantedBoundaries {
+    fn permitted(&self) -> Vec<PathBuf> {
+        self.core.live_tree_boundaries(&self.org)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

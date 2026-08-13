@@ -1295,8 +1295,17 @@ pub(crate) async fn build_org_state(
         // Root content lives outside the vault (`<org>/files/`); the
         // Named / Project Version entities that reference it are
         // ordinary vault pages, so the backend gets both paths.
+        // Storage Locations widen where this org may hold live trees
+        // (issue #262): without this a File Root can only live under
+        // `<org>/files`, which is on the server's own disk — so media
+        // that was never going to fit there, on a NAS or an external
+        // volume, could not be registered at all.
         let files = files::FilesBackend::new(org_root.path().join("files"), vault_root.clone())
-            .map_err(|e| eyre::eyre!("files backend: {e}"))?;
+            .map_err(|e| eyre::eyre!("files backend: {e}"))?
+            .with_location_boundaries(Arc::new(crate::storage::GrantedBoundaries::new(
+                Arc::clone(storage),
+                org_root.slug().to_owned(),
+            )));
         let files_webdav = files_webdav::WebdavBridge::new(files.clone());
         // Placement lane. The coordinator is the deployment's, owned by
         // `AppState` and passed in — this is just this org's view of it.

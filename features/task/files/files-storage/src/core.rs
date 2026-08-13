@@ -478,6 +478,48 @@ impl StorageCore {
 
     // ── Org lane ────────────────────────────────────────────────────
 
+    /// Directories this org may register a File Root under, outside its
+    /// own org directory: `<location.root_path>/<grant.path_prefix>` for
+    /// every grant carrying [`CapabilityClass::LiveTrees`].
+    ///
+    /// This is the boundary the Files backend confines root creation to —
+    /// the same computation [`Self::place_root`] performs before binding a
+    /// live tree, exposed so the check can happen at `create_root` time
+    /// rather than only at placement. Keeping ONE definition of "where may
+    /// this org put a tree" matters: a boundary that disagreed with
+    /// placement would either register roots that can never be placed, or
+    /// refuse ones that could.
+    ///
+    /// Health is deliberately NOT consulted. An offline location is a
+    /// reason to refuse a WRITE (`place_root` calls `require_online`), not
+    /// a reason to forget that the org is allowed to keep trees there — a
+    /// NAS that is briefly unreachable must not make every root under it
+    /// look like an escape attempt.
+    ///
+    /// Empty when this deployment has no locations or the org holds no
+    /// grants, which is the single-machine default: only the org's own
+    /// directory is permitted, exactly as before locations existed.
+    pub fn live_tree_boundaries(&self, org: &str) -> Vec<PathBuf> {
+        self.registry.read(|state| {
+            state
+                .locations
+                .iter()
+                .filter_map(|location| {
+                    let grant = state.grant(org, location.id)?;
+                    if !grant.capabilities.contains(&CapabilityClass::LiveTrees) {
+                        return None;
+                    }
+                    // A malformed prefix (absolute, or containing `..`)
+                    // yields no boundary rather than a boundary that
+                    // escapes the location — the same rule `place_root`
+                    // enforces via `safe_relative`.
+                    let prefix = task_files_util::safe_relative(&grant.path_prefix).ok()?;
+                    Some(Path::new(&location.root_path).join(prefix))
+                })
+                .collect()
+        })
+    }
+
     /// Locations this org holds a grant on — the only ones it can see.
     pub fn locations_for(&self, org: &str) -> Vec<StorageLocationInfo> {
         self.registry.read(|state| {
