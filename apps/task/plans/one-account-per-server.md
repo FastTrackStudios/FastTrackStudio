@@ -37,12 +37,43 @@ org. Membership is currently a side effect of which database answered.
 
 ## Target
 
+**Revised 2026-08-13**, after Cody pointed out he is the only principal:
+build no second auth store. The `merge-principals` dry run had already
+shown why — the canonical id is always the HOME org's, so home-org data
+(which is nearly all the data) never moves. The destination was the
+expensive half, and it turns out we own one already.
+
 ```
-<data_root>/identity/auth.sqlite     ONE auth store per server
-                                     (users, sessions, accounts, …)
-<data_root>/identity/memberships     (user_id, org_slug, role, created_at)
-<data_root>/orgs/<slug>/…            unchanged: vault, content, feature stores
+<data_root>/orgs/<home>/auth.sqlite         the server's identity authority
+<data_root>/orgs/<home>/memberships.sqlite  (user_id, org_slug, role, created_at)
+<data_root>/orgs/<slug>/…                   unchanged, auth.sqlite included
 ```
+
+- **Sign-in** is unchanged: against the home org.
+- **Org lane**: try this org's own auth store, then the home org's. A
+  home-issued token that validates gets its role from
+  `(user_id, org_slug)` in `memberships`. No row = not a member = the
+  gate refuses. Membership stops being a side effect of which database
+  answered.
+- **Discovery** answers `member` from `memberships`.
+- **Client**: still no change.
+
+What this buys over a merged store: no account migration, no id
+rewriting, no session loss, no new blast radius — and identity stays
+*inside* the home org, which is what `federated-task-platform.md`'s open
+decision #1 leaned toward, so "rsync the org elsewhere" keeps working
+with the transfer functions rather than against them.
+
+Per-org accounts stay where they are, unused for sign-in but intact —
+they are the rollback, and they are what a future "detach this org onto
+its own server" reads to hand the org back its own identity.
+
+### Superseded target (kept for the record)
+
+One server-level `<data_root>/identity/auth.sqlite` holding every user,
+with the per-org stores merged into it. Rejected as more machinery than
+a single-principal server needs, and because moving identity out of the
+home org contradicts org portability.
 
 - **Sign-in** issues a server session, not an org session.
 - **Org lane** resolves the bearer against the server store → `user_id`,
@@ -55,58 +86,57 @@ org. Membership is currently a side effect of which database answered.
 
 ## Staging
 
-Each stage is separately deployable, and the user-visible win lands at
-S3 — before the riskiest work.
+**S1 — memberships store.** `memberships.sqlite` in the home org, and
+`admin adopt-principal --email <e>`: for every org holding an account
+with that email, write `(home_user_id, slug, role)`, taking the role from
+that org's own account so an admin stays an admin. Idempotent, and
+`--dry-run` prints the rows first. Nothing else reads the table yet, so
+this cannot break a running server.
 
-**S1 — server store, dual read.** Create the server auth store and the
-membership table. Sign-in issues server sessions; the org lane resolves
-against the server store *first* and falls back to the org's own store
-for tokens issued before the cutover. No data is moved. Nothing changes
-for a self-hoster with one org.
+**S2 — org lane falls back to home.** When a bearer token does not
+validate against the org's own store, try the home org's; on success,
+require a membership row and take the role from it. A token that is
+neither is refused exactly as it is today.
 
-**S2 — `admin merge-principals`, dry-run first.** Report per email:
-which orgs hold an account, which user id is canonical (the home org's),
-and every row that would be rewritten. Read-only, run against prod, read
-the output, *then* run for real. Writes users + memberships into the
-server store and persists `user_id_map(org_slug, old_user_id) → user_id`.
-That map is permanent — it is how pre-merge references keep resolving.
+**S3 — discovery answers from memberships.** `.well-known` reports
+`member` per membership row instead of "does this token validate here".
+**"All organizations" starts working here** — the client already unions
+`member || linked` and fans out over `selected_slugs`.
 
-**S3 — flip discovery + gate.** `member` comes from memberships; roles
-come from the membership row rather than `default_user_role`. **"All
-organizations" starts working here.** Sessions do not survive the
-cutover (different store) — everyone signs in once more, and that must
-be said out loud rather than discovered.
+**S4 — later, as more people arrive.** Per-org accounts for OTHER humans
+become memberships too, and `admin merge-principals --apply` (the dry
+run already exists) grows the id remap for orgs where someone's rows
+predate their membership. Not needed while there is one principal.
 
-**S4 — rewrite references, drop the fallback.** Rewrite `user_id` in the
-per-org feature stores through the map — the blast radius is smaller
-than it sounds: timer (`timer/src/store.rs`), prefs, identity links,
-workflows/agent, presence. Vault content is markdown and holds no user
-ids. Then remove the per-org auth fallback and archive the old DBs
-(never delete: they are the rollback).
+`merge-principals` (dry run, shipped) stays useful throughout: it is the
+report of who exists where, and it is what says whether S4 has anything
+to do.
 
 ## Risks, named
 
-- **One store, one blast radius.** A corrupt server auth DB locks every
-  org out, where today it would lock out one. Backups become
-  load-bearing; the existing `task-git-backup` CronJob must cover
-  `identity/`.
-- **Org portability regresses.** `federated-task-platform.md` sells
-  "rsync the org directory to another machine". With identity outside
-  the org, moving an org now has to export its membership + user rows.
-  That is the price of the merge and phase 3's locker is where it gets
-  paid back. Open decision #1 in that doc leaned toward identity living
-  *inside* the home org; this design puts it at `<data_root>/identity/`
-  instead, because a server hosting six orgs has no single "home".
-- **Merging by email is a judgement call.** Two humans sharing an email
-  across orgs would merge into one principal. Acceptable here (the
-  operator provisioned every account by hand, self-registration is
-  closed) but the dry-run must print every merge for a human to read
-  before it happens.
-- **`architect-auth` assumes users are local to a store.** S1 needs a
-  public way to issue a session for a known user
-  (`flows.rs:2104 issue_session` is `pub(crate)`; `impersonate_user` is
-  public but stamps `impersonated_by`, which would be a lie here).
-  architect is in-tree, so this is an ordinary refactor.
+- **The home org becomes load-bearing for the whole server.** Losing
+  `orgs/<home>/auth.sqlite` locks every org out, not one. It is already
+  the most-backed-up thing here, and identity riding *with* the home org
+  is the point — but it is a real concentration and the
+  `task-git-backup` CronJob should be checked against it.
+- **A membership row is now the thing standing between an org's data and
+  a signed-in stranger.** Today the org's own auth store is that fence.
+  The S2 fallback must require the row, not merely a valid home token —
+  a home token is easy to get if we ever open sign-up.
+- **Roles are copied once, at adopt time.** Change a role in an org's own
+  auth store afterwards and nothing notices, because nothing reads it
+  any more. `adopt-principal` re-run updates the row; that is the only
+  path, and it should stay obvious.
+- **Merging by email stays a judgement call** for S4, when other humans
+  arrive. Two people sharing an address would become one principal. The
+  `merge-principals` dry run prints every group for a human to read
+  before `--apply` exists.
+- **Portability is preserved, deliberately.** Identity lives in the home
+  org, so moving a NON-home org elsewhere still means copying its
+  directory — it keeps its own untouched `auth.sqlite`, and the transfer
+  function's job is to hand back the membership rows as local accounts.
+  Moving the *home* org moves the server's identity, which is the
+  intended mental model.
 
 ## Not doing
 
