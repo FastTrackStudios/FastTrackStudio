@@ -401,6 +401,92 @@ impl RenditionKind {
     }
 }
 
+/// A **Review** (issue #270): the persistent review conversation for
+/// one media file in a root — a Vault entity, like the curated version
+/// entities (spec: "Review pages present a file via slice with
+/// timecoded comments and frame annotations"). One review per
+/// `(root, file path)`; it survives new versions of its file — the
+/// comments record the version they were made on, the review itself
+/// records only the file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct Review {
+    pub id: Uuid,
+    /// Vault-relative path of the entity's own page; server-filled.
+    pub path: String,
+    pub root_id: Uuid,
+    /// Root-relative path of the media file under review.
+    pub file_path: String,
+    /// Display title — defaults to the file's name.
+    pub title: String,
+    /// The page body — free-form notes about the review.
+    pub note: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// One point of an annotation stroke, in coordinates normalized to the
+/// video frame (`0..=1` on both axes) — what makes a drawing re-anchor
+/// across renditions and window sizes (issue #270 AC 3).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct AnnotationPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// One freehand stroke of a frame annotation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct AnnotationStroke {
+    pub points: Vec<AnnotationPoint>,
+    /// CSS color of the stroke.
+    pub color: String,
+    /// Stroke width as a fraction of the frame width.
+    pub width: f32,
+}
+
+/// One timecoded comment on a [`Review`] — a Vault entity page whose
+/// body is the comment text. Records the file version (`commit_id`)
+/// the commenter was watching, so a new version of the file keeps old
+/// feedback attributed to the frames it was actually about (AC 2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct ReviewComment {
+    pub id: Uuid,
+    /// Vault-relative path of the entity's own page; server-filled.
+    pub path: String,
+    pub review_id: Uuid,
+    /// Position in the media, in seconds (fractional for frame
+    /// accuracy).
+    pub timecode_secs: f64,
+    /// Display name of the commenter; empty renders as a guest.
+    pub author: String,
+    /// The comment text (the page body).
+    pub body: String,
+    /// Hex commit id of the file version the comment was made on.
+    pub commit_id: String,
+    /// Frame drawing anchored to `(review, commit_id, timecode)` in
+    /// normalized coordinates (AC 3). Empty = no drawing.
+    pub annotation: Vec<AnnotationStroke>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Input half of [`ReviewComment`] for
+/// [`crate::service::FilesService::add_review_comment`] (bundled — RPC
+/// methods carry at most 4 params).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct NewReviewComment {
+    pub timecode_secs: f64,
+    pub author: String,
+    pub body: String,
+    /// The file version the commenter is watching — the client knows
+    /// (it may be pinned to an older version via the switcher), the
+    /// server validates it against the root's store.
+    pub commit_id: String,
+    pub annotation: Vec<AnnotationStroke>,
+}
+
 /// A generated (or cached) rendition, ready to stream: its CAS content
 /// id, byte length, and MIME. The Review page (issue #270) resolves a
 /// media file to this, then streams the bytes.

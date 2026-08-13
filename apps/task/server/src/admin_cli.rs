@@ -525,13 +525,75 @@ async fn seed_owner(
     let auth = crate::AuthState::open(&url, &crate::auth_secret())
         .await
         .wrap_err_with(|| format!("open/create auth store for `{}`", org.slug()))?;
+    seed_account(
+        &auth,
+        email,
+        password,
+        &format!("Dev ({display})"),
+        None,
+        Some("admin"),
+        "owner",
+    )
+    .await?;
+    // The web shell's debug-build roster (`ui::auth::DEV_ACCOUNTS` —
+    // keep the two lists in lockstep): a fresh debug browser boots
+    // straight into Guest with no login, and the account dropdown
+    // switches between the others. Debug-only on both sides, so the
+    // known passwords never exist in a release binary.
+    const DEV_ACCOUNTS: [(&str, &str, &str, &str, Option<&str>); 4] = [
+        (
+            "cody@fasttrackstudios.com",
+            "dev-cody-2026",
+            "Cody Wright",
+            "cody",
+            Some("admin"),
+        ),
+        (
+            "carter@fasttrackstudios.com",
+            "dev-carter-2026",
+            "Carter Whitlock",
+            "carter",
+            None,
+        ),
+        (
+            "tom@fasttrackstudios.com",
+            "dev-tom-2026",
+            "Tom Brooks",
+            "tom",
+            None,
+        ),
+        (
+            "guest@fasttrackstudios.com",
+            "dev-guest-2026",
+            "Guest",
+            "guest",
+            None,
+        ),
+    ];
+    for (mail, pass, name, username, role) in DEV_ACCOUNTS {
+        seed_account(&auth, mail, pass, name, Some(username), role, "dev account").await?;
+    }
+    Ok(())
+}
+
+/// Create one auth account if it doesn't exist yet (idempotent seed).
+#[cfg(debug_assertions)]
+async fn seed_account(
+    auth: &crate::AuthState,
+    email: &str,
+    password: &str,
+    name: &str,
+    username: Option<&str>,
+    role: Option<&str>,
+    label: &str,
+) -> eyre::Result<()> {
     if let Some(existing) = auth
         .auth
         .find_user_by_email(email)
         .await
         .map_err(|e| eyre::eyre!("look up `{email}`: {e:?}"))?
     {
-        println!("  owner: {email} already exists ({})", existing.id);
+        println!("  {label}: {email} already exists ({})", existing.id);
         return Ok(());
     }
     let bundle = auth
@@ -539,8 +601,8 @@ async fn seed_owner(
         .create_email_password_user(architect_auth::CreateEmailPasswordUser {
             email: email.to_owned(),
             password: password.to_owned(),
-            name: Some(format!("Dev ({display})")),
-            username: None,
+            name: Some(name.to_owned()),
+            username: username.map(str::to_owned),
             image: None,
             metadata_json: None,
             ip_address: None,
@@ -548,13 +610,16 @@ async fn seed_owner(
         })
         .await
         .map_err(|e| eyre::eyre!("create `{email}`: {e:?}"))?;
-    auth.auth
-        .set_user_role_local_trusted(bundle.user.id, Some("admin".to_owned()))
-        .await
-        .map_err(|e| eyre::eyre!("set admin role: {e:?}"))?;
+    if let Some(role) = role {
+        auth.auth
+            .set_user_role_local_trusted(bundle.user.id, Some(role.to_owned()))
+            .await
+            .map_err(|e| eyre::eyre!("set {role} role: {e:?}"))?;
+    }
     println!(
-        "  owner: {email} created ({}) with admin role",
-        bundle.user.id
+        "  {label}: {email} created ({}){}",
+        bundle.user.id,
+        role.map(|r| format!(" with {r} role")).unwrap_or_default()
     );
     Ok(())
 }

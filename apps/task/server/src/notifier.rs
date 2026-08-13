@@ -106,10 +106,8 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
                     .await;
                     match seeded {
                         Ok(Ok(rows)) => {
-                            *cache.lock().expect("task cache lock") = rows
-                                .iter()
-                                .map(|t| (t.id, TaskSnapshot::of(t)))
-                                .collect();
+                            *cache.lock().expect("task cache lock") =
+                                rows.iter().map(|t| (t.id, TaskSnapshot::of(t))).collect();
                         }
                         Ok(Err(e)) => tracing::warn!(error = ?e, "notifier: task seed failed"),
                         Err(e) => tracing::warn!(error = %e, "notifier: task seed panicked"),
@@ -143,8 +141,7 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
                     let client: agent_proto::service::subscriptions::SubscriptionsStreamClient =
                         local.establish().await.ok()?;
                     let (tx, rx) = vox::channel::<AgentEventEnvelope>();
-                    let call: SubCall =
-                        Box::pin(async move { client.events(tx).await.is_ok() });
+                    let call: SubCall = Box::pin(async move { client.events(tx).await.is_ok() });
                     Some((call, rx))
                 }
             }
@@ -183,8 +180,10 @@ fn spawn_org(org: OrgAppState, scope: Arc<architect::Scope>) {
                     .await;
                     match seeded {
                         Ok(Ok(rows)) => {
-                            *cache.lock().expect("booking cache lock") =
-                                rows.into_iter().map(|b| (b.id.0.clone(), b.status)).collect();
+                            *cache.lock().expect("booking cache lock") = rows
+                                .into_iter()
+                                .map(|b| (b.id.0.clone(), b.status))
+                                .collect();
                         }
                         Ok(Err(e)) => tracing::warn!(error = ?e, "notifier: booking seed failed"),
                         Err(e) => tracing::warn!(error = %e, "notifier: booking seed panicked"),
@@ -293,16 +292,15 @@ fn spawn_email(org: OrgAppState, deliver: Arc<Deliverer>) {
                 let id = account.id.0.clone();
                 let product = org.email_product.clone();
                 let acct = id.clone();
-                let pending = match tokio::task::spawn_blocking(move || {
-                    product.unnotified(&acct, BATCH)
-                })
-                .await
-                {
-                    Ok(Ok(ids)) if !ids.is_empty() => ids,
-                    // An account with no store (or a transient backend
-                    // error) is not worth logging every 30s.
-                    _ => continue,
-                };
+                let pending =
+                    match tokio::task::spawn_blocking(move || product.unnotified(&acct, BATCH))
+                        .await
+                    {
+                        Ok(Ok(ids)) if !ids.is_empty() => ids,
+                        // An account with no store (or a transient backend
+                        // error) is not worth logging every 30s.
+                        _ => continue,
+                    };
 
                 // Ids alone make a useless notification ("new message:
                 // <opaque@id>"), so pull the headers we already have
@@ -612,7 +610,9 @@ fn forge_rule(ev: &GitEvent) -> Option<NewNotification> {
             source: source(repo, issue.0.to_string()),
             actor: String::new(),
         }),
-        GitEvent::IssueUpdated { repo, issue, state } if *state == git_proto::IssueState::Closed => {
+        GitEvent::IssueUpdated { repo, issue, state }
+            if *state == git_proto::IssueState::Closed =>
+        {
             Some(NewNotification {
                 kind: NotifyKind::ForgeIssue,
                 title: format!("Issue #{} closed in {}/{}", issue.0, repo.owner, repo.repo),
@@ -695,19 +695,17 @@ mod tests {
     #[test]
     fn booking_rule_first_sight_and_cancellation() {
         let mut cache = HashMap::new();
-        let b = |status: BookingStatus| {
-            scheduling_proto::Booking {
-                path: "scheduling/bookings/b1.md".into(),
-                id: scheduling_proto::BookingId("b1".into()),
-                event_type_id: scheduling_proto::EventTypeId("c30".into()),
-                start_utc: "2026-08-01T09:00:00+00:00".into(),
-                end_utc: "2026-08-01T09:30:00+00:00".into(),
-                attendee_name: "Alice".into(),
-                attendee_email: "alice@example.com".into(),
-                note: None,
-                status,
-                created_utc: "2026-07-27T00:00:00+00:00".into(),
-            }
+        let b = |status: BookingStatus| scheduling_proto::Booking {
+            path: "scheduling/bookings/b1.md".into(),
+            id: scheduling_proto::BookingId("b1".into()),
+            event_type_id: scheduling_proto::EventTypeId("c30".into()),
+            start_utc: "2026-08-01T09:00:00+00:00".into(),
+            end_utc: "2026-08-01T09:30:00+00:00".into(),
+            attendee_name: "Alice".into(),
+            attendee_email: "alice@example.com".into(),
+            note: None,
+            status,
+            created_utc: "2026-07-27T00:00:00+00:00".into(),
         };
         let n = booking_rule(
             &mut cache,

@@ -95,6 +95,74 @@ async fn rendition_generates_and_caches_per_media_class() {
     backend.shutdown().await;
 }
 
+/// The version switcher (issue #270 AC 4): `rendition_at` renders the
+/// file as it was at a PAST commit, distinct from the head's rendition
+/// (each version's proxy is keyed by that version's own content), and
+/// `rendition_at(head)` hits the same cache entry as `rendition`.
+#[tokio::test(flavor = "multi_thread")]
+async fn rendition_at_serves_past_versions() {
+    let (dir, backend, client, root_id, _local) = rig().await;
+    client.checkpoint_now(root_id, None).await.unwrap();
+    let v1_proxy = client
+        .rendition(root_id, "cut.mov".into(), RenditionKind::Proxy720)
+        .await
+        .expect("v1 proxy");
+
+    // A new cut of the video lands as a second version.
+    let mut video = b"VIDEO".to_vec();
+    video.extend_from_slice(&vec![0x33u8; 8192]);
+    std::fs::write(dir.path().join("session/cut.mov"), &video).unwrap();
+    client.checkpoint_now(root_id, None).await.unwrap();
+    let chain = client.chain(root_id, "cut.mov".into()).await.unwrap();
+    assert!(chain.len() >= 2, "two versions: {}", chain.len());
+    let (v2, v1) = (&chain[0].commit_id, &chain[1].commit_id);
+
+    let old = client
+        .rendition_at(
+            root_id,
+            "cut.mov".into(),
+            v1.clone(),
+            RenditionKind::Proxy720,
+        )
+        .await
+        .expect("past version proxy");
+    assert_eq!(
+        old.file_id, v1_proxy.file_id,
+        "the old version's proxy is exactly what v1 rendered"
+    );
+    let new = client
+        .rendition_at(
+            root_id,
+            "cut.mov".into(),
+            v2.clone(),
+            RenditionKind::Proxy720,
+        )
+        .await
+        .expect("head version proxy");
+    assert_ne!(
+        old.file_id, new.file_id,
+        "different content, different proxy"
+    );
+    let head = client
+        .rendition(root_id, "cut.mov".into(), RenditionKind::Proxy720)
+        .await
+        .unwrap();
+    assert_eq!(new.file_id, head.file_id, "rendition_at(head) == rendition");
+
+    // A commit that doesn't exist is a clean error.
+    client
+        .rendition_at(
+            root_id,
+            "cut.mov".into(),
+            "0000000000000000".into(),
+            RenditionKind::Proxy720,
+        )
+        .await
+        .expect_err("unknown commit");
+
+    backend.shutdown().await;
+}
+
 /// A rendition request without a transcoder configured is a clean
 /// NotFound, not a panic.
 #[tokio::test(flavor = "multi_thread")]

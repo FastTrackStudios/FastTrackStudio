@@ -1223,3 +1223,101 @@ async fn curation_works_the_same_on_a_software_root() {
     drop(client);
     scope.close().await;
 }
+
+/// Issue #270 AC 2's durability half: the version a review comment
+/// pins is a GC protect-set member exactly like a Named Version — and
+/// deleting the comment releases it (the protect set is read from the
+/// Vault every pass, never baked in).
+#[tokio::test(flavor = "multi_thread")]
+async fn gc_never_sweeps_a_commit_a_review_comment_pins() {
+    let fx = fixture("Review Retention").await;
+    let root_id = fx.root_id().await;
+
+    // A tracked file, so the review can exist at all.
+    std::fs::write(fx.root_dir.join("cut.mov"), vec![7u8; 1024]).unwrap();
+    fx.client
+        .checkpoint_now(root_id, None)
+        .await
+        .expect("checkpoint");
+
+    let (pinned_commit, pinned_chunk, swept_chunk) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    let (pinned, pinned_chunk) =
+                        write_unreachable_commit(vs, "client-cut.mov", b"the reviewed cut").await;
+                    let (_swept, swept_chunk) =
+                        write_unreachable_commit(vs, "scratch.mov", b"nobody pinned this").await;
+                    (pinned, pinned_chunk, swept_chunk)
+                })
+            })
+            .expect("with_version_store")
+    });
+
+    let review = fx
+        .client
+        .review_for_file(root_id, "cut.mov".into())
+        .await
+        .expect("review");
+    fx.client
+        .add_review_comment(
+            review.id,
+            files_proto::NewReviewComment {
+                timecode_secs: 4.0,
+                author: "Client".into(),
+                body: "this is the take".into(),
+                commit_id: pinned_commit.hex(),
+                annotation: Vec::new(),
+            },
+        )
+        .await
+        .expect("comment pinning the old version");
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let report = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("gc_root rpc");
+    assert_eq!(
+        report.protected_commits, 1,
+        "the comment's pin joined the protect set: {report:?}"
+    );
+
+    let (pinned_present, swept_present) = tokio::task::block_in_place(|| {
+        fx.backend
+            .with_version_store(root_id, |vs| {
+                pollster::block_on(async {
+                    (
+                        vs.chunks().has(pinned_chunk).await,
+                        vs.chunks().has(swept_chunk).await,
+                    )
+                })
+            })
+            .expect("with_version_store")
+    });
+    assert!(
+        pinned_present,
+        "a commented version's content survives GC (AC 2: the reference stays resolvable)"
+    );
+    assert!(!swept_present, "the unpinned commit's content is gone");
+
+    // Delete the comment and the same pass now sweeps the pin.
+    let comments = fx
+        .client
+        .review_comments(review.id)
+        .await
+        .expect("comments");
+    fx.client
+        .delete_review_comment(comments[0].id)
+        .await
+        .expect("delete comment");
+    let report = fx
+        .client
+        .gc_root(root_id, Some(0))
+        .await
+        .expect("gc_root rpc");
+    assert_eq!(report.protected_commits, 0);
+
+    fx.backend.shutdown().await;
+}

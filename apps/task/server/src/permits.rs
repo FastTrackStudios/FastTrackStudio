@@ -370,7 +370,18 @@ table!(FILES, "files", "files/**", [
     // Derived media (issue #269). Requesting a rendition may generate
     // it (an expensive transcode) and cache it, but it never mutates
     // the versioned tree — a read from the caller's point of view.
-    rd "rendition",
+    // `rendition_at` is the same call pinned to a past version (the
+    // Review page's switcher, issue #270).
+    rd "rendition", rd "rendition_at",
+    // Reviews (issue #270). The Review page's audience includes
+    // share-link guests, so the feedback verbs sit at comment tier
+    // (`cm`, like `add_comment` / `post_message`): get-or-create runs
+    // when feedback starts, and posting writes a comment page. Pure
+    // lookups are reads. Deleting a comment removes someone's
+    // feedback, so it carries an audit line even on allow, like the
+    // other `delete` verbs.
+    rd "find_review", cm "review_for_file", rd "list_reviews", rd "review_comments",
+    cm "add_review_comment", wa "delete_review_comment",
 ]);
 table!(FILES_STREAM, "files-stream", "files/**", [rd "events"]);
 // The Files placement layer's ORG lane (issue #262). The operator and

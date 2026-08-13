@@ -856,22 +856,6 @@ impl FilesBackend {
         Ok(Some((repo, head)))
     }
 
-    /// Advance the cached checkpoint head, leaving the snapshot branch
-    /// where it is — every caller here is a checkpoint-line move, and a
-    /// mid-session reload must not forget the session's snapshots.
-    fn set_head(&self, root_id: Uuid, repo: Arc<ReadonlyRepo>, head: CommitId) {
-        let mut repos = self.repos.lock().expect("repo cache lock poisoned");
-        let snapshot_head = repos.get(&root_id).and_then(|rt| rt.snapshot_head.clone());
-        repos.insert(
-            root_id,
-            RootRuntime {
-                repo,
-                head,
-                snapshot_head,
-            },
-        );
-    }
-
     /// Set both heads at once — what a capture does (issue #260): a
     /// checkpoint moves the line and closes the branch, a snapshot
     /// leaves the line alone and extends the branch.
@@ -1330,6 +1314,121 @@ impl FilesBackend {
         let _guard = lock.lock().expect("root lock poisoned");
         self.versions.delete_named_version(id)?;
         Ok(named)
+    }
+
+    /// The file's review if one exists, following renames: a review
+    /// keyed under any previous path in the file's chain is this
+    /// file's review (renames must not fork the conversation).
+    ///
+    /// The reach-back is only as good as the store's copy records:
+    /// `Change::Rename` writers (the sync engine, a WebDAV MOVE) record
+    /// them, but the v1 scan checkpoint captures a plain filesystem
+    /// rename as remove+add (ADR 0001: "detection may start simple"),
+    /// which this lookup cannot see through. FUTURE: content-id rename
+    /// detection in the scan checkpoint closes that gap for reviews and
+    /// chains alike.
+    fn find_review_inner(
+        &self,
+        root_id: Uuid,
+        file_path: &str,
+    ) -> Result<Option<files_proto::Review>, Error> {
+        if let Some(review) = self.versions.review_by_file(root_id, file_path)? {
+            return Ok(Some(review));
+        }
+        // The chain already follows copy records back through renames —
+        // an untracked path simply has no chain (and so no review).
+        let chain = self
+            .chain_inner(root_id, file_path.to_string())
+            .unwrap_or_default();
+        for entry in &chain {
+            if entry.path != file_path
+                && let Some(review) = self.versions.review_by_file(root_id, &entry.path)?
+            {
+                return Ok(Some(review));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Get-or-create the review for `(root, file_path)` (issue #270).
+    /// Returns `(review, created)` so the RPC wrapper knows whether to
+    /// publish `ReviewCreated`.
+    fn review_for_file_inner(
+        &self,
+        root_id: Uuid,
+        file_path: String,
+    ) -> Result<(files_proto::Review, bool), Error> {
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "review")?;
+        // Same lock as the curation writes: two first-asks for one file
+        // must not both scan an empty vault and write two pages.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        if let Some(mut existing) = self.find_review_inner(root_id, &file_path)? {
+            // Found under a previous path — re-key to the current one
+            // so the exact lookup hits next time and the page reads
+            // true.
+            if existing.file_path != file_path {
+                existing.file_path = file_path;
+                existing = self.versions.update_review(existing)?;
+            }
+            return Ok((existing, false));
+        }
+        // First ask: the file must actually be a versioned member of
+        // this root — an untracked path has no versions to review.
+        let (_disk, repo_path) = self.resolve_root_file(&root, &file_path)?;
+        let (repo, head) = self.reload_repo(&root)?;
+        if Self::head_file(&repo, &head, &repo_path)?.is_none() {
+            return Err(Error::NotFound(format!(
+                "{file_path}: not tracked by the checkpoint head"
+            )));
+        }
+        let review = self
+            .versions
+            .create_review(root_id, &root.name, file_path)?;
+        Ok((review, true))
+    }
+
+    /// The root lock guarding a comment's vault writes, via its review
+    /// (a comment page doesn't carry the root id itself).
+    fn root_lock_for_review(
+        &self,
+        comment: &files_proto::ReviewComment,
+    ) -> Result<Arc<std::sync::Mutex<()>>, Error> {
+        let review = self.versions.review(comment.review_id)?;
+        Ok(self.root_lock(review.root_id))
+    }
+
+    fn add_review_comment_inner(
+        &self,
+        review_id: Uuid,
+        comment: files_proto::NewReviewComment,
+    ) -> Result<files_proto::ReviewComment, Error> {
+        if comment.body.trim().is_empty() && comment.annotation.is_empty() {
+            return Err(Error::BadRequest(
+                "a comment needs text or a drawing".into(),
+            ));
+        }
+        if !comment.timecode_secs.is_finite() || comment.timecode_secs < 0.0 {
+            return Err(Error::BadRequest(format!(
+                "bad timecode: {}",
+                comment.timecode_secs
+            )));
+        }
+        let review = self.versions.review(review_id)?;
+        let root = self.get_root_info(review.root_id)?;
+        let lock = self.root_lock(review.root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        // The recorded version must exist in this root's store — AC 2
+        // hinges on the reference staying resolvable. Normalized to the
+        // store's full hex spelling so two comments on one version
+        // always compare equal.
+        let (commit_id, _change) = self.resolve_commit(&root, &comment.commit_id)?;
+        let normalized = files_proto::NewReviewComment {
+            commit_id: commit_id.hex(),
+            ..comment
+        };
+        self.versions.create_review_comment(&review, normalized)
     }
 
     /// Resolve a Named Version the way a share link must: prefer the
@@ -3837,13 +3936,16 @@ impl FilesBackend {
         Ok(store)
     }
 
-    /// Resolve a media file at `path` to its source CAS `FileId` (at the
-    /// checkpoint head) plus the root's chunk store — the sync prep a
-    /// rendition needs before the async generate.
+    /// Resolve a media file at `path` to its source CAS `FileId` — at
+    /// the checkpoint head, or at `at` (a commit reference) for the
+    /// version switcher (issue #270 AC 4) — plus the root's chunk
+    /// store: the sync prep a rendition needs before the async
+    /// generate.
     fn rendition_prep(
         &self,
         root_id: Uuid,
         path: &str,
+        at: Option<&str>,
     ) -> Result<
         (
             Arc<task_files_chunk_store::ChunkStore>,
@@ -3856,9 +3958,13 @@ impl FilesBackend {
         Self::require_media(&root, "rendition")?;
         let (_disk, repo_path) = self.resolve_root_file(&root, path)?;
         let (repo, head) = self.reload_repo(&root)?;
-        let Some((source_id, _exec)) = Self::head_file(&repo, &head, &repo_path)? else {
+        let commit = match at {
+            Some(reference) => self.resolve_commit(&root, reference)?.0,
+            None => head,
+        };
+        let Some((source_id, _exec)) = Self::head_file(&repo, &commit, &repo_path)? else {
             return Err(Error::NotFound(format!(
-                "{path}: not tracked by the checkpoint head"
+                "{path}: not tracked by that version"
             )));
         };
         let source_fid = task_files_chunk_store::FileId::from_hex(&source_id.hex())
@@ -3873,6 +3979,7 @@ impl FilesBackend {
         &self,
         root_id: Uuid,
         path: String,
+        at: Option<String>,
         kind: files_proto::RenditionKind,
     ) -> Result<files_proto::RenditionInfo, Error> {
         let Some(transcoder) = self.transcoder_opt() else {
@@ -3882,9 +3989,10 @@ impl FilesBackend {
         };
         let this = self.clone();
         let p = path.clone();
-        let (chunks, source_fid, root_path) = blocking(move || this.rendition_prep(root_id, &p))
-            .await
-            .map_err(from_files_error)?;
+        let (chunks, source_fid, root_path) =
+            blocking(move || this.rendition_prep(root_id, &p, at.as_deref()))
+                .await
+                .map_err(from_files_error)?;
         let store = self.rendition_store(root_id, &root_path).await?;
         let ekind = crate::transcode::engine_kind(kind);
         // Generate-once (AC 2): hold a per-`(root, source, kind)` lock
@@ -4292,6 +4400,69 @@ impl FilesService for FilesBackend {
         blocking(move || this.versions.project_versions(root_id)).await
     }
 
+    async fn find_review(
+        &self,
+        root_id: Uuid,
+        file_path: String,
+    ) -> Result<Option<files_proto::Review>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.find_review_inner(root_id, &file_path)).await
+    }
+
+    async fn review_for_file(
+        &self,
+        root_id: Uuid,
+        file_path: String,
+    ) -> Result<files_proto::Review, FilesError> {
+        let this = self.clone();
+        let (review, created) =
+            blocking(move || this.review_for_file_inner(root_id, file_path)).await?;
+        if created {
+            self.publish(FilesEvent::ReviewCreated(review.clone()));
+        }
+        Ok(review)
+    }
+
+    async fn list_reviews(
+        &self,
+        root_id: Option<Uuid>,
+    ) -> Result<Vec<files_proto::Review>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.reviews(root_id)).await
+    }
+
+    async fn review_comments(
+        &self,
+        review_id: Uuid,
+    ) -> Result<Vec<files_proto::ReviewComment>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.review_comments(review_id)).await
+    }
+
+    async fn add_review_comment(
+        &self,
+        review_id: Uuid,
+        comment: files_proto::NewReviewComment,
+    ) -> Result<files_proto::ReviewComment, FilesError> {
+        let this = self.clone();
+        let added = blocking(move || this.add_review_comment_inner(review_id, comment)).await?;
+        self.publish(FilesEvent::ReviewCommentAdded(added.clone()));
+        Ok(added)
+    }
+
+    async fn delete_review_comment(&self, id: Uuid) -> Result<(), FilesError> {
+        let this = self.clone();
+        let removed = blocking(move || {
+            let comment = this.versions.review_comment(id)?;
+            let lock = this.root_lock_for_review(&comment)?;
+            let _guard = lock.lock().expect("root lock poisoned");
+            this.versions.delete_review_comment(id)
+        })
+        .await?;
+        self.publish(FilesEvent::ReviewCommentDeleted(removed));
+        Ok(())
+    }
+
     async fn restart_project_version(
         &self,
         root_id: Uuid,
@@ -4366,7 +4537,19 @@ impl FilesService for FilesBackend {
         path: String,
         kind: files_proto::RenditionKind,
     ) -> Result<files_proto::RenditionInfo, FilesError> {
-        self.rendition_inner(root_id, path, kind)
+        self.rendition_inner(root_id, path, None, kind)
+            .await
+            .map_err(to_files_error)
+    }
+
+    async fn rendition_at(
+        &self,
+        root_id: Uuid,
+        path: String,
+        commit_id: String,
+        kind: files_proto::RenditionKind,
+    ) -> Result<files_proto::RenditionInfo, FilesError> {
+        self.rendition_inner(root_id, path, Some(commit_id), kind)
             .await
             .map_err(to_files_error)
     }
