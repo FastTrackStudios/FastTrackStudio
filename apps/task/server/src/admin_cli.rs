@@ -40,6 +40,9 @@ pub async fn dispatch() -> eyre::Result<bool> {
         Some("delete-user") => delete_user(&args[2..]).await.map(|()| true),
         Some("set-role") => set_role(&args[2..]).await.map(|()| true),
         Some("create-user") => create_user(&args[2..]).await.map(|()| true),
+        Some("merge-principals") => merge_principals(&args[2..]).await.map(|()| true),
+        Some("adopt-principal") => adopt_principal(&args[2..]).await.map(|()| true),
+        Some("memberships") => show_memberships(&args[2..]).await.map(|()| true),
         // Dev-only: compiled OUT of release builds entirely, so the
         // deployed (release) server can never seed a known-password
         // admin (PR #295 review). In a release binary `seed` is just an
@@ -409,6 +412,556 @@ async fn email_history(args: &[String]) -> eyre::Result<()> {
         }
     }
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  merge-principals — one account per server (S2 of
+//  `plans/one-account-per-server.md`)
+// ─────────────────────────────────────────────────────────────────────
+
+/// One org's account for a given email, as it exists today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OrgAccount {
+    slug: String,
+    user_id: uuid::Uuid,
+}
+
+/// Every account sharing one email, and which of them becomes the
+/// principal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Principal {
+    email: String,
+    /// The id every other account's rows get remapped onto.
+    canonical: OrgAccount,
+    /// The rest — `(slug, old_id)` that need a `user_id_map` row.
+    absorbed: Vec<OrgAccount>,
+}
+
+impl Principal {
+    /// Orgs this principal ends up a member of, canonical included.
+    fn org_slugs(&self) -> Vec<String> {
+        std::iter::once(self.canonical.slug.clone())
+            .chain(self.absorbed.iter().map(|a| a.slug.clone()))
+            .collect()
+    }
+}
+
+/// Decide the principals from the per-org account lists.
+///
+/// The canonical account is the HOME org's when the email has one there,
+/// because the home org is the only org on a server guaranteed to
+/// outlive the others — an org can be exported and moved away, and a
+/// principal whose canonical id left with it would strand every
+/// remapped row. Otherwise the first org in slug order, so the choice is
+/// deterministic across runs rather than dependent on directory
+/// iteration order.
+///
+/// Emails are compared case-insensitively (`Cody@…` and `cody@…` are one
+/// login everywhere else in this stack) but reported in the casing the
+/// home — or first — org stored, since that is what the person typed.
+///
+/// Pure so the rule can be tested without six databases.
+fn plan_principals(
+    orgs: &[(String, bool, Vec<(uuid::Uuid, Option<String>)>)],
+) -> (Vec<Principal>, Vec<String>) {
+    use std::collections::BTreeMap;
+
+    let mut by_email: BTreeMap<String, Vec<(String, bool, uuid::Uuid, String)>> = BTreeMap::new();
+    let mut warnings = Vec::new();
+
+    let mut sorted: Vec<&(String, bool, Vec<(uuid::Uuid, Option<String>)>)> = orgs.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (slug, is_home, users) in sorted {
+        for (id, email) in users {
+            let Some(email) = email else {
+                // An account with no address cannot be matched to
+                // anything; naming it is the whole point of a dry run.
+                warnings.push(format!(
+                    "{slug}: user {id} has no email — cannot merge, left alone"
+                ));
+                continue;
+            };
+            by_email.entry(email.to_lowercase()).or_default().push((
+                slug.clone(),
+                *is_home,
+                *id,
+                email.clone(),
+            ));
+        }
+    }
+
+    let mut principals = Vec::new();
+    for (_key, mut rows) in by_email {
+        // Home first, then slug order — `plan` reads the head as canonical.
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let (slug, _, id, display_email) = rows.remove(0);
+        let canonical = OrgAccount { slug, user_id: id };
+        let absorbed: Vec<OrgAccount> = rows
+            .iter()
+            .map(|(slug, _, id, _)| OrgAccount {
+                slug: slug.clone(),
+                user_id: *id,
+            })
+            .collect();
+        principals.push(Principal {
+            email: display_email,
+            canonical,
+            absorbed,
+        });
+    }
+
+    (principals, warnings)
+}
+
+/// Columns that hold a user id. Matched by NAME across every table in
+/// every per-org database, rather than from a list of tables this
+/// command knows about — a store added later would otherwise be silently
+/// left holding dead ids, and the dry run exists precisely to be
+/// exhaustive about what a merge touches.
+fn is_user_id_column(name: &str) -> bool {
+    matches!(
+        name,
+        "user_id" | "home_user_id" | "owner_id" | "assignee_id" | "created_by" | "changed_by"
+    )
+}
+
+/// `admin merge-principals` — the S2 dry run of
+/// `plans/one-account-per-server.md`.
+///
+/// Reports, and by default changes NOTHING: which accounts share an
+/// email across this server's orgs, which id each group would collapse
+/// onto, the membership rows that would exist afterwards, and every row
+/// in every per-org database that carries one of the absorbed ids.
+///
+/// Databases are opened READ-ONLY (`mode=ro`) so this is safe to run
+/// against a live server — it holds these same files open.
+///
+/// `--apply` is deliberately NOT implemented yet: the server-level auth
+/// store (S1) has to exist before there is anywhere to write the merged
+/// principals, and a half-applied merge is the one outcome with no clean
+/// rollback.
+async fn merge_principals(args: &[String]) -> eyre::Result<()> {
+    use sea_orm::{ConnectionTrait as _, Database, DatabaseBackend, Statement};
+
+    if has(args, "--apply") {
+        bail!(
+            "--apply is not implemented yet — S1 (the server-level auth store) must land first.\n\
+             See apps/task/plans/one-account-per-server.md. This command is read-only today."
+        );
+    }
+
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    let orgs = data_root
+        .scan_orgs()
+        .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
+
+    println!(
+        "merge-principals (DRY RUN) — data root {}",
+        data_root.path().display()
+    );
+    println!();
+
+    // ── every org's accounts ────────────────────────────────────────
+    let mut per_org: Vec<(String, bool, Vec<(uuid::Uuid, Option<String>)>)> = Vec::new();
+    for (root, manifest) in &orgs {
+        let slug = root.slug().to_owned();
+        if !root.auth_db().exists() {
+            println!("  {slug}: no auth store — skipped");
+            continue;
+        }
+        let auth = open_org_auth(&slug).await?;
+        let users = auth
+            .auth
+            .list_users_local_trusted()
+            .await
+            .map_err(|e| eyre::eyre!("list users in `{slug}`: {e:?}"))?;
+        per_org.push((
+            slug,
+            manifest.is_home,
+            users.into_iter().map(|u| (u.id, u.email)).collect(),
+        ));
+    }
+
+    let (principals, warnings) = plan_principals(&per_org);
+
+    // ── principals ──────────────────────────────────────────────────
+    println!("principals ({})", principals.len());
+    for p in &principals {
+        let home_note = if p.absorbed.is_empty() {
+            "  (single org — nothing to merge)"
+        } else {
+            ""
+        };
+        println!(
+            "  {}{home_note}\n    canonical  {}  ({})",
+            p.email, p.canonical.user_id, p.canonical.slug
+        );
+        for a in &p.absorbed {
+            println!("    absorbed   {}  ({})", a.user_id, a.slug);
+        }
+    }
+    println!();
+
+    // ── memberships ─────────────────────────────────────────────────
+    let membership_rows: usize = principals.iter().map(|p| p.org_slugs().len()).sum();
+    println!("memberships to create ({membership_rows})");
+    for p in &principals {
+        println!("  {}: {}", p.email, p.org_slugs().join(", "));
+    }
+    println!();
+
+    // ── rows carrying an absorbed id ────────────────────────────────
+    // Absorbed ids only: the canonical id keeps its rows untouched.
+    let mut absorbed_by_slug: std::collections::BTreeMap<String, Vec<uuid::Uuid>> =
+        std::collections::BTreeMap::new();
+    for p in &principals {
+        for a in &p.absorbed {
+            absorbed_by_slug
+                .entry(a.slug.clone())
+                .or_default()
+                .push(a.user_id);
+        }
+    }
+
+    println!("rows to rewrite");
+    let mut total = 0usize;
+    for (root, _) in &orgs {
+        let slug = root.slug().to_owned();
+        let Some(ids) = absorbed_by_slug.get(&slug) else {
+            continue;
+        };
+        for (label, path) in [
+            ("auth", root.auth_db()),
+            ("identity", root.identity_db()),
+            ("timer", root.timer_db()),
+            ("finance", root.finance_db()),
+            ("threads", root.threads_db()),
+            ("prefs", root.prefs_db()),
+        ] {
+            if !path.exists() {
+                continue;
+            }
+            // Read-only: a live server holds these open.
+            let url = format!("sqlite://{}?mode=ro", path.display());
+            let conn = Database::connect(&url)
+                .await
+                .wrap_err_with(|| format!("open {label} db for `{slug}`"))?;
+            let tables = conn
+                .query_all(Statement::from_string(
+                    DatabaseBackend::Sqlite,
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                        .to_owned(),
+                ))
+                .await?;
+            for t in tables {
+                let table: String = t.try_get("", "name")?;
+                let cols = conn
+                    .query_all(Statement::from_string(
+                        DatabaseBackend::Sqlite,
+                        format!("PRAGMA table_info('{table}')"),
+                    ))
+                    .await?;
+                for c in cols {
+                    let column: String = c.try_get("", "name")?;
+                    if !is_user_id_column(&column) {
+                        continue;
+                    }
+                    // Ids are stored as text or as blobs depending on the
+                    // store; compare against both spellings rather than
+                    // guessing, so a zero here means zero rows and not a
+                    // type mismatch quietly hiding them.
+                    let list = ids
+                        .iter()
+                        .map(|id| format!("'{id}'"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let sql = format!(
+                        "SELECT COUNT(*) AS n FROM \"{table}\" WHERE CAST(\"{column}\" AS TEXT) IN ({list})"
+                    );
+                    let row = conn
+                        .query_one(Statement::from_string(DatabaseBackend::Sqlite, sql))
+                        .await?;
+                    let n: i64 = row.map(|r| r.try_get("", "n")).transpose()?.unwrap_or(0);
+                    if n > 0 {
+                        println!("  {slug:<18} {label:<9} {table}.{column}  {n}");
+                        total += usize::try_from(n).unwrap_or(0);
+                    }
+                }
+            }
+        }
+    }
+    if total == 0 {
+        println!("  (none — absorbed accounts own no rows in any per-org store)");
+    } else {
+        println!("  total {total}");
+    }
+
+    if !warnings.is_empty() {
+        println!();
+        println!("warnings");
+        for w in &warnings {
+            println!("  {w}");
+        }
+    }
+
+    println!();
+    println!("nothing was written. `--apply` lands with S1.");
+    Ok(())
+}
+
+/// Resolve the home org — the server's identity authority.
+fn home_org(
+    orgs: &[(org_proto::OrgRoot, org_proto::OrgManifest)],
+) -> eyre::Result<&org_proto::OrgRoot> {
+    orgs.iter()
+        .find(|(_, m)| m.is_home)
+        .map(|(r, _)| r)
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "no org is marked `is_home` in its org.toml — the home org is this server's \
+                 identity authority, so memberships have nowhere to live"
+            )
+        })
+}
+
+/// `admin adopt-principal --email <addr>` — S1 of
+/// `plans/one-account-per-server.md`.
+///
+/// Give one principal a membership row in every org on this server that
+/// already holds an account with that address, carrying THAT org's role
+/// so an admin in one org and a reader in another stay exactly that.
+/// The principal is the home org's user id.
+///
+/// It adopts orgs that already provisioned the person; it never invents
+/// membership. An org with no account for the address is reported and
+/// skipped — `admin create-user --org <slug> --email <addr>` first if
+/// that org should have them, then re-run.
+///
+/// Idempotent: re-running updates roles in place, which is the ONLY way
+/// a role changes once the lane stops reading each org's own role
+/// column. `--dry-run` prints the rows and writes nothing.
+async fn adopt_principal(args: &[String]) -> eyre::Result<()> {
+    let Some(email) = flag(args, "--email") else {
+        bail!("--email is required");
+    };
+    let dry = has(args, "--dry-run");
+
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    let orgs = data_root
+        .scan_orgs()
+        .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
+    let home = home_org(&orgs)?;
+    let home_slug = home.slug().to_owned();
+
+    // The principal id is the home org's user id, so nothing that
+    // already references it in the home org — where nearly all the data
+    // is — has to be rewritten.
+    let home_auth = open_org_auth(&home_slug).await?;
+    let principal = home_auth
+        .auth
+        .find_user_by_email(&email)
+        .await
+        .map_err(|e| eyre::eyre!("look up `{email}` in home org `{home_slug}`: {e:?}"))?
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "no account with email `{email}` in the home org `{home_slug}` — the principal \
+                 must exist there first (`admin create-user --org {home_slug} --email {email}`)"
+            )
+        })?;
+
+    println!(
+        "principal {} ({email}) — home org `{home_slug}`{}",
+        principal.id,
+        if dry { "  [DRY RUN]" } else { "" }
+    );
+
+    let mut adopted: Vec<(String, Option<String>)> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for (root, _) in &orgs {
+        let slug = root.slug().to_owned();
+        if !root.auth_db().exists() {
+            skipped.push(format!("{slug}: no auth store"));
+            continue;
+        }
+        let auth = open_org_auth(&slug).await?;
+        let account = auth
+            .auth
+            .find_user_by_email(&email)
+            .await
+            .map_err(|e| eyre::eyre!("look up `{email}` in `{slug}`: {e:?}"))?;
+        match account {
+            Some(user) => adopted.push((slug, user.role)),
+            None => skipped.push(format!("{slug}: no account for `{email}`")),
+        }
+    }
+
+    if !dry {
+        let store = crate::memberships::Memberships::open(&home.memberships_db()).await?;
+        for (slug, role) in &adopted {
+            store.upsert(principal.id, slug, role.as_deref()).await?;
+        }
+    }
+
+    println!();
+    println!("memberships ({})", adopted.len());
+    for (slug, role) in &adopted {
+        println!(
+            "  {slug:<20} role = {}",
+            role.as_deref().unwrap_or("(member)")
+        );
+    }
+    if !skipped.is_empty() {
+        println!();
+        println!("skipped");
+        for s in &skipped {
+            println!("  {s}");
+        }
+    }
+    println!();
+    if dry {
+        println!("nothing written (--dry-run).");
+    } else {
+        println!("written to {}", home.memberships_db().display());
+    }
+    Ok(())
+}
+
+/// `admin memberships [--email <addr>]` — read the table back.
+///
+/// The counterpart to `adopt-principal`: what the server will actually
+/// believe about who belongs where, read from the rows rather than
+/// inferred from six auth stores.
+async fn show_memberships(args: &[String]) -> eyre::Result<()> {
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    let orgs = data_root
+        .scan_orgs()
+        .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
+    let home = home_org(&orgs)?;
+    let db = home.memberships_db();
+    if !db.exists() {
+        println!(
+            "no memberships store yet at {} — run `admin adopt-principal --email <addr>`",
+            db.display()
+        );
+        return Ok(());
+    }
+
+    let store = crate::memberships::Memberships::open_ro(&db).await?;
+    let home_auth = open_org_auth(home.slug()).await?;
+
+    let users = match flag(args, "--email") {
+        Some(email) => {
+            let u = home_auth
+                .auth
+                .find_user_by_email(&email)
+                .await
+                .map_err(|e| eyre::eyre!("look up `{email}`: {e:?}"))?
+                .ok_or_else(|| eyre::eyre!("no account with email `{email}` in the home org"))?;
+            vec![u]
+        }
+        None => home_auth
+            .auth
+            .list_users_local_trusted()
+            .await
+            .map_err(|e| eyre::eyre!("list users: {e:?}"))?,
+    };
+
+    for u in users {
+        let rows = store.for_user(u.id).await?;
+        println!("{}  {}", u.id, u.email.as_deref().unwrap_or("(no email)"));
+        if rows.is_empty() {
+            println!("  (no memberships — not a member of any org on this server)");
+        }
+        for r in rows {
+            println!(
+                "  {:<20} role = {}",
+                r.org_slug,
+                r.role.as_deref().unwrap_or("(member)")
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod merge_principals_tests {
+    use super::*;
+
+    fn u(n: u128) -> uuid::Uuid {
+        uuid::Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn the_home_org_supplies_the_canonical_id() {
+        let orgs = vec![
+            ("cbu".into(), false, vec![(u(2), Some("a@b.com".into()))]),
+            (
+                "codywright".into(),
+                true,
+                vec![(u(1), Some("a@b.com".into()))],
+            ),
+        ];
+        let (principals, _) = plan_principals(&orgs);
+        assert_eq!(principals.len(), 1);
+        assert_eq!(principals[0].canonical.user_id, u(1));
+        assert_eq!(principals[0].canonical.slug, "codywright");
+        assert_eq!(principals[0].absorbed.len(), 1);
+        assert_eq!(principals[0].absorbed[0].slug, "cbu");
+    }
+
+    #[test]
+    fn without_a_home_account_the_first_slug_wins_deterministically() {
+        // Directory iteration order must not decide which id survives.
+        let orgs = vec![
+            ("zeta".into(), false, vec![(u(9), Some("a@b.com".into()))]),
+            ("alpha".into(), false, vec![(u(3), Some("a@b.com".into()))]),
+        ];
+        let (principals, _) = plan_principals(&orgs);
+        assert_eq!(principals[0].canonical.slug, "alpha");
+        assert_eq!(principals[0].absorbed[0].slug, "zeta");
+    }
+
+    #[test]
+    fn email_case_does_not_split_a_principal() {
+        let orgs = vec![
+            (
+                "codywright".into(),
+                true,
+                vec![(u(1), Some("Cody@Example.com".into()))],
+            ),
+            (
+                "cbu".into(),
+                false,
+                vec![(u(2), Some("cody@example.com".into()))],
+            ),
+        ];
+        let (principals, _) = plan_principals(&orgs);
+        assert_eq!(principals.len(), 1, "one login, one principal");
+        // Reported in the casing the home org stored — what was typed.
+        assert_eq!(principals[0].email, "Cody@Example.com");
+    }
+
+    #[test]
+    fn a_single_org_account_is_a_principal_with_nothing_absorbed() {
+        let orgs = vec![(
+            "tombrooksmusic".into(),
+            false,
+            vec![(u(7), Some("carter@x.invalid".into()))],
+        )];
+        let (principals, _) = plan_principals(&orgs);
+        assert_eq!(principals[0].absorbed, vec![]);
+        assert_eq!(principals[0].org_slugs(), vec!["tombrooksmusic".to_owned()]);
+    }
+
+    #[test]
+    fn an_account_without_an_email_is_reported_not_merged() {
+        let orgs = vec![("cbu".into(), false, vec![(u(5), None)])];
+        let (principals, warnings) = plan_principals(&orgs);
+        assert!(principals.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("no email"));
+    }
 }
 
 /// `admin seed` — stand up (or top up) a LOCAL multi-org dev vault with

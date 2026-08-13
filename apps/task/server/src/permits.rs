@@ -1541,6 +1541,98 @@ impl<R> AuditedIdentityResolver<R> {
     }
 }
 
+/// Accept a home-org token for THIS org — but only with a membership row.
+///
+/// The org's own store answers first, so nothing about single-org
+/// behaviour changes and a token issued here keeps working after the
+/// home org is gone. Only when that yields no user do we ask the home
+/// org, and a home principal is admitted **only** if
+/// `memberships.role_for(user, slug)` returns a row.
+///
+/// That row is the entire fence. Before this existed, a `codywright`
+/// token was simply meaningless to `cbu` — the wrong database, no
+/// decision to get wrong. Now it is meaningful everywhere on the server
+/// and the row is what says no, which is why a missing row must fail
+/// closed rather than fall through to `DEFAULT_ORG_ROLE`. See
+/// `plans/one-account-per-server.md`.
+pub struct HomeFallbackResolver<R, H> {
+    own: R,
+    home: H,
+    memberships: std::sync::Arc<crate::memberships::Memberships>,
+    slug: String,
+}
+
+impl<R, H> HomeFallbackResolver<R, H> {
+    pub fn new(
+        own: R,
+        home: H,
+        memberships: std::sync::Arc<crate::memberships::Memberships>,
+        slug: impl Into<String>,
+    ) -> Self {
+        Self {
+            own,
+            home,
+            memberships,
+            slug: slug.into(),
+        }
+    }
+}
+
+impl<R: IdentityResolver, H: IdentityResolver> IdentityResolver for HomeFallbackResolver<R, H> {
+    fn resolve<'a>(&'a self, bearer_token: Option<&'a str>) -> BoxIdentityFuture<'a> {
+        Box::pin(async move {
+            use task_telemetry::wide;
+
+            let own = self.own.resolve(bearer_token).await;
+            if matches!(own, Principal::User { .. }) {
+                return own;
+            }
+            let Principal::User { user_id } = self.home.resolve(bearer_token).await else {
+                return Principal::Anonymous;
+            };
+            // A home principal exists. Membership decides.
+            let Ok(uuid) = user_id.parse::<uuid::Uuid>() else {
+                // Ids are uuids everywhere in architect-auth; a token that
+                // resolves to something else is not a shape we admit
+                // across orgs.
+                wide::set("auth.cross_org", "unparsable_user_id");
+                return Principal::Anonymous;
+            };
+            match self.memberships.role_for(uuid, &self.slug).await {
+                Ok(Some(m)) => {
+                    wide::set("auth.cross_org", "member");
+                    wide::set(
+                        "auth.membership_role",
+                        m.role.unwrap_or_else(|| "(member)".into()),
+                    );
+                    Principal::User { user_id }
+                }
+                Ok(None) => {
+                    // Signed in, and not a member here. ONE warn line:
+                    // this is a refusal, and refusals are alertable.
+                    wide::set("auth.cross_org", "not_a_member");
+                    tracing::warn!(
+                        org.slug = self.slug,
+                        "cross-org: home principal has no membership row for this org"
+                    );
+                    Principal::Anonymous
+                }
+                Err(e) => {
+                    // Fail closed: an unreadable membership table must not
+                    // become "everyone is a member".
+                    wide::set("auth.cross_org", "lookup_failed");
+                    tracing::warn!(
+                        org.slug = self.slug,
+                        error = %e,
+                        "cross-org: membership lookup failed — refusing"
+                    );
+                    Principal::Anonymous
+                }
+            }
+        })
+    }
+}
+
 impl<R: IdentityResolver> IdentityResolver for AuditedIdentityResolver<R> {
     fn resolve<'a>(&'a self, bearer_token: Option<&'a str>) -> BoxIdentityFuture<'a> {
         Box::pin(async move {
