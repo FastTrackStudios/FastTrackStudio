@@ -62,6 +62,24 @@ use sea_orm_migration::MigratorTrait;
 
 use crate::capability::ServerKeypair;
 
+/// The home org's identity, which is this server's identity authority.
+///
+/// A principal is "a user in the home org's `auth.sqlite`, plus the orgs
+/// it has membership rows for". Every other org's lane consults this
+/// when a token is not one of its own — see
+/// `plans/one-account-per-server.md`.
+///
+/// `None` on a server whose orgs carry no `is_home`, or before
+/// `admin adopt-principal` has created the memberships store: both mean
+/// "no cross-org identity", and every lane behaves exactly as it did
+/// before this existed.
+#[derive(Clone)]
+pub struct HomeIdentity {
+    pub slug: String,
+    pub auth: AuthState,
+    pub memberships: Arc<crate::memberships::Memberships>,
+}
+
 #[derive(Clone)]
 pub struct AuthState {
     pub auth: ArchitectAuth<AuthSeaOrmStorage>,
@@ -399,6 +417,11 @@ pub struct AppState {
     /// Source data root. Held for `.well-known/task-server.json`
     /// discovery, manifest re-scans, and the keypair path.
     pub data_root: org_proto::DataRoot,
+    /// The home org's auth store + memberships table — this server's
+    /// identity authority. `None` when no org is marked `is_home`, or
+    /// when no memberships store exists yet, in which case every lane
+    /// behaves exactly as it did before cross-org identity existed.
+    pub home_identity: Option<HomeIdentity>,
     /// Construction scope for every backend resource (DB pools).
     /// Each org's SQLite pools register a finalizer here via
     /// architect's [`Resource::acquire_release`]; [`Scope::close`]
@@ -557,12 +580,36 @@ impl AppState {
         // half-mounting it was the policy split the review flagged.
         let storage = crate::storage::open(data_root.path())?;
         let org_roots = pick_server_orgs(&data_root, slug_filter)?;
+
+        // The home org's identity, opened BEFORE the org loop so every
+        // lane can be built with it. A second connection to the same
+        // sqlite file (WAL, like the admin verbs) rather than plumbing
+        // the loop's own AuthState out of it — the home org is not
+        // guaranteed to be built first, and ordering the loop by
+        // is_home to arrange that would be a subtle trap for whoever
+        // next touches it.
+        let home_identity = build_home_identity(&org_roots).await;
+        if let Some(home) = &home_identity {
+            tracing::info!(
+                home.slug = home.slug,
+                "cross-org identity: home org is this server's identity authority"
+            );
+        }
+
         let mut orgs = std::collections::HashMap::new();
         for org_root in org_roots {
             let slug = org_root.slug().to_owned();
             let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
             let auth = AuthState::open(&auth_db_url, &auth_secret()).await?;
-            let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage).await?;
+            let org_state = build_org_state(
+                auth,
+                &keypair,
+                org_root,
+                &scope,
+                &storage,
+                home_identity.as_ref(),
+            )
+            .await?;
             orgs.insert(slug, org_state);
         }
 
@@ -571,6 +618,7 @@ impl AppState {
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             storage,
             data_root,
+            home_identity,
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -600,7 +648,7 @@ impl AppState {
             .pop()
             .ok_or_else(|| eyre::eyre!("no org to host"))?;
         let slug = org_root.slug().to_owned();
-        let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage).await?;
+        let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage, None).await?;
         let mut orgs = std::collections::HashMap::new();
         orgs.insert(slug, org_state);
         Ok(Self {
@@ -608,6 +656,8 @@ impl AppState {
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             storage,
             data_root,
+            // Test helpers host a single org: no cross-org identity.
+            home_identity: None,
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -628,7 +678,7 @@ impl AppState {
         let scope = architect::Scope::new();
         let storage = crate::storage::open(data_root.path())?;
         let slug = org_root.slug().to_owned();
-        let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage).await?;
+        let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage, None).await?;
         let mut orgs = std::collections::HashMap::new();
         orgs.insert(slug, org_state);
         Ok(Self {
@@ -636,6 +686,8 @@ impl AppState {
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             storage,
             data_root,
+            // Test helpers host a single org: no cross-org identity.
+            home_identity: None,
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -709,12 +761,56 @@ where
 /// Build one [`OrgAppState`] for a single org's
 /// [`OrgRoot`]. Opens every backend the vox dispatcher
 /// will mount.
+/// Open the home org's auth store + memberships table, if this server
+/// has both.
+///
+/// Every failure here degrades to `None` — no `is_home` org, no
+/// memberships file yet, or a store that will not open — because the
+/// fallback it powers is an ADDITION to per-org auth, never a
+/// replacement. A server that cannot answer "which orgs does this
+/// principal belong to" must still serve every org exactly as it did
+/// before, rather than refuse to boot.
+async fn build_home_identity(org_roots: &[org_proto::OrgRoot]) -> Option<HomeIdentity> {
+    let home = org_roots
+        .iter()
+        .find(|r| r.manifest().is_ok_and(|m| m.is_home))?;
+    let db = home.memberships_db();
+    if !db.exists() {
+        tracing::debug!(
+            path = %db.display(),
+            "no memberships store — cross-org identity off (run `admin adopt-principal`)"
+        );
+        return None;
+    }
+    let memberships = match crate::memberships::Memberships::open(&db).await {
+        Ok(m) => Arc::new(m),
+        Err(e) => {
+            tracing::warn!(error = %e, "memberships store failed to open — cross-org identity off");
+            return None;
+        }
+    };
+    let url = format!("sqlite://{}?mode=rwc", home.auth_db().display());
+    let auth = match AuthState::open(&url, &auth_secret()).await {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!(error = %e, "home auth store failed to open — cross-org identity off");
+            return None;
+        }
+    };
+    Some(HomeIdentity {
+        slug: home.slug().to_owned(),
+        auth,
+        memberships,
+    })
+}
+
 pub(crate) async fn build_org_state(
     auth: AuthState,
     keypair: &ServerKeypair,
     org_root: org_proto::OrgRoot,
     scope: &std::sync::Arc<architect::Scope>,
     storage: &Arc<files_storage::StorageCore>,
+    home_identity: Option<&HomeIdentity>,
 ) -> eyre::Result<OrgAppState> {
     {
         // The org's effective plugin set, resolved once from the
@@ -1427,7 +1523,12 @@ pub(crate) async fn build_org_state(
             sqlite_conns.push(store.conn().clone());
         }
 
-        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins, org_root.slug()));
+        let permissions = Arc::new(build_org_permissions_gate(
+            &auth,
+            &plugins,
+            org_root.slug(),
+            home_identity,
+        ));
         // Coverage + dry-run, once per org at boot: how many mounted
         // services carry a permit table, which do not, and what a
         // signed-in member would be denied if enforcement were on. The
@@ -2395,6 +2496,33 @@ async fn permissions_report_handler(headers: axum::http::HeaderMap) -> axum::res
     .into_response()
 }
 
+/// Does the bearer belong to `slug` by way of the home org?
+///
+/// Validates the token against the home org's auth store (this server's
+/// identity authority) and then requires a membership row. False on
+/// every failure — no home identity, an unreadable table, a token the
+/// home org does not know — because discovery must never claim
+/// membership the org lane would then refuse.
+async fn home_membership(state: &AppState, token: &str, slug: &str) -> bool {
+    let Some(home) = &state.home_identity else {
+        return false;
+    };
+    let Ok(bundle) = home
+        .auth
+        .auth
+        .current_session(architect_auth::CurrentSession {
+            token: token.to_owned(),
+        })
+        .await
+    else {
+        return false;
+    };
+    home.memberships
+        .role_for(bundle.user.id, slug)
+        .await
+        .is_ok_and(|m| m.is_some())
+}
+
 /// `.well-known/task-server.json` — federation discovery.
 /// Lists every org this server hosts plus its routing URL
 /// suffix. Public, no auth required.
@@ -2434,17 +2562,35 @@ async fn well_known_handler(
         // can tell "signed out" from "signed in and not a member" — the
         // former must still show every org (that's the sign-in path), the
         // latter must not.
-        let member = match (&bearer, state.org(&slug)) {
-            (Some(token), Some(org)) => Some(
-                org.auth
-                    .auth
-                    .current_session(architect_auth::CurrentSession {
-                        token: token.clone(),
-                    })
-                    .await
-                    .is_ok(),
-            ),
-            _ => None,
+        // Membership, in two steps. A token this org issued still means
+        // membership — that is what it meant before cross-org identity,
+        // and an org detached onto its own server must keep working. If
+        // it did not, the token may still be a home-org one, in which
+        // case the memberships table is the authority.
+        //
+        // The client turns this tag into what "All organizations" means
+        // (`orgs::my_orgs_with_links`), so a `false` here is exactly the
+        // org disappearing from every multi-org view.
+        let member = match &bearer {
+            None => None,
+            Some(token) => {
+                let own = match state.org(&slug) {
+                    Some(org) => org
+                        .auth
+                        .auth
+                        .current_session(architect_auth::CurrentSession {
+                            token: token.clone(),
+                        })
+                        .await
+                        .is_ok(),
+                    None => false,
+                };
+                if own {
+                    Some(true)
+                } else {
+                    Some(home_membership(&state, token, &slug).await)
+                }
+            }
         };
         orgs.push(serde_json::json!({
             "slug": slug,
@@ -2738,15 +2884,31 @@ fn build_org_permissions_gate(
     auth: &AuthState,
     plugins: &task_plugin::PluginSet,
     slug: &str,
+    home_identity: Option<&HomeIdentity>,
 ) -> architect::permissions_gate::PermissionsGate {
     use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
-    // Wrapped so every RPC's wide event carries WHY the principal came out
-    // the way it did — "no token presented" vs "token rejected" are the
-    // same `Principal::Anonymous` without it (see `AuditedIdentityResolver`).
-    let identity = permits::AuditedIdentityResolver::new(
-        architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone()),
-        slug,
-    );
+    let own = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
+    // Cross-org identity: a token this org does not know may still be a
+    // home-org token belonging to a principal with a membership row for
+    // this org. Not installed on the home org itself (its own resolver
+    // already IS the home resolver) or when there is no home identity.
+    let resolver: Arc<dyn architect_permissions::IdentityResolver + Send + Sync> =
+        match home_identity {
+            Some(home) if home.slug != slug => Arc::new(permits::AuditedIdentityResolver::new(
+                permits::HomeFallbackResolver::new(
+                    own,
+                    architect_auth::identity::SessionIdentityResolver::new(home.auth.auth.clone()),
+                    Arc::clone(&home.memberships),
+                    slug,
+                ),
+                slug,
+            )),
+            // Wrapped so every RPC's wide event carries WHY the principal came out
+            // the way it did — "no token presented" vs "token rejected" are the
+            // same `Principal::Anonymous` without it (see `AuditedIdentityResolver`).
+            _ => Arc::new(permits::AuditedIdentityResolver::new(own, slug)),
+        };
+    let identity = resolver;
     let enforce = enforce_permissions();
     let audit = permits::GateAudit::new(enforce, permission_deny_ledger(), DEFAULT_ORG_ROLE);
     let gate = PermissionsGate::new(org_permission_engine(), Arc::new(identity))
