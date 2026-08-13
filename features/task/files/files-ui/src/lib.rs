@@ -332,6 +332,7 @@ pub(crate) fn use_files_events(
 // ── The explorer ── the Spacedrive-style shell lives in `explorer` ──
 
 pub mod explorer;
+pub mod tree;
 pub use explorer::{Explorer, ExplorerProps};
 
 /// First 12 hex chars of a commit id — enough to identify a saved state
@@ -356,6 +357,9 @@ pub enum Selection {
     /// auto-select effect may act on.
     #[default]
     Unset,
+    /// One area of the org tree (issue #304) — the unified namespace
+    /// the OS mount serves too.
+    Area(tree::TreeArea),
     /// The Drive surface (loose files outside any root).
     Drive,
     Root(Uuid),
@@ -399,6 +403,22 @@ pub fn FilesSidebar() -> Element {
         div { class: "flex h-full min-h-0 flex-col gap-1 overflow-y-auto p-2",
             span { class: "px-2 pt-1 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground",
                 "Files"
+            }
+            // The org tree: the same namespace an OS mount shows.
+            for area in tree::TreeArea::ALL {
+                button {
+                    key: "{area.as_str()}",
+                    class: if *selected.read() == Selection::Area(area) {
+                        "rounded-md bg-indigo-500/10 px-2.5 py-1.5 text-left text-sm ring-1 ring-indigo-400/40"
+                    } else {
+                        "rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted/30"
+                    },
+                    onclick: move |_| selected.set(Selection::Area(area)),
+                    "{area.as_str()}"
+                }
+            }
+            span { class: "px-2 pt-3 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground",
+                "Roots"
             }
             if let Some(Err(e)) = &rows {
                 task_ui_core::states::ErrorState {
@@ -499,6 +519,8 @@ pub fn FilesPane() -> Element {
 
     let selection = selected();
     let active = match selection {
+        // An area selection browses the tree; no root is active.
+        Selection::Area(_) => None,
         Selection::Root(id) => known.iter().find(|r| r.id == id).cloned(),
         Selection::Unset | Selection::Drive => None,
     };
@@ -567,6 +589,18 @@ pub fn FilesPane() -> Element {
                             task_ui_core::states::LoadingState { rows: 3 }
                         }
                     },
+                    _ if matches!(selection, Selection::Area(_)) => {
+                        let Selection::Area(area) = selection else {
+                            unreachable!()
+                        };
+                        rsx! {
+                            tree::TreeExplorer {
+                                key: "{org()}:{area.as_str()}",
+                                org: org(),
+                                area,
+                            }
+                        }
+                    }
                     (false, Some(root)) => rsx! {
                         Explorer {
                             key: "{org()}:{root.id}",

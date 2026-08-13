@@ -86,6 +86,23 @@ pub struct BrowseEntry {
     pub divergent: bool,
 }
 
+/// One resolved node of the org tree (issue #304) — the unified
+/// namespace the Files surface and the OS mount both browse:
+/// `Projects/` (vault project folders joined with their File Roots),
+/// `Vault/` and `Wiki/` (lensed: Folders + Tags), `Assets/` (loose
+/// files outside any root).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub enum TreeNode {
+    /// A listing at this tree path — virtual (areas, lenses, tag
+    /// folders) or filesystem-backed (vault/wiki dirs, assets).
+    Listing(Vec<BrowseEntry>),
+    /// The subtree from here down IS a File Root's live tree — the
+    /// client mounts its full root explorer (inspector, versions,
+    /// review) instead of walking entries one RPC at a time.
+    Root { id: Uuid, subpath: String },
+}
+
 /// A project-file save observed during a session (glossary
 /// "Auto-snapshot": "a project-file save marks the nearest
 /// auto-snapshot as a **save point** (display metadata, not a

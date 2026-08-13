@@ -421,6 +421,13 @@ impl FilesBackend {
     /// reporting the second as the first is both a false alarm and the
     /// wrong status code (PR #287 review).
     #[must_use]
+    /// Every registered root, unprojected — the org-tree resolver's
+    /// join input (the lineage overlay is browse-time garnish it
+    /// doesn't need).
+    pub(crate) fn registry_list(&self) -> Vec<FileRootInfo> {
+        self.registry.list()
+    }
+
     pub fn confine_root(&self) -> &Path {
         &self.confine_root
     }
@@ -964,7 +971,7 @@ impl FilesBackend {
     /// the raw tree. `hide_git` additionally hides `.git`, which is a
     /// root's own object store on the software flavor but ordinary
     /// content on a media one.
-    fn list_dir(
+    pub(crate) fn list_dir(
         dir: &Path,
         hide_internals: bool,
         hide_git: bool,
@@ -4434,6 +4441,11 @@ impl FilesService for FilesBackend {
     async fn drive_browse(&self, path: String) -> Result<Vec<BrowseEntry>, FilesError> {
         let this = self.clone();
         blocking(move || this.drive_browse_inner(path)).await
+    }
+
+    async fn tree_browse(&self, path: String) -> Result<files_proto::TreeNode, FilesError> {
+        let this = self.clone();
+        blocking(move || this.tree_browse_inner(path)).await
     }
 
     async fn chain(&self, root_id: Uuid, path: String) -> Result<Vec<ChainEntry>, FilesError> {

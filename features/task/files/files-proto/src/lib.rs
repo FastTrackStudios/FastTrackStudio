@@ -25,7 +25,7 @@ pub use model::{
     AnnotationPoint, AnnotationStroke, BrowseEntry, ChainEntry, CheckpointInfo, DivergenceChoice,
     DivergenceInfo, DivergenceSide, FileRootInfo, GcReport, HydrationChange, HydrationReport,
     NamedVersion, NewReviewComment, ProjectVersion, RenditionInfo, RenditionKind, RestartMode,
-    Review, ReviewComment, RootFlavor, SavePoint, SnapshotInfo, VersionRef,
+    Review, ReviewComment, RootFlavor, SavePoint, SnapshotInfo, TreeNode, VersionRef,
 };
 pub use service::{FilesError, FilesEvent, FilesService};
 

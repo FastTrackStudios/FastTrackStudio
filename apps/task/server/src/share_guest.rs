@@ -309,6 +309,12 @@ impl FilesService for GuestFilesService {
     async fn drive_browse(&self, _path: String) -> Result<Vec<BrowseEntry>, FilesError> {
         denied()
     }
+
+    async fn tree_browse(&self, _path: String) -> Result<files_proto::TreeNode, FilesError> {
+        // The org tree spans the whole vault/wiki — nothing a
+        // review-scoped guest may see.
+        denied()
+    }
     async fn checkpoint_now(
         &self,
         _root_id: Uuid,

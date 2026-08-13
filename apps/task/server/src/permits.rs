@@ -349,7 +349,7 @@ table!(WORKSTREAM, "workstream", "workstreams/**", [
 ]);
 table!(WORKSTREAM_STREAM, "workstream-stream", "workstreams/**", [rd "events"]);
 table!(FILES, "files", "files/**", [
-    wr "create_root", rd "list_roots", rd "get_root", rd "browse", rd "drive_browse",
+    wr "create_root", rd "list_roots", rd "get_root", rd "browse", rd "drive_browse", rd "tree_browse",
     rd "chain", wr "checkpoint_now",
     // Cadence engine (issue #260): activity hints and the per-root
     // Ignore set. A hint can cause a capture, so it is a write.
