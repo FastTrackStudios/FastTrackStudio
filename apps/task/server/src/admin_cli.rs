@@ -487,6 +487,14 @@ async fn seed(args: &[String]) -> eyre::Result<()> {
         seed_owner(&org, &email, &password, display).await?;
         seed_vault_notes(&org, display)?;
         seed_files_demo(&org, with_divergence).await?;
+        // The full studio dataset — 50 projects, albums with songs,
+        // the song library / setlists / events, and media-bearing
+        // Files roots — only in the home org: the other orgs stay
+        // light so multi-org flows stay fast to eyeball.
+        if is_home {
+            seed_studio_vault(&org)?;
+            seed_studio_files(&org, with_divergence).await?;
+        }
     }
 
     println!("\ndone. sign in at the web app with:");
@@ -777,6 +785,631 @@ async fn seed_files_demo_inner(
             ""
         }
     );
+    Ok(())
+}
+
+// ── The studio dataset (home org only) ────────────────────────────
+//
+// A dataset big enough to actually exercise the UI: 50 projects (10
+// video productions, 3 albums whose songs are sub-projects, 37 other
+// engagements), each with its own folder of working notes — the
+// project's "vault within the vault". Plus the performance stack: a
+// song library, setlists, and events that reference them. And
+// media-bearing Files roots (real tiny renditions when ffmpeg is on
+// PATH) so browsing, review, and version history all have teeth.
+//
+// Everything is deterministic and idempotent: names are fixed,
+// numbers derive from indices, notes are write-if-absent, roots are
+// topped up by name. Playwright/dioxus tests and screenshots can
+// rely on exact titles.
+
+/// The ten video productions. Also seeded as Files roots.
+#[cfg(debug_assertions)]
+const VIDEO_PROJECTS: [&str; 10] = [
+    "Aurora Sneaker Spot",
+    "Hayes Wedding Film",
+    "Skyline Doc — Ep 1",
+    "Product Launch Teaser",
+    "Cafe Brand Story",
+    "Drone Reel 2026",
+    "Iron & Oak Gym Promo",
+    "Charity Gala Recap",
+    "Neon Run Music Video",
+    "Color 101 Tutorial Series",
+];
+
+/// The three albums and their songs (sub-projects of the album).
+/// 6 + 4 + 8 songs — inside the brief's 4–8 per album. Song titles
+/// are unique across the whole vault ON PURPOSE: wikilink resolution
+/// is basename-keyed, so a song sharing its album's name (or any
+/// other page's) would shadow one of the two.
+#[cfg(debug_assertions)]
+const ALBUMS: [(&str, &str, &[&str]); 3] = [
+    (
+        "Midnight Static",
+        "Neon Palms",
+        &[
+            "Static Heart",
+            "Neon Run",
+            "Afterglow",
+            "Low Tide",
+            "Signal Fade",
+            "City Sleeps",
+        ],
+    ),
+    (
+        "Golden Hour",
+        "Ada June",
+        &[
+            "First Light",
+            "Amber Sky",
+            "Slow Burn",
+            "Golden Hour (Reprise)",
+        ],
+    ),
+    (
+        "Roots & Wires",
+        "Timber & Rye",
+        &[
+            "Copper Strings",
+            "Dust & Diesel",
+            "Backroad Hymn",
+            "Porch Light",
+            "Wire & Wood",
+            "River Stone",
+            "Old Growth",
+            "Homestead",
+        ],
+    ),
+];
+
+/// The other 37 engagements (10 video + 3 albums + these = 50).
+#[cfg(debug_assertions)]
+const OTHER_PROJECTS: [&str; 37] = [
+    "Acme Brand Refresh",
+    "Acme Sizzle Reel",
+    "Northwind Onboarding Videos",
+    "Northwind Trade Show Loop",
+    "Bluebird Podcast Launch",
+    "Bluebird Season 2",
+    "Fall Tour Prep",
+    "Acoustic Sessions — Vol 1",
+    "Acoustic Sessions — Vol 2",
+    "Sunday Service Production",
+    "Christmas Special 2026",
+    "Easter Live Album",
+    "Studio Website Redesign",
+    "Gear Inventory Overhaul",
+    "Control Room B Buildout",
+    "Patch Bay Relabel",
+    "Sample Library Cleanup",
+    "Archive Migration",
+    "Client Portal Rollout",
+    "Merch Store Photos",
+    "EPK — Neon Palms",
+    "EPK — Ada June",
+    "Single — Glass River",
+    "Single — Paper Kites",
+    "Remix Pack — Static Heart",
+    "Live at the Fox Theater",
+    "Festival Recap — Summerline",
+    "Voiceover Sessions — Q3",
+    "Audiobook — The Long Field",
+    "Jingle Package — Fresh Mart",
+    "Podcast Edit Retainer",
+    "Wedding Highlights — Ortiz",
+    "Corporate Training — Delta Freight",
+    "Real Estate Walkthroughs",
+    "Youth Camp Recap",
+    "Studio Open House",
+    "Intern Program 2026",
+];
+
+/// Rotating project statuses — every one a REAL `ProjectStatus`
+/// variant (the proto's `from_str`), so each lands in a genuine
+/// filter bucket rather than the unknown-status fallback.
+#[cfg(debug_assertions)]
+fn project_status(i: usize) -> &'static str {
+    ["active", "on-hold", "done", "stale"][i % 4]
+}
+
+/// Deterministic musical facts from an index — believable, stable.
+#[cfg(debug_assertions)]
+fn song_facts(i: usize) -> (&'static str, u32, f64) {
+    const KEYS: [&str; 8] = ["C", "G", "D", "A", "E", "B", "F", "Bb"];
+    let key = KEYS[i % KEYS.len()];
+    let bpm = 72 + ((i * 13) % 76) as u32; // 72..148
+    let duration = 180.0 + ((i * 29) % 150) as f64; // 3:00..5:30
+    (key, bpm, duration)
+}
+
+/// One `type: song` note — the ONE emitter of the song frontmatter
+/// shape (`SongFront`), so a schema change lands in every seeded
+/// song at once.
+#[cfg(debug_assertions)]
+fn song_note(title: &str, artist: &str, album: Option<&str>, facts_index: usize) -> String {
+    let (key, bpm, duration) = song_facts(facts_index);
+    let album_line = album.map(|a| format!("album: {a}\n")).unwrap_or_default();
+    let verse_end = duration * 0.35;
+    let chorus_end = duration * 0.6;
+    let bridge_end = duration * 0.8;
+    format!(
+        "---\ntitle: {title}\ntype: song\nartist: {artist}\n{album_line}key: {key}\nbpm: {bpm}\ntime_signature: \"4/4\"\nduration_sec: {duration}\nsections:\n  - name: Intro\n    start_sec: 0\n    end_sec: 12\n  - name: Verse 1\n    start_sec: 12\n    end_sec: {verse_end:.0}\n  - name: Chorus\n    start_sec: {verse_end:.0}\n    end_sec: {chorus_end:.0}\n  - name: Bridge\n    start_sec: {chorus_end:.0}\n    end_sec: {bridge_end:.0}\n  - name: Outro\n    start_sec: {bridge_end:.0}\n    end_sec: {duration:.0}\n---\n\n\
+         # {title}\n\n\
+         Verse one keeps it low and close,\nthe city hums a distant note.\n\n\
+         **Chorus** — we don't fade, we amplify,\nsignal strong against the night.\n\n\
+         *(seeded demo lyric — original text)*\n"
+    )
+}
+
+/// The studio vault: projects with their working notes, albums with
+/// song sub-projects, the song library, setlists, and events.
+#[cfg(debug_assertions)]
+fn seed_studio_vault(org: &org_proto::OrgRoot) -> eyre::Result<()> {
+    let vault = org.vault_dir();
+    std::fs::create_dir_all(&vault).wrap_err("create vault dir")?;
+
+    // ── 10 video projects + 37 other engagements ──────────────
+    let mut planted = 0usize;
+    for (i, name) in VIDEO_PROJECTS
+        .iter()
+        .chain(OTHER_PROJECTS.iter())
+        .enumerate()
+    {
+        let dir = vault.join("Projects").join(name);
+        std::fs::create_dir_all(&dir)?;
+        let status = project_status(i);
+        let is_video = i < VIDEO_PROJECTS.len();
+        let kind = if is_video { "video" } else { "engagement" };
+        let note = format!(
+            "---\ntitle: {name}\ntype: project\nstatus: {status}\nkind: {kind}\n---\n\n\
+             # {name}\n\n\
+             Working home for **{name}** — notes, decisions, and links live here, \
+             beside the project instead of in a shared pile.\n\n\
+             ## Next\n\n- [ ] Kickoff notes\n- [ ] First cut / draft\n- [ ] Client review\n- [ ] Deliver\n"
+        );
+        write_if_absent(&dir.join(format!("{name}.md")), &note)?;
+        std::fs::create_dir_all(dir.join("Notes"))?;
+        let brief = format!(
+            "---\ntitle: Brief\ntype: note\n---\n\n# Brief — {name}\n\n\
+             Audience, tone, references, and the one-line promise. Seeded demo copy: \
+             deliver something the client screenshots and sends to their team.\n"
+        );
+        write_if_absent(&dir.join("Notes").join("Brief.md"), &brief)?;
+        let log = format!(
+            "---\ntitle: Session Log\ntype: note\n---\n\n# Session Log — {name}\n\n\
+             - Kickoff: scoped the deliverables.\n- Session 2: first pass reviewed in the room.\n"
+        );
+        write_if_absent(&dir.join("Notes").join("Session Log.md"), &log)?;
+        planted += 1;
+    }
+
+    // ── 3 albums, songs as sub-projects with their own notes ──
+    let mut song_index = 0usize;
+    for (album, artist, songs) in ALBUMS {
+        let album_dir = vault.join("Albums").join(album);
+        std::fs::create_dir_all(&album_dir)?;
+        let tracklist = songs
+            .iter()
+            .map(|s| format!("1. [[{s}]]"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let album_note = format!(
+            "---\ntitle: {album}\ntype: project\nstatus: active\nkind: album\nartist: {artist}\n---\n\n\
+             # {album}\n\n*{artist}* — {n} songs, each its own sub-project below.\n\n\
+             ## Tracklist\n\n{tracklist}\n\n\
+             ## Next\n\n- [ ] Tracking\n- [ ] Mixing\n- [ ] Master\n- [ ] Artwork\n- [ ] Release\n",
+            n = songs.len(),
+        );
+        write_if_absent(&album_dir.join(format!("{album}.md")), &album_note)?;
+
+        for song in songs {
+            let song_dir = album_dir.join(song);
+            std::fs::create_dir_all(&song_dir)?;
+            write_if_absent(
+                &song_dir.join(format!("{song}.md")),
+                &song_note(song, artist, Some(album), song_index),
+            )?;
+            song_index += 1;
+            let prod = format!(
+                "---\ntitle: Production Notes\ntype: note\n---\n\n# Production Notes — {song}\n\n\
+                 - Drums tracked in Room A.\n- [ ] Comp vocals\n- [ ] Print stems\n"
+            );
+            write_if_absent(&song_dir.join("Production Notes.md"), &prod)?;
+        }
+    }
+
+    // ── the live song library ──────────────────────────────────
+    const LIVE_SONGS: [&str; 8] = [
+        "Rise and Shine",
+        "Every Morning New",
+        "Anchor Line",
+        "Wildfire Praise",
+        "Steady Ground",
+        "Open Doors",
+        "Brighter Still",
+        "Carry Me Home",
+    ];
+    let songs_dir = vault.join("Songs");
+    std::fs::create_dir_all(&songs_dir)?;
+    for (i, song) in LIVE_SONGS.iter().enumerate() {
+        write_if_absent(
+            &songs_dir.join(format!("{song}.md")),
+            &song_note(song, "FTS Collective", None, 50 + i),
+        )?;
+    }
+
+    // ── setlists ───────────────────────────────────────────────
+    let setlists = vault.join("Setlists");
+    std::fs::create_dir_all(&setlists)?;
+    write_if_absent(
+        &setlists.join("Sunday Setlist.md"),
+        "---\ntitle: Sunday Setlist\ntype: setlist\n---\n\n# Sunday Setlist\n\n\
+         1. [[Rise and Shine]]\n2. [[Every Morning New]]\n3. [[Anchor Line]]\n4. [[Steady Ground]]\n5. [[Carry Me Home]]\n",
+    )?;
+    write_if_absent(
+        &setlists.join("Album Release Show.md"),
+        "---\ntitle: Album Release Show\ntype: setlist\n---\n\n# Album Release Show\n\n\
+         1. [[Static Heart]]\n2. [[Neon Run]]\n3. [[Afterglow]]\n4. [[Signal Fade]]\n5. [[City Sleeps]]\n6. [[Brighter Still]]\n",
+    )?;
+
+    // ── events (Records/events, setlist experience) ────────────
+    // Basenames stay unique vault-wide (wikilink resolution is
+    // basename-keyed): the event is "… — Fox Theater", never a twin
+    // of the "Album Release Show" setlist above.
+    let events = vault.join("Records").join("events");
+    std::fs::create_dir_all(&events)?;
+    write_if_absent(
+        &events.join("Sunday Service.md"),
+        "---\ntitle: Sunday Service\ntype: event\nexperience: setlist\ntabs: true\nstart: 2026-08-16T09:00:00Z\nend: 2026-08-16T11:00:00Z\n---\n\n\
+         # Sunday Service\n\n## Walk-in\n\n- [[Brighter Still]]\n\n## Set\n\n\
+         1. [[Rise and Shine]]\n2. [[Every Morning New]]\n3. [[Anchor Line]]\n4. [[Steady Ground]]\n5. [[Carry Me Home]]\n\n\
+         ## Notes\n\nSeeded demo event — the set mirrors [[Sunday Setlist]].\n",
+    )?;
+    write_if_absent(
+        &events.join("Album Release Show — Fox Theater.md"),
+        "---\ntitle: Album Release Show — Fox Theater\ntype: event\nexperience: setlist\ntabs: true\nstart: 2026-08-22T19:30:00Z\nend: 2026-08-22T22:00:00Z\n---\n\n\
+         # Album Release Show — Fox Theater\n\n## Doors\n\n- Playlist: label picks\n\n## Set\n\n\
+         1. [[Static Heart]]\n2. [[Neon Run]]\n3. [[Afterglow]]\n4. [[Signal Fade]]\n5. [[City Sleeps]]\n6. [[Brighter Still]]\n\n\
+         ## Production\n\nSeeded demo event for [[Midnight Static]].\n",
+    )?;
+
+    println!(
+        "  vault: {planted} projects, {albums} albums ({songs} songs), 8 library songs, 2 setlists, 2 events",
+        albums = ALBUMS.len(),
+        songs = ALBUMS.iter().map(|(_, _, s)| s.len()).sum::<usize>(),
+    );
+    Ok(())
+}
+
+/// One slug for every demo root dir: lowercase, every non-alnum run
+/// collapsed to a single '-'. Two ad-hoc spellings of this drifted
+/// once already ("Roots & Wires" kept its literal '&' on disk).
+#[cfg(debug_assertions)]
+fn demo_slug(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut dash = false;
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            dash = false;
+        } else if !dash && !out.is_empty() {
+            out.push('-');
+            dash = true;
+        }
+    }
+    out.trim_end_matches('-').to_owned()
+}
+
+/// Whether ffmpeg is runnable — real tiny media when it is, labeled
+/// placeholder bytes when not (everything still browses; only
+/// playback needs the real thing).
+#[cfg(debug_assertions)]
+fn ffmpeg_available() -> bool {
+    std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Write a small real MP4 (testsrc + tone) at `path`; placeholder
+/// bytes when ffmpeg is missing. `variant` changes the picture so
+/// successive checkpoints have genuinely different content.
+#[cfg(debug_assertions)]
+fn seed_video_file(path: &std::path::Path, ffmpeg: bool, variant: u32) -> eyre::Result<()> {
+    if ffmpeg {
+        let duration = 3 + (variant % 3);
+        let hue = (variant * 47) % 360;
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-y", "-f", "lavfi"])
+            .arg("-i")
+            .arg(format!("testsrc2=duration={duration}:size=640x360:rate=24"))
+            .args(["-f", "lavfi"])
+            .arg("-i")
+            .arg(format!("sine=frequency={}:duration={duration}", 220 + hue))
+            .args(["-vf", &format!("hue=h={hue}")])
+            .args(["-pix_fmt", "yuv420p", "-shortest"])
+            .arg(path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .wrap_err("run ffmpeg (video)")?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+    std::fs::write(path, format!("seeded placeholder video v{variant}"))?;
+    Ok(())
+}
+
+/// Write a short real WAV (sine) at `path`; placeholder bytes when
+/// ffmpeg is missing.
+#[cfg(debug_assertions)]
+fn seed_audio_file(path: &std::path::Path, ffmpeg: bool, freq: u32) -> eyre::Result<()> {
+    if ffmpeg {
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-y", "-f", "lavfi"])
+            .arg("-i")
+            .arg(format!("sine=frequency={freq}:duration=2"))
+            .arg(path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .wrap_err("run ffmpeg (audio)")?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+    std::fs::write(path, format!("seeded placeholder audio {freq}hz"))?;
+    Ok(())
+}
+
+/// A batch of independent media writes, run on the blocking pool in
+/// parallel. A fresh seed is ~97 encodes; strictly sequential they
+/// were the whole wall time.
+#[cfg(debug_assertions)]
+async fn run_media_jobs(
+    jobs: Vec<Box<dyn FnOnce() -> eyre::Result<()> + Send>>,
+) -> eyre::Result<()> {
+    let mut set = tokio::task::JoinSet::new();
+    for job in jobs {
+        set.spawn_blocking(job);
+    }
+    while let Some(joined) = set.join_next().await {
+        joined.map_err(|e| eyre::eyre!("media job: {e}"))??;
+    }
+    Ok(())
+}
+
+/// Media-bearing Files roots for the studio: one per video project
+/// (2 checkpoints, Named Versions on half, divergences on two) and
+/// one per album (per-song folders with mixes + stems). Existing
+/// roots are TOPPED UP, not skipped — an interrupted prior run (the
+/// encode window is seconds long) must not leave a root permanently
+/// half-dressed.
+#[cfg(debug_assertions)]
+async fn seed_studio_files(org: &org_proto::OrgRoot, with_divergence: bool) -> eyre::Result<()> {
+    let files_dir = org.path().join("files");
+    let backend = files::FilesBackend::new(&files_dir, org.vault_dir())
+        .map_err(|e| eyre::eyre!("open files backend: {e}"))?;
+    let result = seed_studio_files_inner(&backend, &files_dir, with_divergence).await;
+    backend.shutdown().await;
+    result
+}
+
+#[cfg(debug_assertions)]
+async fn seed_studio_files_inner(
+    backend: &files::FilesBackend,
+    files_dir: &std::path::Path,
+    with_divergence: bool,
+) -> eyre::Result<()> {
+    let existing: std::collections::HashMap<String, files::FileRootInfo> =
+        files::FilesService::list_roots(backend)
+            .await
+            .map_err(|e| eyre::eyre!("list roots: {e:?}"))?
+            .into_iter()
+            .map(|r| (r.name.clone(), r))
+            .collect();
+    let ffmpeg = ffmpeg_available();
+    if !ffmpeg {
+        println!(
+            "  files: ffmpeg not on PATH — placeholder media bytes (browsing works, playback won't)"
+        );
+    }
+
+    // "Dressed" = the second-revision checkpoint landed: the probe
+    // file's chain has two entries. Chain length is the marker (not
+    // Named Versions — half the roots deliberately never get one,
+    // and re-dressing those every run would grow their chains).
+    async fn dressed(
+        backend: &files::FilesBackend,
+        root_id: uuid::Uuid,
+        probe: &str,
+    ) -> eyre::Result<bool> {
+        Ok(
+            files::FilesService::chain(backend, root_id, probe.to_owned())
+                .await
+                .map_err(|e| eyre::eyre!("chain {probe}: {e:?}"))?
+                .len()
+                >= 2,
+        )
+    }
+
+    let mut planted = 0usize;
+    let mut topped_up = 0usize;
+    for (i, name) in VIDEO_PROJECTS.iter().enumerate() {
+        let root_dir = files_dir.join(format!("video-{}", demo_slug(name)));
+        let variant = u32::try_from(i).unwrap_or(0);
+        let wants_name = i % 2 == 0;
+        let wants_divergence = with_divergence && i < 2;
+
+        let root = match existing.get(*name) {
+            Some(root) => root.clone(),
+            None => {
+                std::fs::create_dir_all(root_dir.join("broll"))?;
+                let mut jobs: Vec<Box<dyn FnOnce() -> eyre::Result<()> + Send>> = Vec::new();
+                let (cut, aerial, vo) = (
+                    root_dir.join("cut.mp4"),
+                    root_dir.join("broll").join("aerial.mp4"),
+                    root_dir.join("vo-scratch.wav"),
+                );
+                jobs.push(Box::new(move || seed_video_file(&cut, ffmpeg, variant)));
+                jobs.push(Box::new(move || {
+                    seed_video_file(&aerial, ffmpeg, variant + 40)
+                }));
+                jobs.push(Box::new(move || {
+                    seed_audio_file(&vo, ffmpeg, 200 + variant * 20)
+                }));
+                run_media_jobs(jobs).await?;
+                std::fs::write(
+                    root_dir.join("notes.md"),
+                    format!("# {name}\n\n- assembly cut\n"),
+                )?;
+
+                let root = files::FilesService::create_root(
+                    backend,
+                    root_dir.to_string_lossy().into_owned(),
+                    (*name).to_owned(),
+                    files::RootFlavor::Media,
+                )
+                .await
+                .map_err(|e| eyre::eyre!("create root {name}: {e:?}"))?;
+                files::FilesService::checkpoint_now(
+                    backend,
+                    root.id,
+                    Some("Initial import".to_owned()),
+                )
+                .await
+                .map_err(|e| eyre::eyre!("checkpoint {name}: {e:?}"))?;
+                planted += 1;
+                root
+            }
+        };
+
+        // Second-revision dressing, keyed on the probe chain so an
+        // interrupted run completes here and a complete one is a
+        // no-op.
+        if !dressed(backend, root.id, "cut.mp4").await? {
+            if existing.contains_key(*name) {
+                topped_up += 1;
+            }
+            seed_video_file(&root_dir.join("cut.mp4"), ffmpeg, variant + 100)?;
+            std::fs::write(
+                root_dir.join("notes.md"),
+                format!("# {name}\n\n- assembly cut\n- rough cut: tightened intro\n"),
+            )?;
+            let cp2 =
+                files::FilesService::checkpoint_now(backend, root.id, Some("Rough cut".to_owned()))
+                    .await
+                    .map_err(|e| eyre::eyre!("checkpoint 2 {name}: {e:?}"))?;
+            if wants_name {
+                files::FilesService::name_version(
+                    backend,
+                    root.id,
+                    cp2.commit_id.clone(),
+                    "Rough Cut v1".to_owned(),
+                )
+                .await
+                .map_err(|e| eyre::eyre!("name version {name}: {e:?}"))?;
+            }
+        }
+
+        // Divergence top-up (the #267 UI's fixture) — on the NOTES
+        // file, so the playable cut stays playable.
+        if wants_divergence {
+            let has = files::FilesService::divergences(backend, root.id)
+                .await
+                .map_err(|e| eyre::eyre!("divergences {name}: {e:?}"))?
+                .iter()
+                .any(|d| d.path == "notes.md");
+            if !has {
+                backend
+                    .seed_divergent_file(
+                        root.id,
+                        "notes.md",
+                        format!("# {name}\n\n- rough cut (producer pass)\n").as_bytes(),
+                        format!("# {name}\n\n- rough cut (director pass)\n").as_bytes(),
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("seed divergence {name}: {e:?}"))?;
+            }
+        }
+    }
+
+    for (album, _artist, songs) in ALBUMS {
+        let root_name = format!("Album — {album}");
+        let root_dir = files_dir.join(format!("album-{}", demo_slug(album)));
+
+        let root = match existing.get(&root_name) {
+            Some(root) => root.clone(),
+            None => {
+                let mut jobs: Vec<Box<dyn FnOnce() -> eyre::Result<()> + Send>> = Vec::new();
+                for (j, song) in songs.iter().enumerate() {
+                    let song_dir = root_dir.join(song);
+                    std::fs::create_dir_all(song_dir.join("stems"))?;
+                    let base = 180 + u32::try_from(j).unwrap_or(0) * 30;
+                    let (mix, drums, bass) = (
+                        song_dir.join("mix.wav"),
+                        song_dir.join("stems").join("drums.wav"),
+                        song_dir.join("stems").join("bass.wav"),
+                    );
+                    jobs.push(Box::new(move || seed_audio_file(&mix, ffmpeg, base)));
+                    jobs.push(Box::new(move || seed_audio_file(&drums, ffmpeg, base + 5)));
+                    jobs.push(Box::new(move || seed_audio_file(&bass, ffmpeg, base / 2)));
+                }
+                run_media_jobs(jobs).await?;
+                std::fs::write(
+                    root_dir.join("album-notes.md"),
+                    format!("# {album}\n\nTracking + mix files, one folder per song.\n"),
+                )?;
+
+                let root = files::FilesService::create_root(
+                    backend,
+                    root_dir.to_string_lossy().into_owned(),
+                    root_name.clone(),
+                    files::RootFlavor::Media,
+                )
+                .await
+                .map_err(|e| eyre::eyre!("create root {root_name}: {e:?}"))?;
+                files::FilesService::checkpoint_now(backend, root.id, Some("Tracking".to_owned()))
+                    .await
+                    .map_err(|e| eyre::eyre!("checkpoint {root_name}: {e:?}"))?;
+                planted += 1;
+                root
+            }
+        };
+
+        // Mix revision on the first song, named — keyed on the probe
+        // chain like the video roots, so interruptions heal.
+        if let Some(first) = songs.first() {
+            if !dressed(backend, root.id, &format!("{first}/mix.wav")).await? {
+                if existing.contains_key(&root_name) {
+                    topped_up += 1;
+                }
+                seed_audio_file(&root_dir.join(first).join("mix.wav"), ffmpeg, 445)?;
+                let cp = files::FilesService::checkpoint_now(
+                    backend,
+                    root.id,
+                    Some("Mix v1".to_owned()),
+                )
+                .await
+                .map_err(|e| eyre::eyre!("checkpoint 2 {root_name}: {e:?}"))?;
+                files::FilesService::name_version(
+                    backend,
+                    root.id,
+                    cp.commit_id,
+                    "Mix v1".to_owned(),
+                )
+                .await
+                .map_err(|e| eyre::eyre!("name version {root_name}: {e:?}"))?;
+            }
+        }
+    }
+
+    println!("  files: {planted} studio roots planted, {topped_up} topped up");
     Ok(())
 }
 
