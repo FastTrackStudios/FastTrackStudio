@@ -538,7 +538,9 @@ fn kick_off_async(state: AppState) -> axum::response::Response {
 /// Shared bearer-token gate for the snapshot HTTP routes.
 // Err is boxed: an axum `Response` is large, and `result_large_err`
 // flags returning it by value (the Ok path is the common one).
-pub(crate) fn check_backup_auth(headers: &axum::http::HeaderMap) -> Result<(), Box<axum::response::Response>> {
+pub(crate) fn check_backup_auth(
+    headers: &axum::http::HeaderMap,
+) -> Result<(), Box<axum::response::Response>> {
     use axum::response::IntoResponse as _;
 
     let expected = std::env::var("TASK_BACKUP_GIT_TOKEN").unwrap_or_default();

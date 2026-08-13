@@ -63,9 +63,10 @@ impl IdentityServiceImpl {
     /// Validate `session_token` against the home org's auth DB and
     /// return `(home identity store, home_user_id)`.
     fn resolve(&self, session_token: &str) -> Result<(Store, Uuid), IdentityServiceError> {
-        let home_slug = self.state.home_slug().ok_or_else(|| {
-            IdentityServiceError::Unauthorized("server has no home org".into())
-        })?;
+        let home_slug = self
+            .state
+            .home_slug()
+            .ok_or_else(|| IdentityServiceError::Unauthorized("server has no home org".into()))?;
         if session_token.is_empty() {
             return Err(IdentityServiceError::Unauthorized(
                 "missing session token".into(),
@@ -94,9 +95,7 @@ impl IdentityServiceImpl {
             .org(&home_slug)
             .and_then(|o| o.identity)
             .ok_or_else(|| {
-                IdentityServiceError::Internal(
-                    "home org has no identity locker".into(),
-                )
+                IdentityServiceError::Internal("home org has no identity locker".into())
             })?;
         Ok((store, home_user_id))
     }
@@ -267,11 +266,7 @@ impl IdentityService for IdentityServiceImpl {
         Ok(record_to_view(stored))
     }
 
-    fn unlink_server(
-        &self,
-        session_token: String,
-        id: Uuid,
-    ) -> Result<(), IdentityServiceError> {
+    fn unlink_server(&self, session_token: String, id: Uuid) -> Result<(), IdentityServiceError> {
         let (store, home_user_id) = self.resolve(&session_token)?;
         tokio::runtime::Handle::current()
             .block_on(async move { store.delete_link(home_user_id, id).await })

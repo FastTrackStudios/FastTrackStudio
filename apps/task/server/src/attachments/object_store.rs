@@ -145,9 +145,12 @@ impl ObjectStore for LocalFsStore {
         file.seek(std::io::SeekFrom::Start(start))
             .await
             .map_err(io_err)?;
-        let mut buf = vec![0u8; usize::try_from(len).map_err(|e| {
-            AttachmentError::Internal(format!("range too large for this platform: {e}"))
-        })?];
+        let mut buf = vec![
+            0u8;
+            usize::try_from(len).map_err(|e| {
+                AttachmentError::Internal(format!("range too large for this platform: {e}"))
+            })?
+        ];
         file.read_exact(&mut buf).await.map_err(io_err)?;
         Ok(buf)
     }

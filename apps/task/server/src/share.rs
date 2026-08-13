@@ -47,8 +47,8 @@ impl ShareStore {
     }
 
     fn save(&self, links: &[StoredLink]) -> Result<(), ShareError> {
-        let json = serde_json::to_string_pretty(links)
-            .map_err(|e| ShareError::Storage(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(links).map_err(|e| ShareError::Storage(e.to_string()))?;
         std::fs::write(&self.path, json).map_err(|e| ShareError::Storage(e.to_string()))
     }
 
@@ -164,15 +164,15 @@ impl ShareService for ShareServiceImpl {
     }
 
     async fn set_link_disabled(&self, token: String, disabled: bool) -> Result<(), ShareError> {
-        let (found, links) = self.store.with_links(|links| {
-            match links.iter_mut().find(|l| l.token == token) {
-                Some(l) => {
-                    l.disabled = disabled;
-                    true
-                }
-                None => false,
-            }
-        });
+        let (found, links) =
+            self.store
+                .with_links(|links| match links.iter_mut().find(|l| l.token == token) {
+                    Some(l) => {
+                        l.disabled = disabled;
+                        true
+                    }
+                    None => false,
+                });
         if !found {
             return Err(ShareError::NotFound);
         }

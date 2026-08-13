@@ -17,6 +17,7 @@
 //! `project-crdt` crates. CRDT now lives only at the per-file
 //! editor layer (future); vault is the sole storage path.
 
+pub mod admin_cli;
 #[cfg(feature = "plugin-agent")]
 pub mod agent_router;
 pub mod api_ref;
@@ -27,7 +28,6 @@ pub mod connections;
 pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
-pub mod admin_cli;
 pub mod media;
 pub mod notifier;
 pub mod otlp;
@@ -819,12 +819,13 @@ pub(crate) async fn build_org_state(
         // applies nothing. There is a regression test for that in
         // `agent-runners`; do not co-locate this with agent-tasks.
         #[cfg(feature = "plugin-agent")]
-        let agent_runners_url = std::env::var("TASK_SERVER_AGENT_RUNNERS_URL").unwrap_or_else(|_| {
-            format!(
-                "sqlite://{}?mode=rwc",
-                org_root.path().join("agent-runners.sqlite").display()
-            )
-        });
+        let agent_runners_url =
+            std::env::var("TASK_SERVER_AGENT_RUNNERS_URL").unwrap_or_else(|_| {
+                format!(
+                    "sqlite://{}?mode=rwc",
+                    org_root.path().join("agent-runners.sqlite").display()
+                )
+            });
         #[cfg(feature = "plugin-agent")]
         let agent_runners_conn =
             open_sqlite_pool(scope, agent_runners_url, "agent-runners", |db| {
@@ -1209,6 +1210,29 @@ pub(crate) async fn build_org_state(
         // snapshots, 30-minute quiescence) is the engine's.
         files.enable_watching().await;
         files.spawn_cadence_driver(std::time::Duration::from_secs(30));
+        // Derived media (issue #269): wire the real ffmpeg driver when
+        // the toolchain is on PATH. Without it the rendition RPC (and
+        // the Review page's player, issue #270) reports "no transcoder
+        // configured" — everything else works, so absence is a warn,
+        // not an error.
+        match tokio::process::Command::new("ffprobe")
+            .arg("-version")
+            .output()
+            .await
+        {
+            Ok(out) if out.status.success() => {
+                files.set_transcoder(std::sync::Arc::new(
+                    files_transcode::transcoder::ffmpeg::FfmpegTranscoder,
+                ));
+                tracing::info!(org = org_root.slug(), "files: ffmpeg transcoder wired");
+            }
+            _ => {
+                tracing::warn!(
+                    org = org_root.slug(),
+                    "files: ffmpeg/ffprobe not on PATH — media renditions disabled"
+                );
+            }
+        }
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.
@@ -1841,7 +1865,10 @@ async fn authorize_media(
             None => false,
         };
         wide::set("media.authorized", ok);
-        wide::set("media.auth_via", if ok { "bearer" } else { "bearer-invalid" });
+        wide::set(
+            "media.auth_via",
+            if ok { "bearer" } else { "bearer-invalid" },
+        );
         if ok {
             return None;
         }
@@ -1910,7 +1937,8 @@ async fn per_org_media_handler(
     if rel.split('/').any(|s| s == ".." || s.is_empty()) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    if let Some(refusal) = authorize_media(&state, &slug, &rel, q.token.as_deref(), &headers).await {
+    if let Some(refusal) = authorize_media(&state, &slug, &rel, q.token.as_deref(), &headers).await
+    {
         return refusal;
     }
     let file = state
@@ -3479,7 +3507,10 @@ mod upgrade_bearer_tests {
         // An empty bearer must read as "anonymous", not as a token that
         // will resolve to nothing and muddy `auth.outcome`.
         assert_eq!(
-            upgrade_bearer(&headers(&[("sec-websocket-protocol", "vox.v1, vox.bearer.")])),
+            upgrade_bearer(&headers(&[(
+                "sec-websocket-protocol",
+                "vox.v1, vox.bearer."
+            )])),
             None
         );
         assert_eq!(
