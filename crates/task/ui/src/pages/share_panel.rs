@@ -7,7 +7,7 @@
 use dioxus::prelude::*;
 
 use crate::vox_clients::share_client;
-use share_proto::ShareLinkInfo;
+use share_proto::{NewShareLink, ShareCapabilities, ShareLinkInfo, ShareTarget};
 
 /// Copy `text` to the clipboard (browser only; ignored on native).
 fn copy_to_clipboard(text: &str) {
@@ -40,7 +40,9 @@ pub fn SharePanel(slug: String, path: Option<String>) -> Element {
         async move {
             let client = share_client(&slug2).await?;
             client
-                .links_for_note(path2.clone())
+                .links_for_target(ShareTarget::Note {
+                    path: path2.clone(),
+                })
                 .await
                 .map_err(|e| format!("{e:?}"))
         }
@@ -57,7 +59,15 @@ pub fn SharePanel(slug: String, path: Option<String>) -> Element {
                 match share_client(&slug).await {
                     Ok(client) => {
                         if let Err(e) = client
-                            .create_link(path, "share link".into(), "view".into())
+                            .create_link(
+                                ShareTarget::Note { path },
+                                NewShareLink {
+                                    label: "share link".into(),
+                                    capabilities: ShareCapabilities::default(),
+                                    password: None,
+                                    expires_unix: None,
+                                },
+                            )
                             .await
                         {
                             tracing::warn!("share: create_link failed: {e:?}");
@@ -164,7 +174,13 @@ fn ShareLinkRow(
             div { class: "flex items-center justify-between gap-2",
                 span { class: "truncate text-sm font-medium text-foreground", "{link.label}" }
                 span { class: "shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground",
-                    if disabled { "disabled" } else { "{link.capability}" }
+                    if disabled {
+                        "disabled"
+                    } else if link.capabilities.comment {
+                        "comment"
+                    } else {
+                        "view"
+                    }
                 }
             }
             div { class: "truncate rounded bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground",

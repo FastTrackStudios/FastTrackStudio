@@ -4180,6 +4180,51 @@ impl FilesBackend {
             .map_err(|e| rendition_read_err(file_id_hex, e))
     }
 
+    /// A source file's byte length as of `at` (`None` = the checkpoint
+    /// head) — what a share download's `Content-Length` needs (issue
+    /// #271). Media roots only: their content lives in the chunk CAS;
+    /// a software root's history is git's.
+    pub async fn source_len_at(
+        &self,
+        root_id: Uuid,
+        path: String,
+        at: Option<String>,
+    ) -> Result<u64, FilesError> {
+        let this = self.clone();
+        let p = path.clone();
+        let (chunks, fid, _root) = blocking(move || this.rendition_prep(root_id, &p, at.as_deref()))
+            .await?;
+        chunks
+            .content_len(fid)
+            .await
+            .map_err(|e| FilesError::Io(format!("{path}: {e}")))
+    }
+
+    /// Stream a source file's bytes as of `at` (`None` = the checkpoint
+    /// head) to `dest` — the share-link download path (issue #271):
+    /// a Named Version link serves the exact commit it names, not
+    /// whatever the live tree holds today. Media roots only (see
+    /// [`FilesBackend::source_len_at`]).
+    pub async fn read_source_at<W>(
+        &self,
+        root_id: Uuid,
+        path: String,
+        at: Option<String>,
+        dest: &mut W,
+    ) -> Result<(), FilesError>
+    where
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        let this = self.clone();
+        let p = path.clone();
+        let (chunks, fid, _root) = blocking(move || this.rendition_prep(root_id, &p, at.as_deref()))
+            .await?;
+        chunks
+            .read_to(fid, dest)
+            .await
+            .map_err(|e| FilesError::Io(format!("{path}: {e}")))
+    }
+
     /// Prune a root's renditions whose source content the store no
     /// longer holds, or whose recipe is superseded — the source-tied
     /// half of GC (AC 3/4). Called after `gc_root`'s version-store

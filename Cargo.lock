@@ -25419,7 +25419,9 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "facet 0.50.0-rc.5",
+ "serde",
  "thiserror 2.0.18",
+ "uuid",
  "vox",
 ]
 
