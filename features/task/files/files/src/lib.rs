@@ -48,6 +48,10 @@ mod transcode;
 mod versions;
 
 pub use backend::{Captured, FilesBackend, MaterializeReport, SyncTreeMeta};
+// The engine-side rendition vocabulary (tag ↔ kind ↔ MIME) — the
+// rendition streaming route (issue #270) parses its `{kind}` path
+// segment with `from_tag` and serves `mime()` as the Content-Type.
+pub use files_transcode::RenditionKind as TranscodeRenditionKind;
 pub use cadence::{CadenceConfig, CadenceEngine, Clock, SystemClock, TestClock};
 pub use entity::{NamedVersions, ProjectVersions};
 pub use error::{Error, Result};

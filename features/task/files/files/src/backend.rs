@@ -3724,6 +3724,17 @@ fn chunk_file_id_from_hex(hex: &str) -> Result<task_files_chunk_store::FileId, F
         .map_err(|e| FilesError::BadRequest(format!("{hex}: {e}")))
 }
 
+/// Map a rendition-store read failure: a CAS id the store doesn't hold
+/// is `NotFound` (the streaming route's 404), anything else is `Io`.
+fn rendition_read_err(file_id_hex: &str, e: files_transcode::Error) -> FilesError {
+    match e {
+        files_transcode::Error::ChunkStore(task_files_chunk_store::Error::UnknownFileId(_)) => {
+            FilesError::NotFound(format!("rendition {file_id_hex}"))
+        }
+        other => FilesError::Io(format!("rendition {file_id_hex}: {other}")),
+    }
+}
+
 /// Derived media (issue #269): the `rendition` RPC, the checkpoint
 /// warm-up trigger, and the source-tied rendition GC.
 impl FilesBackend {
@@ -3956,7 +3967,7 @@ impl FilesBackend {
         store
             .read_to(fid, dest)
             .await
-            .map_err(|e| FilesError::Io(format!("rendition {file_id_hex}: {e}")))
+            .map_err(|e| rendition_read_err(file_id_hex, e))
     }
 
     /// A rendition's total byte length — the Review page's streaming
@@ -3976,7 +3987,7 @@ impl FilesBackend {
         store
             .content_len(fid)
             .await
-            .map_err(|e| FilesError::Io(format!("rendition {file_id_hex}: {e}")))
+            .map_err(|e| rendition_read_err(file_id_hex, e))
     }
 
     /// Stream a byte range of a rendition (the `<video>`-seek path, issue
@@ -4003,7 +4014,7 @@ impl FilesBackend {
         store
             .read_range(fid, start, len, dest)
             .await
-            .map_err(|e| FilesError::Io(format!("rendition {file_id_hex}: {e}")))
+            .map_err(|e| rendition_read_err(file_id_hex, e))
     }
 
     /// Prune a root's renditions whose source content the store no
