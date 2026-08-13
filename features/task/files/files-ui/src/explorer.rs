@@ -44,7 +44,7 @@ enum ViewMode {
 /// What kind of thing an entry is, for icon + tint. Derived from the
 /// extension — cheap, wrong is harmless (it only picks an icon).
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum EntryKind {
+pub(crate) enum EntryKind {
     Folder,
     Video,
     Audio,
@@ -54,7 +54,7 @@ enum EntryKind {
     Other,
 }
 
-fn entry_kind(entry: &BrowseEntry) -> EntryKind {
+pub(crate) fn entry_kind(entry: &BrowseEntry) -> EntryKind {
     if entry.is_dir {
         return EntryKind::Folder;
     }
@@ -81,7 +81,7 @@ fn entry_kind(entry: &BrowseEntry) -> EntryKind {
 }
 
 /// The kind's icon at `size`, in the kind's tint.
-fn kind_icon(kind: EntryKind, size: usize) -> Element {
+pub(crate) fn kind_icon(kind: EntryKind, size: usize) -> Element {
     match kind {
         EntryKind::Folder => rsx! {
             span { class: "text-sky-400", Folder { size } }
@@ -475,7 +475,7 @@ pub fn Explorer(props: ExplorerProps) -> Element {
 
 /// One grid tile: big kind icon, two-line name, state dots.
 #[component]
-fn GridTile(
+pub(crate) fn GridTile(
     entry: BrowseEntry,
     selected: bool,
     on_select: EventHandler<()>,

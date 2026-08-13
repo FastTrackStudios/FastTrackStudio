@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::model::{
     BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, GcReport, HydrationChange,
-    HydrationReport, NamedVersion, ProjectVersion, SnapshotInfo, VersionRef,
+    HydrationReport, NamedVersion, ProjectVersion, SnapshotInfo, TreeNode, VersionRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
@@ -100,6 +100,13 @@ pub trait FilesService {
     /// root context — "Drive" browsing (glossary: loose files outside
     /// any root). Never touches the version store.
     async fn drive_browse(&self, path: String) -> Result<Vec<BrowseEntry>, FilesError>;
+
+    /// Resolve one path of the org tree (issue #304): the unified
+    /// namespace over Projects / Vault / Wiki / Assets. `""` lists the
+    /// areas; `Projects/<name>/Media/…` resolves to the project's File
+    /// Root. The same resolver backs the explorer and the WebDAV
+    /// mount, so the app and a mounted share always show one tree.
+    async fn tree_browse(&self, path: String) -> Result<TreeNode, FilesError>;
 
     /// Derive `path`'s version chain (newest first) from `root_id`'s
     /// current checkpoint head, following recorded renames. Empty when
