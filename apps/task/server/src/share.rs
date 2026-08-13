@@ -1220,11 +1220,15 @@ async fn render_browse(
 ) -> Response {
     // A Review link is one file, not a tree: the landing (rel = "")
     // IS the file page, any other path 404s, and there is no listing.
+    // The page carries "Open review" — the real app booting in guest
+    // mode over the scoped vox lane (issue #272), where commenting and
+    // drawing live.
     if let Some(only) = &scope.file_only {
         let base = format!("/org/{slug}/share/{token}");
         let pw = pw_suffix(q);
         return if rel.is_empty() || rel == *only {
-            Html(file_html(link, &base, only, &pw)).into_response()
+            let open_review = review_app_url(slug, token, link, q);
+            Html(file_html(link, &base, only, &pw, open_review.as_deref())).into_response()
         } else {
             (StatusCode::NOT_FOUND, "this link serves one file").into_response()
         };
@@ -1252,7 +1256,7 @@ async fn render_browse(
     match listing {
         Ok(entries) => Html(browse_html(link, &base, rel, &entries, &pw)).into_response(),
         // Not a directory (or not present as one): render the file page.
-        Err(_) => Html(file_html(link, &base, rel, &pw)).into_response(),
+        Err(_) => Html(file_html(link, &base, rel, &pw, None)).into_response(),
     }
 }
 
@@ -1354,7 +1358,47 @@ fn is_video_name(name: &str) -> bool {
     )
 }
 
-fn file_html(link: &StoredLink, base: &str, rel: &str, pw: &str) -> String {
+/// The guest app's review URL for a landing's "Open review" button —
+/// `None` when the button shouldn't render: the link doesn't grant
+/// commenting (view-only stays view-only end to end), or no app is
+/// reachable (neither `TASK_SHARE_APP_ORIGIN` nor a served SPA), where
+/// the href would 404.
+fn review_app_url(slug: &str, token: &str, link: &StoredLink, q: &ShareQuery) -> Option<String> {
+    if !link.capabilities().comment {
+        return None;
+    }
+    let app_origin = std::env::var("TASK_SHARE_APP_ORIGIN").unwrap_or_default();
+    let serves_spa = std::env::var("TASK_SERVER_WEB_DIR").is_ok_and(|v| !v.is_empty());
+    if app_origin.is_empty() && !serves_spa {
+        return None;
+    }
+    let pw_param = match &q.pw {
+        Some(pw) if !pw.is_empty() => format!("&pw={}", urlencoding_encode(pw)),
+        _ => String::new(),
+    };
+    // `server` tells the guest app where its vox lane lives — a fresh
+    // visitor has no server registry, and same-origin fallback only
+    // holds when app and server share an origin (prod). Dev splits
+    // them (dx vs task-server). Only an EXPLICIT public base rides
+    // along: the bind-address fallback would tell a remote browser to
+    // dial 127.0.0.1.
+    let server_param = match crate::share_public_base_explicit() {
+        Some(base) => format!("&server={}", urlencoding_encode(&base)),
+        None => String::new(),
+    };
+    Some(format!(
+        "{}/share-review?org={slug}&token={token}{pw_param}{server_param}",
+        app_origin.trim_end_matches('/'),
+    ))
+}
+
+fn file_html(
+    link: &StoredLink,
+    base: &str,
+    rel: &str,
+    pw: &str,
+    open_review: Option<&str>,
+) -> String {
     let label = html_escape(&link.label);
     let name = rel.rsplit('/').next().unwrap_or(rel);
     let mut body = format!(
@@ -1377,6 +1421,14 @@ fn file_html(link: &StoredLink, base: &str, rel: &str, pw: &str) -> String {
         ));
     } else {
         body.push_str(r#"<p>View-only link — originals aren't downloadable.</p>"#);
+    }
+    if let Some(url) = open_review {
+        // The review landing's door into the real app on the guest
+        // lane (issue #272).
+        body.push_str(&format!(
+            r#"<a class="btn" style="margin-left:.6rem" href="{}">Open review — comment &amp; draw</a>"#,
+            html_escape(url),
+        ));
     }
     page(&link.label, &body)
 }

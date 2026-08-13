@@ -176,6 +176,52 @@ pub fn vox_url() -> String {
     }
 }
 
+/// A share-guest session (issue #272): the app was opened from a
+/// review share link, holds no account, and every org connection must
+/// dial the scoped guest lane instead of the org lane.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GuestShare {
+    pub org: String,
+    /// The share-link token — the whole grant.
+    pub token: String,
+    /// The link password the visitor entered, if any.
+    pub pw: Option<String>,
+}
+
+fn guest_share_slot() -> &'static std::sync::Mutex<Option<GuestShare>> {
+    static SLOT: std::sync::OnceLock<std::sync::Mutex<Option<GuestShare>>> =
+        std::sync::OnceLock::new();
+    SLOT.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Enter (or leave, with `None`) share-guest mode. Set once at boot by
+/// the guest entry page, before any connection is established.
+pub fn set_guest_share(session: Option<GuestShare>) {
+    *guest_share_slot().lock().expect("guest share slot") = session;
+}
+
+#[must_use]
+pub fn guest_share() -> Option<GuestShare> {
+    guest_share_slot().lock().expect("guest share slot").clone()
+}
+
+/// The guest session's HTTP(S) origin for media/rendition fetches —
+/// `Some` only in share-guest mode with an explicit server pinned.
+/// A guest app may be served from a different origin than the task
+/// server (dev dx, static hosting), where origin-relative media URLs
+/// would hit the app's static server; members keep relative URLs
+/// (same-origin routing is the deployed shape).
+#[must_use]
+pub fn guest_http_base() -> Option<String> {
+    guest_share()?;
+    let server = active_server()?;
+    let http = server
+        .url
+        .replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1);
+    Some(http.trim_end_matches("/vox").trim_end_matches('/').to_owned())
+}
+
 /// Derive `ws(s)://<host>/vox` from the page's own origin. `None` only
 /// when there's no window (tests, workers) or a non-http(s) origin.
 ///

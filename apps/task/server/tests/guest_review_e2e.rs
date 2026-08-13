@@ -191,10 +191,11 @@ async fn guest_lane_comments_scoped_and_attributed() -> eyre::Result<()> {
         .browse(root_id, String::new())
         .await
         .expect_err("browsing is refused");
-    guest
-        .list_reviews(None)
-        .await
-        .expect_err("listing the org's reviews is refused");
+    // list_reviews is the guest's "what can I see": exactly its one
+    // review, never the org's list — the entry page boots from this.
+    let visible = guest.list_reviews(None).await.expect("scoped listing");
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].id, review.id);
     guest
         .delete_review_comment(posted.id)
         .await

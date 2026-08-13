@@ -28,6 +28,7 @@ pub mod feeds;
 pub mod forge_views;
 pub mod fuzzy;
 pub mod gantt_adapt;
+pub mod guest_share;
 pub mod nav;
 pub mod orgs;
 pub mod pages;
