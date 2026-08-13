@@ -316,14 +316,112 @@ pub(crate) fn short_id(commit_id: &str) -> String {
 /// What the pane is showing. Three states, not `Option<Uuid>`: "nothing
 /// chosen yet" and "the user chose Drive" are different answers, and
 /// collapsing them makes every roots refresh look like a fresh mount.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Selection {
+///
+/// Shared as `Signal<Selection>` context provided by the app shell:
+/// on the Files page the shell's sidebar column IS the Files sidebar
+/// ([`FilesSidebar`]), and it drives the same selection the pane
+/// renders.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Selection {
     /// Before the roots list has landed — the only state the
     /// auto-select effect may act on.
+    #[default]
     Unset,
     /// The Drive surface (loose files outside any root).
     Drive,
     Root(Uuid),
+}
+
+/// The shell-column sidebar for the Files page: the org's roots and
+/// the Drive surface. Replaces the vault explorer while Files is the
+/// open view — the whole screen belongs to file management.
+#[component]
+pub fn FilesSidebar() -> Element {
+    let selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+    let org =
+        use_memo(move || task_ui_core::orgs::active_slug(&selection.read(), &org_list.read()));
+    let mut selected = use_context::<Signal<Selection>>();
+
+    let mut roots = use_resource(move || async move {
+        let slug = org();
+        if slug.is_empty() {
+            return Ok(Vec::new());
+        }
+        fetch_roots(&slug).await
+    });
+    architect::use_stream(
+        move |tx| async move {
+            let slug = org();
+            if slug.is_empty() {
+                return false;
+            }
+            let Ok(stream) =
+                task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&slug).await
+            else {
+                return false;
+            };
+            stream.events(tx).await.is_ok()
+        },
+        move |event: FilesEvent| {
+            let mut roots = roots;
+            if matches!(event, FilesEvent::RootCreated(_)) {
+                roots.restart();
+            }
+        },
+    );
+
+    let rows = roots.read_unchecked().clone();
+    let known: Vec<FileRootInfo> = match &rows {
+        Some(Ok(list)) => list.clone(),
+        _ => Vec::new(),
+    };
+
+    rsx! {
+        div { class: "flex h-full min-h-0 flex-col gap-1 overflow-y-auto p-2",
+            span { class: "px-2 pt-1 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground",
+                "Files"
+            }
+            if let Some(Err(e)) = &rows {
+                task_ui_core::states::ErrorState {
+                    message: e.clone(),
+                    title: "Couldn't list File Roots",
+                    on_retry: move |()| roots.restart(),
+                }
+            }
+            for root in known.iter().cloned() {
+                button {
+                    key: "{root.id}",
+                    class: if *selected.read() == Selection::Root(root.id) {
+                        "rounded-md bg-indigo-500/10 px-2.5 py-1.5 text-left text-sm ring-1 ring-indigo-400/40"
+                    } else {
+                        "rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted/30"
+                    },
+                    onclick: move |_| selected.set(Selection::Root(root.id)),
+                    div { class: "flex items-center gap-2",
+                        span { class: "truncate", "{root.name}" }
+                        if let Some(badge) = &root.project_version {
+                            Badge { variant: BadgeVariant::Secondary, "v{badge.number}" }
+                        }
+                    }
+                    div { class: "truncate text-xs text-muted-foreground", "{root.path}" }
+                }
+            }
+            button {
+                class: if *selected.read() == Selection::Drive {
+                    "rounded-md bg-indigo-500/10 px-2.5 py-1.5 text-left text-sm ring-1 ring-indigo-400/40"
+                } else {
+                    "rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted/30"
+                },
+                onclick: move |_| selected.set(Selection::Drive),
+                div { class: "flex items-center gap-2",
+                    span { "Drive" }
+                    Badge { variant: BadgeVariant::Outline, "loose files" }
+                }
+                div { class: "text-xs text-muted-foreground", "Outside any root" }
+            }
+        }
+    }
 }
 
 /// The shell's `/files` pane: the org's roots down the side, the
@@ -365,7 +463,13 @@ pub fn FilesPane() -> Element {
         },
     );
 
-    let mut selected = use_signal(|| Selection::Unset);
+    // The shell provides the selection; the Files sidebar (the shell
+    // column) writes it. `try_` so a bare mount (tests, previews)
+    // still works with its own local state.
+    let mut selected = match try_use_context::<Signal<Selection>>() {
+        Some(shared) => shared,
+        None => use_signal(|| Selection::Unset),
+    };
     let rows = roots.read_unchecked().clone();
     let known: Vec<FileRootInfo> = match &rows {
         Some(Ok(list)) => list.clone(),
@@ -402,8 +506,11 @@ pub fn FilesPane() -> Element {
         // roots down a left rail, the explorer filling the rest. No
         // page heading, no content card, no dead margins.
         div { class: "flex h-full min-h-0 w-full",
-            // ── roots rail ──────────────────────────────────────
-            div { class: "flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/40 p-2",
+            // ── roots rail (mobile fallback) ────────────────────
+            // At md+ the SHELL's sidebar column is the Files sidebar
+            // ([`FilesSidebar`]); this inline rail only exists below
+            // md, where that column is hidden.
+            div { class: "flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/40 p-2 md:hidden",
                 span { class: "px-2 pt-1 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground",
                     "Files"
                 }

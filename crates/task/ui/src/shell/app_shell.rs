@@ -21,6 +21,10 @@ pub fn AppShell() -> Element {
     // Shell panel state: the vault explorer + the right (backlinks)
     // panel, toggled from the top bar (Obsidian-style).
     let explorer = use_context_provider(|| Signal::new(crate::chrome::ExplorerOpen(true)));
+    // The Files page's selection (which root / Drive) — provided at
+    // the shell so the sidebar column (FilesSidebar) and the pane
+    // drive one state.
+    use_context_provider(|| Signal::new(files_ui::Selection::default()));
     let _ = use_context_provider(|| Signal::new(crate::chrome::RightPanelOpen(true)));
     let agent_panel = use_context_provider(|| Signal::new(crate::chrome::AgentPanelOpen(false)));
     let _ = use_context_provider(|| {
@@ -85,7 +89,14 @@ pub fn AppShell() -> Element {
                 div { class: "flex flex-col md:min-h-0 md:flex-1 md:flex-row",
                     if explorer.read().0 && !chromeless() {
                         div { class: "hidden w-[17rem] shrink-0 border-r border-border/60 md:flex md:min-h-0 md:flex-col md:overflow-hidden",
-                            crate::shell::explorer::VaultExplorer {}
+                            // On the Files page the sidebar column IS
+                            // the file sidebar — the whole screen is
+                            // the file manager.
+                            if matches!(current, Route::FilesRoute {}) {
+                                files_ui::FilesSidebar {}
+                            } else {
+                                crate::shell::explorer::VaultExplorer {}
+                            }
                         }
                     }
                     div { class: "flex min-h-screen flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
