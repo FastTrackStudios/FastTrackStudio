@@ -376,6 +376,18 @@ pub trait FilesService {
         kind: crate::model::RenditionKind,
     ) -> Result<crate::model::RenditionInfo, FilesError>;
 
+    /// [`FilesService::rendition`], but of the file as it was at
+    /// `commit_id` rather than at the checkpoint head — the Review
+    /// page's version switcher / compare (issue #270 AC 4). Same
+    /// generate-once cache, keyed by the version's own content.
+    async fn rendition_at(
+        &self,
+        root_id: Uuid,
+        path: String,
+        commit_id: String,
+        kind: crate::model::RenditionKind,
+    ) -> Result<crate::model::RenditionInfo, FilesError>;
+
     /// The review for a media file — created on first ask, returned
     /// as-is after (one review per `(root, file path)`, so one link
     /// carries the whole conversation across versions — issue #270).

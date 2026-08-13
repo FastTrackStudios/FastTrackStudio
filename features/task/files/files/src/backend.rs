@@ -3852,13 +3852,16 @@ impl FilesBackend {
         Ok(store)
     }
 
-    /// Resolve a media file at `path` to its source CAS `FileId` (at the
-    /// checkpoint head) plus the root's chunk store — the sync prep a
-    /// rendition needs before the async generate.
+    /// Resolve a media file at `path` to its source CAS `FileId` — at
+    /// the checkpoint head, or at `at` (a commit reference) for the
+    /// version switcher (issue #270 AC 4) — plus the root's chunk
+    /// store: the sync prep a rendition needs before the async
+    /// generate.
     fn rendition_prep(
         &self,
         root_id: Uuid,
         path: &str,
+        at: Option<&str>,
     ) -> Result<
         (
             Arc<task_files_chunk_store::ChunkStore>,
@@ -3871,9 +3874,13 @@ impl FilesBackend {
         Self::require_media(&root, "rendition")?;
         let (_disk, repo_path) = self.resolve_root_file(&root, path)?;
         let (repo, head) = self.reload_repo(&root)?;
-        let Some((source_id, _exec)) = Self::head_file(&repo, &head, &repo_path)? else {
+        let commit = match at {
+            Some(reference) => self.resolve_commit(&root, reference)?.0,
+            None => head,
+        };
+        let Some((source_id, _exec)) = Self::head_file(&repo, &commit, &repo_path)? else {
             return Err(Error::NotFound(format!(
-                "{path}: not tracked by the checkpoint head"
+                "{path}: not tracked by that version"
             )));
         };
         let source_fid = task_files_chunk_store::FileId::from_hex(&source_id.hex())
@@ -3888,6 +3895,7 @@ impl FilesBackend {
         &self,
         root_id: Uuid,
         path: String,
+        at: Option<String>,
         kind: files_proto::RenditionKind,
     ) -> Result<files_proto::RenditionInfo, Error> {
         let Some(transcoder) = self.transcoder_opt() else {
@@ -3897,9 +3905,10 @@ impl FilesBackend {
         };
         let this = self.clone();
         let p = path.clone();
-        let (chunks, source_fid, root_path) = blocking(move || this.rendition_prep(root_id, &p))
-            .await
-            .map_err(from_files_error)?;
+        let (chunks, source_fid, root_path) =
+            blocking(move || this.rendition_prep(root_id, &p, at.as_deref()))
+                .await
+                .map_err(from_files_error)?;
         let store = self.rendition_store(root_id, &root_path).await?;
         let ekind = crate::transcode::engine_kind(kind);
         // Generate-once (AC 2): hold a per-`(root, source, kind)` lock
@@ -4435,7 +4444,19 @@ impl FilesService for FilesBackend {
         path: String,
         kind: files_proto::RenditionKind,
     ) -> Result<files_proto::RenditionInfo, FilesError> {
-        self.rendition_inner(root_id, path, kind)
+        self.rendition_inner(root_id, path, None, kind)
+            .await
+            .map_err(to_files_error)
+    }
+
+    async fn rendition_at(
+        &self,
+        root_id: Uuid,
+        path: String,
+        commit_id: String,
+        kind: files_proto::RenditionKind,
+    ) -> Result<files_proto::RenditionInfo, FilesError> {
+        self.rendition_inner(root_id, path, Some(commit_id), kind)
             .await
             .map_err(to_files_error)
     }

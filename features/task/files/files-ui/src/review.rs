@@ -95,19 +95,31 @@ struct Sources {
 
 /// Resolve the opened file to its streamable sources: proxy + filmstrip
 /// renditions over the RPC (generated on demand, cached server-side),
-/// plus one grant covering both URLs.
-async fn resolve_sources(org: &str, root_id: Uuid, path: &str) -> Result<Sources, String> {
+/// plus one grant covering both URLs. `at` pins a past version (the
+/// switcher, issue #270 AC 4); `None` follows the checkpoint head.
+async fn resolve_sources(
+    org: &str,
+    root_id: Uuid,
+    path: &str,
+    at: Option<String>,
+) -> Result<Sources, String> {
     let c = crate::client(org).await?;
-    let proxy = c
-        .rendition(root_id, path.to_owned(), RenditionKind::Proxy720)
+    let rendition = |kind: RenditionKind| {
+        let c = c.clone();
+        let at = at.clone();
+        async move {
+            match at {
+                Some(commit) => c.rendition_at(root_id, path.to_owned(), commit, kind).await,
+                None => c.rendition(root_id, path.to_owned(), kind).await,
+            }
+        }
+    };
+    let proxy = rendition(RenditionKind::Proxy720)
         .await
         .map_err(|e| e.to_string())?;
     // No filmstrip is not an error — the proxy still plays; the scrub
     // strip simply doesn't render.
-    let filmstrip = c
-        .rendition(root_id, path.to_owned(), RenditionKind::Filmstrip)
-        .await
-        .ok();
+    let filmstrip = rendition(RenditionKind::Filmstrip).await.ok();
     let tok =
         task_ui_core::media_grant::suffix_for_prefix(org, &format!("files/renditions/{root_id}"))
             .await;
@@ -118,35 +130,26 @@ async fn resolve_sources(org: &str, root_id: Uuid, path: &str) -> Result<Sources
     })
 }
 
-/// The review scope the comments panel works in: the entity, plus the
-/// file's current head commit (what a fresh comment records, and what
-/// an older comment is contrasted against).
-#[derive(Clone, Debug, PartialEq)]
-struct ReviewScope {
-    review: Review,
-    head_commit: String,
-}
-
-/// Get-or-create the file's review and read its chain head in one
-/// round trip pair — the panel needs both before it can post.
-async fn resolve_review(org: &str, root_id: Uuid, path: &str) -> Result<ReviewScope, String> {
-    let c = crate::client(org).await?;
-    let review = c
+/// Get-or-create the file's review — the comments panel's identity.
+async fn resolve_review(org: &str, root_id: Uuid, path: &str) -> Result<Review, String> {
+    crate::client(org)
+        .await?
         .review_for_file(root_id, path.to_owned())
         .await
-        .map_err(|e| e.to_string())?;
-    let chain = c
+        .map_err(|e| e.to_string())
+}
+
+/// The file's version chain (newest first) — the switcher's data.
+async fn fetch_versions(
+    org: &str,
+    root_id: Uuid,
+    path: &str,
+) -> Result<Vec<files_proto::ChainEntry>, String> {
+    crate::client(org)
+        .await?
         .chain(root_id, path.to_owned())
         .await
-        .map_err(|e| e.to_string())?;
-    let head_commit = chain
-        .first()
-        .map(|e| e.commit_id.clone())
-        .ok_or_else(|| "file has no checkpointed versions yet".to_string())?;
-    Ok(ReviewScope {
-        review,
-        head_commit,
-    })
+        .map_err(|e| e.to_string())
 }
 
 async fn fetch_comments(org: &str, review_id: Uuid) -> Result<Vec<ReviewComment>, String> {
@@ -259,9 +262,35 @@ pub fn ReviewPlayer(
     let video_id = use_hook(|| format!("review-video-{}", Uuid::new_v4().simple()));
     let strip_id = use_hook(|| format!("review-strip-{}", Uuid::new_v4().simple()));
 
-    let sources = use_resource(move || {
+    // The version switcher (issue #270 AC 4): the file's chain, the
+    // pinned version (`None` follows the head), and an optional second
+    // version compared side by side.
+    let versions = use_resource(move || {
         let (org, root_id, path) = (org(), root_id(), path());
-        async move { resolve_sources(&org, root_id, &path).await }
+        async move { fetch_versions(&org, root_id, &path).await }
+    });
+    let mut selected = use_signal(|| Option::<String>::None);
+    let mut compare = use_signal(|| Option::<String>::None);
+    let head_commit = use_memo(move || match &*versions.read() {
+        Some(Ok(chain)) => chain.first().map(|e| e.commit_id.clone()),
+        _ => None,
+    });
+    // What the main player is actually showing — what a fresh comment
+    // records as its file version.
+    let watching = use_memo(move || selected().or(head_commit()));
+
+    let sources = use_resource(move || {
+        let (org, root_id, path, at) = (org(), root_id(), path(), selected());
+        async move { resolve_sources(&org, root_id, &path, at).await }
+    });
+    let compare_sources = use_resource(move || {
+        let (org, root_id, path, at) = (org(), root_id(), path(), compare());
+        async move {
+            match at {
+                Some(commit) => Some(resolve_sources(&org, root_id, &path, Some(commit)).await),
+                None => None,
+            }
+        }
     });
 
     let mut now = use_signal(|| 0.0f64);
@@ -322,6 +351,57 @@ pub fn ReviewPlayer(
                     div { class: "text-xs text-muted-foreground", "No proxy rendition: {e}" }
                 },
                 Some(Ok(src)) => rsx! {
+                    // Version switcher: pin the player to any version in
+                    // the chain; ⇆ holds a second one beside it (AC 4).
+                    if let Some(Ok(chain)) = &*versions.read_unchecked() {
+                        if chain.len() > 1 {
+                            div { class: "flex items-center gap-1 overflow-x-auto text-xs",
+                                span { class: "text-muted-foreground shrink-0", "Version:" }
+                                for (i , entry) in chain.iter().cloned().enumerate() {
+                                    VersionChip {
+                                        key: "{entry.commit_id}",
+                                        number: chain.len() - i,
+                                        entry: entry.clone(),
+                                        watched: *watching.read() == Some(entry.commit_id.clone()),
+                                        compared: compare() == Some(entry.commit_id.clone()),
+                                        on_watch: {
+                                            let commit = entry.commit_id.clone();
+                                            move |()| {
+                                                // Head stays "follow the
+                                                // head", not a pin.
+                                                if i == 0 {
+                                                    selected.set(None);
+                                                } else {
+                                                    selected.set(Some(commit.clone()));
+                                                }
+                                            }
+                                        },
+                                        on_compare: {
+                                            let commit = entry.commit_id.clone();
+                                            move |()| {
+                                                if *compare.peek() == Some(commit.clone()) {
+                                                    compare.set(None);
+                                                } else {
+                                                    compare.set(Some(commit.clone()));
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if selected().is_some() {
+                        div { class: "flex items-center gap-2 text-xs",
+                            Badge { variant: BadgeVariant::Outline, "viewing an older version" }
+                            button {
+                                class: "rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted/50",
+                                onclick: move |_| selected.set(None),
+                                "back to latest"
+                            }
+                        }
+                    }
+                    div { class: if compare().is_some() { "grid gap-2 md:grid-cols-2" } else { "contents" },
                     div { class: "relative",
                         video {
                             id: video_id.clone(),
@@ -400,6 +480,38 @@ pub fn ReviewPlayer(
                             }
                         }
                     }
+                    // The compared version, side by side (its own
+                    // independent transport — a compare is two eyes on
+                    // two cuts, not one synced clock).
+                    if compare().is_some() {
+                        div { class: "flex flex-col gap-1",
+                            {match &*compare_sources.read_unchecked() {
+                                Some(Some(Ok(cmp))) => rsx! {
+                                    video {
+                                        src: cmp.proxy.clone(),
+                                        controls: true,
+                                        preload: "metadata",
+                                        class: "block w-full max-h-96 rounded bg-black/80",
+                                    }
+                                },
+                                Some(Some(Err(e))) => rsx! {
+                                    div { class: "text-xs text-muted-foreground", "No proxy for that version: {e}" }
+                                },
+                                _ => rsx! {
+                                    Text { variant: TextVariant::Muted, class: "text-xs", "Resolving version…" }
+                                },
+                            }}
+                            div { class: "flex items-center gap-2 text-xs",
+                                Badge { variant: BadgeVariant::Secondary, "comparing" }
+                                button {
+                                    class: "rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted/50",
+                                    onclick: move |_| compare.set(None),
+                                    "close compare"
+                                }
+                            }
+                        }
+                    }
+                    }
                     div { class: "flex items-center gap-2 flex-wrap",
                         Badge { variant: BadgeVariant::Outline, "{display_timecode(now())}" }
                         Input {
@@ -464,9 +576,45 @@ pub fn ReviewPlayer(
                         pending,
                         viewing,
                         draw_mode,
+                        watching,
+                        head: head_commit,
                     }
                 },
             }}
+        }
+    }
+}
+
+/// One version in the switcher row: `v<n>`, its Named Version stars,
+/// watch-on-click, and the ⇆ compare toggle (issue #270 AC 4).
+#[component]
+fn VersionChip(
+    number: usize,
+    entry: files_proto::ChainEntry,
+    watched: bool,
+    compared: bool,
+    on_watch: EventHandler<()>,
+    on_compare: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div { class: if watched { "flex shrink-0 items-center gap-1 rounded-md border border-ring bg-muted/40 px-1.5 py-0.5" } else { "flex shrink-0 items-center gap-1 rounded-md border border-border/40 px-1.5 py-0.5 hover:bg-muted/20" },
+            button {
+                class: "flex items-center gap-1",
+                title: "{entry.commit_id}",
+                onclick: move |_| on_watch.call(()),
+                span { class: "font-medium", "v{number}" }
+                // A curated Named Version is the thing a client compares
+                // — its stars ride the chip.
+                for nm in entry.names.iter() {
+                    span { class: "text-muted-foreground", "★ {nm}" }
+                }
+            }
+            button {
+                class: if compared { "rounded bg-primary/20 px-1" } else { "rounded px-1 text-muted-foreground hover:bg-muted/50" },
+                title: "Compare side by side",
+                onclick: move |_| on_compare.call(()),
+                "⇆"
+            }
         }
     }
 }
@@ -491,6 +639,11 @@ fn CommentsPanel(
     viewing: Signal<Vec<AnnotationStroke>>,
     /// Cleared when a drawing-carrying comment posts.
     draw_mode: Signal<bool>,
+    /// The version the player is showing — what a fresh comment
+    /// records (a reviewer pinned to v2 is commenting on v2, AC 2).
+    watching: ReadSignal<Option<String>>,
+    /// The chain head — what an older comment's badge contrasts with.
+    head: ReadSignal<Option<String>>,
 ) -> Element {
     let toast = use_toast();
     let scope = use_resource(move || {
@@ -498,7 +651,7 @@ fn CommentsPanel(
         async move { resolve_review(&org, root_id, &path).await }
     });
     let review_id = use_memo(move || match &*scope.read() {
-        Some(Ok(s)) => Some(s.review.id),
+        Some(Ok(review)) => Some(review.id),
         _ => None,
     });
     let mut comments = use_resource(move || {
@@ -546,7 +699,12 @@ fn CommentsPanel(
     let mut busy = use_signal(|| false);
 
     let post = move |_| {
-        let Some(Ok(s)) = scope.peek().clone() else {
+        let Some(Ok(review)) = scope.peek().clone() else {
+            return;
+        };
+        // The recorded version is the one on screen; without a chain
+        // yet there is nothing to attribute to.
+        let Some(commit_id) = watching.peek().clone() else {
             return;
         };
         let text = body.peek().trim().to_string();
@@ -562,12 +720,12 @@ fn CommentsPanel(
             timecode_secs: *now.peek(),
             author: author.peek().trim().to_string(),
             body: text,
-            commit_id: s.head_commit.clone(),
+            commit_id,
             annotation: strokes,
         };
         let (mut body, mut pending, mut draw_mode) = (body, pending, draw_mode);
         spawn(async move {
-            match post_comment(&org, s.review.id, comment).await {
+            match post_comment(&org, review.id, comment).await {
                 Ok(_) => {
                     body.set(String::new());
                     pending.set(Vec::new());
@@ -594,12 +752,12 @@ fn CommentsPanel(
                 Some(Err(e)) => rsx! {
                     div { class: "text-xs text-muted-foreground", "No review: {e}" }
                 },
-                Some(Ok(s)) => {
-                    let head = s.head_commit.clone();
+                Some(Ok(review)) => {
+                    let head = head().unwrap_or_default();
                     rsx! {
                         div { class: "flex items-center gap-2",
                             Badge { variant: BadgeVariant::Secondary, "Review" }
-                            Text { variant: TextVariant::Muted, class: "text-xs", "{s.review.title}" }
+                            Text { variant: TextVariant::Muted, class: "text-xs", "{review.title}" }
                         }
                         {match &*comments.read_unchecked() {
                             Some(Some(Ok(list))) if list.is_empty() => rsx! {
