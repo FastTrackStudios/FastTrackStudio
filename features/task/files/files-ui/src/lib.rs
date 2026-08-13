@@ -300,6 +300,35 @@ fn project_version_label(version: &ProjectVersion) -> String {
     }
 }
 
+/// Subscribe to the org's `FilesEvent` stream — the ONE establishment
+/// seam for every live surface in this crate. Six hand-rolled copies
+/// of this block drifted before; a change to establishment/retry now
+/// lands everywhere at once. `org` is read fresh on every
+/// (re)establish, so reconnects follow org switches.
+pub(crate) fn use_files_events(
+    org: impl Fn() -> String + Clone + 'static,
+    on_event: impl Fn(FilesEvent) + Clone + 'static,
+) {
+    architect::use_stream(
+        move |tx| {
+            let slug = org();
+            async move {
+                if slug.is_empty() {
+                    return false;
+                }
+                let Ok(stream) =
+                    task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&slug)
+                        .await
+                else {
+                    return false;
+                };
+                stream.events(tx).await.is_ok()
+            }
+        },
+        on_event,
+    );
+}
+
 // ── The explorer ── the Spacedrive-style shell lives in `explorer` ──
 
 pub mod explorer;
@@ -350,19 +379,8 @@ pub fn FilesSidebar() -> Element {
         }
         fetch_roots(&slug).await
     });
-    architect::use_stream(
-        move |tx| async move {
-            let slug = org();
-            if slug.is_empty() {
-                return false;
-            }
-            let Ok(stream) =
-                task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&slug).await
-            else {
-                return false;
-            };
-            stream.events(tx).await.is_ok()
-        },
+    use_files_events(
+        move || org(),
         move |event: FilesEvent| {
             let mut roots = roots;
             if matches!(event, FilesEvent::RootCreated(_)) {
@@ -442,19 +460,8 @@ pub fn FilesPane() -> Element {
     });
 
     // A new root anywhere joins the picker without a refresh.
-    architect::use_stream(
-        move |tx| async move {
-            let slug = org();
-            if slug.is_empty() {
-                return false;
-            }
-            let Ok(stream) =
-                task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&slug).await
-            else {
-                return false;
-            };
-            stream.events(tx).await.is_ok()
-        },
+    use_files_events(
+        move || org(),
         move |event: FilesEvent| {
             let mut roots = roots;
             if matches!(event, FilesEvent::RootCreated(_)) {
@@ -464,12 +471,11 @@ pub fn FilesPane() -> Element {
     );
 
     // The shell provides the selection; the Files sidebar (the shell
-    // column) writes it. `try_` so a bare mount (tests, previews)
-    // still works with its own local state.
-    let mut selected = match try_use_context::<Signal<Selection>>() {
-        Some(shared) => shared,
-        None => use_signal(|| Selection::Unset),
-    };
+    // column) writes it. The local signal is ALWAYS created (hooks
+    // must run unconditionally) and only used when no shell context
+    // exists (tests, previews).
+    let local = use_signal(|| Selection::Unset);
+    let mut selected = try_use_context::<Signal<Selection>>().unwrap_or(local);
     let rows = roots.read_unchecked().clone();
     let known: Vec<FileRootInfo> = match &rows {
         Some(Ok(list)) => list.clone(),
@@ -563,6 +569,7 @@ pub fn FilesPane() -> Element {
                     },
                     (false, Some(root)) => rsx! {
                         Explorer {
+                            key: "{org()}:{root.id}",
                             org: org(),
                             start: Location::Root { id: root.id, subpath: String::new() },
                             root: root.clone(),
@@ -577,7 +584,7 @@ pub fn FilesPane() -> Element {
                         }
                     },
                     (false, None) => rsx! {
-                        DrivePane { org: org() }
+                        DrivePane { key: "{org()}", org: org() }
                     },
                 }}
             }
@@ -608,6 +615,7 @@ fn DrivePane(org: String) -> Element {
                 }
             } else {
                 Explorer {
+                    key: "{org}:{submitted()}",
                     org: org.clone(),
                     start: Location::Drive { path: submitted() },
                     floor: submitted(),

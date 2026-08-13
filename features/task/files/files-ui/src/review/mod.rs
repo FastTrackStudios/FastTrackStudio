@@ -44,8 +44,8 @@
 
 use dioxus::prelude::*;
 use files_proto::{
-    AnnotationPoint, AnnotationStroke, FilesEvent, FilesServiceStreamClient, NewReviewComment,
-    RenditionKind, Review, ReviewComment,
+    AnnotationPoint, AnnotationStroke, FilesEvent, NewReviewComment, RenditionKind, Review,
+    ReviewComment,
 };
 use uuid::Uuid;
 
@@ -612,19 +612,8 @@ pub(crate) fn use_review_data(
 
     // Live: a comment landing anywhere (another reviewer, another
     // device) re-reads this thread.
-    architect::use_stream(
-        move |tx| {
-            let org = org();
-            async move {
-                let Ok(stream) =
-                    task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
-                        .await
-                else {
-                    return false;
-                };
-                stream.events(tx).await.is_ok()
-            }
-        },
+    crate::use_files_events(
+        move || org(),
         move |event: FilesEvent| {
             let mut comments = comments;
             let touched = match &event {

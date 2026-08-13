@@ -19,7 +19,6 @@
 use dioxus::prelude::*;
 use files_proto::{
     BrowseEntry, ChainEntry, DivergenceChoice, DivergenceInfo, FileRootInfo, FilesEvent,
-    FilesServiceStreamClient,
 };
 use fts_ui::lucide_dioxus::{
     Box as BoxIcon, File, FileText, Film, Folder, Image as ImageIcon, LayoutGrid, List as ListIcon,
@@ -59,14 +58,18 @@ fn entry_kind(entry: &BrowseEntry) -> EntryKind {
     if entry.is_dir {
         return EntryKind::Folder;
     }
-    let ext = entry
-        .name
-        .rsplit('.')
-        .next()
-        .unwrap_or_default()
-        .to_lowercase();
+    // The video list is the review player's own gate — ONE authority,
+    // so an icon'd video always mounts a player and vice versa.
+    if crate::review::is_video_path(&entry.name) {
+        return EntryKind::Video;
+    }
+    // A real extension only: a file literally named "mp3" (no dot, a
+    // common build-output name) must not classify by its whole name.
+    let ext = match entry.name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => ext.to_lowercase(),
+        _ => return EntryKind::Other,
+    };
     match ext.as_str() {
-        "mov" | "mp4" | "m4v" | "mkv" | "webm" | "avi" | "mxf" | "mts" => EntryKind::Video,
         "wav" | "aif" | "aiff" | "flac" | "mp3" | "ogg" | "m4a" | "opus" => EntryKind::Audio,
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "tif" | "tiff" | "heic" | "svg" | "exr"
         | "dng" | "cr3" | "arw" => EntryKind::Image,
@@ -153,8 +156,11 @@ pub fn Explorer(props: ExplorerProps) -> Element {
         }
     });
     let mut inspector_open = use_signal(|| true);
-    // The quick-preview overlay's subject (Space / double-click).
-    let mut previewing = use_signal(|| Option::<BrowseEntry>::None);
+    // The quick-preview overlay's subject (Space / double-click) — a
+    // NAME, resolved against the live listing at render (a stored row
+    // snapshot would go stale under checkpoints, like the selection
+    // comment below says).
+    let mut previewing = use_signal(|| Option::<String>::None);
 
     // Follow prop changes (the pane swaps roots underneath us).
     let start = props.start.clone();
@@ -178,39 +184,40 @@ pub fn Explorer(props: ExplorerProps) -> Element {
     // refresh.
     {
         let org = org.clone();
-        architect::use_stream(
-            move |tx| {
-                let org = org.clone();
-                async move {
-                    let Ok(stream) =
-                        task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
-                            .await
-                    else {
-                        return false;
-                    };
-                    stream.events(tx).await.is_ok()
-                }
-            },
+        crate::use_files_events(
+            move || org.clone(),
             move |event: FilesEvent| {
                 let mut entries = entries;
+                // Only events that can change browse() output restart
+                // the listing. Naming / Project Version events write
+                // vault pages and chain badges — the Inspector's own
+                // stream handles those; restarting here double-fetched
+                // for output that could not have moved.
                 let touched = match &event {
                     FilesEvent::Checkpointed(info) => Some(info.root_id),
-                    FilesEvent::RootCreated(root) => Some(root.id),
-                    FilesEvent::VersionNamed(v) | FilesEvent::VersionUnnamed(v) => Some(v.root_id),
-                    FilesEvent::ProjectVersionStarted(pv) => Some(pv.root_id),
                     FilesEvent::Snapshotted(snap) => Some(snap.root_id),
                     FilesEvent::HydrationChanged(change) => Some(change.root_id),
-                    // Review traffic never moves a listing. Early
-                    // return, NOT `None`: the Drive arm below re-reads
-                    // on any root-less event, and org-wide comment
-                    // traffic must not churn Drive listings.
-                    FilesEvent::ReviewCreated(_)
+                    // A new root can adopt loose files out from under a
+                    // Drive listing, so it refreshes BOTH surfaces.
+                    FilesEvent::RootCreated(root) => {
+                        if location.peek().root_id().is_none() {
+                            entries.restart();
+                            return;
+                        }
+                        Some(root.id)
+                    }
+                    FilesEvent::VersionNamed(_)
+                    | FilesEvent::VersionUnnamed(_)
+                    | FilesEvent::ProjectVersionStarted(_)
+                    | FilesEvent::ReviewCreated(_)
                     | FilesEvent::ReviewCommentAdded(_)
                     | FilesEvent::ReviewCommentDeleted(_) => return,
                 };
-                match location.peek().root_id() {
-                    Some(id) if touched != Some(id) => {}
-                    _ => entries.restart(),
+                // Root browsing refreshes on its own root's traffic; a
+                // Drive listing lives outside every root, and a
+                // checkpoint inside one cannot move loose files.
+                if location.peek().root_id() == touched {
+                    entries.restart();
                 }
             },
         );
@@ -231,7 +238,14 @@ pub fn Explorer(props: ExplorerProps) -> Element {
 
     // The selected entry's record, resolved fresh from the listing so
     // badges (divergent, stub) are never stale.
-    let selected_entry: Option<BrowseEntry> = match (&listing, selected()) {
+    let selected_name = selected();
+    let selected_entry: Option<BrowseEntry> = match (&listing, &selected_name) {
+        (Some(Ok(rows)), Some(name)) => rows.iter().find(|e| &e.name == name).cloned(),
+        _ => None,
+    };
+    // Same derivation for the preview: the overlay follows the live
+    // row (and closes itself if the file vanishes under it).
+    let preview_entry: Option<BrowseEntry> = match (&listing, previewing()) {
         (Some(Ok(rows)), Some(name)) => rows.iter().find(|e| e.name == name).cloned(),
         _ => None,
     };
@@ -252,7 +266,7 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                 location.set(next);
                 selected.set(None);
             } else {
-                previewing.set(Some(entry.clone()));
+                previewing.set(Some(entry.name.clone()));
             }
         }
     };
@@ -262,11 +276,10 @@ pub fn Explorer(props: ExplorerProps) -> Element {
             class: shell_class,
             tabindex: 0,
             onkeydown: {
-                let listing = listing.clone();
                 move |evt: Event<KeyboardData>| {
-                    let rows = match &listing {
-                        Some(Ok(rows)) => rows.clone(),
-                        _ => return,
+                    let guard = entries.peek();
+                    let Some(Ok(rows)) = &*guard else {
+                        return;
                     };
                     match evt.data().key() {
                         Key::Escape => {
@@ -278,10 +291,11 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                         }
                         Key::Enter => {
                             if let Some(name) = selected.peek().clone()
-                                && let Some(entry) = rows.iter().find(|e| e.name == name)
+                                && let Some(entry) = rows.iter().find(|e| e.name == name).cloned()
                             {
                                 evt.prevent_default();
-                                open_entry(&entry.clone());
+                                drop(guard);
+                                open_entry(&entry);
                             }
                         }
                         Key::Character(c) if c == " " => {
@@ -290,7 +304,9 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                                 && !entry.is_dir
                             {
                                 evt.prevent_default();
-                                previewing.set(Some(entry.clone()));
+                                let name = entry.name.clone();
+                                drop(guard);
+                                previewing.set(Some(name));
                             }
                         }
                         _ => {}
@@ -383,7 +399,7 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                                         GridTile {
                                             key: "{entry.name}",
                                             entry: entry.clone(),
-                                            selected: selected() == Some(entry.name.clone()),
+                                            selected: selected_name.as_deref() == Some(entry.name.as_str()),
                                             on_select: {
                                                 let name = entry.name.clone();
                                                 move |()| selected.set(Some(name.clone()))
@@ -402,7 +418,7 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                                         ListRowEntry {
                                             key: "{entry.name}",
                                             entry: entry.clone(),
-                                            selected: selected() == Some(entry.name.clone()),
+                                            selected: selected_name.as_deref() == Some(entry.name.as_str()),
                                             on_select: {
                                                 let name = entry.name.clone();
                                                 move |()| selected.set(Some(name.clone()))
@@ -422,6 +438,12 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                 if (embedded || inspector_open()) && selected_entry.is_some() {
                     div { class: if embedded { "w-full" } else { "w-80 shrink-0 overflow-y-auto border-l border-border/40 pl-3" },
                         Inspector {
+                            // The key is the whole fix for stale
+                            // inspection: a different subject is a
+                            // different Inspector, never a reused one
+                            // whose chain closure captured the old
+                            // file's path.
+                            key: "{selected_path.clone().unwrap_or_default()}",
                             org: org.clone(),
                             root_id: here_root,
                             entry: selected_entry.clone().expect("selected_entry is Some"),
@@ -434,8 +456,9 @@ pub fn Explorer(props: ExplorerProps) -> Element {
             }
         }
         // ── quick preview (Space / double-click) ────────────────
-        if let Some(entry) = previewing() {
+        if let Some(entry) = preview_entry {
             QuickPreview {
+                key: "{entry.name}",
                 org: org.clone(),
                 root_id: here_root,
                 entry: entry.clone(),
@@ -557,19 +580,8 @@ fn Inspector(
     // A chain changes on checkpoint / naming events — keep it live.
     {
         let org = org.clone();
-        architect::use_stream(
-            move |tx| {
-                let org = org.clone();
-                async move {
-                    let Ok(stream) =
-                        task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
-                            .await
-                    else {
-                        return false;
-                    };
-                    stream.events(tx).await.is_ok()
-                }
-            },
+        crate::use_files_events(
+            move || org.clone(),
             move |event: FilesEvent| {
                 let mut chain = chain;
                 let touched = match &event {
@@ -1007,19 +1019,8 @@ fn DivergencePanel(
     // must not go stale under the panel.
     {
         let org = org.clone();
-        architect::use_stream(
-            move |tx| {
-                let org = org.clone();
-                async move {
-                    let Ok(stream) =
-                        task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
-                            .await
-                    else {
-                        return false;
-                    };
-                    stream.events(tx).await.is_ok()
-                }
-            },
+        crate::use_files_events(
+            move || org.clone(),
             move |event: FilesEvent| {
                 let mut info = info;
                 let touched = match &event {

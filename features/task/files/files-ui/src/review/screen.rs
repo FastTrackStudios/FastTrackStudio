@@ -19,7 +19,7 @@ use super::{
     DrawCtx, PlayerCtx, resolve_sources, seek_by, toggle_fullscreen, toggle_play, use_review_data,
     video_op,
 };
-use files_proto::{FilesEvent, FilesServiceStreamClient};
+use files_proto::FilesEvent;
 
 /// The full-screen review surface.
 #[component]
@@ -89,19 +89,8 @@ pub fn ReviewScreen(
     // chain (so the switcher shows the new version and fresh comments
     // record the right commit) and, when following the head,
     // re-resolve the stream.
-    architect::use_stream(
-        move |tx| {
-            let org = org();
-            async move {
-                let Ok(stream) =
-                    task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
-                        .await
-                else {
-                    return false;
-                };
-                stream.events(tx).await.is_ok()
-            }
-        },
+    crate::use_files_events(
+        move || org(),
         move |event: FilesEvent| {
             let (mut versions, mut sources) = (versions, sources);
             if let FilesEvent::Checkpointed(info) = &event
