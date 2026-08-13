@@ -109,7 +109,42 @@ impl VaultVersions {
         );
         store.with_vault(|vault| {
             let mut out = Vec::new();
+            // Review-comment pins (issue #270 AC 2: "the reference
+            // stays resolvable") protect their commit too, but a
+            // comment page carries only its `reviewId` — collect both
+            // sides in this one scan and join after.
+            let mut reviews_root: std::collections::HashMap<Uuid, Uuid> =
+                std::collections::HashMap::new();
+            let mut comment_pins: Vec<(String, Uuid, String)> = Vec::new();
             for page in &vault.pages {
+                let owned = page.rel_path.starts_with(&owned_prefix);
+                if Reviews::matches(page) {
+                    match Reviews::from_page(page) {
+                        Ok(r) => {
+                            reviews_root.insert(r.id, r.root_id);
+                        }
+                        Err(e) if owned => return Err(strict_parse_err(page, e)),
+                        Err(e) => {
+                            tracing::warn!(page = %page.rel_path, ?e, "unreadable review page");
+                        }
+                    }
+                    continue;
+                }
+                if ReviewComments::matches(page) {
+                    match ReviewComments::from_page(page) {
+                        // A comment page that predates commit recording
+                        // (or was hand-edited empty) pins nothing.
+                        Ok(c) if c.commit_id.is_empty() => {}
+                        Ok(c) => {
+                            comment_pins.push((page.rel_path.clone(), c.review_id, c.commit_id));
+                        }
+                        Err(e) if owned => return Err(strict_parse_err(page, e)),
+                        Err(e) => {
+                            tracing::warn!(page = %page.rel_path, ?e, "unreadable review comment");
+                        }
+                    }
+                    continue;
+                }
                 let parsed = if NamedVersions::matches(page) {
                     NamedVersions::from_page(page).map(|v| (v.root_id, v.commit_id))
                 } else if ProjectVersions::matches(page) {
@@ -119,7 +154,7 @@ impl VaultVersions {
                 };
                 let (page_root_id, commit_id) = match parsed {
                     Ok(v) => v,
-                    Err(e) if page.rel_path.starts_with(&owned_prefix) => {
+                    Err(e) if owned => {
                         return Err(strict_parse_err(page, e));
                     }
                     Err(e) => {
@@ -137,6 +172,20 @@ impl VaultVersions {
                         page: page.rel_path.clone(),
                         commit_id,
                     });
+                }
+            }
+            for (page, review_id, commit_id) in comment_pins {
+                // A comment belongs to this root if its review says so —
+                // or, when the review page is missing (orphaned), if the
+                // page sits in this root's own folder (the folder is the
+                // only identity left, and forfeiting the pin because the
+                // review page vanished would sweep referenced content).
+                let this_roots = match reviews_root.get(&review_id) {
+                    Some(rid) => *rid == root_id,
+                    None => page.starts_with(&owned_prefix),
+                };
+                if this_roots {
+                    out.push(VersionEntityRef { page, commit_id });
                 }
             }
             Ok(out)
@@ -349,6 +398,14 @@ impl VaultVersions {
             created_at: Utc::now(),
         };
         store.create(model).map_err(entity_err)
+    }
+
+    /// Re-write a review page in place (the rename re-key: same id,
+    /// same page path, new `file_path`).
+    pub fn update_review(&self, review: Review) -> Result<Review> {
+        self.write_store::<Reviews>()?
+            .update(review)
+            .map_err(entity_err)
     }
 
     /// A review's comments, by timecode (ties by creation time, so a

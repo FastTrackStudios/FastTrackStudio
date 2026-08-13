@@ -130,24 +130,22 @@ async fn resolve_sources(
     })
 }
 
-/// Get-or-create the file's review — the comments panel's identity.
-async fn resolve_review(org: &str, root_id: Uuid, path: &str) -> Result<Review, String> {
+/// The file's review if it exists — a pure read (follows renames
+/// server-side). Browsing must never mint entities.
+async fn find_review(org: &str, root_id: Uuid, path: &str) -> Result<Option<Review>, String> {
     crate::client(org)
         .await?
-        .review_for_file(root_id, path.to_owned())
+        .find_review(root_id, path.to_owned())
         .await
         .map_err(|e| e.to_string())
 }
 
-/// The file's version chain (newest first) — the switcher's data.
-async fn fetch_versions(
-    org: &str,
-    root_id: Uuid,
-    path: &str,
-) -> Result<Vec<files_proto::ChainEntry>, String> {
+/// Get-or-create the file's review — called when feedback actually
+/// starts (the first comment), never on mount.
+async fn ensure_review(org: &str, root_id: Uuid, path: &str) -> Result<Review, String> {
     crate::client(org)
         .await?
-        .chain(root_id, path.to_owned())
+        .review_for_file(root_id, path.to_owned())
         .await
         .map_err(|e| e.to_string())
 }
@@ -207,10 +205,14 @@ async fn read_time(video_id: &str) -> f64 {
 }
 
 /// An element's CSS-pixel size — what normalizes pointer coordinates
-/// into the frame's `0..=1` space when a drawing starts.
+/// into the frame's `0..=1` space when a drawing starts. Measured via
+/// `getBoundingClientRect` (an SVG element's `clientWidth`/`Height`
+/// are 0 on Firefox).
 async fn element_dims(id: &str) -> (f64, f64) {
     let mut e = dioxus::document::eval(&format!(
-        "var el=document.getElementById('{id}');dioxus.send(el?[el.clientWidth,el.clientHeight]:[0,0]);"
+        "var el=document.getElementById('{id}');\
+         if(el){{var r=el.getBoundingClientRect();dioxus.send([r.width,r.height]);}}\
+         else{{dioxus.send([0,0]);}}"
     ));
     e.recv::<(f64, f64)>().await.unwrap_or((0.0, 0.0))
 }
@@ -264,34 +266,74 @@ pub fn ReviewPlayer(
 
     // The version switcher (issue #270 AC 4): the file's chain, the
     // pinned version (`None` follows the head), and an optional second
-    // version compared side by side.
+    // version compared side by side. A pin carries `(commit, path)` —
+    // the chain follows renames, so a pre-rename version must be
+    // resolved under the path it lived at, not the current one.
     let versions = use_resource(move || {
         let (org, root_id, path) = (org(), root_id(), path());
-        async move { fetch_versions(&org, root_id, &path).await }
+        async move { crate::fetch_chain(&org, root_id, path).await }
     });
-    let mut selected = use_signal(|| Option::<String>::None);
-    let mut compare = use_signal(|| Option::<String>::None);
+    let mut selected = use_signal(|| Option::<(String, String)>::None);
+    let mut compare = use_signal(|| Option::<(String, String)>::None);
     let head_commit = use_memo(move || match &*versions.read() {
         Some(Ok(chain)) => chain.first().map(|e| e.commit_id.clone()),
         _ => None,
     });
     // What the main player is actually showing — what a fresh comment
     // records as its file version.
-    let watching = use_memo(move || selected().or(head_commit()));
+    let watching = use_memo(move || selected().map(|(commit, _)| commit).or(head_commit()));
 
     let sources = use_resource(move || {
-        let (org, root_id, path, at) = (org(), root_id(), path(), selected());
-        async move { resolve_sources(&org, root_id, &path, at).await }
+        let (org, root_id, path, pin) = (org(), root_id(), path(), selected());
+        async move {
+            match pin {
+                Some((commit, vpath)) => resolve_sources(&org, root_id, &vpath, Some(commit)).await,
+                None => resolve_sources(&org, root_id, &path, None).await,
+            }
+        }
     });
     let compare_sources = use_resource(move || {
-        let (org, root_id, path, at) = (org(), root_id(), path(), compare());
+        let (org, root_id, pin) = (org(), root_id(), compare());
         async move {
-            match at {
-                Some(commit) => Some(resolve_sources(&org, root_id, &path, Some(commit)).await),
+            match pin {
+                Some((commit, vpath)) => {
+                    Some(resolve_sources(&org, root_id, &vpath, Some(commit)).await)
+                }
                 None => None,
             }
         }
     });
+
+    // A checkpoint anywhere on this root moves the head: re-read the
+    // chain (so the switcher shows the new version and fresh comments
+    // record the right commit) and, when following the head, re-resolve
+    // the stream. Without this an open review page would silently
+    // attribute new feedback to the previous version.
+    architect::use_stream(
+        move |tx| {
+            let org = org();
+            async move {
+                let Ok(stream) =
+                    task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
+                        .await
+                else {
+                    return false;
+                };
+                stream.events(tx).await.is_ok()
+            }
+        },
+        move |event: FilesEvent| {
+            let (mut versions, mut sources) = (versions, sources);
+            if let FilesEvent::Checkpointed(info) = &event
+                && info.root_id == *root_id.peek()
+            {
+                versions.restart();
+                if selected.peek().is_none() {
+                    sources.restart();
+                }
+            }
+        },
+    );
 
     let mut now = use_signal(|| 0.0f64);
     let timecode_input = use_signal(String::new);
@@ -363,26 +405,31 @@ pub fn ReviewPlayer(
                                         number: chain.len() - i,
                                         entry: entry.clone(),
                                         watched: *watching.read() == Some(entry.commit_id.clone()),
-                                        compared: compare() == Some(entry.commit_id.clone()),
+                                        compared: compare().map(|(commit, _)| commit) == Some(entry.commit_id.clone()),
                                         on_watch: {
-                                            let commit = entry.commit_id.clone();
+                                            // The pin carries the version's
+                                            // OWN path — a pre-rename entry
+                                            // resolves under it.
+                                            let pin = (entry.commit_id.clone(), entry.path.clone());
                                             move |()| {
                                                 // Head stays "follow the
                                                 // head", not a pin.
                                                 if i == 0 {
                                                     selected.set(None);
                                                 } else {
-                                                    selected.set(Some(commit.clone()));
+                                                    selected.set(Some(pin.clone()));
                                                 }
                                             }
                                         },
                                         on_compare: {
-                                            let commit = entry.commit_id.clone();
+                                            let pin = (entry.commit_id.clone(), entry.path.clone());
                                             move |()| {
-                                                if *compare.peek() == Some(commit.clone()) {
+                                                let same = compare.peek().as_ref().map(|(commit, _)| commit)
+                                                    == Some(&pin.0);
+                                                if same {
                                                     compare.set(None);
                                                 } else {
-                                                    compare.set(Some(commit.clone()));
+                                                    compare.set(Some(pin.clone()));
                                                 }
                                             }
                                         },
@@ -402,13 +449,18 @@ pub fn ReviewPlayer(
                         }
                     }
                     div { class: if compare().is_some() { "grid gap-2 md:grid-cols-2" } else { "contents" },
-                    div { class: "relative",
+                    // The wrapper shrink-wraps the video's USED box
+                    // (inline-block), so the inset-0 overlay is exactly
+                    // the picture — with a full-width wrapper the video
+                    // narrows under max-h and normalized coordinates
+                    // would mis-anchor (AC 3's whole point).
+                    div { class: "relative inline-block max-w-full",
                         video {
                             id: video_id.clone(),
                             src: src.proxy.clone(),
                             controls: !draw_mode(),
                             preload: "metadata",
-                            class: "block w-full max-h-96 rounded bg-black/80",
+                            class: "block max-w-full max-h-96 rounded bg-black/80",
                             ontimeupdate: {
                                 let video_id = video_id.clone();
                                 move |_| {
@@ -426,17 +478,29 @@ pub fn ReviewPlayer(
                             class: if draw_mode() { "absolute inset-0 h-full w-full cursor-crosshair touch-none" } else { "absolute inset-0 h-full w-full pointer-events-none" },
                             view_box: "0 0 1 1",
                             preserve_aspect_ratio: "none",
-                            onmousedown: move |evt: Event<MouseData>| {
-                                if !*draw_mode.peek() {
-                                    return;
-                                }
-                                let c = evt.data().element_coordinates();
-                                if let Some(p) = normalized_point(c.x, c.y, *dims.peek()) {
-                                    active.set(Some(AnnotationStroke {
-                                        points: vec![p],
-                                        color: STROKE_COLOR.into(),
-                                        width: STROKE_WIDTH,
-                                    }));
+                            onmousedown: {
+                                let overlay_for_measure = overlay_id.clone();
+                                move |evt: Event<MouseData>| {
+                                    if !*draw_mode.peek() {
+                                        return;
+                                    }
+                                    // Every stroke start re-measures for the
+                                    // NEXT events (resize between strokes);
+                                    // an unmeasured overlay (the async
+                                    // measure from ✏ hasn't landed) captures
+                                    // nothing rather than capturing garbage.
+                                    let overlay_for_measure = overlay_for_measure.clone();
+                                    spawn(async move {
+                                        dims.set(element_dims(&overlay_for_measure).await);
+                                    });
+                                    let c = evt.data().element_coordinates();
+                                    if let Some(p) = normalized_point(c.x, c.y, *dims.peek()) {
+                                        active.set(Some(AnnotationStroke {
+                                            points: vec![p],
+                                            color: STROKE_COLOR.into(),
+                                            width: STROKE_WIDTH,
+                                        }));
+                                    }
                                 }
                             },
                             onmousemove: move |evt: Event<MouseData>| {
@@ -476,6 +540,11 @@ pub fn ReviewPlayer(
                                     // must be screen-space.
                                     stroke_width: format!("{}", (f64::from(stroke.width) * dims().0).max(2.5)),
                                     "vector-effect": "non-scaling-stroke",
+                                    // Never a pointer target: a mousedown
+                                    // over an existing stroke must report
+                                    // overlay-relative coordinates, not
+                                    // polyline-relative ones.
+                                    pointer_events: "none",
                                 }
                             }
                         }
@@ -567,20 +636,23 @@ pub fn ReviewPlayer(
                             },
                         }
                     }
-                    CommentsPanel {
-                        org,
-                        root_id,
-                        path,
-                        video_id: video_id.clone(),
-                        now,
-                        pending,
-                        viewing,
-                        draw_mode,
-                        watching,
-                        head: head_commit,
-                    }
                 },
             }}
+            // Outside the sources match on purpose: a proxy that fails
+            // to resolve must not hide the conversation (the comments
+            // are vault data, not renditions).
+            CommentsPanel {
+                org,
+                root_id,
+                path,
+                video_id: video_id.clone(),
+                now,
+                pending,
+                viewing,
+                draw_mode,
+                watching,
+                head: head_commit,
+            }
         }
     }
 }
@@ -646,12 +718,14 @@ fn CommentsPanel(
     head: ReadSignal<Option<String>>,
 ) -> Element {
     let toast = use_toast();
-    let scope = use_resource(move || {
+    // A pure read on mount: browsing a video must never write a review
+    // page — the entity is minted by the first posted comment.
+    let mut scope = use_resource(move || {
         let (org, root_id, path) = (org(), root_id(), path());
-        async move { resolve_review(&org, root_id, &path).await }
+        async move { find_review(&org, root_id, &path).await }
     });
     let review_id = use_memo(move || match &*scope.read() {
-        Some(Ok(review)) => Some(review.id),
+        Some(Ok(Some(review))) => Some(review.id),
         _ => None,
     });
     let mut comments = use_resource(move || {
@@ -699,9 +773,6 @@ fn CommentsPanel(
     let mut busy = use_signal(|| false);
 
     let post = move |_| {
-        let Some(Ok(review)) = scope.peek().clone() else {
-            return;
-        };
         // The recorded version is the one on screen; without a chain
         // yet there is nothing to attribute to.
         let Some(commit_id) = watching.peek().clone() else {
@@ -716,6 +787,8 @@ fn CommentsPanel(
         }
         busy.set(true);
         let org = org.peek().clone();
+        let (root_id_now, path_now) = (*root_id.peek(), path.peek().clone());
+        let existing = *review_id.peek();
         let comment = NewReviewComment {
             timecode_secs: *now.peek(),
             author: author.peek().trim().to_string(),
@@ -725,11 +798,26 @@ fn CommentsPanel(
         };
         let (mut body, mut pending, mut draw_mode) = (body, pending, draw_mode);
         spawn(async move {
-            match post_comment(&org, review.id, comment).await {
-                Ok(_) => {
+            // First comment on this file: mint the review now (the one
+            // write-on-demand), then post into it.
+            let target = match existing {
+                Some(id) => Ok(id),
+                None => ensure_review(&org, root_id_now, &path_now)
+                    .await
+                    .map(|r| r.id),
+            };
+            let posted = match target {
+                Ok(id) => post_comment(&org, id, comment).await.map(|_| ()),
+                Err(e) => Err(e),
+            };
+            match posted {
+                Ok(()) => {
                     body.set(String::new());
                     pending.set(Vec::new());
                     draw_mode.set(false);
+                    if existing.is_none() {
+                        scope.restart();
+                    }
                     comments.restart();
                 }
                 Err(e) => {
@@ -747,49 +835,57 @@ fn CommentsPanel(
         div { class: "flex flex-col gap-2 pt-1",
             {match &*scope.read_unchecked() {
                 None => rsx! {
-                    Text { variant: TextVariant::Muted, class: "text-xs", "Opening review…" }
+                    Text { variant: TextVariant::Muted, class: "text-xs", "Checking for a review…" }
                 },
                 Some(Err(e)) => rsx! {
                     div { class: "text-xs text-muted-foreground", "No review: {e}" }
                 },
-                Some(Ok(review)) => {
+                Some(Ok(found)) => {
                     let head = head().unwrap_or_default();
                     rsx! {
-                        div { class: "flex items-center gap-2",
-                            Badge { variant: BadgeVariant::Secondary, "Review" }
-                            Text { variant: TextVariant::Muted, class: "text-xs", "{review.title}" }
-                        }
-                        {match &*comments.read_unchecked() {
-                            Some(Some(Ok(list))) if list.is_empty() => rsx! {
-                                Text { variant: TextVariant::Muted, class: "text-xs",
-                                    "No comments yet — be the first."
-                                }
-                            },
-                            Some(Some(Ok(list))) => rsx! {
-                                div { class: "flex flex-col gap-1",
-                                    for comment in list.iter().cloned() {
-                                        CommentRow {
-                                            key: "{comment.id}",
-                                            org,
-                                            comment,
-                                            head_commit: head.clone(),
-                                            video_id: video_id.clone(),
-                                            on_removed: move |()| comments.restart(),
-                                            on_view: {
-                                                let mut viewing = viewing;
-                                                move |strokes| viewing.set(strokes)
-                                            },
+                        if let Some(review) = found {
+                            div { class: "flex items-center gap-2",
+                                Badge { variant: BadgeVariant::Secondary, "Review" }
+                                Text { variant: TextVariant::Muted, class: "text-xs", "{review.title}" }
+                            }
+                            {match &*comments.read_unchecked() {
+                                Some(Some(Ok(list))) if list.is_empty() => rsx! {
+                                    Text { variant: TextVariant::Muted, class: "text-xs",
+                                        "No comments yet — be the first."
+                                    }
+                                },
+                                Some(Some(Ok(list))) => rsx! {
+                                    div { class: "flex flex-col gap-1",
+                                        for comment in list.iter().cloned() {
+                                            CommentRow {
+                                                key: "{comment.id}",
+                                                org,
+                                                comment,
+                                                head_commit: head.clone(),
+                                                video_id: video_id.clone(),
+                                                on_removed: move |()| comments.restart(),
+                                                on_view: {
+                                                    let mut viewing = viewing;
+                                                    move |strokes| viewing.set(strokes)
+                                                },
+                                            }
                                         }
                                     }
-                                }
-                            },
-                            Some(Some(Err(e))) => rsx! {
-                                div { class: "text-xs text-destructive", "Couldn't read comments: {e}" }
-                            },
-                            _ => rsx! {
-                                Text { variant: TextVariant::Muted, class: "text-xs", "Reading comments…" }
-                            },
-                        }}
+                                },
+                                Some(Some(Err(e))) => rsx! {
+                                    div { class: "text-xs text-destructive", "Couldn't read comments: {e}" }
+                                },
+                                _ => rsx! {
+                                    Text { variant: TextVariant::Muted, class: "text-xs", "Reading comments…" }
+                                },
+                            }}
+                        } else {
+                            // No entity yet, on purpose: browsing is a
+                            // read; the first comment mints the review.
+                            Text { variant: TextVariant::Muted, class: "text-xs",
+                                "No review yet — the first comment starts one."
+                            }
+                        }
                         div { class: "flex items-center gap-2",
                             Input {
                                 value: author,
@@ -805,7 +901,10 @@ fn CommentsPanel(
                             Button {
                                 variant: ButtonVariant::Secondary,
                                 size: ButtonSize::Small,
-                                disabled: busy(),
+                                // No chain head yet = nothing to attribute
+                                // a comment to; disabled beats a silent
+                                // no-op click.
+                                disabled: busy() || watching().is_none(),
                                 on_click: post,
                                 if pending().is_empty() {
                                     "Comment @ {display_timecode(now())}"
@@ -838,7 +937,9 @@ fn CommentRow(
     let toast = use_toast();
     let mut busy = use_signal(|| false);
     let tc = comment.timecode_secs;
-    let stale = comment.commit_id != head_commit;
+    // Only badge against a KNOWN head — an unloaded chain must not
+    // flag every comment as old.
+    let stale = !head_commit.is_empty() && comment.commit_id != head_commit;
     let author = if comment.author.is_empty() {
         "Guest".to_string()
     } else {
@@ -889,7 +990,7 @@ fn CommentRow(
                         // Feedback about an older cut stays attributed to
                         // it (AC 2) — never silently re-anchored.
                         Badge { variant: BadgeVariant::Outline,
-                            "on version {short_commit(&comment.commit_id)}"
+                            "on version {crate::short_id(&comment.commit_id)}"
                         }
                     }
                 }
@@ -906,11 +1007,6 @@ fn CommentRow(
             }
         }
     }
-}
-
-/// First 12 hex chars — same display rule as the explorer's chain rows.
-fn short_commit(commit_id: &str) -> String {
-    commit_id.chars().take(12).collect()
 }
 
 #[cfg(test)]

@@ -161,6 +161,39 @@ async fn annotations_round_trip_through_the_vault_page() {
     backend.shutdown().await;
 }
 
+/// Browsing is a read: `find_review` never mints an entity, and the
+/// review only comes to exist when feedback starts
+/// (`review_for_file`). Once it exists, `find_review` resolves it.
+#[tokio::test(flavor = "multi_thread")]
+async fn finding_a_review_never_creates_one() {
+    let (_dir, backend, client, root_id, _local) = rig().await;
+
+    // A miss, twice — and nothing minted by looking.
+    for _ in 0..2 {
+        assert_eq!(
+            client.find_review(root_id, "cut.mov".into()).await.unwrap(),
+            None
+        );
+    }
+    assert!(
+        client.list_reviews(Some(root_id)).await.unwrap().is_empty(),
+        "looking must not create"
+    );
+
+    let review = client
+        .review_for_file(root_id, "cut.mov".into())
+        .await
+        .unwrap();
+    let found = client
+        .find_review(root_id, "cut.mov".into())
+        .await
+        .unwrap()
+        .expect("exists now");
+    assert_eq!(found.id, review.id);
+
+    backend.shutdown().await;
+}
+
 /// The refusals: an untracked file has no review, a comment must name
 /// a real version, and an empty comment is nothing.
 #[tokio::test(flavor = "multi_thread")]

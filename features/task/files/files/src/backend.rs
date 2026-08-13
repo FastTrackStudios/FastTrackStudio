@@ -1257,6 +1257,40 @@ impl FilesBackend {
         Ok(named)
     }
 
+    /// The file's review if one exists, following renames: a review
+    /// keyed under any previous path in the file's chain is this
+    /// file's review (renames must not fork the conversation).
+    ///
+    /// The reach-back is only as good as the store's copy records:
+    /// `Change::Rename` writers (the sync engine, a WebDAV MOVE) record
+    /// them, but the v1 scan checkpoint captures a plain filesystem
+    /// rename as remove+add (ADR 0001: "detection may start simple"),
+    /// which this lookup cannot see through. FUTURE: content-id rename
+    /// detection in the scan checkpoint closes that gap for reviews and
+    /// chains alike.
+    fn find_review_inner(
+        &self,
+        root_id: Uuid,
+        file_path: &str,
+    ) -> Result<Option<files_proto::Review>, Error> {
+        if let Some(review) = self.versions.review_by_file(root_id, file_path)? {
+            return Ok(Some(review));
+        }
+        // The chain already follows copy records back through renames —
+        // an untracked path simply has no chain (and so no review).
+        let chain = self
+            .chain_inner(root_id, file_path.to_string())
+            .unwrap_or_default();
+        for entry in &chain {
+            if entry.path != file_path
+                && let Some(review) = self.versions.review_by_file(root_id, &entry.path)?
+            {
+                return Ok(Some(review));
+            }
+        }
+        Ok(None)
+    }
+
     /// Get-or-create the review for `(root, file_path)` (issue #270).
     /// Returns `(review, created)` so the RPC wrapper knows whether to
     /// publish `ReviewCreated`.
@@ -1271,7 +1305,14 @@ impl FilesBackend {
         // must not both scan an empty vault and write two pages.
         let lock = self.root_lock(root_id);
         let _guard = lock.lock().expect("root lock poisoned");
-        if let Some(existing) = self.versions.review_by_file(root_id, &file_path)? {
+        if let Some(mut existing) = self.find_review_inner(root_id, &file_path)? {
+            // Found under a previous path — re-key to the current one
+            // so the exact lookup hits next time and the page reads
+            // true.
+            if existing.file_path != file_path {
+                existing.file_path = file_path;
+                existing = self.versions.update_review(existing)?;
+            }
             return Ok((existing, false));
         }
         // First ask: the file must actually be a versioned member of
@@ -4298,6 +4339,15 @@ impl FilesService for FilesBackend {
     ) -> Result<Vec<ProjectVersion>, FilesError> {
         let this = self.clone();
         blocking(move || this.versions.project_versions(root_id)).await
+    }
+
+    async fn find_review(
+        &self,
+        root_id: Uuid,
+        file_path: String,
+    ) -> Result<Option<files_proto::Review>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.find_review_inner(root_id, &file_path)).await
     }
 
     async fn review_for_file(

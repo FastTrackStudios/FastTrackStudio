@@ -388,9 +388,21 @@ pub trait FilesService {
         kind: crate::model::RenditionKind,
     ) -> Result<crate::model::RenditionInfo, FilesError>;
 
+    /// The review for a media file, if one exists — a pure read, so a
+    /// browser opening files never mints entities. Follows the file's
+    /// rename history: a review keyed under a previous path of the same
+    /// chain is this file's review.
+    async fn find_review(
+        &self,
+        root_id: Uuid,
+        file_path: String,
+    ) -> Result<Option<crate::model::Review>, FilesError>;
+
     /// The review for a media file — created on first ask, returned
-    /// as-is after (one review per `(root, file path)`, so one link
-    /// carries the whole conversation across versions — issue #270).
+    /// as-is after (one review per file *chain*: renames don't fork the
+    /// conversation, so one link carries it across versions — issue
+    /// #270). Callers that only display use [`FilesService::find_review`];
+    /// this is the write half, invoked when feedback actually starts.
     ///
     /// [`RootFlavor::Media`](crate::model::RootFlavor::Media) only;
     /// fails with [`FilesError::NotFound`] when the checkpoint head

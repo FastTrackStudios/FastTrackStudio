@@ -349,9 +349,12 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                     FilesEvent::HydrationChanged(change) => Some(change.root_id),
                     // Review traffic (issue #270) never moves a listing
                     // or a chain — the review panel has its own stream.
+                    // Early return, NOT `None`: the Drive arm below
+                    // re-reads on any root-less event, and org-wide
+                    // comment traffic must not churn Drive listings.
                     FilesEvent::ReviewCreated(_)
                     | FilesEvent::ReviewCommentAdded(_)
-                    | FilesEvent::ReviewCommentDeleted(_) => None,
+                    | FilesEvent::ReviewCommentDeleted(_) => return,
                 };
                 // Drive listings have no root id, so any Files event is
                 // a reason to re-read (loose files move under roots).
