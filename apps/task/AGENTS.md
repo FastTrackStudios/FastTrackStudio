@@ -476,6 +476,7 @@ Others that may prompt: `scp`/`ssh` (`-o BatchMode=yes`), `apt-get`
 | architect crdt codec helpers | `libs/architect/crdt/crdt/src/codec.rs` |
 | Env var reference | `.env.example` (complete inventory) |
 | Vault ⇄ CRDT design | `docs/architecture/vault-crdt-reconciliation.md` |
+| Dev demo seed (studio dataset, deterministic names) | `docs/dev-seed.md` |
 | Crate topology + request path | `ARCHITECTURE.md` |
 | Plans + their status convention | `plans/README.md` |
 

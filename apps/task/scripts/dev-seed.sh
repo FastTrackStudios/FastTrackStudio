@@ -4,9 +4,12 @@
 # Unlike dev-clone-prod.sh (which mirrors REAL prod data and needs prod
 # credentials you can't type into the web sign-in), this stands up a
 # self-contained dev vault with its OWN orgs, its OWN owner account with
-# a KNOWN password, and demo content — including a Files root with real
-# version history + a divergence, so the version-history / divergence UI
-# (issue #267) has something to show.
+# a KNOWN password, and demo content — including the STUDIO DATASET in
+# the home org: 50 projects, 3 albums with song sub-projects, the song
+# library / setlists / events, and 13 media Files roots with real
+# ffmpeg-generated video/audio (ffmpeg must be on PATH for playable
+# media; placeholders otherwise). Deterministic names, idempotent +
+# healing re-runs. Full guide: apps/task/docs/dev-seed.md
 #
 #   ./dev-seed.sh seed     # build + seed the dev vault ($DATA_ROOT)
 #   ./dev-seed.sh fresh    # wipe $DATA_ROOT, then seed from scratch
