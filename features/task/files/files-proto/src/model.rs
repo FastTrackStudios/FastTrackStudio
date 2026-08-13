@@ -384,6 +384,23 @@ pub enum RenditionKind {
     Filmstrip,
 }
 
+impl RenditionKind {
+    /// The stable rendition tag — the `{kind}` path segment of the
+    /// streaming route (issue #270). Must mirror
+    /// `files_transcode::RenditionKind::tag`, which the server parses
+    /// the segment with.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            RenditionKind::Proxy1080 => "proxy-1080",
+            RenditionKind::Proxy720 => "proxy-720",
+            RenditionKind::Audio => "audio-aac",
+            RenditionKind::Peaks => "peaks",
+            RenditionKind::Filmstrip => "filmstrip",
+        }
+    }
+}
+
 /// A generated (or cached) rendition, ready to stream: its CAS content
 /// id, byte length, and MIME. The Review page (issue #270) resolves a
 /// media file to this, then streams the bytes.

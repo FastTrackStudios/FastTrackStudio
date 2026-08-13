@@ -33,6 +33,10 @@
 //! Session checkpoint taken anywhere — another device, the CLI, the
 //! cadence engine — re-reads the listing in place, with no refresh.
 
+/// The Review player (issue #270): proxy playback + timecode seek +
+/// filmstrip scrub for an opened media file.
+pub mod review;
+
 use dioxus::prelude::*;
 use files_proto::{
     BrowseEntry, ChainEntry, DivergenceChoice, DivergenceInfo, FileRootInfo, FilesEvent,
@@ -561,6 +565,16 @@ fn OpenFileDetail(
 ) -> Element {
     rsx! {
         div { class: "pl-6 flex flex-col gap-2",
+            // A video file opens as a review: its proxy rendition plays
+            // here (issue #270 Phase A). Audio/other files skip straight
+            // to their history.
+            if review::is_video_path(&path) {
+                review::ReviewPlayer {
+                    org: org.clone(),
+                    root_id,
+                    path: path.clone(),
+                }
+            }
             if divergent {
                 DivergencePanel {
                     org: org.clone(),

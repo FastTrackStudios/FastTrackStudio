@@ -20,6 +20,9 @@ task-ui-core.workspace = true
 task-widgets.workspace = true
 # Wire types + RPC client only — wasm-clean by construction.
 files-proto = { workspace = true, features = ["vox"] }
+# The review player mints a signed media grant over vox before handing
+# a URL to `<video src>` (which can't set headers or await an RPC).
+media-proto = { workspace = true, features = ["vox"] }
 # `use_stream` — holds the `FilesService` event stream open and
 # re-establishes it across reconnects.
 architect = { workspace = true, features = ["client", "vox", "platform"] }

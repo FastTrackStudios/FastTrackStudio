@@ -3972,11 +3972,7 @@ impl FilesBackend {
 
     /// A rendition's total byte length — the Review page's streaming
     /// route (issue #270) needs it to build a `Content-Range`.
-    pub async fn rendition_len(
-        &self,
-        root_id: Uuid,
-        file_id_hex: &str,
-    ) -> Result<u64, FilesError> {
+    pub async fn rendition_len(&self, root_id: Uuid, file_id_hex: &str) -> Result<u64, FilesError> {
         let root = self.get_root_info(root_id).map_err(to_files_error)?;
         let store = self
             .rendition_store(root_id, Path::new(&root.path))

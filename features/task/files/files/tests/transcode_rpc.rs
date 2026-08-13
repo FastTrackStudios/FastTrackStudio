@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use architect::{LayerRouter, LocalServer, Scope};
-use files::{FilesBackend, FilesService as _, RootFlavor};
+use files::{FilesBackend, RootFlavor};
 use files_proto::RenditionKind;
 use files_transcode::transcoder::FakeTranscoder;
 

@@ -123,7 +123,11 @@ async fn rendition_route_streams_ranges_behind_the_media_grant() -> eyre::Result
 
     // ── A grant for a DIFFERENT root's renditions must not unlock this
     //    one — the prefix is per (root, review), not per org.
-    let stranger = grant(&state, &format!("files/renditions/{}", uuid::Uuid::new_v4())).await;
+    let stranger = grant(
+        &state,
+        &format!("files/renditions/{}", uuid::Uuid::new_v4()),
+    )
+    .await;
     let r = reqwest::get(format!("{url}?token={stranger}")).await?;
     assert_eq!(r.status().as_u16(), 401, "cross-root grant must not leak");
 
@@ -133,11 +137,15 @@ async fn rendition_route_streams_ranges_behind_the_media_grant() -> eyre::Result
     let r = reqwest::get(&authed).await?;
     assert_eq!(r.status().as_u16(), 200);
     assert_eq!(
-        r.headers().get("content-type").and_then(|v| v.to_str().ok()),
+        r.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
         Some("video/mp4")
     );
     assert_eq!(
-        r.headers().get("accept-ranges").and_then(|v| v.to_str().ok()),
+        r.headers()
+            .get("accept-ranges")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes"),
         "media elements need Accept-Ranges to consider the source seekable"
     );
@@ -154,7 +162,9 @@ async fn rendition_route_streams_ranges_behind_the_media_grant() -> eyre::Result
         .await?;
     assert_eq!(r.status().as_u16(), 206);
     assert_eq!(
-        r.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        r.headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
         Some(format!("bytes 5-9/{}", proxy.len).as_str())
     );
     let window = r.bytes().await?;
