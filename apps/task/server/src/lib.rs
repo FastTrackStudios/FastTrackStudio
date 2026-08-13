@@ -29,6 +29,7 @@ pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
 pub mod media;
+pub mod memberships;
 pub mod notifier;
 pub mod otlp;
 pub mod permits;

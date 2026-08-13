@@ -41,6 +41,8 @@ pub async fn dispatch() -> eyre::Result<bool> {
         Some("set-role") => set_role(&args[2..]).await.map(|()| true),
         Some("create-user") => create_user(&args[2..]).await.map(|()| true),
         Some("merge-principals") => merge_principals(&args[2..]).await.map(|()| true),
+        Some("adopt-principal") => adopt_principal(&args[2..]).await.map(|()| true),
+        Some("memberships") => show_memberships(&args[2..]).await.map(|()| true),
         // Dev-only: compiled OUT of release builds entirely, so the
         // deployed (release) server can never seed a known-password
         // admin (PR #295 review). In a release binary `seed` is just an
@@ -475,13 +477,17 @@ fn plan_principals(
             let Some(email) = email else {
                 // An account with no address cannot be matched to
                 // anything; naming it is the whole point of a dry run.
-                warnings.push(format!("{slug}: user {id} has no email — cannot merge, left alone"));
+                warnings.push(format!(
+                    "{slug}: user {id} has no email — cannot merge, left alone"
+                ));
                 continue;
             };
-            by_email
-                .entry(email.to_lowercase())
-                .or_default()
-                .push((slug.clone(), *is_home, *id, email.clone()));
+            by_email.entry(email.to_lowercase()).or_default().push((
+                slug.clone(),
+                *is_home,
+                *id,
+                email.clone(),
+            ));
         }
     }
 
@@ -550,7 +556,10 @@ async fn merge_principals(args: &[String]) -> eyre::Result<()> {
         .scan_orgs()
         .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
 
-    println!("merge-principals (DRY RUN) — data root {}", data_root.path().display());
+    println!(
+        "merge-principals (DRY RUN) — data root {}",
+        data_root.path().display()
+    );
     println!();
 
     // ── every org's accounts ────────────────────────────────────────
@@ -701,6 +710,180 @@ async fn merge_principals(args: &[String]) -> eyre::Result<()> {
     Ok(())
 }
 
+/// Resolve the home org — the server's identity authority.
+fn home_org(
+    orgs: &[(org_proto::OrgRoot, org_proto::OrgManifest)],
+) -> eyre::Result<&org_proto::OrgRoot> {
+    orgs.iter()
+        .find(|(_, m)| m.is_home)
+        .map(|(r, _)| r)
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "no org is marked `is_home` in its org.toml — the home org is this server's \
+                 identity authority, so memberships have nowhere to live"
+            )
+        })
+}
+
+/// `admin adopt-principal --email <addr>` — S1 of
+/// `plans/one-account-per-server.md`.
+///
+/// Give one principal a membership row in every org on this server that
+/// already holds an account with that address, carrying THAT org's role
+/// so an admin in one org and a reader in another stay exactly that.
+/// The principal is the home org's user id.
+///
+/// It adopts orgs that already provisioned the person; it never invents
+/// membership. An org with no account for the address is reported and
+/// skipped — `admin create-user --org <slug> --email <addr>` first if
+/// that org should have them, then re-run.
+///
+/// Idempotent: re-running updates roles in place, which is the ONLY way
+/// a role changes once the lane stops reading each org's own role
+/// column. `--dry-run` prints the rows and writes nothing.
+async fn adopt_principal(args: &[String]) -> eyre::Result<()> {
+    let Some(email) = flag(args, "--email") else {
+        bail!("--email is required");
+    };
+    let dry = has(args, "--dry-run");
+
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    let orgs = data_root
+        .scan_orgs()
+        .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
+    let home = home_org(&orgs)?;
+    let home_slug = home.slug().to_owned();
+
+    // The principal id is the home org's user id, so nothing that
+    // already references it in the home org — where nearly all the data
+    // is — has to be rewritten.
+    let home_auth = open_org_auth(&home_slug).await?;
+    let principal = home_auth
+        .auth
+        .find_user_by_email(&email)
+        .await
+        .map_err(|e| eyre::eyre!("look up `{email}` in home org `{home_slug}`: {e:?}"))?
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "no account with email `{email}` in the home org `{home_slug}` — the principal \
+                 must exist there first (`admin create-user --org {home_slug} --email {email}`)"
+            )
+        })?;
+
+    println!(
+        "principal {} ({email}) — home org `{home_slug}`{}",
+        principal.id,
+        if dry { "  [DRY RUN]" } else { "" }
+    );
+
+    let mut adopted: Vec<(String, Option<String>)> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for (root, _) in &orgs {
+        let slug = root.slug().to_owned();
+        if !root.auth_db().exists() {
+            skipped.push(format!("{slug}: no auth store"));
+            continue;
+        }
+        let auth = open_org_auth(&slug).await?;
+        let account = auth
+            .auth
+            .find_user_by_email(&email)
+            .await
+            .map_err(|e| eyre::eyre!("look up `{email}` in `{slug}`: {e:?}"))?;
+        match account {
+            Some(user) => adopted.push((slug, user.role)),
+            None => skipped.push(format!("{slug}: no account for `{email}`")),
+        }
+    }
+
+    if !dry {
+        let store = crate::memberships::Memberships::open(&home.memberships_db()).await?;
+        for (slug, role) in &adopted {
+            store.upsert(principal.id, slug, role.as_deref()).await?;
+        }
+    }
+
+    println!();
+    println!("memberships ({})", adopted.len());
+    for (slug, role) in &adopted {
+        println!(
+            "  {slug:<20} role = {}",
+            role.as_deref().unwrap_or("(member)")
+        );
+    }
+    if !skipped.is_empty() {
+        println!();
+        println!("skipped");
+        for s in &skipped {
+            println!("  {s}");
+        }
+    }
+    println!();
+    if dry {
+        println!("nothing written (--dry-run).");
+    } else {
+        println!("written to {}", home.memberships_db().display());
+    }
+    Ok(())
+}
+
+/// `admin memberships [--email <addr>]` — read the table back.
+///
+/// The counterpart to `adopt-principal`: what the server will actually
+/// believe about who belongs where, read from the rows rather than
+/// inferred from six auth stores.
+async fn show_memberships(args: &[String]) -> eyre::Result<()> {
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    let orgs = data_root
+        .scan_orgs()
+        .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
+    let home = home_org(&orgs)?;
+    let db = home.memberships_db();
+    if !db.exists() {
+        println!(
+            "no memberships store yet at {} — run `admin adopt-principal --email <addr>`",
+            db.display()
+        );
+        return Ok(());
+    }
+
+    let store = crate::memberships::Memberships::open_ro(&db).await?;
+    let home_auth = open_org_auth(home.slug()).await?;
+
+    let users = match flag(args, "--email") {
+        Some(email) => {
+            let u = home_auth
+                .auth
+                .find_user_by_email(&email)
+                .await
+                .map_err(|e| eyre::eyre!("look up `{email}`: {e:?}"))?
+                .ok_or_else(|| eyre::eyre!("no account with email `{email}` in the home org"))?;
+            vec![u]
+        }
+        None => home_auth
+            .auth
+            .list_users_local_trusted()
+            .await
+            .map_err(|e| eyre::eyre!("list users: {e:?}"))?,
+    };
+
+    for u in users {
+        let rows = store.for_user(u.id).await?;
+        println!("{}  {}", u.id, u.email.as_deref().unwrap_or("(no email)"));
+        if rows.is_empty() {
+            println!("  (no memberships — not a member of any org on this server)");
+        }
+        for r in rows {
+            println!(
+                "  {:<20} role = {}",
+                r.org_slug,
+                r.role.as_deref().unwrap_or("(member)")
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod merge_principals_tests {
     use super::*;
@@ -747,7 +930,11 @@ mod merge_principals_tests {
                 true,
                 vec![(u(1), Some("Cody@Example.com".into()))],
             ),
-            ("cbu".into(), false, vec![(u(2), Some("cody@example.com".into()))]),
+            (
+                "cbu".into(),
+                false,
+                vec![(u(2), Some("cody@example.com".into()))],
+            ),
         ];
         let (principals, _) = plan_principals(&orgs);
         assert_eq!(principals.len(), 1, "one login, one principal");
