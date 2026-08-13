@@ -324,6 +324,7 @@ impl VaultEntity for ReviewComments {
             body: body.trim_start_matches('\n').to_string(),
             commit_id: hex_at(&map, "commitId", "commit_id").unwrap_or_default(),
             annotation,
+            via_link: yaml::str_at(&map, "viaLink").unwrap_or_default(),
             created_at: yaml::timestamp_at(&map, "dateCreated").unwrap_or_else(epoch),
         })
     }
@@ -335,6 +336,9 @@ impl VaultEntity for ReviewComments {
         map.insert("timecode".into(), m.timecode_secs.into());
         if !m.author.is_empty() {
             map.insert("author".into(), m.author.clone().into());
+        }
+        if !m.via_link.is_empty() {
+            map.insert("viaLink".into(), m.via_link.clone().into());
         }
         map.insert("commitId".into(), m.commit_id.clone().into());
         if !m.annotation.is_empty() {

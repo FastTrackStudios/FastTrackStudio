@@ -148,6 +148,7 @@ async fn share_links_scope_gate_and_receipt() -> eyre::Result<()> {
             options(ShareCapabilities {
                 comment: false,
                 download: true,
+                file_request: false,
             }),
         )
         .await
@@ -238,6 +239,7 @@ async fn share_links_scope_gate_and_receipt() -> eyre::Result<()> {
             options(ShareCapabilities {
                 comment: false,
                 download: true,
+                file_request: false,
             }),
         )
         .await
@@ -273,6 +275,7 @@ async fn share_links_scope_gate_and_receipt() -> eyre::Result<()> {
             options(ShareCapabilities {
                 comment: false,
                 download: false,
+                file_request: false,
             }),
         )
         .await

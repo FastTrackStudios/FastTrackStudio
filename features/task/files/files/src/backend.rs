@@ -1396,10 +1396,27 @@ impl FilesBackend {
         Ok(self.root_lock(review.root_id))
     }
 
+    /// Add a comment stamped with a share-link attribution (issue #272
+    /// AC 1) — the guest lane's entry point. Publishes like the org-lane
+    /// RPC.
+    pub async fn add_review_comment_via(
+        &self,
+        review_id: Uuid,
+        comment: files_proto::NewReviewComment,
+        via_link: String,
+    ) -> Result<files_proto::ReviewComment, FilesError> {
+        let this = self.clone();
+        let added =
+            blocking(move || this.add_review_comment_inner(review_id, comment, via_link)).await?;
+        self.publish(FilesEvent::ReviewCommentAdded(added.clone()));
+        Ok(added)
+    }
+
     fn add_review_comment_inner(
         &self,
         review_id: Uuid,
         comment: files_proto::NewReviewComment,
+        via_link: String,
     ) -> Result<files_proto::ReviewComment, Error> {
         if comment.body.trim().is_empty() && comment.annotation.is_empty() {
             return Err(Error::BadRequest(
@@ -1425,7 +1442,8 @@ impl FilesBackend {
             commit_id: commit_id.hex(),
             ..comment
         };
-        self.versions.create_review_comment(&review, normalized)
+        self.versions
+            .create_review_comment(&review, normalized, via_link)
     }
 
     /// Resolve a Named Version the way a share link must: prefer the
@@ -4500,7 +4518,9 @@ impl FilesService for FilesBackend {
         comment: files_proto::NewReviewComment,
     ) -> Result<files_proto::ReviewComment, FilesError> {
         let this = self.clone();
-        let added = blocking(move || this.add_review_comment_inner(review_id, comment)).await?;
+        let added =
+            blocking(move || this.add_review_comment_inner(review_id, comment, String::new()))
+                .await?;
         self.publish(FilesEvent::ReviewCommentAdded(added.clone()));
         Ok(added)
     }

@@ -35,6 +35,7 @@ pub mod permits;
 pub mod presence;
 pub mod server_mgmt;
 pub mod share;
+pub mod share_guest;
 pub mod snapshot;
 pub mod storage;
 pub mod watch_bridge;
@@ -2213,6 +2214,20 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/org/{slug}/share/{token}/download/{*rel}",
             get(share::share_download_handler),
+        )
+        // The guest lane (issue #272): the real RPC surface over an
+        // anonymous WebSocket, scoped to the link's Review.
+        .route(
+            "/org/{slug}/share/{token}/vox",
+            any(share::share_guest_vox_handler),
+        )
+        // The file-request inbox (issue #272): uploads land in the
+        // link's incoming area, never the tree. Media runs far past
+        // axum's 2 MB default body cap.
+        .route(
+            "/org/{slug}/share/{token}/upload/{*name}",
+            axum::routing::post(share::share_upload_handler)
+                .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024)),
         )
         // MCP — Task as a tool surface for agents (Hermes gateway,
         // Claude Code, any MCP client). See `mcp`.

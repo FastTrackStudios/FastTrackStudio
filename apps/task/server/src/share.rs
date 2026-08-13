@@ -74,6 +74,7 @@ impl StoredLink {
         self.capabilities.unwrap_or(ShareCapabilities {
             comment: self.capability == "comment",
             download: false,
+            file_request: false,
         })
     }
 
@@ -118,6 +119,9 @@ struct StoreFile {
 pub struct ShareStore {
     path: PathBuf,
     log_path: PathBuf,
+    /// The org dir — file-request uploads land under
+    /// `<org>/files-incoming/<token>/` (issue #272 AC 3).
+    org_dir: PathBuf,
     state: Mutex<StoreFile>,
 }
 
@@ -161,8 +165,14 @@ impl ShareStore {
         Self {
             path,
             log_path,
+            org_dir: org_dir.to_path_buf(),
             state: Mutex::new(state),
         }
+    }
+
+    /// A file-request link's incoming area (per token, created lazily).
+    pub fn incoming_dir(&self, token: &str) -> PathBuf {
+        self.org_dir.join("files-incoming").join(token)
     }
 
     fn save_locked(path: &std::path::Path, file: &StoreFile) -> Result<(), ShareError> {
@@ -417,6 +427,24 @@ impl ShareService for ShareServiceImpl {
                 ));
             }
         }
+        // A Review link must point at a review that exists — a guest
+        // lane on a dangling id would 404 on every open.
+        if let ShareTarget::Review { id } = &target {
+            let Some(files) = &self.files else {
+                return Err(ShareError::Invalid(
+                    "review links need the Files backend mounted".into(),
+                ));
+            };
+            let found = files
+                .list_reviews(None)
+                .await
+                .map_err(|e| ShareError::Invalid(format!("reviews: {e}")))?
+                .into_iter()
+                .any(|r| r.id == *id);
+            if !found {
+                return Err(ShareError::Invalid(format!("no review {id}")));
+            }
+        }
         // 32 hex chars of UUIDv4 randomness — unguessable, URL-safe.
         let token = uuid::Uuid::new_v4().simple().to_string();
         let mut link = StoredLink {
@@ -521,6 +549,92 @@ impl ShareService for ShareServiceImpl {
     async fn sharing_disabled(&self) -> Result<bool, ShareError> {
         Ok(self.store.sharing_disabled())
     }
+
+    async fn list_incoming(
+        &self,
+        token: String,
+    ) -> Result<Vec<share_proto::IncomingFile>, ShareError> {
+        if self.store.resolve(&token).is_none() {
+            return Err(ShareError::NotFound);
+        }
+        let dir = self.store.incoming_dir(&token);
+        let mut out = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let Ok(meta) = entry.metadata() else { continue };
+                if !meta.is_file() {
+                    continue;
+                }
+                let uploaded_at = meta
+                    .modified()
+                    .ok()
+                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+                    .unwrap_or_default();
+                out.push(share_proto::IncomingFile {
+                    name: entry.file_name().to_string_lossy().into_owned(),
+                    size: meta.len(),
+                    uploaded_at,
+                });
+            }
+        }
+        out.sort_by(|a, b| b.uploaded_at.cmp(&a.uploaded_at));
+        Ok(out)
+    }
+
+    async fn promote_incoming(
+        &self,
+        token: String,
+        name: String,
+        dest_path: String,
+    ) -> Result<(), ShareError> {
+        let Some(link) = self.store.resolve(&token) else {
+            return Err(ShareError::NotFound);
+        };
+        // Only a Slice link has a tree to promote into.
+        let ShareTarget::Slice { root_id, .. } = link.target() else {
+            return Err(ShareError::Invalid("not a slice link".into()));
+        };
+        // The upload's name is a flat basename (the upload route wrote
+        // it); refuse anything that isn't.
+        if name.is_empty() || name.contains('/') || name.contains("..") {
+            return Err(ShareError::Invalid(format!("bad incoming name: {name}")));
+        }
+        let dest_path = dest_path.trim_matches('/');
+        if dest_path.is_empty() || dest_path.split('/').any(|s| s == ".." || s.is_empty()) {
+            return Err(ShareError::Invalid(format!("bad destination: {dest_path}")));
+        }
+        let Some(files) = &self.files else {
+            return Err(ShareError::Invalid(
+                "promotion needs the Files backend mounted".into(),
+            ));
+        };
+        let root = files
+            .get_root(root_id)
+            .await
+            .map_err(|e| ShareError::Invalid(format!("root: {e}")))?;
+        let src = self.store.incoming_dir(&token).join(&name);
+        let dest = std::path::Path::new(&root.path).join(dest_path);
+        if dest.exists() {
+            // Never overwrite (AC 3): the versioned tree's files are
+            // the owner's; an upload never clobbers one.
+            return Err(ShareError::Invalid(format!(
+                "{dest_path}: already exists — promote to a different name"
+            )));
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ShareError::Storage(e.to_string()))?;
+        }
+        // Copy + remove rather than rename: the incoming area (org dir)
+        // and the root may live on different filesystems.
+        std::fs::copy(&src, &dest).map_err(|e| ShareError::Storage(format!("promote: {e}")))?;
+        let _ = std::fs::remove_file(&src);
+        // The cadence engine sees the arrival like any other save; a
+        // hint makes the capture prompt.
+        let _ = files
+            .hint_activity(root_id, vec![dest_path.to_string()])
+            .await;
+        Ok(())
+    }
 }
 
 // ── HTTP: token-gated serving ───────────────────────────────────────
@@ -622,6 +736,9 @@ struct FilesScope {
     /// Browse LISTINGS resolve the head too ([`render_browse`]), so a
     /// link never lists a file its byte routes can't serve.
     at: Option<String>,
+    /// A Review link (issue #272) is scoped to ONE file: only this
+    /// root-relative path is addressable; browsing is refused.
+    file_only: Option<String>,
 }
 
 /// Resolve a link's Files scope; `None` for note links.
@@ -635,6 +752,7 @@ async fn files_scope(
             root_id,
             subpath,
             at: None,
+            file_only: None,
         })),
         ShareTarget::NamedVersion { id } => {
             // Resolve the curated entity to its exact change — the
@@ -647,6 +765,27 @@ async fn files_scope(
                 root_id: version.root_id,
                 subpath: String::new(),
                 at: Some(version.commit_id),
+                file_only: None,
+            }))
+        }
+        ShareTarget::Review { id } => {
+            // The review pins the file; the guest lane (its own vox
+            // route) carries the conversation. These HTML routes serve
+            // exactly the one file.
+            let review = org
+                .files
+                .list_reviews(None)
+                .await
+                .ok()
+                .and_then(|all| all.into_iter().find(|r| r.id == id));
+            let Some(review) = review else {
+                return Err((StatusCode::NOT_FOUND, "review gone").into_response());
+            };
+            Ok(Some(FilesScope {
+                root_id: review.root_id,
+                subpath: String::new(),
+                at: None,
+                file_only: Some(review.file_path),
             }))
         }
     }
@@ -729,6 +868,11 @@ pub async fn share_rendition_handler(
     let Some(wire_kind) = rendition_kind_from_tag(&kind) else {
         return (StatusCode::NOT_FOUND, "unknown rendition kind").into_response();
     };
+    if let Some(only) = &scope.file_only
+        && rel != *only
+    {
+        return (StatusCode::NOT_FOUND, "this link serves one file").into_response();
+    }
     let full = join_scope(&scope.subpath, &rel);
     let rendition = match &scope.at {
         Some(commit) => {
@@ -778,6 +922,11 @@ pub async fn share_download_handler(
         Ok(None) => return (StatusCode::NOT_FOUND, "not a files link").into_response(),
         Err(resp) => return resp,
     };
+    if let Some(only) = &scope.file_only
+        && rel != *only
+    {
+        return (StatusCode::NOT_FOUND, "this link serves one file").into_response();
+    }
     let full = join_scope(&scope.subpath, &rel);
     // Pin the exact bytes BEFORE any header leaves: `resolve_source`
     // returns (len, CAS id) in one resolution and the stream then reads
@@ -840,6 +989,119 @@ fn sanitize_filename(name: &str) -> String {
     }
 }
 
+/// `GET /org/{slug}/share/{token}/vox` — the guest lane (issue #272):
+/// an anonymous WebSocket carrying the real RPC surface, scoped to the
+/// link's Review by construction (see [`crate::share_guest`]). The
+/// token + password + expiry are the whole grant, re-checked at every
+/// upgrade; there is no session and no permission-gate principal.
+pub async fn share_guest_vox_handler(
+    State(state): State<AppState>,
+    AxPath((slug, token)): AxPath<(String, String)>,
+    Query(q): Query<ShareQuery>,
+    ws: axum::extract::WebSocketUpgrade,
+) -> Response {
+    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref(), false) {
+        Ok(v) => v,
+        Err(resp) => return *resp,
+    };
+    let ShareTarget::Review { id } = link.target() else {
+        return (StatusCode::BAD_REQUEST, "not a review link").into_response();
+    };
+    let review = match org.files.list_reviews(None).await {
+        Ok(all) => all.into_iter().find(|r| r.id == id),
+        Err(_) => None,
+    };
+    let Some(review) = review else {
+        return (StatusCode::NOT_FOUND, "review gone").into_response();
+    };
+    org.shares.log_access(&token, "guest", "");
+    // AC 1's attribution: every comment through this lane carries the
+    // link's identity, stamped server-side.
+    let attribution = format!(
+        "{} ({})",
+        link.label,
+        &link.token[..8.min(link.token.len())]
+    );
+    let guest = crate::share_guest::GuestFilesService::new(
+        org.files.clone(),
+        review.clone(),
+        link.capabilities(),
+        attribution,
+    );
+    let media = crate::share_guest::GuestMediaService::new(
+        crate::media::MediaServiceImpl::new(
+            org.attachments.clone(),
+            org.slug.clone(),
+            org.attachments.keypair.clone(),
+        ),
+        review.root_id,
+    );
+    let router = architect::LayerRouter::new()
+        .merge(files::files_service_layer(guest))
+        .with(
+            media_proto::media_service_service_descriptor(),
+            media_proto::MediaServiceDispatcher::new(media),
+        );
+    let router = crate::snapshot::GatedRouter::new(router, state.write_gate.clone());
+    ws.protocols([crate::VOX_SUBPROTOCOL])
+        .on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
+}
+
+/// `POST /org/{slug}/share/{token}/upload/{name}` — the file-request
+/// inbox (issue #272 AC 3): visitors with the `file_request` capability
+/// drop files into the link's per-token incoming area. Uploads NEVER
+/// touch the tree (no overwrite, no delete — collisions get suffixed);
+/// the owner promotes them in.
+pub async fn share_upload_handler(
+    State(state): State<AppState>,
+    AxPath((slug, token, name)): AxPath<(String, String, String)>,
+    Query(q): Query<ShareQuery>,
+    body: axum::body::Bytes,
+) -> Response {
+    let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref(), false) {
+        Ok(v) => v,
+        Err(resp) => return *resp,
+    };
+    if !link.capabilities().file_request {
+        return (
+            StatusCode::FORBIDDEN,
+            "this link does not accept file uploads",
+        )
+            .into_response();
+    }
+    // Flat basenames only — the incoming area is a single review queue,
+    // not a tree.
+    let name = sanitize_filename(name.rsplit('/').next().unwrap_or(&name));
+    let dir = org.shares.incoming_dir(&token);
+    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("incoming: {e}")).into_response();
+    }
+    // Never overwrite: a second `notes.pdf` lands as `notes-2.pdf`.
+    let mut dest = dir.join(&name);
+    if dest.exists() {
+        let (stem, ext) = match name.rsplit_once('.') {
+            Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+            _ => (name.clone(), String::new()),
+        };
+        for n in 2..1000 {
+            let candidate = dir.join(format!("{stem}-{n}{ext}"));
+            if !candidate.exists() {
+                dest = candidate;
+                break;
+            }
+        }
+    }
+    let saved = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if let Err(e) = tokio::fs::write(&dest, &body).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("upload: {e}")).into_response();
+    }
+    org.shares.log_access(&token, "upload", &saved);
+    (StatusCode::OK, saved).into_response()
+}
+
 fn rendition_kind_from_tag(tag: &str) -> Option<files_proto::RenditionKind> {
     use files_proto::RenditionKind as K;
     Some(match tag {
@@ -863,6 +1125,17 @@ async fn render_browse(
     rel: &str,
     q: &ShareQuery,
 ) -> Response {
+    // A Review link is one file, not a tree: the landing (rel = "")
+    // IS the file page, any other path 404s, and there is no listing.
+    if let Some(only) = &scope.file_only {
+        let base = format!("/org/{slug}/share/{token}");
+        let pw = pw_suffix(q);
+        return if rel.is_empty() || rel == *only {
+            Html(file_html(link, &base, only, &pw)).into_response()
+        } else {
+            (StatusCode::NOT_FOUND, "this link serves one file").into_response()
+        };
+    }
     let full = join_scope(&scope.subpath, rel);
     // List the CHECKPOINT tree, never the live directory: the byte
     // routes (download / rendition) serve checkpointed content, and a

@@ -468,6 +468,11 @@ pub struct ReviewComment {
     /// Frame drawing anchored to `(review, commit_id, timecode)` in
     /// normalized coordinates (AC 3). Empty = no drawing.
     pub annotation: Vec<AnnotationStroke>,
+    /// Share-link attribution (issue #272 AC 1): the label/token of the
+    /// guest link this comment arrived through. Empty for org members.
+    /// Stamped by the guest lane server-side — a client never sets it.
+    #[serde(default)]
+    pub via_link: String,
     pub created_at: DateTime<Utc>,
 }
 

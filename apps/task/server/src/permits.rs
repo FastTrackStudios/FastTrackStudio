@@ -227,6 +227,9 @@ table!(SHARE, "share", "shares/**", [
     // The per-link access log (views + download receipts) is a read;
     // the org kill switch is the org's biggest sharing decision.
     rd "access_log", wa "set_sharing_disabled", rd "sharing_disabled",
+    // The file-request inbox (issue #272): listing the queue is a
+    // read; promotion writes into the versioned tree — audited.
+    rd "list_incoming", wa "promote_incoming",
 ]);
 
 // Per-file CRDT: `sync` mutates the doc; presence is ephemeral and never

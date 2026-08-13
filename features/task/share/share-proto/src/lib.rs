@@ -31,6 +31,10 @@ pub enum ShareTarget {
     /// A curated Named Version (issue #261 entity) — resolves to the
     /// exact change it names, however the root has moved since.
     NamedVersion { id: Uuid },
+    /// A Files Review (issue #270 entity): the guest lane (issue #272)
+    /// puts an anonymous visitor in the review — playback, comments,
+    /// drawings — scoped to exactly that review's file.
+    Review { id: Uuid },
 }
 
 /// Capability axes on a link. `view` is what a link IS — the axes are
@@ -43,6 +47,11 @@ pub struct ShareCapabilities {
     /// May download originals. Without it a link is view-only: proxy
     /// renditions serve, original bytes never do (issue #271 AC 3).
     pub download: bool,
+    /// May upload into the link's per-token incoming area (issue #272:
+    /// the file-request inbox) — never into the tree itself; the owner
+    /// promotes uploads in.
+    #[serde(default)]
+    pub file_request: bool,
 }
 
 /// The mint/edit options for a link, bundled (RPC methods carry at most
@@ -100,6 +109,19 @@ pub struct ShareAccess {
     pub path: String,
 }
 
+/// One upload sitting in a file-request link's incoming area (issue
+/// #272 AC 3), waiting for the owner to promote it into the tree.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(C)]
+pub struct IncomingFile {
+    /// Name inside the link's incoming area (uploads never overwrite —
+    /// collisions get suffixed).
+    pub name: String,
+    pub size: u64,
+    /// RFC3339 upload stamp (filesystem mtime).
+    pub uploaded_at: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Facet, thiserror::Error)]
 #[repr(u8)]
 pub enum ShareError {
@@ -154,4 +176,18 @@ pub trait ShareService {
     async fn set_sharing_disabled(&self, disabled: bool) -> Result<(), ShareError>;
 
     async fn sharing_disabled(&self) -> Result<bool, ShareError>;
+
+    /// A file-request link's incoming uploads (issue #272 AC 3),
+    /// newest first — the owner's review queue.
+    async fn list_incoming(&self, token: String) -> Result<Vec<IncomingFile>, ShareError>;
+
+    /// Promote one incoming upload into the link's root at
+    /// `dest_path` (root-relative). Never overwrites; the versioning
+    /// cadence captures the arrival like any other save.
+    async fn promote_incoming(
+        &self,
+        token: String,
+        name: String,
+        dest_path: String,
+    ) -> Result<(), ShareError>;
 }
