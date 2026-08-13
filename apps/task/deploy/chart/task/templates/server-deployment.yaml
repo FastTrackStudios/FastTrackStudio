@@ -96,6 +96,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- range .Values.server.mediaMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /.well-known/task-server.json
@@ -116,6 +120,18 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Values.server.persistence.existingClaim | default (printf "%s-data" (include "task.fullname" .)) }}
+        {{- range .Values.server.mediaMounts }}
+        - name: {{ .name }}
+          {{- if .nfs }}
+          nfs:
+            server: {{ .nfs.server }}
+            path: {{ .nfs.path }}
+          {{- else if .hostPath }}
+          hostPath:
+            path: {{ .hostPath }}
+            type: Directory
+          {{- end }}
+        {{- end }}
       {{- with .Values.server.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -70,6 +70,36 @@ server:
     accessModes:
       - ReadWriteOnce
 
+  # Media trees mounted alongside /data, for File Roots that live on a
+  # NAS rather than in the PVC.
+  #
+  # The PVC holds what the server OWNS (org sqlites, vault, crdt docs).
+  # A File Root is different: it points at bytes that already exist
+  # somewhere else and stay there — a 25 GB video project has no
+  # business being copied into a 10Gi claim. Mount that tree here and
+  # register the root at the path it appears at inside the pod.
+  #
+  # **Mount at the same absolute path the host uses.** A root stores its
+  # path, and its version store lives inside the tree, so a root
+  # registered as /mnt/storage/… must resolve to the same string in
+  # every process that opens it — the server, a future agent, an
+  # operator running `admin` verbs. Mounting the same tree at a
+  # different path in each is how a root ends up "missing" while the
+  # bytes sit right there.
+  #
+  # The tree must be WRITABLE: checkpoints keep version history in a
+  # `.fts-files/` directory inside the root itself.
+  #
+  #  mediaMounts:
+  #    - name: projects
+  #      mountPath: /mnt/storage/Task/Projects
+  #      nfs: { server: 10.10.10.1, path: /mnt/storage/Task/Projects }
+  #    # or, for a single-node cluster:
+  #    - name: projects
+  #      mountPath: /mnt/storage/Task/Projects
+  #      hostPath: /mnt/storage/Task/Projects
+  mediaMounts: []
+
   resources: {}
   #  e.g.
   #  resources:
