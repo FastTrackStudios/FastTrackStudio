@@ -90,14 +90,18 @@ server:
   # The tree must be WRITABLE: checkpoints keep version history in a
   # `.fts-files/` directory inside the root itself.
   #
+  # Mount the TREE, not one folder inside it — Projects/, Assets/ and
+  # the inbox all live under it, and a new area should not need a
+  # redeploy to become visible.
+  #
   #  mediaMounts:
-  #    - name: projects
-  #      mountPath: /mnt/storage/Task/Projects
-  #      nfs: { server: 10.10.10.1, path: /mnt/storage/Task/Projects }
+  #    - name: task-media
+  #      mountPath: /mnt/storage/Task
+  #      nfs: { server: 10.10.10.1, path: /mnt/storage/Task }
   #    # or, for a single-node cluster:
-  #    - name: projects
-  #      mountPath: /mnt/storage/Task/Projects
-  #      hostPath: /mnt/storage/Task/Projects
+  #    - name: task-media
+  #      mountPath: /mnt/storage/Task
+  #      hostPath: /mnt/storage/Task
   mediaMounts: []
 
   resources: {}
