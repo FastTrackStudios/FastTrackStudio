@@ -94,6 +94,11 @@ pub(crate) fn VideoStage(
                         // against its own size.
                         let (_, _, w, h) = *player.frame_rect.peek();
                         if let Some(p) = normalized_point(c.x, c.y, (0.0, 0.0, w, h)) {
+                            // The drawing belongs to the frame its first
+                            // stroke landed on — record it once.
+                            if draw.pending_at.peek().is_none() {
+                                draw.pending_at.set(Some(*player.now.peek()));
+                            }
                             active.set(Some(AnnotationStroke {
                                 points: vec![p],
                                 color: (*draw.color.peek()).into(),

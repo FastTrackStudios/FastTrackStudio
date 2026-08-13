@@ -38,7 +38,7 @@ pub fn ReviewScreen(
     let stage_id = use_hook(|| format!("review-stage-{}", Uuid::new_v4().simple()));
     let cmp_video_id = use_hook(|| format!("review-cmp-{}", Uuid::new_v4().simple()));
 
-    let player = use_hook(|| PlayerCtx::install(&video_id, &stage_id));
+    let player = use_hook(|| PlayerCtx::install(&video_id, &stage_id, &container_id));
     use_context_provider(|| player);
     let draw = use_hook(DrawCtx::install);
     use_context_provider(|| draw);
@@ -285,17 +285,22 @@ fn ComparePane(
     compare_sources: Resource<Option<Result<super::Sources, String>>>,
     on_close: EventHandler<()>,
 ) -> Element {
-    // Install the sync loop once both elements exist: B follows A —
-    // playing when A plays, seeking when drift exceeds 50ms (one
-    // frame's tolerance while paused avoids decoder thrash).
+    // The pane div anchors the sync loop's lifetime: B's <video>
+    // mounts late (after its rendition resolves), so a missing B is a
+    // skipped frame, never a shutdown — the loop ends only when the
+    // pane itself unmounts.
+    let pane_id = use_hook(|| format!("review-cmppane-{}", uuid::Uuid::new_v4().simple()));
+
+    // B follows A — playing when A plays, seeking when drift exceeds
+    // 50ms (one frame's tolerance while paused avoids decoder thrash).
     {
-        let (a, b) = (video_id.clone(), cmp_video_id.clone());
+        let (a, b, pane) = (video_id.clone(), cmp_video_id.clone(), pane_id.clone());
         use_hook(move || {
             let _ = dioxus::document::eval(&format!(
                 "var loop=function(){{\
+                   if(!document.getElementById('{pane}')){{return;}}\
                    var a=document.getElementById('{a}'),b=document.getElementById('{b}');\
-                   if(!b){{return;}}\
-                   if(a){{\
+                   if(a&&b){{\
                      b.muted=true;\
                      if(!a.paused){{\
                        if(b.paused){{b.play();}}\
@@ -312,7 +317,9 @@ fn ComparePane(
     }
 
     rsx! {
-        div { class: "relative flex min-w-0 flex-1 flex-col bg-black",
+        div {
+            id: pane_id.clone(),
+            class: "relative flex min-w-0 flex-1 flex-col bg-black",
             {match &*compare_sources.read_unchecked() {
                 Some(Some(Ok(cmp))) => rsx! {
                     video {

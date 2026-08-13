@@ -299,37 +299,12 @@ impl TimeFormat {
     }
 }
 
-// ── avatars ───────────────────────────────────────────────────────
+// ── avatars ───────────────────────────────────────────────────
+// The identity (hash, palette, initials) is the app-wide one from
+// task-ui-core::avatar — the same person renders the same in the
+// review rail and the org chrome.
 
-/// The marker/avatar palette — hashed per author name so a reviewer
-/// keeps one color across the timeline and the rail.
-const AVATAR_COLORS: [&str; 10] = [
-    "#E67E22", "#E74C3C", "#9B59B6", "#3498DB", "#1ABC9C", "#2ECC71", "#F39C12", "#D35400",
-    "#8E44AD", "#2980B9",
-];
-
-pub(crate) fn avatar_color(name: &str) -> &'static str {
-    let mut hash: i64 = 0;
-    for c in name.chars() {
-        hash = (c as i64)
-            .wrapping_add(hash.wrapping_shl(5))
-            .wrapping_sub(hash);
-    }
-    AVATAR_COLORS[hash.unsigned_abs() as usize % AVATAR_COLORS.len()]
-}
-
-/// First + last initial, or the first character, uppercased. Empty
-/// names (anonymous guests) read as "G".
-pub(crate) fn initials(name: &str) -> String {
-    let mut words = name.split_whitespace().filter(|w| !w.is_empty());
-    let first = words.next().and_then(|w| w.chars().next());
-    let last = words.next_back().and_then(|w| w.chars().next());
-    match (first, last) {
-        (Some(f), Some(l)) => format!("{}{}", f.to_uppercase(), l.to_uppercase()),
-        (Some(f), None) => f.to_uppercase().to_string(),
-        _ => "G".to_string(),
-    }
-}
+pub(crate) use task_ui_core::avatar::{gradient_css as avatar_css, initials};
 
 pub(crate) fn display_author(name: &str) -> String {
     if name.is_empty() {
@@ -337,6 +312,17 @@ pub(crate) fn display_author(name: &str) -> String {
     } else {
         name.to_string()
     }
+}
+
+// ── unpinned comments ─────────────────────────────────────────
+
+/// The wire type's `timecode_secs` is a bare f64 with no pinned flag;
+/// a detached (general) comment stores this sentinel so it never
+/// masquerades as frame-0 feedback: no marker dot, no chip, no seek.
+pub(crate) const UNPINNED: f64 = -1.0;
+
+pub(crate) fn is_pinned(timecode_secs: f64) -> bool {
+    timecode_secs >= 0.0
 }
 
 // ── element interop ───────────────────────────────────────────────
@@ -421,9 +407,12 @@ impl PlayerCtx {
     }
 
     /// Create the signals and start the poll loop for `video_id`
-    /// inside `stage_id`. Call once per mounted player, then provide
-    /// via context.
-    pub(crate) fn install(video_id: &str, stage_id: &str) -> Self {
+    /// inside `stage_id`. `anchor_id` is the player's OUTERMOST
+    /// container — the poll lives exactly as long as it does. The
+    /// video element itself mounts late (after the rendition RPC
+    /// resolves), so its absence is a skipped tick, never a shutdown.
+    /// Call once per mounted player, then provide via context.
+    pub(crate) fn install(video_id: &str, stage_id: &str, anchor_id: &str) -> Self {
         let ctx = Self {
             now: Signal::new(0.0),
             duration: Signal::new(0.0),
@@ -435,15 +424,20 @@ impl PlayerCtx {
             frame_rect: Signal::new((0.0, 0.0, 0.0, 0.0)),
         };
         let mut c = ctx;
-        let (video_id, stage_id) = (video_id.to_owned(), stage_id.to_owned());
+        let (video_id, stage_id, anchor_id) = (
+            video_id.to_owned(),
+            stage_id.to_owned(),
+            anchor_id.to_owned(),
+        );
         spawn(async move {
             // The interval self-terminates when the element leaves the
             // DOM, and the recv loop ends with the channel — unmount
             // cleans both sides up.
             let mut chan = dioxus::document::eval(&format!(
                 "var t=setInterval(function(){{\
+                   if(!document.getElementById('{anchor_id}')){{clearInterval(t);return;}}\
                    var v=document.getElementById('{video_id}');\
-                   if(!v){{clearInterval(t);return;}}\
+                   if(!v){{return;}}\
                    var b=0;try{{if(v.buffered.length)b=v.buffered.end(v.buffered.length-1);}}catch(e){{}}\
                    var s=document.getElementById('{stage_id}');\
                    var fx=0,fy=0,fw=0,fh=0;\
@@ -487,6 +481,10 @@ pub(crate) struct DrawCtx {
     pub draw_mode: Signal<bool>,
     pub color: Signal<&'static str>,
     pub pending: Signal<Vec<AnnotationStroke>>,
+    /// The clock when the pending drawing's FIRST stroke landed — the
+    /// frame the drawing belongs to. A posted drawing pins there, not
+    /// wherever the user scrubbed afterwards.
+    pub pending_at: Signal<Option<f64>>,
     pub viewing: Signal<Vec<AnnotationStroke>>,
     /// The comment whose drawing / focus state is active — timeline
     /// markers and rail rows highlight it together.
@@ -503,9 +501,18 @@ impl DrawCtx {
             draw_mode: Signal::new(false),
             color: Signal::new(STROKE_COLORS[0]),
             pending: Signal::new(Vec::new()),
+            pending_at: Signal::new(None),
             viewing: Signal::new(Vec::new()),
             focused: Signal::new(None),
         }
+    }
+
+    /// Leave draw mode, discarding the unposted drawing (the explicit
+    /// cancel — posting clears through the composer instead).
+    pub(crate) fn cancel_drawing(&mut self) {
+        self.draw_mode.set(false);
+        self.pending.set(Vec::new());
+        self.pending_at.set(None);
     }
 
     /// Focus a comment: show its drawing and highlight it everywhere.
@@ -586,9 +593,18 @@ pub(crate) fn use_review_data(
             Some(Some(Ok(list))) => list.clone(),
             _ => Vec::new(),
         };
+        // Pinned feedback in timecode order; general (unpinned) notes
+        // last — the reference tool's ordering.
         list.sort_by(|a, b| {
-            a.timecode_secs
-                .partial_cmp(&b.timecode_secs)
+            let key = |c: &ReviewComment| {
+                if is_pinned(c.timecode_secs) {
+                    (0, c.timecode_secs)
+                } else {
+                    (1, 0.0)
+                }
+            };
+            key(a)
+                .partial_cmp(&key(b))
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         list
@@ -692,12 +708,11 @@ mod tests {
     }
 
     #[test]
-    fn avatars_are_stable_and_initialed() {
-        assert_eq!(avatar_color("Cody"), avatar_color("Cody"));
-        assert_eq!(initials("Cody Wright"), "CW");
-        assert_eq!(initials("ripley"), "R");
-        assert_eq!(initials(""), "G");
+    fn authors_and_pins_read_correctly() {
         assert_eq!(display_author(""), "Guest");
+        assert!(is_pinned(0.0));
+        assert!(is_pinned(42.5));
+        assert!(!is_pinned(UNPINNED));
     }
 
     #[test]

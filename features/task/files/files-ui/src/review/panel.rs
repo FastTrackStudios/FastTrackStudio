@@ -13,8 +13,8 @@ use fts_ui::lucide_dioxus::{Clock, Pencil, SendHorizontal, X};
 use fts_ui::prelude::*;
 
 use super::{
-    DrawCtx, PlayerCtx, ReviewData, avatar_color, display_author, display_timecode, ensure_review,
-    initials, pause, post_comment, remove_comment, seek_to,
+    DrawCtx, PlayerCtx, ReviewData, UNPINNED, avatar_css, display_author, display_timecode,
+    ensure_review, initials, is_pinned, pause, post_comment, remove_comment, seek_to,
 };
 
 #[component]
@@ -102,15 +102,20 @@ fn CommentRow(comment: ReviewComment, head_commit: String, video_id: String) -> 
     // flag every comment as old.
     let stale = !head_commit.is_empty() && comment.commit_id != head_commit;
     let author = display_author(&comment.author);
-    let color = avatar_color(&author);
+    let color = avatar_css(&author);
+    let pinned = is_pinned(tc);
     let focused = (draw.focused)() == Some(comment.id);
 
     let focus_row = {
         let video_id = video_id.clone();
         let comment = comment.clone();
         move |_| {
-            seek_to(&video_id, tc);
-            pause(&video_id);
+            // A general note has no frame — highlight it without
+            // yanking the playhead to 0:00.
+            if pinned {
+                seek_to(&video_id, tc);
+                pause(&video_id);
+            }
             draw.focus(&comment);
         }
     };
@@ -149,16 +154,19 @@ fn CommentRow(comment: ReviewComment, head_commit: String, video_id: String) -> 
                 span {
                     class: "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white",
                     style: "background:{color}",
+                    title: "{author}",
                     "{initials(&author)}"
                 }
                 div { class: "min-w-0 flex-1 flex flex-col gap-1",
                     div { class: "flex items-center gap-2 flex-wrap",
                         span { class: "text-[13px] font-semibold truncate", "{author}" }
-                        button {
-                            class: "inline-flex items-center gap-1 rounded-md bg-indigo-500/10 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-indigo-400 hover:bg-indigo-500/20",
-                            title: "Jump to this frame",
-                            Clock { size: 10 }
-                            "{display_timecode(tc)}"
+                        if pinned {
+                            button {
+                                class: "inline-flex items-center gap-1 rounded-md bg-indigo-500/10 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-indigo-400 hover:bg-indigo-500/20",
+                                title: "Jump to this frame",
+                                Clock { size: 10 }
+                                "{display_timecode(tc)}"
+                            }
                         }
                         if !comment.annotation.is_empty() {
                             span { class: "text-purple-400", title: "Has a drawing — click to view",
@@ -217,7 +225,12 @@ fn Composer(video_id: String, watching: ReadSignal<Option<String>>) -> Element {
 
     let has_drawing = !draw.pending.read().is_empty();
     let attached = attach_tc() || has_drawing;
-    let now = (player.now)();
+    // The chip shows the frame the comment will ACTUALLY pin to: a
+    // pending drawing anchors to its first stroke's frame, not the
+    // live clock.
+    let now = (draw.pending_at)()
+        .filter(|_| has_drawing)
+        .unwrap_or_else(|| (player.now)());
 
     let post = move |_| {
         // The recorded version is the one on screen; without a chain
@@ -236,9 +249,21 @@ fn Composer(video_id: String, watching: ReadSignal<Option<String>>) -> Element {
         let org = data.org.peek().clone();
         let (root_id_now, path_now) = (*data.root_id.peek(), data.path.peek().clone());
         let existing = *data.review_id.peek();
-        let pinned = *attach_tc.peek() || !strokes.is_empty();
+        // A drawing pins to the frame its first stroke landed on —
+        // NOT wherever the user scrubbed afterwards. A plain comment
+        // pins to the current frame, or detaches to the sentinel.
+        let timecode_secs = if let Some(at) = (!strokes.is_empty())
+            .then(|| *draw.pending_at.peek())
+            .flatten()
+        {
+            at
+        } else if *attach_tc.peek() || !strokes.is_empty() {
+            *player.now.peek()
+        } else {
+            UNPINNED
+        };
         let comment = NewReviewComment {
-            timecode_secs: if pinned { *player.now.peek() } else { 0.0 },
+            timecode_secs,
             author: author.peek().trim().to_string(),
             body: text,
             commit_id,
@@ -262,6 +287,7 @@ fn Composer(video_id: String, watching: ReadSignal<Option<String>>) -> Element {
                 Ok(()) => {
                     body.set(String::new());
                     draw.pending.set(Vec::new());
+                    draw.pending_at.set(None);
                     draw.draw_mode.set(false);
                     if existing.is_none() {
                         scope.restart();
@@ -315,12 +341,13 @@ fn Composer(video_id: String, watching: ReadSignal<Option<String>>) -> Element {
                     onclick: {
                         let video_id = video_id.clone();
                         move |_| {
-                            let entering = !*draw.draw_mode.peek();
-                            if entering {
+                            if *draw.draw_mode.peek() {
+                                draw.cancel_drawing();
+                            } else {
                                 pause(&video_id);
                                 draw.viewing.set(Vec::new());
+                                draw.draw_mode.set(true);
                             }
-                            draw.draw_mode.set(entering);
                         }
                     },
                     Pencil { size: 16 }

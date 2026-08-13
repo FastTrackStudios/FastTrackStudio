@@ -13,8 +13,8 @@ use files_proto::ReviewComment;
 use uuid::Uuid;
 
 use super::{
-    DrawCtx, PlayerCtx, avatar_color, display_author, display_timecode, element_dims, initials,
-    pause, seek_to,
+    DrawCtx, PlayerCtx, avatar_css, display_author, display_timecode, element_dims, initials,
+    is_pinned, pause, seek_to,
 };
 
 /// Preview crop size (CSS px) — 16:9 under the reference's 160px width.
@@ -68,7 +68,11 @@ pub(crate) fn TimelineBand(
         }
     };
 
-    let markers: Vec<ReviewComment> = comments().into_iter().collect();
+    // Only pinned feedback becomes a dot — a general note has no frame.
+    let markers: Vec<ReviewComment> = comments()
+        .into_iter()
+        .filter(|c| is_pinned(c.timecode_secs))
+        .collect();
     let show_marker_row = !mini || !markers.is_empty();
 
     // Hover preview geometry.
@@ -119,10 +123,20 @@ pub(crate) fn TimelineBand(
                     }
                 },
                 onpointerdown: {
+                    // Measure BEFORE the first seek: on touch there is
+                    // no hover, so pointerenter's async measure hasn't
+                    // landed; and a cached width goes stale across
+                    // resize/fullscreen.
                     let seek_at = seek_at.clone();
+                    let track_id = track_id.clone();
                     move |evt: Event<PointerData>| {
                         dragging.set(true);
-                        seek_at(evt.data().element_coordinates().x);
+                        let x = evt.data().element_coordinates().x;
+                        let (seek_at, track_id) = (seek_at.clone(), track_id.clone());
+                        spawn(async move {
+                            track_w.set(element_dims(&track_id).await.0);
+                            seek_at(x);
+                        });
                     }
                 },
                 onpointermove: {
@@ -193,7 +207,7 @@ pub(crate) fn TimelineBand(
                         {
                             let pct = frac(comment.timecode_secs) * 100.0;
                             let author = display_author(&comment.author);
-                            let color = avatar_color(&author);
+                            let color = avatar_css(&author);
                             let focused = (draw.focused)() == Some(comment.id);
                             let hovered = hovered_marker() == Some(comment.id);
                             let id = comment.id;

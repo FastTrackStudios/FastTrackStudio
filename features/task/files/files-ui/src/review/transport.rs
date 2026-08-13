@@ -182,7 +182,10 @@ fn DrawToolbar(video_id: String) -> Element {
             }
             button {
                 class: "flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50",
-                onclick: move |_| draw.pending.set(Vec::new()),
+                onclick: move |_| {
+                    draw.pending.set(Vec::new());
+                    draw.pending_at.set(None);
+                },
                 "Clear"
             }
             div { class: "flex-1" }
@@ -191,12 +194,13 @@ fn DrawToolbar(video_id: String) -> Element {
             }
             button {
                 class: BTN,
-                title: "Exit drawing",
+                title: "Cancel drawing",
                 onclick: {
                     let _video_id = video_id;
-                    move |_| {
-                        draw.draw_mode.set(false);
-                    }
+                    // Discard, don't carry: strokes left armed after
+                    // exit would post pinned to whatever frame the
+                    // user scrubbed to next.
+                    move |_| draw.cancel_drawing()
                 },
                 X { size: 16 }
             }

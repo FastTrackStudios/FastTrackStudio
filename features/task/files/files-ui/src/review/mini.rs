@@ -3,6 +3,12 @@
 //! and an expand button that opens the full [`ReviewScreen`] as a
 //! fixed overlay. The conversation lives in the full screen; the mini
 //! shows where it lands.
+//!
+//! Expanded and collapsed are EITHER/OR mounts: the mini body
+//! unmounts under the overlay, so there is never a second `<video>`
+//! holding decoded media, a second poll interval, or a second event
+//! stream running behind the full screen. Collapsing re-resolves one
+//! server-side-cached rendition RPC — cheap.
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::Maximize2;
@@ -23,11 +29,41 @@ pub fn MiniPlayer(
     root_id: ReadSignal<Uuid>,
     path: ReadSignal<String>,
 ) -> Element {
+    let mut expanded = use_signal(|| false);
+
+    rsx! {
+        if expanded() {
+            div { class: "fixed inset-0 z-50",
+                ReviewScreen {
+                    org,
+                    root_id,
+                    path,
+                    on_close: move |()| expanded.set(false),
+                }
+            }
+        } else {
+            MiniBody {
+                org,
+                root_id,
+                path,
+                on_expand: move |()| expanded.set(true),
+            }
+        }
+    }
+}
+
+#[component]
+fn MiniBody(
+    org: ReadSignal<String>,
+    root_id: ReadSignal<Uuid>,
+    path: ReadSignal<String>,
+    on_expand: EventHandler<()>,
+) -> Element {
     let video_id = use_hook(|| format!("review-mini-{}", Uuid::new_v4().simple()));
     let stage_id = use_hook(|| format!("review-ministage-{}", Uuid::new_v4().simple()));
     let container_id = use_hook(|| format!("review-minibox-{}", Uuid::new_v4().simple()));
 
-    let player = use_hook(|| PlayerCtx::install(&video_id, &stage_id));
+    let player = use_hook(|| PlayerCtx::install(&video_id, &stage_id, &container_id));
     use_context_provider(|| player);
     // The mini never draws, but the stage + timeline read the draw
     // context (focus, viewing) — install an inert one.
@@ -41,8 +77,6 @@ pub fn MiniPlayer(
         async move { resolve_sources(&org, root_id, &path, None).await }
     });
 
-    let mut expanded = use_signal(|| false);
-
     rsx! {
         div {
             id: container_id.clone(),
@@ -54,7 +88,21 @@ pub fn MiniPlayer(
                     }
                 },
                 Some(Err(e)) => rsx! {
-                    div { class: "px-3 py-2 text-xs text-muted-foreground", "No proxy rendition: {e}" }
+                    // A failed proxy must not hide the conversation:
+                    // the full screen still shows the comment rail, so
+                    // the door stays open.
+                    div { class: "flex items-center gap-2 px-3 py-2",
+                        span { class: "min-w-0 flex-1 truncate text-xs text-muted-foreground",
+                            "No proxy rendition: {e}"
+                        }
+                        button {
+                            class: "flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-2 text-xs hover:bg-muted/80",
+                            title: "Open the review conversation",
+                            onclick: move |_| on_expand.call(()),
+                            Maximize2 { size: 12 }
+                            "Review"
+                        }
+                    }
                 },
                 Some(Ok(src)) => rsx! {
                     div { class: "relative",
@@ -68,16 +116,7 @@ pub fn MiniPlayer(
                         button {
                             class: "absolute right-2 top-2 flex h-7 items-center gap-1.5 rounded-md bg-black/60 px-2 text-xs text-white opacity-80 hover:opacity-100",
                             title: "Open the full review",
-                            onclick: {
-                                let video_id = video_id.clone();
-                                move |_| {
-                                    // Two mounted players must not both
-                                    // sound — hold the mini while the
-                                    // full screen is up.
-                                    super::pause(&video_id);
-                                    expanded.set(true);
-                                }
-                            },
+                            onclick: move |_| on_expand.call(()),
                             Maximize2 { size: 12 }
                             "Review"
                         }
@@ -95,16 +134,6 @@ pub fn MiniPlayer(
                     }
                 },
             }}
-        }
-        if expanded() {
-            div { class: "fixed inset-0 z-50",
-                ReviewScreen {
-                    org,
-                    root_id,
-                    path,
-                    on_close: move |()| expanded.set(false),
-                }
-            }
         }
     }
 }
