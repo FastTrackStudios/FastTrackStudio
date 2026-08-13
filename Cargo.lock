@@ -10679,6 +10679,7 @@ dependencies = [
  "eyre",
  "keyflow-cli",
  "session",
+ "signal-auto-sampler",
  "signal-sampler",
  "tokio",
  "tracing",
@@ -25466,6 +25467,21 @@ dependencies = [
  "tokio",
  "utils",
  "uuid",
+]
+
+[[package]]
+name = "signal-auto-sampler"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "cpal",
+ "daw-audio-io",
+ "eyre",
+ "hound",
+ "midicore-midir",
+ "midicore-proto",
+ "signal-sampler",
+ "tracing",
 ]
 
 [[package]]

@@ -79,6 +79,16 @@ enum SignalCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<OsString>,
     },
+    /// Auto-sampler: drive a MIDI instrument across a note/velocity grid,
+    /// record its audio, and build a pack — `fts signal sample devices`,
+    /// `fts signal sample run --name ... --out ...`.
+    #[cfg(feature = "sample")]
+    #[command(disable_help_flag = true)]
+    Sample {
+        /// Arguments forwarded verbatim to the auto-sampler CLI.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<OsString>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -128,6 +138,10 @@ fn main() -> Result<()> {
         Cmd::Signal {
             command: SignalCmd::Pack { args },
         } => signal_sampler::pack_cli::cli_main(args),
+        #[cfg(feature = "sample")]
+        Cmd::Signal {
+            command: SignalCmd::Sample { args },
+        } => signal_auto_sampler::cli::cli_main(args),
         Cmd::Session {
             command: SessionCmd::Engine { addr },
         } => session_engine_cmd(addr),
