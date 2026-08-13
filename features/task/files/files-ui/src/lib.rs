@@ -128,6 +128,63 @@ async fn resolve_a_divergence(
         .map_err(|e| e.to_string())
 }
 
+// ── Share links (issue #271) ──────────────────────────────────────
+
+/// Mint a share link (view-only defaults — capabilities are edited in
+/// the Links registry afterwards) and hand back its URL.
+async fn mint_share_link(org: &str, target: share_proto::ShareTarget) -> Result<String, String> {
+    let client =
+        task_ui_core::vox_clients::establish_for::<share_proto::ShareServiceClient>(org).await?;
+    client
+        .create_link(
+            target,
+            share_proto::NewShareLink {
+                label: String::new(),
+                capabilities: share_proto::ShareCapabilities::default(),
+                password: None,
+                expires_unix: None,
+            },
+        )
+        .await
+        .map(|link| link.url)
+        .map_err(|e| e.to_string())
+}
+
+/// Mint a link for the Named Version curated at `commit_id` — the chain
+/// row knows the names, not the entity id, so resolve it first.
+async fn mint_named_version_link(
+    org: &str,
+    root_id: Uuid,
+    commit_id: &str,
+) -> Result<String, String> {
+    let c = client(org).await?;
+    let named = c
+        .list_named_versions(Some(root_id))
+        .await
+        .map_err(|e| e.to_string())?;
+    let version = named
+        .into_iter()
+        .find(|v| v.commit_id == commit_id)
+        .ok_or_else(|| "no Named Version at this checkpoint".to_string())?;
+    mint_share_link(
+        org,
+        share_proto::ShareTarget::NamedVersion { id: version.id },
+    )
+    .await
+}
+
+/// Copy `text` to the clipboard (browser only; a no-op on native).
+fn copy_to_clipboard(text: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(win) = web_sys::window() {
+            let _ = win.navigator().clipboard().write_text(text);
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = text;
+}
+
 // ── Scope ─────────────────────────────────────────────────────────
 
 /// Where the explorer is currently looking. Root browsing and Drive
@@ -394,7 +451,11 @@ pub fn Explorer(props: ExplorerProps) -> Element {
     rsx! {
         div { class: "flex flex-col gap-3 rounded-lg border border-border/40 bg-card/40 {padding}",
             if let Some(root) = &props.root {
-                RootHeader { root: root.clone(), slice: floor.clone() }
+                RootHeader {
+                    org: org.clone(),
+                    root: root.clone(),
+                    slice: floor.clone(),
+                }
             }
             // Breadcrumb — never above the pinned slice.
             div { class: "flex items-center gap-1 text-xs text-muted-foreground flex-wrap",
@@ -487,9 +548,46 @@ pub fn Explorer(props: ExplorerProps) -> Element {
 }
 
 /// The root's name, flavor, and Project Version badge, plus the slice
-/// the explorer is pinned to (when it is).
+/// the explorer is pinned to (when it is) — and the Share action that
+/// mints a link scoped to exactly this slice (issue #271).
 #[component]
-fn RootHeader(root: FileRootInfo, slice: String) -> Element {
+fn RootHeader(org: String, root: FileRootInfo, slice: String) -> Element {
+    let toast = use_toast();
+    let mut busy = use_signal(|| false);
+    let share = {
+        let org = org.clone();
+        let slice = slice.clone();
+        let root_id = root.id;
+        move |_| {
+            if *busy.peek() {
+                return;
+            }
+            busy.set(true);
+            let (org, slice) = (org.clone(), slice.clone());
+            spawn(async move {
+                let target = share_proto::ShareTarget::Slice {
+                    root_id,
+                    subpath: slice.clone(),
+                };
+                match mint_share_link(&org, target).await {
+                    Ok(url) => {
+                        copy_to_clipboard(&url);
+                        toast.success(
+                            "Share link minted".into(),
+                            ToastOptions::new().description(format!("Copied: {url}")),
+                        );
+                    }
+                    Err(e) => {
+                        toast.error(
+                            "Couldn't mint link".into(),
+                            ToastOptions::new().description(e),
+                        );
+                    }
+                }
+                busy.set(false);
+            });
+        }
+    };
     rsx! {
         div { class: "flex items-baseline gap-2 flex-wrap",
             span { class: "text-sm font-medium", "{root.name}" }
@@ -500,6 +598,15 @@ fn RootHeader(root: FileRootInfo, slice: String) -> Element {
                 Badge { variant: BadgeVariant::Outline, "slice: {slice}" }
             }
             span { class: "text-xs text-muted-foreground truncate", "{root.path}" }
+            div { class: "ml-auto",
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    disabled: busy(),
+                    on_click: share,
+                    "Share…"
+                }
+            }
         }
     }
 }
@@ -739,6 +846,45 @@ fn ChainRow(
                     }
                 }
                 div { class: "ml-auto flex items-center gap-1",
+                    // A curated checkpoint can be handed out as a link
+                    // that resolves to exactly this change (issue #271).
+                    if !version.names.is_empty() {
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::Small,
+                            disabled: busy(),
+                            on_click: {
+                                let org = org.clone();
+                                let commit = version.commit_id.clone();
+                                move |_| {
+                                    if *busy.peek() {
+                                        return;
+                                    }
+                                    busy.set(true);
+                                    let (org, commit) = (org.clone(), commit.clone());
+                                    spawn(async move {
+                                        match mint_named_version_link(&org, root_id, &commit).await {
+                                            Ok(url) => {
+                                                copy_to_clipboard(&url);
+                                                toast.success(
+                                                    "Version link minted".into(),
+                                                    ToastOptions::new().description(format!("Copied: {url}")),
+                                                );
+                                            }
+                                            Err(e) => {
+                                                toast.error(
+                                                    "Couldn't mint link".into(),
+                                                    ToastOptions::new().description(e),
+                                                );
+                                            }
+                                        }
+                                        busy.set(false);
+                                    });
+                                }
+                            },
+                            "Share"
+                        }
+                    }
                     Button {
                         variant: ButtonVariant::Ghost,
                         size: ButtonSize::Small,
