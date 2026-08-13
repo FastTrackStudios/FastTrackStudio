@@ -703,7 +703,7 @@ fn OpenFileDetail(
             // here (issue #270 Phase A). Audio/other files skip straight
             // to their history.
             if review::is_video_path(&path) {
-                review::ReviewPlayer {
+                review::MiniPlayer {
                     org: org.clone(),
                     root_id,
                     path: path.clone(),
