@@ -287,6 +287,7 @@ members = [
     "features/rigs/wurli/openwurli-dsp",
     "features/sampler/signal-sampler",
     "features/sampler/signal-sampler-clap",
+    "features/sampler/signal-auto-sampler",
     "features/sampler/packs-proto",
     "features/sampler/pack-library",
     "features/nam",
@@ -583,6 +584,7 @@ signal-extension = { path = "features/reaper/signal-extension" }
 signal-macromod = { path = "features/fx/macromod" }
 signal-plugin-host = { path = "features/plugin-host", default-features = false }
 signal-sampler = { path = "features/sampler/signal-sampler" }
+signal-auto-sampler = { path = "features/sampler/signal-auto-sampler" }
 signal-packs-proto = { path = "features/sampler/packs-proto" }
 signal-pack-library = { path = "features/sampler/pack-library" }
 signal-bass = { path = "features/rigs/bass" }

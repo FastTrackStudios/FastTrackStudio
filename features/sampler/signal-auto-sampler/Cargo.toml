@@ -1,0 +1,35 @@
+[package]
+name = "signal-auto-sampler"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+description = "Auto-sampler — drive a MIDI instrument across a note/velocity grid, capture its audio, and emit a zone-mapped .signalpack"
+
+# Sampling an *external* instrument (hardware synth on a MIDI port, audio
+# returning on interface inputs) is a single-process job: one thread owns both
+# the MIDI output and the capture stream, so note-on and record-arm need no
+# cross-process sync. That is why this is a plain crate + CLI rather than the
+# generator/recorder plugin pair a plugin host would force.
+
+[dependencies]
+clap = { workspace = true }
+cpal = { workspace = true }
+eyre = { workspace = true }
+tracing = { workspace = true }
+hound = "3.5"
+
+# MIDI out to the instrument under test.
+midicore-proto = { workspace = true }
+midicore-midir = { workspace = true }
+
+# Device resolution + channel-count rules for the capture stream. `open_input`
+# already knows that CoreAudio needs a pro interface's full channel count
+# opened before a high channel index is reachable.
+daw-audio-io = { workspace = true }
+
+# Zone specs and the pack builder we hand the finished samples to.
+signal-sampler = { workspace = true }
+
+[lints]
+workspace = true
