@@ -3381,6 +3381,17 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         )
 }
 
+/// The public base only when explicitly configured — `None` on the
+/// bind-address fallback. A guest's `server=` hint must never carry
+/// the bind address (a remote browser would dial 127.0.0.1); absent,
+/// the guest app falls back to same-origin, which is right in prod.
+pub(crate) fn share_public_base_explicit() -> Option<String> {
+    std::env::var("TASK_SHARE_PUBLIC_BASE")
+        .or_else(|_| std::env::var("TASK_SERVER_PUBLIC_URL"))
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
 /// Public base URL share links are composed against.
 pub(crate) fn share_public_base() -> String {
     std::env::var("TASK_SHARE_PUBLIC_BASE")

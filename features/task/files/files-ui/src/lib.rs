@@ -130,9 +130,14 @@ async fn resolve_a_divergence(
 
 // ── Share links (issue #271) ──────────────────────────────────────
 
-/// Mint a share link (view-only defaults — capabilities are edited in
-/// the Links registry afterwards) and hand back its URL.
-async fn mint_share_link(org: &str, target: share_proto::ShareTarget) -> Result<String, String> {
+/// Mint a share link and hand back its URL. `capabilities: None` is
+/// the view-only default (edited in the Links registry afterwards);
+/// `Some` grants at mint time (the review flow's comment-on link).
+pub(crate) async fn mint_share_link(
+    org: &str,
+    target: share_proto::ShareTarget,
+    capabilities: Option<share_proto::ShareCapabilities>,
+) -> Result<String, String> {
     let client =
         task_ui_core::vox_clients::establish_for::<share_proto::ShareServiceClient>(org).await?;
     client
@@ -140,7 +145,7 @@ async fn mint_share_link(org: &str, target: share_proto::ShareTarget) -> Result<
             target,
             share_proto::NewShareLink {
                 label: String::new(),
-                capabilities: None,
+                capabilities,
                 password: None,
                 expires_unix: None,
             },
@@ -169,6 +174,7 @@ async fn mint_named_version_link(
     mint_share_link(
         org,
         share_proto::ShareTarget::NamedVersion { id: version.id },
+        None,
     )
     .await
 }
@@ -569,7 +575,7 @@ fn RootHeader(org: String, root: FileRootInfo, slice: String) -> Element {
                     root_id,
                     subpath: slice.clone(),
                 };
-                match mint_share_link(&org, target).await {
+                match mint_share_link(&org, target, None).await {
                     Ok(url) => {
                         copy_to_clipboard(&url);
                         toast.success(

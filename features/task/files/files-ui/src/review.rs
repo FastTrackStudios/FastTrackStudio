@@ -53,8 +53,12 @@ fn rendition_url(
     file_id: &str,
     tok: &str,
 ) -> String {
+    // Guests may be served from a different origin than the task server
+    // (split-origin dev/static hosting) — pin media to the server there;
+    // members stay origin-relative (the deployed same-origin shape).
+    let base = task_ui_core::vox_session::guest_http_base().unwrap_or_default();
     format!(
-        "/org/{org}/files/renditions/{root_id}/{}/{file_id}{tok}",
+        "{base}/org/{org}/files/renditions/{root_id}/{}/{file_id}{tok}",
         kind.tag()
     )
 }
@@ -889,31 +893,12 @@ fn CommentsPanel(
                                                 let org = org.peek().clone();
                                                 spawn(async move {
                                                     let target = share_proto::ShareTarget::Review { id: review_id };
-                                                    let result = async {
-                                                        let client = task_ui_core::vox_clients::establish_for::<
-                                                            share_proto::ShareServiceClient,
-                                                        >(&org)
-                                                        .await?;
-                                                        client
-                                                            .create_link(
-                                                                target,
-                                                                share_proto::NewShareLink {
-                                                                    label: String::new(),
-                                                                    capabilities: Some(share_proto::ShareCapabilities {
-                                                                        comment: true,
-                                                                        download: false,
-                                                                        file_request: false,
-                                                                    }),
-                                                                    password: None,
-                                                                    expires_unix: None,
-                                                                },
-                                                            )
-                                                            .await
-                                                            .map(|link| link.url)
-                                                            .map_err(|e| e.to_string())
-                                                    }
-                                                    .await;
-                                                    match result {
+                                                    let caps = share_proto::ShareCapabilities {
+                                                        comment: true,
+                                                        download: false,
+                                                        file_request: false,
+                                                    };
+                                                    match crate::mint_share_link(&org, target, Some(caps)).await {
                                                         Ok(url) => {
                                                             crate::copy_to_clipboard(&url);
                                                             toast.success(

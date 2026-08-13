@@ -155,6 +155,27 @@ pub fn active_server() -> Option<ActiveServer> {
 ///
 /// Native: `TASK_VOX_URL` at runtime, empty when unset.
 #[must_use]
+pub fn vox_url() -> String {
+    // A user-selected server (multi-server registry) always wins.
+    if let Some(server) = active_server() {
+        return server.url;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(baked) = option_env!("TASK_VOX_URL_WEB") {
+            return baked.to_string();
+        }
+        if let Some(url) = same_origin_vox_url() {
+            return url;
+        }
+        DEFAULT_VOX_URL.to_string()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var("TASK_VOX_URL").unwrap_or_default()
+    }
+}
+
 /// A share-guest session (issue #272): the app was opened from a
 /// review share link, holds no account, and every org connection must
 /// dial the scoped guest lane instead of the org lane.
@@ -184,25 +205,21 @@ pub fn guest_share() -> Option<GuestShare> {
     guest_share_slot().lock().expect("guest share slot").clone()
 }
 
-pub fn vox_url() -> String {
-    // A user-selected server (multi-server registry) always wins.
-    if let Some(server) = active_server() {
-        return server.url;
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        if let Some(baked) = option_env!("TASK_VOX_URL_WEB") {
-            return baked.to_string();
-        }
-        if let Some(url) = same_origin_vox_url() {
-            return url;
-        }
-        DEFAULT_VOX_URL.to_string()
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::var("TASK_VOX_URL").unwrap_or_default()
-    }
+/// The guest session's HTTP(S) origin for media/rendition fetches —
+/// `Some` only in share-guest mode with an explicit server pinned.
+/// A guest app may be served from a different origin than the task
+/// server (dev dx, static hosting), where origin-relative media URLs
+/// would hit the app's static server; members keep relative URLs
+/// (same-origin routing is the deployed shape).
+#[must_use]
+pub fn guest_http_base() -> Option<String> {
+    guest_share()?;
+    let server = active_server()?;
+    let http = server
+        .url
+        .replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1);
+    Some(http.trim_end_matches("/vox").trim_end_matches('/').to_owned())
 }
 
 /// Derive `ws(s)://<host>/vox` from the page's own origin. `None` only

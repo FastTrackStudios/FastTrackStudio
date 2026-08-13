@@ -326,6 +326,21 @@ impl vox_core::FromVoxLane for RootLane {
 /// well-known fetch lands; previously that raced into a doomed
 /// WebSocket to `/org//vox` plus a console error). Callers just retry /
 /// re-run when the org-list signal fires.
+/// Percent-encode a URL query component: everything but unreserved
+/// characters (RFC 3986) is `%XX`-escaped.
+fn percent_encode_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 fn org_ws_url(slug: &str) -> Result<String, String> {
     if slug.is_empty() {
         return Err("awaiting org discovery (no org slug yet)".to_owned());
@@ -343,7 +358,10 @@ fn org_ws_url(slug: &str) -> Result<String, String> {
         && guest.org == slug
     {
         let pw = match &guest.pw {
-            Some(pw) if !pw.is_empty() => format!("?pw={pw}"),
+            // Percent-encode: the password is user-chosen text riding a
+            // URL query — '&', '#', '+', '=' etc. would truncate or
+            // corrupt it (the landing page encodes the same value).
+            Some(pw) if !pw.is_empty() => format!("?pw={}", percent_encode_component(pw)),
             _ => String::new(),
         };
         return Ok(format!(
@@ -635,5 +653,18 @@ mod subprotocol_tests {
                 "{bad:?} should not be offered as a subprotocol"
             );
         }
+    }
+
+    #[test]
+    fn link_passwords_survive_url_hostile_characters() {
+        // The guest dial splices the password into the ws URL query —
+        // '&' would truncate it, '#' would end the URL, '+' would
+        // decode as a space server-side. RFC 3986 unreserved passes
+        // through untouched.
+        assert_eq!(
+            super::percent_encode_component("a&b #c+d=e"),
+            "a%26b%20%23c%2Bd%3De"
+        );
+        assert_eq!(super::percent_encode_component("Ok-1._~x"), "Ok-1._~x");
     }
 }
