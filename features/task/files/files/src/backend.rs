@@ -1273,6 +1273,80 @@ impl FilesBackend {
         Ok(named)
     }
 
+    /// Get-or-create the review for `(root, file_path)` (issue #270).
+    /// Returns `(review, created)` so the RPC wrapper knows whether to
+    /// publish `ReviewCreated`.
+    fn review_for_file_inner(
+        &self,
+        root_id: Uuid,
+        file_path: String,
+    ) -> Result<(files_proto::Review, bool), Error> {
+        let root = self.get_root_info(root_id)?;
+        Self::require_media(&root, "review")?;
+        // Same lock as the curation writes: two first-asks for one file
+        // must not both scan an empty vault and write two pages.
+        let lock = self.root_lock(root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        if let Some(existing) = self.versions.review_by_file(root_id, &file_path)? {
+            return Ok((existing, false));
+        }
+        // First ask: the file must actually be a versioned member of
+        // this root — an untracked path has no versions to review.
+        let (_disk, repo_path) = self.resolve_root_file(&root, &file_path)?;
+        let (repo, head) = self.reload_repo(&root)?;
+        if Self::head_file(&repo, &head, &repo_path)?.is_none() {
+            return Err(Error::NotFound(format!(
+                "{file_path}: not tracked by the checkpoint head"
+            )));
+        }
+        let review = self
+            .versions
+            .create_review(root_id, &root.name, file_path)?;
+        Ok((review, true))
+    }
+
+    /// The root lock guarding a comment's vault writes, via its review
+    /// (a comment page doesn't carry the root id itself).
+    fn root_lock_for_review(
+        &self,
+        comment: &files_proto::ReviewComment,
+    ) -> Result<Arc<std::sync::Mutex<()>>, Error> {
+        let review = self.versions.review(comment.review_id)?;
+        Ok(self.root_lock(review.root_id))
+    }
+
+    fn add_review_comment_inner(
+        &self,
+        review_id: Uuid,
+        comment: files_proto::NewReviewComment,
+    ) -> Result<files_proto::ReviewComment, Error> {
+        if comment.body.trim().is_empty() && comment.annotation.is_empty() {
+            return Err(Error::BadRequest(
+                "a comment needs text or a drawing".into(),
+            ));
+        }
+        if !comment.timecode_secs.is_finite() || comment.timecode_secs < 0.0 {
+            return Err(Error::BadRequest(format!(
+                "bad timecode: {}",
+                comment.timecode_secs
+            )));
+        }
+        let review = self.versions.review(review_id)?;
+        let root = self.get_root_info(review.root_id)?;
+        let lock = self.root_lock(review.root_id);
+        let _guard = lock.lock().expect("root lock poisoned");
+        // The recorded version must exist in this root's store — AC 2
+        // hinges on the reference staying resolvable. Normalized to the
+        // store's full hex spelling so two comments on one version
+        // always compare equal.
+        let (commit_id, _change) = self.resolve_commit(&root, &comment.commit_id)?;
+        let normalized = files_proto::NewReviewComment {
+            commit_id: commit_id.hex(),
+            ..comment
+        };
+        self.versions.create_review_comment(&review, normalized)
+    }
+
     /// Resolve a Named Version the way a share link must: prefer the
     /// stable `change_id` (so a rewritten change still lands on its
     /// current commit) and fall back to the recorded `commit_id`.
@@ -4231,6 +4305,60 @@ impl FilesService for FilesBackend {
     ) -> Result<Vec<ProjectVersion>, FilesError> {
         let this = self.clone();
         blocking(move || this.versions.project_versions(root_id)).await
+    }
+
+    async fn review_for_file(
+        &self,
+        root_id: Uuid,
+        file_path: String,
+    ) -> Result<files_proto::Review, FilesError> {
+        let this = self.clone();
+        let (review, created) =
+            blocking(move || this.review_for_file_inner(root_id, file_path)).await?;
+        if created {
+            self.publish(FilesEvent::ReviewCreated(review.clone()));
+        }
+        Ok(review)
+    }
+
+    async fn list_reviews(
+        &self,
+        root_id: Option<Uuid>,
+    ) -> Result<Vec<files_proto::Review>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.reviews(root_id)).await
+    }
+
+    async fn review_comments(
+        &self,
+        review_id: Uuid,
+    ) -> Result<Vec<files_proto::ReviewComment>, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.review_comments(review_id)).await
+    }
+
+    async fn add_review_comment(
+        &self,
+        review_id: Uuid,
+        comment: files_proto::NewReviewComment,
+    ) -> Result<files_proto::ReviewComment, FilesError> {
+        let this = self.clone();
+        let added = blocking(move || this.add_review_comment_inner(review_id, comment)).await?;
+        self.publish(FilesEvent::ReviewCommentAdded(added.clone()));
+        Ok(added)
+    }
+
+    async fn delete_review_comment(&self, id: Uuid) -> Result<(), FilesError> {
+        let this = self.clone();
+        let removed = blocking(move || {
+            let comment = this.versions.review_comment(id)?;
+            let lock = this.root_lock_for_review(&comment)?;
+            let _guard = lock.lock().expect("root lock poisoned");
+            this.versions.delete_review_comment(id)
+        })
+        .await?;
+        self.publish(FilesEvent::ReviewCommentDeleted(removed));
+        Ok(())
     }
 
     async fn restart_project_version(

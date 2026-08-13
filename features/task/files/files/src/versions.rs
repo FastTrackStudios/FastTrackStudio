@@ -18,13 +18,14 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use files_proto::{NamedVersion, ProjectVersion};
+use files_proto::{NamedVersion, NewReviewComment, ProjectVersion, Review, ReviewComment};
 use uuid::Uuid;
 use vault::Vault;
 use vault_entity::store::{VaultEntity, VaultEntityStore};
 
 use crate::entity::{
     FILES_FOLDER, NAMED_SUBFOLDER, NamedVersions, PROJECT_SUBFOLDER, ProjectVersions,
+    REVIEWS_SUBFOLDER, ReviewComments, Reviews,
 };
 use crate::error::{Error, Result};
 
@@ -289,6 +290,124 @@ impl VaultVersions {
             started_at: Utc::now(),
         };
         store.create(model).map_err(entity_err)
+    }
+
+    // ── Reviews (issue #270) ──────────────────────────────────────
+
+    /// Every review, newest first; `root_id` filters to one root.
+    pub fn reviews(&self, root_id: Option<Uuid>) -> Result<Vec<Review>> {
+        let mut list = self.read_store::<Reviews>()?.list();
+        if let Some(root_id) = root_id {
+            list.retain(|r| r.root_id == root_id);
+        }
+        list.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(a.title.cmp(&b.title)));
+        Ok(list)
+    }
+
+    pub fn review(&self, id: Uuid) -> Result<Review> {
+        self.read_store::<Reviews>()?
+            .get_by_uuid(id)
+            .ok_or_else(|| Error::NotFound(format!("review {id}")))
+    }
+
+    /// The review for `(root_id, file_path)` if one exists — the
+    /// get-or-create read half.
+    pub fn review_by_file(&self, root_id: Uuid, file_path: &str) -> Result<Option<Review>> {
+        Ok(self
+            .read_store::<Reviews>()?
+            .list()
+            .into_iter()
+            .find(|r| r.root_id == root_id && r.file_path == file_path))
+    }
+
+    /// Write a new review page for `(root_id, file_path)`. The caller
+    /// (the backend, under the root lock) has already checked none
+    /// exists.
+    pub fn create_review(
+        &self,
+        root_id: Uuid,
+        root_name: &str,
+        file_path: String,
+    ) -> Result<Review> {
+        let title = file_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(file_path.as_str())
+            .to_string();
+        let store = self.write_store::<Reviews>()?;
+        let folder = root_folder(root_name, REVIEWS_SUBFOLDER);
+        let path = store.with_vault(|vault| {
+            self.unique_path(vault, &folder, &vault_entity::slugify(&title, "review"))
+        });
+        let model = Review {
+            id: Uuid::new_v4(),
+            path,
+            root_id,
+            file_path,
+            title,
+            note: String::new(),
+            created_at: Utc::now(),
+        };
+        store.create(model).map_err(entity_err)
+    }
+
+    /// A review's comments, by timecode (ties by creation time, so a
+    /// thread of replies at one timecode reads in order).
+    pub fn review_comments(&self, review_id: Uuid) -> Result<Vec<ReviewComment>> {
+        let mut list = self.read_store::<ReviewComments>()?.list();
+        list.retain(|c| c.review_id == review_id);
+        list.sort_by(|a, b| {
+            a.timecode_secs
+                .total_cmp(&b.timecode_secs)
+                .then(a.created_at.cmp(&b.created_at))
+        });
+        Ok(list)
+    }
+
+    pub fn review_comment(&self, id: Uuid) -> Result<ReviewComment> {
+        self.read_store::<ReviewComments>()?
+            .get_by_uuid(id)
+            .ok_or_else(|| Error::NotFound(format!("review comment {id}")))
+    }
+
+    /// Write one comment page under the review's own folder
+    /// (`…/reviews/<review-slug>/…`), so a review's conversation lives
+    /// together in the vault.
+    pub fn create_review_comment(
+        &self,
+        review: &Review,
+        comment: NewReviewComment,
+    ) -> Result<ReviewComment> {
+        let store = self.write_store::<ReviewComments>()?;
+        // The review page is `<folder>/<stem>.md`; its comments live in
+        // the sibling folder `<folder>/<stem>/`.
+        let folder = review.path.strip_suffix(".md").unwrap_or(&review.path);
+        let id = Uuid::new_v4();
+        let stem = format!("comment-{}", &id.simple().to_string()[..8]);
+        let path = store.with_vault(|vault| self.unique_path(vault, folder, &stem));
+        let model = ReviewComment {
+            id,
+            path,
+            review_id: review.id,
+            timecode_secs: comment.timecode_secs,
+            author: comment.author,
+            body: comment.body,
+            commit_id: comment.commit_id,
+            annotation: comment.annotation,
+            created_at: Utc::now(),
+        };
+        store.create(model).map_err(entity_err)
+    }
+
+    /// Delete one comment page, returning what was removed (the event
+    /// payload).
+    pub fn delete_review_comment(&self, id: Uuid) -> Result<ReviewComment> {
+        let store = self.write_store::<ReviewComments>()?;
+        let removed = store
+            .get_by_uuid(id)
+            .ok_or_else(|| Error::NotFound(format!("review comment {id}")))?;
+        store.delete(&id.to_string()).map_err(entity_err)?;
+        Ok(removed)
     }
 
     /// `<folder>/<stem>.md`, suffixed `-2`, `-3`, … past a page that is

@@ -54,6 +54,12 @@ pub enum FilesEvent {
     /// A file's live-tree content was replaced by a pointer stub, or a
     /// stub was restored to resident content (issue #263).
     HydrationChanged(HydrationChange),
+    /// A review page was created (first ask for a file — issue #270).
+    ReviewCreated(crate::model::Review),
+    /// A timecoded comment landed on a review.
+    ReviewCommentAdded(crate::model::ReviewComment),
+    /// A comment was removed.
+    ReviewCommentDeleted(crate::model::ReviewComment),
 }
 
 #[architect::rpc]
@@ -369,6 +375,44 @@ pub trait FilesService {
         path: String,
         kind: crate::model::RenditionKind,
     ) -> Result<crate::model::RenditionInfo, FilesError>;
+
+    /// The review for a media file — created on first ask, returned
+    /// as-is after (one review per `(root, file path)`, so one link
+    /// carries the whole conversation across versions — issue #270).
+    ///
+    /// [`RootFlavor::Media`](crate::model::RootFlavor::Media) only;
+    /// fails with [`FilesError::NotFound`] when the checkpoint head
+    /// doesn't track `file_path` (an unversioned file has no versions
+    /// to review).
+    async fn review_for_file(
+        &self,
+        root_id: Uuid,
+        file_path: String,
+    ) -> Result<crate::model::Review, FilesError>;
+
+    /// Every review, newest first; `root_id` filters to one root.
+    async fn list_reviews(
+        &self,
+        root_id: Option<Uuid>,
+    ) -> Result<Vec<crate::model::Review>, FilesError>;
+
+    /// A review's comments, ordered by timecode.
+    async fn review_comments(
+        &self,
+        review_id: Uuid,
+    ) -> Result<Vec<crate::model::ReviewComment>, FilesError>;
+
+    /// Add a timecoded comment (optionally carrying a frame
+    /// annotation). The recorded `commit_id` is validated against the
+    /// root's store — a comment must reference a version that exists.
+    async fn add_review_comment(
+        &self,
+        review_id: Uuid,
+        comment: crate::model::NewReviewComment,
+    ) -> Result<crate::model::ReviewComment, FilesError>;
+
+    /// Remove one comment (its page).
+    async fn delete_review_comment(&self, id: Uuid) -> Result<(), FilesError>;
 
     /// Every root-creation / checkpoint / version-curation / hydration
     /// event, as it happens.

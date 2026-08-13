@@ -19,7 +19,7 @@
 //! (the markdown body).
 
 use chrono::{DateTime, Utc};
-use files_proto::{NamedVersion, ProjectVersion};
+use files_proto::{AnnotationStroke, NamedVersion, ProjectVersion, Review, ReviewComment};
 use uuid::Uuid;
 use vault::VaultPage;
 use vault_entity::error::{ParseError, WriteError};
@@ -27,17 +27,25 @@ use vault_entity::store::VaultEntity;
 use vault_entity::{frontmatter, yaml};
 
 /// Vault folder holding every Files version entity, per root:
-/// `Files/<root-slug>/versions/…` and
-/// `Files/<root-slug>/project-versions/…`.
+/// `Files/<root-slug>/versions/…`,
+/// `Files/<root-slug>/project-versions/…`, and
+/// `Files/<root-slug>/reviews/…` (issue #270).
 pub(crate) const FILES_FOLDER: &str = "Files";
 pub(crate) const NAMED_SUBFOLDER: &str = "versions";
 pub(crate) const PROJECT_SUBFOLDER: &str = "project-versions";
+pub(crate) const REVIEWS_SUBFOLDER: &str = "reviews";
 
 /// Vault mapping marker for [`NamedVersion`].
 pub struct NamedVersions;
 
 /// Vault mapping marker for [`ProjectVersion`].
 pub struct ProjectVersions;
+
+/// Vault mapping marker for [`Review`] (issue #270).
+pub struct Reviews;
+
+/// Vault mapping marker for [`ReviewComment`] (issue #270).
+pub struct ReviewComments;
 
 /// Read a uuid from `key`, accepting `alt` as the snake_case spelling
 /// a hand-written page might use.
@@ -202,5 +210,139 @@ impl VaultEntity for ProjectVersions {
         map.insert("commitId".into(), m.commit_id.clone().into());
         map.insert("dateCreated".into(), m.started_at.to_rfc3339().into());
         frontmatter::document(Self::TYPE, &map, "")
+    }
+}
+
+impl VaultEntity for Reviews {
+    type Model = Review;
+
+    const TYPE: &'static str = "files-review";
+    const DEFAULT_FOLDER: &'static str = FILES_FOLDER;
+
+    fn id(m: &Review) -> Uuid {
+        m.id
+    }
+    fn set_id(m: &mut Review, id: Uuid) {
+        m.id = id;
+    }
+    fn path(m: &Review) -> &str {
+        &m.path
+    }
+    fn set_path(m: &mut Review, path: String) {
+        m.path = path;
+    }
+    fn name(m: &Review) -> &str {
+        &m.title
+    }
+
+    fn on_create(m: &mut Review, now: DateTime<Utc>) {
+        if m.created_at.timestamp() == 0 {
+            m.created_at = now;
+        }
+    }
+
+    fn from_page(page: &VaultPage) -> Result<Review, ParseError> {
+        let (map, body) = frontmatter::mapping(&page.raw).ok_or(ParseError::NoFrontmatter)?;
+        let root_id = uuid_at(&map, "rootId", "root_id")
+            .ok_or_else(|| ParseError::Field("review is missing required `rootId`".into()))?;
+        let file_path = yaml::str_at(&map, "filePath")
+            .or_else(|| yaml::str_at(&map, "file_path"))
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| ParseError::Field("review is missing required `filePath`".into()))?;
+        Ok(Review {
+            id: id_at(&map, &page.rel_path),
+            path: page.rel_path.clone(),
+            root_id,
+            file_path,
+            title: yaml::str_at(&map, "title").unwrap_or_else(|| page.basename.clone()),
+            note: body.trim_start_matches('\n').to_string(),
+            created_at: yaml::timestamp_at(&map, "dateCreated").unwrap_or_else(epoch),
+        })
+    }
+
+    fn to_markdown(m: &Review) -> Result<String, WriteError> {
+        let mut map = serde_yaml::Mapping::new();
+        map.insert("id".into(), m.id.to_string().into());
+        map.insert("title".into(), m.title.clone().into());
+        map.insert("rootId".into(), m.root_id.to_string().into());
+        map.insert("filePath".into(), m.file_path.clone().into());
+        map.insert("dateCreated".into(), m.created_at.to_rfc3339().into());
+        frontmatter::document(Self::TYPE, &map, &m.note)
+    }
+}
+
+impl VaultEntity for ReviewComments {
+    type Model = ReviewComment;
+
+    const TYPE: &'static str = "files-review-comment";
+    const DEFAULT_FOLDER: &'static str = FILES_FOLDER;
+
+    fn id(m: &ReviewComment) -> Uuid {
+        m.id
+    }
+    fn set_id(m: &mut ReviewComment, id: Uuid) {
+        m.id = id;
+    }
+    fn path(m: &ReviewComment) -> &str {
+        &m.path
+    }
+    fn set_path(m: &mut ReviewComment, path: String) {
+        m.path = path;
+    }
+    /// Only feeds [`VaultEntity::default_path`]; real paths are built
+    /// by [`crate::versions`] under the review's own folder.
+    fn name(m: &ReviewComment) -> &str {
+        &m.author
+    }
+
+    fn on_create(m: &mut ReviewComment, now: DateTime<Utc>) {
+        if m.created_at.timestamp() == 0 {
+            m.created_at = now;
+        }
+    }
+
+    fn from_page(page: &VaultPage) -> Result<ReviewComment, ParseError> {
+        let (map, body) = frontmatter::mapping(&page.raw).ok_or(ParseError::NoFrontmatter)?;
+        let review_id = uuid_at(&map, "reviewId", "review_id")
+            .ok_or_else(|| ParseError::Field("comment is missing required `reviewId`".into()))?;
+        let timecode_secs = yaml::f64_at(&map, "timecode").unwrap_or(0.0);
+        // The drawing round-trips through serde: strokes are plain
+        // data, and hand-editing them is not a supported workflow — an
+        // unreadable `annotation` drops to "no drawing" rather than
+        // losing the comment text with it.
+        let annotation: Vec<AnnotationStroke> = map
+            .get(serde_yaml::Value::from("annotation"))
+            .cloned()
+            .and_then(|v| serde_yaml::from_value(v).ok())
+            .unwrap_or_default();
+        Ok(ReviewComment {
+            id: id_at(&map, &page.rel_path),
+            path: page.rel_path.clone(),
+            review_id,
+            timecode_secs,
+            author: yaml::str_at(&map, "author").unwrap_or_default(),
+            body: body.trim_start_matches('\n').to_string(),
+            commit_id: hex_at(&map, "commitId", "commit_id").unwrap_or_default(),
+            annotation,
+            created_at: yaml::timestamp_at(&map, "dateCreated").unwrap_or_else(epoch),
+        })
+    }
+
+    fn to_markdown(m: &ReviewComment) -> Result<String, WriteError> {
+        let mut map = serde_yaml::Mapping::new();
+        map.insert("id".into(), m.id.to_string().into());
+        map.insert("reviewId".into(), m.review_id.to_string().into());
+        map.insert("timecode".into(), m.timecode_secs.into());
+        if !m.author.is_empty() {
+            map.insert("author".into(), m.author.clone().into());
+        }
+        map.insert("commitId".into(), m.commit_id.clone().into());
+        if !m.annotation.is_empty() {
+            let strokes = serde_yaml::to_value(&m.annotation)
+                .map_err(|e| WriteError::Yaml(format!("annotation: {e}")))?;
+            map.insert("annotation".into(), strokes);
+        }
+        map.insert("dateCreated".into(), m.created_at.to_rfc3339().into());
+        frontmatter::document(Self::TYPE, &map, &m.body)
     }
 }
