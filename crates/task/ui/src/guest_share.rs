@@ -113,37 +113,35 @@ pub fn GuestShell(session: GuestShareSession) -> Element {
     rsx! {
         ThemeProvider { state: theme_state,
             ToastProvider {
-                div { class: "min-h-screen bg-background text-foreground flex justify-center p-4 sm:p-8",
-                    div { class: "w-full max-w-3xl flex flex-col gap-3",
-                        {match &*review.read_unchecked() {
-                            None => rsx! {
+                div { class: "h-screen w-screen overflow-hidden bg-background text-foreground",
+                    {match &*review.read_unchecked() {
+                        None => rsx! {
+                            div { class: "flex h-full items-center justify-center",
                                 Text { variant: TextVariant::Muted, "Opening the review…" }
-                            },
-                            Some(Err(e)) => rsx! {
-                                div { class: "rounded-lg border border-border/40 bg-card/40 p-6 flex flex-col gap-2",
+                            }
+                        },
+                        Some(Err(e)) => rsx! {
+                            div { class: "flex h-full items-center justify-center p-6",
+                                div { class: "w-full max-w-md rounded-lg border border-border/40 bg-card/40 p-6 flex flex-col gap-2",
                                     Heading { level: HeadingLevel::H2, "This review link didn't open" }
                                     Text { variant: TextVariant::Muted, "{e}" }
                                     Text { variant: TextVariant::Muted, class: "text-xs",
                                         "The link may be disabled, expired, or password-protected — reopen it from the page you were given."
                                     }
                                 }
-                            },
-                            Some(Ok(info)) => rsx! {
-                                div { class: "flex items-baseline gap-2 flex-wrap",
-                                    Heading { level: HeadingLevel::H2, "{info.title}" }
-                                    Badge { variant: BadgeVariant::Secondary, "shared review" }
-                                    Text { variant: TextVariant::Muted, class: "text-xs",
-                                        "You're a guest — comments post with your name and this link's attribution."
-                                    }
-                                }
-                                files_ui::review::ReviewPlayer {
-                                    org: org.clone(),
-                                    root_id: info.root_id,
-                                    path: info.file_path.clone(),
-                                }
-                            },
-                        }}
-                    }
+                            }
+                        },
+                        // The full review experience owns the viewport —
+                        // the guest badge and attribution note ride its
+                        // top bar.
+                        Some(Ok(info)) => rsx! {
+                            files_ui::review::ReviewScreen {
+                                org: org.clone(),
+                                root_id: info.root_id,
+                                path: info.file_path.clone(),
+                            }
+                        },
+                    }}
                 }
             }
         }
