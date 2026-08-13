@@ -219,8 +219,14 @@ table!(VAULT_GRAPH, "vault-graph", "vault/**", [
 ]);
 
 table!(SHARE, "share", "shares/**", [
-    wa "create_link", rd "list_links", rd "links_for_note",
+    // Minting and revoking are outward-facing — audited even on allow,
+    // like every capability-granting write. Retroactive edits (issue
+    // #271 AC 5) change what an existing link can do, so they audit too.
+    wa "create_link", wa "update_link", rd "list_links", rd "links_for_target",
     wa "set_link_disabled", wa "delete_link",
+    // The per-link access log (views + download receipts) is a read;
+    // the org kill switch is the org's biggest sharing decision.
+    rd "access_log", wa "set_sharing_disabled", rd "sharing_disabled",
 ]);
 
 // Per-file CRDT: `sync` mutates the doc; presence is ephemeral and never

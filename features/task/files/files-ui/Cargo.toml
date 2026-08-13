@@ -20,6 +20,11 @@ task-ui-core.workspace = true
 task-widgets.workspace = true
 # Wire types + RPC client only — wasm-clean by construction.
 files-proto = { workspace = true, features = ["vox"] }
+# Minting share links for slices and Named Versions (issue #271).
+share-proto = { workspace = true, features = ["vox"] }
+# Copy-minted-link-to-clipboard on the web build.
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = ["Window", "Navigator", "Clipboard"] }
 # `use_stream` — holds the `FilesService` event stream open and
 # re-establishes it across reconnects.
 architect = { workspace = true, features = ["client", "vox", "platform"] }

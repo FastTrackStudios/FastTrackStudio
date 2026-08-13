@@ -509,13 +509,10 @@ impl FilesBackend {
         let (a, b) = (side_a.to_vec(), side_b.to_vec());
         tokio::task::spawn_blocking(move || {
             this.with_repo(root_id, |repo| {
-                let base = repo
-                    .view()
-                    .heads()
-                    .iter()
-                    .next()
-                    .cloned()
-                    .ok_or_else(|| FilesError::NotFound("no checkpoint head to diverge".into()))?;
+                let base =
+                    repo.view().heads().iter().next().cloned().ok_or_else(|| {
+                        FilesError::NotFound("no checkpoint head to diverge".into())
+                    })?;
                 let rp = RepoPathBuf::from_internal_string(&path)
                     .map_err(|e| FilesError::BadRequest(format!("{path}: {e:?}")))?;
                 pollster::block_on(checkpoint(
@@ -4178,6 +4175,64 @@ impl FilesBackend {
             .read_range(fid, start, len, dest)
             .await
             .map_err(|e| rendition_read_err(file_id_hex, e))
+    }
+
+    /// The root's current checkpoint-head commit (hex) — what share
+    /// serving pins a slice link's whole surface to (issue #271):
+    /// listing and bytes must describe the same tree.
+    pub async fn head_commit_hex(&self, root_id: Uuid) -> Result<String, FilesError> {
+        let this = self.clone();
+        blocking(move || {
+            let root = this.get_root_info(root_id)?;
+            let (_repo, head) = this.reload_repo(&root)?;
+            Ok(head.hex())
+        })
+        .await
+    }
+
+    /// Pin a source file as of `at` (`None` = the checkpoint head) to
+    /// its immutable CAS identity: `(byte length, hex FileId)` — the
+    /// share-link download path (issue #271) resolves ONCE, then
+    /// streams by id, so a checkpoint landing mid-request can't produce
+    /// a `Content-Length`/body mismatch. Media roots only: their
+    /// content lives in the chunk CAS; a software root's history is
+    /// git's.
+    pub async fn resolve_source(
+        &self,
+        root_id: Uuid,
+        path: String,
+        at: Option<String>,
+    ) -> Result<(u64, String), FilesError> {
+        let this = self.clone();
+        let p = path.clone();
+        let (chunks, fid, _root) =
+            blocking(move || this.rendition_prep(root_id, &p, at.as_deref())).await?;
+        let len = chunks
+            .content_len(fid)
+            .await
+            .map_err(|e| FilesError::Io(format!("{path}: {e}")))?;
+        Ok((len, fid.to_hex()))
+    }
+
+    /// Stream a source file's bytes by the pinned CAS id
+    /// [`FilesBackend::resolve_source`] returned — content-addressed,
+    /// so the bytes are exactly the resolved version's, whatever has
+    /// happened to the root since.
+    pub async fn read_source_content<W>(
+        &self,
+        root_id: Uuid,
+        file_id_hex: &str,
+        dest: &mut W,
+    ) -> Result<(), FilesError>
+    where
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        let chunks = self.with_version_store(root_id, |vs| vs.chunks().clone())?;
+        let fid = chunk_file_id_from_hex(file_id_hex)?;
+        chunks
+            .read_to(fid, dest)
+            .await
+            .map_err(|e| FilesError::Io(format!("source {file_id_hex}: {e}")))
     }
 
     /// Prune a root's renditions whose source content the store no

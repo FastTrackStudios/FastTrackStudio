@@ -1729,7 +1729,7 @@ fn pick_server_orgs(
 /// or the suffix form `bytes=-N`) against a known total size, returning the
 /// inclusive `[start, end]` it resolves to. Multi-range and unsatisfiable
 /// requests return `None` (the caller then serves the full body).
-fn parse_byte_range(value: &str, total: u64) -> Option<(u64, u64)> {
+pub(crate) fn parse_byte_range(value: &str, total: u64) -> Option<(u64, u64)> {
     if total == 0 {
         return None;
     }
@@ -2086,20 +2086,37 @@ async fn files_rendition_handler(
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| parse_byte_range(s, total));
+    rendition_stream_response(&org, root_id, &file_id, kind.mime(), total, range)
+}
+
+/// Stream a rendition's bytes (whole, or one byte range → 206) as a
+/// response — shared by the org rendition route above and the share
+/// serving routes (issue #271).
+///
+/// Streams, never buffers: a rendition can be a full-length proxy, and
+/// `read_rendition_range` takes an `AsyncWrite` precisely so memory
+/// stays bounded to one chunk. The status is already on the wire when
+/// the read runs, so a mid-stream failure (e.g. the source-tied GC
+/// sweeping this rendition between the caller's stat and here) can only
+/// truncate the body — the client sees a short read against the
+/// advertised Content-Length, not a 500.
+pub(crate) fn rendition_stream_response(
+    org: &OrgAppState,
+    root_id: uuid::Uuid,
+    file_id: &str,
+    mime: &str,
+    total: u64,
+    range: Option<(u64, u64)>,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    use axum::response::IntoResponse;
     let (start, len) = match range {
         Some((start, end)) => (start, end - start + 1),
         None => (0, total),
     };
-    // Stream, never buffer: a rendition can be a full-length proxy, and
-    // `read_rendition_range` takes an `AsyncWrite` precisely so memory
-    // stays bounded to one chunk. The status is already on the wire when
-    // the read runs, so a mid-stream failure (e.g. the source-tied GC
-    // sweeping this rendition between the stat above and here) can only
-    // truncate the body — the client sees a short read against the
-    // advertised Content-Length, not a 500.
     let (mut writer, reader) = tokio::io::duplex(64 * 1024);
     let files = org.files.clone();
-    let read_file_id = file_id.clone();
+    let read_file_id = file_id.to_string();
     tokio::spawn(async move {
         if let Err(e) = files
             .read_rendition_range(root_id, &read_file_id, start, len, &mut writer)
@@ -2117,7 +2134,7 @@ async fn files_rendition_handler(
     });
     let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(reader));
     let base_headers = [
-        (header::CONTENT_TYPE, kind.mime().to_string()),
+        (header::CONTENT_TYPE, mime.to_string()),
         (header::ACCEPT_RANGES, "bytes".to_string()),
         (header::CONTENT_LENGTH, len.to_string()),
     ];
@@ -2179,7 +2196,24 @@ pub fn router(state: AppState) -> Router {
         .route("/org/{slug}/health", get(per_org_health_handler))
         .route("/org/{slug}/api", get(per_org_api_handler))
         .route("/org/{slug}/vox", any(per_org_vox_handler))
-        .route("/org/{slug}/share/{token}", get(share_landing_handler))
+        .route(
+            "/org/{slug}/share/{token}",
+            get(share::share_landing_handler),
+        )
+        // Files share serving (issue #271): scoped browse, view-only
+        // renditions, capability-gated downloads with receipts.
+        .route(
+            "/org/{slug}/share/{token}/b/{*rel}",
+            get(share::share_browse_handler),
+        )
+        .route(
+            "/org/{slug}/share/{token}/rendition/{kind}/{*rel}",
+            get(share::share_rendition_handler),
+        )
+        .route(
+            "/org/{slug}/share/{token}/download/{*rel}",
+            get(share::share_download_handler),
+        )
         // MCP — Task as a tool surface for agents (Hermes gateway,
         // Claude Code, any MCP client). See `mcp`.
         .route("/org/{slug}/mcp", axum::routing::post(mcp::mcp_handler))
@@ -2800,6 +2834,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.shares.clone(),
                 org.slug.clone(),
                 share_public_base(),
+                Some(org.files.clone()),
             )),
         );
 
@@ -3344,30 +3379,8 @@ fn share_public_base() -> String {
         })
 }
 
-/// `GET /org/{slug}/share/{token}` — the share landing page. The token is
-/// checked on EVERY hit so disabling a link is retroactive: unknown → 404,
-/// disabled → 410, live → the landing page (which opens the note in the
-/// app at `TASK_SHARE_APP_ORIGIN`, default same-origin).
-async fn share_landing_handler(
-    State(state): State<AppState>,
-    axum::extract::Path((slug, token)): axum::extract::Path<(String, String)>,
-) -> axum::response::Response {
-    use axum::http::StatusCode;
-    use axum::response::{Html, IntoResponse};
-    let Some(org) = state.org(&slug) else {
-        return (StatusCode::NOT_FOUND, "no such org").into_response();
-    };
-    match org.shares.resolve(&token) {
-        None => (StatusCode::NOT_FOUND, "no such share link").into_response(),
-        Some(link) if link.disabled => {
-            (StatusCode::GONE, Html(share::disabled_html())).into_response()
-        }
-        Some(link) => {
-            let app_origin = std::env::var("TASK_SHARE_APP_ORIGIN").unwrap_or_default();
-            Html(share::landing_html(&link, &app_origin)).into_response()
-        }
-    }
-}
+// The share landing / browse / rendition / download handlers live in
+// `share` (issue #271) — token-gated, re-checked on every hit.
 
 /// The WebSocket subprotocol every Task client offers, and the one the
 /// server selects. A client that offers subprotocols gets no connection at
