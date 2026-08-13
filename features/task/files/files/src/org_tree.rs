@@ -69,10 +69,9 @@ impl FilesBackend {
             None => {
                 let mut entries = Vec::new();
                 for home in ["Projects", "Albums"] {
-                    let dir = vault.join(home);
-                    if !dir.is_dir() {
+                    let Ok(dir) = confined_dir(&vault, &[home]) else {
                         continue;
-                    }
+                    };
                     for entry in std::fs::read_dir(&dir)? {
                         let entry = entry?;
                         if entry.file_type()?.is_dir() {
@@ -95,27 +94,30 @@ impl FilesBackend {
 
                 match rest.split_first() {
                     // `Projects/<name>/` — the project's own notes
-                    // plus the virtual Media/ door to its root.
+                    // plus the virtual Media/ door to its root. A
+                    // physical `Media` dir must not double the entry
+                    // (duplicate names would also collide as Dioxus
+                    // keys client-side).
                     None => {
-                        let mut entries = Self::list_dir(&project_dir, true, true)?;
-                        if media_root.is_some() {
+                        let mut entries =
+                            Self::list_dir(&confined_dir(&project_dir, &[])?, true, true)?;
+                        if media_root.is_some() && !entries.iter().any(|e| e.name == "Media") {
                             entries.push(virtual_dir("Media"));
                             entries.sort_by(|a, b| a.name.cmp(&b.name));
                         }
                         Ok(TreeNode::Listing(entries))
                     }
                     // `Projects/<name>/Media[/…]` — the root's live
-                    // tree; the client takes over with the full root
-                    // explorer.
-                    Some((&"Media", media_rest)) => {
-                        let root = media_root.ok_or_else(|| {
-                            Error::NotFound(format!("{project}: no File Root registered"))
-                        })?;
-                        Ok(TreeNode::Root {
+                    // tree when one is registered (the physical dir,
+                    // if any, is shadowed by the handoff); a plain
+                    // vault dir otherwise.
+                    Some((&"Media", media_rest)) => match media_root {
+                        Some(root) => Ok(TreeNode::Root {
                             id: root,
                             subpath: media_rest.join("/"),
-                        })
-                    }
+                        }),
+                        None => dir_node(&project_dir, rest),
+                    },
                     // `Projects/<name>/<notes…>` — plain vault dirs.
                     Some(_) => dir_node(&project_dir, rest),
                 }
@@ -137,22 +139,32 @@ impl FilesBackend {
 
     fn assets_area(&self, rest: &[&str]) -> Result<TreeNode, Error> {
         let base = self.confine_root().to_path_buf();
-        if rest.is_empty() {
-            // Top level: hide the registered roots' own directories —
-            // they surface through Projects/, not as loose files.
-            let root_dirs: Vec<PathBuf> = self
-                .registry_list()
-                .into_iter()
-                .map(|r| PathBuf::from(r.path))
-                .collect();
-            let mut entries = Self::list_dir(&base, true, true)?;
-            entries.retain(|e| {
-                let full = base.join(&e.name);
-                !root_dirs.iter().any(|r| r == &full)
-            });
-            return Ok(TreeNode::Listing(entries));
-        }
-        dir_node(&base, rest)
+        let dir = confined_dir(&base, rest)?;
+        // Hide registered roots at EVERY depth — a root created in a
+        // subdirectory surfaces through Projects/, never as loose
+        // files. Two guards: the registry's canonical paths, and the
+        // on-disk root marker (catches a root whose registered path
+        // spelling differs from the canonical one).
+        let root_dirs: Vec<PathBuf> = self
+            .registry_list()
+            .into_iter()
+            .filter_map(|r| PathBuf::from(r.path).canonicalize().ok())
+            .collect();
+        let mut entries = Self::list_dir(&dir, true, true)?;
+        entries.retain(|e| {
+            if !e.is_dir {
+                return true;
+            }
+            let full = dir.join(&e.name);
+            if full.join(crate::consts::MARKER_FILE).exists() {
+                return false;
+            }
+            match full.canonicalize() {
+                Ok(canonical) => !root_dirs.iter().any(|r| r == &canonical),
+                Err(_) => true,
+            }
+        });
+        Ok(TreeNode::Listing(entries))
     }
 }
 
@@ -175,17 +187,43 @@ fn markdown_area(base: &Path, rest: &[&str]) -> Result<TreeNode, Error> {
 
 /// A physical directory listing under `base`, `rest` segments deep.
 fn dir_node(base: &Path, rest: &[&str]) -> Result<TreeNode, Error> {
-    let mut dir = base.to_path_buf();
+    Ok(TreeNode::Listing(FilesBackend::list_dir(
+        &confined_dir(base, rest)?,
+        true,
+        true,
+    )?))
+}
+
+/// Resolve `rest` under `base` with REAL confinement: canonicalize
+/// both and require the target to stay inside the base. The literal
+/// `..` scan upstream catches lazy escapes; this catches symlinks —
+/// a link inside the vault pointing at `~/.ssh` (synced content, a
+/// shared volume) must not hand its listing to every org member.
+/// Every sibling browse surface confines; the tree is no exception.
+fn confined_dir(base: &Path, rest: &[&str]) -> Result<PathBuf, Error> {
+    let canonical_base = base
+        .canonicalize()
+        .map_err(|e| Error::NotFound(format!("{}: {e}", base.display())))?;
+    let mut dir = canonical_base.clone();
     for segment in rest {
         dir.push(segment);
     }
-    if !dir.is_dir() {
+    let resolved = dir
+        .canonicalize()
+        .map_err(|_| Error::NotFound(format!("{}: not a directory", rest.join("/"))))?;
+    if !resolved.starts_with(&canonical_base) {
+        return Err(Error::BadRequest(format!(
+            "{}: path escapes the area",
+            rest.join("/")
+        )));
+    }
+    if !resolved.is_dir() {
         return Err(Error::NotFound(format!(
             "{}: not a directory",
             rest.join("/")
         )));
     }
-    Ok(TreeNode::Listing(FilesBackend::list_dir(&dir, true, true)?))
+    Ok(resolved)
 }
 
 // ── entry constructors ────────────────────────────────────────────

@@ -142,3 +142,95 @@ async fn the_tree_serves_areas_join_lenses_and_assets() {
     assert!(client.tree_browse("Nope".into()).await.is_err());
     assert!(client.tree_browse("Vault/Ghost".into()).await.is_err());
 }
+
+/// A physical `Media` folder without a registered root is a plain
+/// vault dir — listed once, and enterable (never shown-but-404).
+#[tokio::test]
+async fn a_physical_media_folder_without_a_root_is_a_plain_dir() {
+    let (dir, client, _root_id, _local) = rig().await;
+    let media = dir
+        .path()
+        .join("vault")
+        .join("Albums")
+        .join("Dusk")
+        .join("Media");
+    std::fs::create_dir_all(&media).unwrap();
+    std::fs::write(media.join("cover.png"), b"png").unwrap();
+
+    let dusk = names(&client.tree_browse("Projects/Dusk".into()).await.unwrap());
+    assert_eq!(dusk.iter().filter(|n| *n == "Media").count(), 1, "{dusk:?}");
+    let inside = names(
+        &client
+            .tree_browse("Projects/Dusk/Media".into())
+            .await
+            .unwrap(),
+    );
+    assert_eq!(inside, vec!["cover.png"]);
+}
+
+/// A project with BOTH a physical Media dir and a registered root
+/// lists ONE Media entry, and the handoff wins on descent.
+#[tokio::test]
+async fn a_registered_root_shadows_a_physical_media_dir() {
+    let (dir, client, root_id, _local) = rig().await;
+    let media = dir
+        .path()
+        .join("vault")
+        .join("Projects")
+        .join("Alpha")
+        .join("Media");
+    std::fs::create_dir_all(&media).unwrap();
+
+    let alpha = names(&client.tree_browse("Projects/Alpha".into()).await.unwrap());
+    assert_eq!(
+        alpha.iter().filter(|n| *n == "Media").count(),
+        1,
+        "{alpha:?}"
+    );
+    match client
+        .tree_browse("Projects/Alpha/Media".into())
+        .await
+        .unwrap()
+    {
+        TreeNode::Root { id, .. } => assert_eq!(id, root_id),
+        TreeNode::Listing(_) => panic!("the registered root must win"),
+    }
+}
+
+/// A root registered in a SUBDIRECTORY of the Files area stays hidden
+/// from Assets at that depth too — roots surface through Projects,
+/// never as loose files.
+#[tokio::test]
+async fn assets_hide_roots_at_every_depth() {
+    let (dir, client, _root_id, _local) = rig().await;
+    let nested = dir.path().join("stash").join("nested-root");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(nested.join("take.wav"), b"wav").unwrap();
+    std::fs::write(dir.path().join("stash").join("loose.txt"), b"txt").unwrap();
+    client
+        .create_root(
+            nested.to_string_lossy().into_owned(),
+            "Stashed".into(),
+            RootFlavor::Media,
+        )
+        .await
+        .unwrap();
+
+    let stash = names(&client.tree_browse("Assets/stash".into()).await.unwrap());
+    assert!(stash.contains(&"loose.txt".to_string()), "{stash:?}");
+    assert!(!stash.contains(&"nested-root".to_string()), "{stash:?}");
+}
+
+/// A symlink inside a markdown area must not escape the org — the
+/// tree confines like every other browse surface.
+#[cfg(unix)]
+#[tokio::test]
+async fn symlinks_cannot_escape_the_area() {
+    let (dir, client, _root_id, _local) = rig().await;
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.txt"), b"nope").unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("vault").join("escape")).unwrap();
+
+    let err = client.tree_browse("Vault/escape".into()).await;
+    assert!(err.is_err(), "symlinked escape must refuse: {err:?}");
+}

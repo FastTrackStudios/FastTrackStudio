@@ -421,15 +421,15 @@ impl FilesBackend {
     /// reporting the second as the first is both a false alarm and the
     /// wrong status code (PR #287 review).
     #[must_use]
+    pub fn confine_root(&self) -> &Path {
+        &self.confine_root
+    }
+
     /// Every registered root, unprojected — the org-tree resolver's
     /// join input (the lineage overlay is browse-time garnish it
     /// doesn't need).
     pub(crate) fn registry_list(&self) -> Vec<FileRootInfo> {
         self.registry.list()
-    }
-
-    pub fn confine_root(&self) -> &Path {
-        &self.confine_root
     }
 
     /// The org vault the curated version entities live in.
