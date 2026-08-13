@@ -153,6 +153,28 @@ impl RenditionStore {
         self.chunks.has(file_id).await
     }
 
+    /// A rendition's total byte length — for a served `Content-Range`.
+    pub async fn content_len(&self, file_id: FileId) -> Result<u64> {
+        Ok(self.chunks.content_len(file_id).await?)
+    }
+
+    /// Stream a byte range `[start, start + len)` of a rendition to
+    /// `dest` — the `<video>`-seek path (issue #270), reading only the
+    /// overlapping chunks.
+    pub async fn read_range<W>(
+        &self,
+        file_id: FileId,
+        start: u64,
+        len: u64,
+        dest: &mut W,
+    ) -> Result<()>
+    where
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        self.chunks.read_range(file_id, start, len, dest).await?;
+        Ok(())
+    }
+
     /// Every distinct source `FileId` hex the index references — so a
     /// caller can resolve liveness for all of them ASYNC up front and
     /// hand [`RenditionStore::gc`] a plain synchronous predicate (no

@@ -14,6 +14,9 @@ publish = false
 
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
+# `ReaderStream` — the rendition route streams a duplex pipe as its
+# response body instead of buffering the window in RAM.
+tokio-util = { workspace = true, features = ["io"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
 # Forwarding client for the OTLP proxy (src/otlp.rs).
@@ -251,6 +254,10 @@ vault-proto = { workspace = true, features = ["vox"] }
 project = { workspace = true, features = ["vox"] }
 collection-proto = { workspace = true, features = ["vox"] }
 media-proto = { workspace = true, features = ["vox"] }
+# The rendition-route e2e drives the deterministic `FakeTranscoder`
+# (no ffmpeg) and names wire `RenditionKind`s directly.
+files-proto = { workspace = true, features = ["vox"] }
+files-transcode = { workspace = true, features = ["test-transcoder"] }
 vox-core = { workspace = true }
 # `connection_identity` dials with a hand-built handshake (subprotocol /
 # Authorization header) — `vox::connect_lane` only takes a URL.

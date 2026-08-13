@@ -408,6 +408,60 @@ impl ChunkStore {
         Ok(buf)
     }
 
+    /// Total byte length of a file's content — the sum of its chunk
+    /// lengths, read from the manifest (no chunk bytes touched). Serving
+    /// an HTTP `Content-Range` needs the total up front.
+    pub async fn content_len(&self, file_id: FileId) -> Result<u64> {
+        Ok(self
+            .read_manifest(file_id)
+            .await?
+            .chunks
+            .iter()
+            .map(|c| c.len)
+            .sum())
+    }
+
+    /// Write the half-open byte range `[start, start + len)` of a file's
+    /// content to `dest`, reading only the chunks that overlap the
+    /// window — so an HTTP Range request (a `<video>` seek) doesn't read
+    /// the whole file. A window past the end is clamped. Chunk reads are
+    /// bounded memory (one chunk at a time, like `read_to`).
+    pub async fn read_range<W>(
+        &self,
+        file_id: FileId,
+        start: u64,
+        len: u64,
+        dest: &mut W,
+    ) -> Result<()>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        use tokio::io::AsyncWriteExt;
+        let manifest = self.read_manifest(file_id).await?;
+        let end = start.saturating_add(len); // exclusive
+        let mut offset = 0u64; // start of the current chunk in the file
+        for chunk in &manifest.chunks {
+            let chunk_start = offset;
+            let chunk_end = offset + chunk.len;
+            offset = chunk_end;
+            // Skip chunks entirely before or after the window.
+            if chunk_end <= start || chunk_start >= end {
+                continue;
+            }
+            let bytes = self.read_chunk(chunk.hash).await?;
+            // Overlap of [start,end) with this chunk, relative to it.
+            let from = start.saturating_sub(chunk_start) as usize;
+            let to = (end.min(chunk_end) - chunk_start) as usize;
+            // A blob shorter than the manifest claims must error like
+            // `read_to`'s length check, not panic on the slice.
+            if bytes.len() < to {
+                return Err(Error::MissingChunk(chunk.hash.to_hex().to_string()));
+            }
+            dest.write_all(&bytes[from..to]).await.map_err(Error::Io)?;
+        }
+        Ok(())
+    }
+
     /// Fetch the manifest for `file_id`, if this store has it.
     pub async fn manifest(&self, file_id: FileId) -> Result<Manifest> {
         self.read_manifest(file_id).await
@@ -777,5 +831,43 @@ mod tests {
         let repaired_id = store.write_stream(&content[..]).await.unwrap();
         assert_eq!(repaired_id, file_id);
         assert_eq!(store.read_to_vec(file_id).await.unwrap(), content);
+    }
+
+    /// `content_len` + `read_range` (the `<video>` seek path): the total
+    /// matches, a full range reads the whole file, and windows in the
+    /// middle / straddling the end return exactly the right bytes across
+    /// chunk boundaries.
+    #[tokio::test]
+    async fn read_range_returns_the_right_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ChunkStore::open(dir.path()).await.unwrap();
+        // Big + varied so it splits into many chunks and a window crosses
+        // chunk boundaries (the case the seek path cares about).
+        let content: Vec<u8> = (0..1_000_000u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 16) as u8)
+            .collect();
+        let file_id = store.write_stream(&content[..]).await.unwrap();
+
+        assert_eq!(
+            store.content_len(file_id).await.unwrap(),
+            content.len() as u64
+        );
+
+        let mut full = Vec::new();
+        store
+            .read_range(file_id, 0, content.len() as u64, &mut full)
+            .await
+            .unwrap();
+        assert_eq!(full, content, "full range == whole file");
+
+        for (start, len) in [(0u64, 10u64), (12_345, 40_000), (999_990, 50)] {
+            let mut got = Vec::new();
+            store
+                .read_range(file_id, start, len, &mut got)
+                .await
+                .unwrap();
+            let end = (start + len).min(content.len() as u64) as usize;
+            assert_eq!(got, content[start as usize..end], "window {start}+{len}");
+        }
     }
 }

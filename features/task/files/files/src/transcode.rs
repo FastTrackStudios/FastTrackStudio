@@ -41,3 +41,19 @@ pub async fn open_store(root_path: &std::path::Path) -> Result<RenditionStore> {
         .await
         .map_err(|e| Error::Repo(format!("rendition store: {e}")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::engine_kind;
+
+    /// The wire kind's `tag()` (what the UI builds streaming URLs with)
+    /// must stay in lockstep with the engine tag the server parses the
+    /// route's `{kind}` segment against.
+    #[test]
+    fn wire_tags_mirror_engine_tags() {
+        use files_proto::RenditionKind as W;
+        for kind in [W::Proxy1080, W::Proxy720, W::Audio, W::Peaks, W::Filmstrip] {
+            assert_eq!(kind.tag(), engine_kind(kind).tag(), "{kind:?}");
+        }
+    }
+}

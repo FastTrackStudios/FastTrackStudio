@@ -1993,6 +1993,121 @@ async fn per_org_media_handler(
     }
 }
 
+/// Rendition streaming (issue #270): `GET
+/// /org/{slug}/files/renditions/{root_id}/{kind}/{file_id}` serves a
+/// derived rendition (issue #269 — proxy, filmstrip, peaks) out of the
+/// root's *private* rendition CAS. Originals are never reachable here:
+/// `file_id` must be a rendition content id in this root's rendition
+/// store, and the source-content read paths can't see that store.
+///
+/// Honours a single HTTP byte range with `206 Partial Content`, reading
+/// only the chunks overlapping the window — the `<video>` proxy seek
+/// path, so a scrub never pulls the whole file.
+///
+/// Authorization matches `/org/{slug}/media` exactly (same channels,
+/// same `TASK_ENFORCE_MEDIA_TOKEN` flag): a browser media element can't
+/// set headers, so the grant is a signed `?token=` minted over vox —
+/// prefix `files/renditions/{root_id}` covers a review's whole
+/// rendition ladder — or an `Authorization: Bearer` session token for
+/// native clients.
+///
+/// Content-Type comes from the `{kind}` path segment (the stable
+/// rendition tag, e.g. `proxy-720`), never from sniffing the bytes.
+async fn files_rendition_handler(
+    State(state): State<AppState>,
+    axum::extract::Path((slug, root_id, kind, file_id)): axum::extract::Path<(
+        String,
+        uuid::Uuid,
+        String,
+        String,
+    )>,
+    axum::extract::Query(q): axum::extract::Query<MediaQuery>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    let rel = format!("files/renditions/{root_id}/{kind}/{file_id}");
+    if let Some(refusal) = authorize_media(&state, &slug, &rel, q.token.as_deref(), &headers).await
+    {
+        return refusal;
+    }
+    let Some(kind) = files::TranscodeRenditionKind::from_tag(&kind) else {
+        return (StatusCode::NOT_FOUND, "unknown rendition kind").into_response();
+    };
+    let Some(org) = state.org(&slug) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let total = match org.files.rendition_len(root_id, &file_id).await {
+        Ok(n) => n,
+        Err(files::FilesError::NotFound(_)) => {
+            return (StatusCode::NOT_FOUND, "no such rendition").into_response();
+        }
+        Err(files::FilesError::BadRequest(m)) => {
+            return (StatusCode::BAD_REQUEST, m).into_response();
+        }
+        Err(e) => {
+            tracing::error!(%root_id, file_id, ?e, "rendition: stat failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "rendition store error").into_response();
+        }
+    };
+
+    // Single byte range → 206; absent/malformed/unsatisfiable → full
+    // body 200, still advertising range support (same contract as the
+    // `/media` route — browser media elements need `Accept-Ranges` to
+    // consider the source seekable at all).
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| parse_byte_range(s, total));
+    let (start, len) = match range {
+        Some((start, end)) => (start, end - start + 1),
+        None => (0, total),
+    };
+    // Stream, never buffer: a rendition can be a full-length proxy, and
+    // `read_rendition_range` takes an `AsyncWrite` precisely so memory
+    // stays bounded to one chunk. The status is already on the wire when
+    // the read runs, so a mid-stream failure (e.g. the source-tied GC
+    // sweeping this rendition between the stat above and here) can only
+    // truncate the body — the client sees a short read against the
+    // advertised Content-Length, not a 500.
+    let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+    let files = org.files.clone();
+    let read_file_id = file_id.clone();
+    tokio::spawn(async move {
+        if let Err(e) = files
+            .read_rendition_range(root_id, &read_file_id, start, len, &mut writer)
+            .await
+        {
+            match e {
+                files::FilesError::NotFound(_) => {
+                    tracing::debug!(%root_id, file_id = read_file_id, "rendition: swept mid-stream");
+                }
+                other => {
+                    tracing::warn!(%root_id, file_id = read_file_id, ?other, "rendition: ranged read failed");
+                }
+            }
+        }
+    });
+    let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(reader));
+    let base_headers = [
+        (header::CONTENT_TYPE, kind.mime().to_string()),
+        (header::ACCEPT_RANGES, "bytes".to_string()),
+        (header::CONTENT_LENGTH, len.to_string()),
+    ];
+    match range {
+        Some((start, end)) => (
+            StatusCode::PARTIAL_CONTENT,
+            base_headers,
+            [(
+                header::CONTENT_RANGE,
+                format!("bytes {start}-{end}/{total}"),
+            )],
+            body,
+        )
+            .into_response(),
+        None => (StatusCode::OK, base_headers, body).into_response(),
+    }
+}
+
 pub fn router(state: AppState) -> Router {
     use attachments::routes::AttachmentRouteState;
     use axum::routing::any;
@@ -2044,6 +2159,11 @@ pub fn router(state: AppState) -> Router {
         // can reach, instead of one registration per org.
         .route("/mcp", axum::routing::post(mcp::mcp_account_handler))
         .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
+        // Derived-rendition streaming for the Review page (issue #270).
+        .route(
+            "/org/{slug}/files/renditions/{root_id}/{kind}/{file_id}",
+            get(files_rendition_handler),
+        )
         .with_state(state.clone());
 
     // Server-management vox: `OrgManagementService` +

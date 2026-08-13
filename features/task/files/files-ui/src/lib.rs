@@ -33,6 +33,10 @@
 //! Session checkpoint taken anywhere — another device, the CLI, the
 //! cadence engine — re-reads the listing in place, with no refresh.
 
+/// The Review player (issue #270): proxy playback + timecode seek +
+/// filmstrip scrub for an opened media file.
+pub mod review;
+
 use dioxus::prelude::*;
 use files_proto::{
     BrowseEntry, ChainEntry, DivergenceChoice, DivergenceInfo, FileRootInfo, FilesEvent,
@@ -261,9 +265,17 @@ pub fn Explorer(props: ExplorerProps) -> Element {
     let org = props.org.clone();
     let floor = props.floor.clone();
     let mut location = use_signal(|| props.start.clone());
+    // The opened file's name — declared up here so the root-swap effect
+    // below can close it (its chain and review player belong to the old
+    // scope; carrying them across a swap would pair one root's video
+    // with another's history).
+    let mut opened = use_signal(|| Option::<String>::None);
     // Follow prop changes (the pane swaps roots underneath us).
     let start = props.start.clone();
-    use_effect(use_reactive!(|start| location.set(start)));
+    use_effect(use_reactive!(|start| {
+        location.set(start);
+        opened.set(None);
+    }));
 
     let mut entries = {
         let org = org.clone();
@@ -278,7 +290,6 @@ pub fn Explorer(props: ExplorerProps) -> Element {
     // chain is derived per file (ADR 0001) and a listing must not pay
     // for it. Declared before the stream so a checkpoint / naming event
     // (which changes a chain's entries and names) can refresh it too.
-    let mut opened = use_signal(|| Option::<String>::None);
     let mut chain = {
         let org = org.clone();
         use_resource(move || {
@@ -561,6 +572,16 @@ fn OpenFileDetail(
 ) -> Element {
     rsx! {
         div { class: "pl-6 flex flex-col gap-2",
+            // A video file opens as a review: its proxy rendition plays
+            // here (issue #270 Phase A). Audio/other files skip straight
+            // to their history.
+            if review::is_video_path(&path) {
+                review::ReviewPlayer {
+                    org: org.clone(),
+                    root_id,
+                    path: path.clone(),
+                }
+            }
             if divergent {
                 DivergencePanel {
                     org: org.clone(),
