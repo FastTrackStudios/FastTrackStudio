@@ -221,7 +221,13 @@ pub fn Explorer(props: ExplorerProps) -> Element {
     let here_base: String = location.read().path().to_string();
     let crumb_items = crumbs(&location.read().clone(), &floor);
     let at_floor = crumb_items.is_empty();
-    let padding = if embedded { "p-3" } else { "p-4" };
+    // Embedded (note-widget) mounts stay a card; the pane mount fills
+    // its parent edge to edge and scrolls internally.
+    let shell_class = if embedded {
+        "flex flex-col gap-2 rounded-lg border border-border/40 bg-card/40 p-3 outline-none"
+    } else {
+        "flex h-full min-h-0 flex-col gap-2 p-3 outline-none"
+    };
 
     // The selected entry's record, resolved fresh from the listing so
     // badges (divergent, stub) are never stale.
@@ -253,7 +259,7 @@ pub fn Explorer(props: ExplorerProps) -> Element {
 
     rsx! {
         div {
-            class: "flex flex-col gap-2 rounded-lg border border-border/40 bg-card/40 {padding} outline-none",
+            class: shell_class,
             tabindex: 0,
             onkeydown: {
                 let listing = listing.clone();
@@ -352,8 +358,8 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                 }
             }
             // ── body: listing + inspector ───────────────────────
-            div { class: if embedded { "flex flex-col gap-2" } else { "flex gap-3 items-start" },
-                div { class: "min-w-0 flex-1",
+            div { class: if embedded { "flex flex-col gap-2" } else { "flex min-h-0 flex-1 items-stretch gap-3" },
+                div { class: if embedded { "min-w-0 flex-1" } else { "min-w-0 flex-1 overflow-y-auto" },
                     {match listing.clone() {
                         None => rsx! {
                             task_ui_core::states::LoadingState { rows: 3 }
@@ -414,7 +420,7 @@ pub fn Explorer(props: ExplorerProps) -> Element {
                     }}
                 }
                 if (embedded || inspector_open()) && selected_entry.is_some() {
-                    div { class: if embedded { "w-full" } else { "w-80 shrink-0 sticky top-0" },
+                    div { class: if embedded { "w-full" } else { "w-80 shrink-0 overflow-y-auto border-l border-border/40 pl-3" },
                         Inspector {
                             org: org.clone(),
                             root_id: here_root,
@@ -582,7 +588,7 @@ fn Inspector(
         chain.read_unchecked().clone().flatten();
 
     rsx! {
-        div { class: "flex flex-col gap-3 rounded-lg border border-border/40 bg-card p-3",
+        div { class: "flex flex-col gap-3 py-1",
             // ── header ──────────────────────────────────────────
             div { class: "flex items-start gap-2",
                 {kind_icon(kind, 20)}

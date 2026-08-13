@@ -398,58 +398,61 @@ pub fn FilesPane() -> Element {
     let missing_root = matches!(selection, Selection::Root(_)) && active.is_none();
 
     rsx! {
-        div { class: "mx-auto w-full max-w-6xl flex flex-col gap-6 p-4 sm:p-6 lg:p-10",
-            div { class: "flex flex-col gap-1",
-                Heading { level: HeadingLevel::H1, "Files" }
-                Text {
-                    variant: TextVariant::Muted,
-                    "File Roots, their live trees, and the Drive surface for loose files."
+        // Full-page experience: the pane owns the whole main area —
+        // roots down a left rail, the explorer filling the rest. No
+        // page heading, no content card, no dead margins.
+        div { class: "flex h-full min-h-0 w-full",
+            // ── roots rail ──────────────────────────────────────
+            div { class: "flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/40 p-2",
+                span { class: "px-2 pt-1 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground",
+                    "Files"
                 }
-            }
-            if let Some(Err(e)) = &rows {
-                task_ui_core::states::ErrorState {
-                    message: e.clone(),
-                    title: "Couldn't list File Roots",
-                    on_retry: move |()| roots.restart(),
-                }
-            }
-            div { class: "grid gap-4 md:grid-cols-[16rem_1fr]",
-                div { class: "flex flex-col gap-1",
-                    for root in known.iter().cloned() {
-                        button {
-                            key: "{root.id}",
-                            class: if selection == Selection::Root(root.id) {
-                                "rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-left text-sm"
-                            } else {
-                                "rounded-md border border-transparent px-3 py-2 text-left text-sm hover:bg-muted/20"
-                            },
-                            onclick: move |_| selected.set(Selection::Root(root.id)),
-                            div { class: "flex items-center gap-2",
-                                span { class: "truncate", "{root.name}" }
-                                if let Some(badge) = &root.project_version {
-                                    Badge { variant: BadgeVariant::Secondary, "v{badge.number}" }
-                                }
-                            }
-                            div { class: "truncate text-xs text-muted-foreground", "{root.path}" }
-                        }
+                if let Some(Err(e)) = &rows {
+                    task_ui_core::states::ErrorState {
+                        message: e.clone(),
+                        title: "Couldn't list File Roots",
+                        on_retry: move |()| roots.restart(),
                     }
+                }
+                for root in known.iter().cloned() {
                     button {
-                        class: if selection == Selection::Drive {
-                            "rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-left text-sm"
+                        key: "{root.id}",
+                        class: if selection == Selection::Root(root.id) {
+                            "rounded-md bg-indigo-500/10 px-2.5 py-1.5 text-left text-sm ring-1 ring-indigo-400/40"
                         } else {
-                            "rounded-md border border-transparent px-3 py-2 text-left text-sm hover:bg-muted/20"
+                            "rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted/30"
                         },
-                        onclick: move |_| selected.set(Selection::Drive),
+                        onclick: move |_| selected.set(Selection::Root(root.id)),
                         div { class: "flex items-center gap-2",
-                            span { "Drive" }
-                            Badge { variant: BadgeVariant::Outline, "loose files" }
+                            span { class: "truncate", "{root.name}" }
+                            if let Some(badge) = &root.project_version {
+                                Badge { variant: BadgeVariant::Secondary, "v{badge.number}" }
+                            }
                         }
-                        div { class: "text-xs text-muted-foreground", "Outside any root" }
+                        div { class: "truncate text-xs text-muted-foreground", "{root.path}" }
                     }
                 }
+                button {
+                    class: if selection == Selection::Drive {
+                        "rounded-md bg-indigo-500/10 px-2.5 py-1.5 text-left text-sm ring-1 ring-indigo-400/40"
+                    } else {
+                        "rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted/30"
+                    },
+                    onclick: move |_| selected.set(Selection::Drive),
+                    div { class: "flex items-center gap-2",
+                        span { "Drive" }
+                        Badge { variant: BadgeVariant::Outline, "loose files" }
+                    }
+                    div { class: "text-xs text-muted-foreground", "Outside any root" }
+                }
+            }
+            // ── the explorer, filling everything else ───────────
+            div { class: "flex min-h-0 min-w-0 flex-1 flex-col",
                 {match (rows.is_none(), active) {
                     (true, _) => rsx! {
-                        task_ui_core::states::LoadingState { rows: 3 }
+                        div { class: "p-4",
+                            task_ui_core::states::LoadingState { rows: 3 }
+                        }
                     },
                     (false, Some(root)) => rsx! {
                         Explorer {
@@ -459,9 +462,11 @@ pub fn FilesPane() -> Element {
                         }
                     },
                     (false, None) if missing_root => rsx! {
-                        task_ui_core::states::EmptyState {
-                            title: "That File Root is gone",
-                            hint: "It is no longer in this org's roots — pick another, or browse Drive.",
+                        div { class: "p-4",
+                            task_ui_core::states::EmptyState {
+                                title: "That File Root is gone",
+                                hint: "It is no longer in this org's roots — pick another, or browse Drive.",
+                            }
                         }
                     },
                     (false, None) => rsx! {
@@ -481,7 +486,7 @@ fn DrivePane(org: String) -> Element {
     let path = use_signal(String::new);
     let mut submitted = use_signal(String::new);
     rsx! {
-        div { class: "flex flex-col gap-3",
+        div { class: "flex h-full min-h-0 flex-col gap-3 p-3",
             div { class: "flex items-center gap-2",
                 Input { value: path, placeholder: "Path to browse" }
                 Button {
