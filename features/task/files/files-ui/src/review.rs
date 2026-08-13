@@ -22,7 +22,10 @@
 //! element's id, same as the shell's watch page.
 
 use dioxus::prelude::*;
-use files_proto::RenditionKind;
+use files_proto::{
+    AnnotationPoint, AnnotationStroke, FilesEvent, FilesServiceStreamClient, NewReviewComment,
+    RenditionKind, Review, ReviewComment,
+};
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
@@ -115,6 +118,65 @@ async fn resolve_sources(org: &str, root_id: Uuid, path: &str) -> Result<Sources
     })
 }
 
+/// The review scope the comments panel works in: the entity, plus the
+/// file's current head commit (what a fresh comment records, and what
+/// an older comment is contrasted against).
+#[derive(Clone, Debug, PartialEq)]
+struct ReviewScope {
+    review: Review,
+    head_commit: String,
+}
+
+/// Get-or-create the file's review and read its chain head in one
+/// round trip pair — the panel needs both before it can post.
+async fn resolve_review(org: &str, root_id: Uuid, path: &str) -> Result<ReviewScope, String> {
+    let c = crate::client(org).await?;
+    let review = c
+        .review_for_file(root_id, path.to_owned())
+        .await
+        .map_err(|e| e.to_string())?;
+    let chain = c
+        .chain(root_id, path.to_owned())
+        .await
+        .map_err(|e| e.to_string())?;
+    let head_commit = chain
+        .first()
+        .map(|e| e.commit_id.clone())
+        .ok_or_else(|| "file has no checkpointed versions yet".to_string())?;
+    Ok(ReviewScope {
+        review,
+        head_commit,
+    })
+}
+
+async fn fetch_comments(org: &str, review_id: Uuid) -> Result<Vec<ReviewComment>, String> {
+    crate::client(org)
+        .await?
+        .review_comments(review_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn post_comment(
+    org: &str,
+    review_id: Uuid,
+    comment: NewReviewComment,
+) -> Result<ReviewComment, String> {
+    crate::client(org)
+        .await?
+        .add_review_comment(review_id, comment)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn remove_comment(org: &str, id: Uuid) -> Result<(), String> {
+    crate::client(org)
+        .await?
+        .delete_review_comment(id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Seek the player to an absolute time.
 fn seek_to(video_id: &str, secs: f64) {
     let _ = dioxus::document::eval(&format!(
@@ -139,6 +201,44 @@ async fn read_time(video_id: &str) -> f64 {
         "var v=document.getElementById('{video_id}');dioxus.send(v?v.currentTime:0);"
     ));
     e.recv::<f64>().await.unwrap_or(0.0)
+}
+
+/// An element's CSS-pixel size — what normalizes pointer coordinates
+/// into the frame's `0..=1` space when a drawing starts.
+async fn element_dims(id: &str) -> (f64, f64) {
+    let mut e = dioxus::document::eval(&format!(
+        "var el=document.getElementById('{id}');dioxus.send(el?[el.clientWidth,el.clientHeight]:[0,0]);"
+    ));
+    e.recv::<(f64, f64)>().await.unwrap_or((0.0, 0.0))
+}
+
+/// The one stroke style Phase C draws with (frame.io-red, ~4px on a
+/// 1000px-wide frame). A palette is later polish; the data model
+/// already carries per-stroke color/width.
+const STROKE_COLOR: &str = "#ff3355";
+const STROKE_WIDTH: f32 = 0.004;
+
+/// Normalize a pointer position against the overlay's size, clamped
+/// into the frame.
+fn normalized_point(x: f64, y: f64, dims: (f64, f64)) -> Option<AnnotationPoint> {
+    if dims.0 <= 0.0 || dims.1 <= 0.0 {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    Some(AnnotationPoint {
+        x: (x / dims.0).clamp(0.0, 1.0) as f32,
+        y: (y / dims.1).clamp(0.0, 1.0) as f32,
+    })
+}
+
+/// A stroke's `<polyline points>` attribute in the normalized viewBox.
+fn points_attr(stroke: &AnnotationStroke) -> String {
+    stroke
+        .points
+        .iter()
+        .map(|p| format!("{},{}", p.x, p.y))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The review player for one opened media file: proxy playback,
@@ -167,11 +267,44 @@ pub fn ReviewPlayer(
     let mut now = use_signal(|| 0.0f64);
     let timecode_input = use_signal(String::new);
 
+    // Frame-annotation state (issue #270 Phase C). `pending` is the
+    // drawing being authored (attached to the next comment); `viewing`
+    // is a saved comment's drawing shown over the frame; `active` is
+    // the stroke under the pointer right now. All in normalized frame
+    // coordinates — `dims` (the overlay's CSS size, read when draw
+    // mode opens) is only the capture-time divisor.
+    let mut draw_mode = use_signal(|| false);
+    let mut pending = use_signal(Vec::<AnnotationStroke>::new);
+    let viewing = use_signal(Vec::<AnnotationStroke>::new);
+    let mut active = use_signal(|| Option::<AnnotationStroke>::None);
+    let mut dims = use_signal(|| (0.0f64, 0.0f64));
+    let overlay_id = use_hook(|| format!("review-overlay-{}", Uuid::new_v4().simple()));
+
     let on_seek = {
         let video_id = video_id.clone();
         move |_| {
             if let Some(secs) = parse_timecode(&timecode_input.peek()) {
                 seek_to(&video_id, secs);
+            }
+        }
+    };
+
+    let toggle_draw = {
+        let (video_id, overlay_id) = (video_id.clone(), overlay_id.clone());
+        move |_| {
+            let entering = !*draw_mode.peek();
+            draw_mode.set(entering);
+            active.set(None);
+            if entering {
+                // Drawing pins a frame: pause, then measure the overlay
+                // so pointer coordinates normalize against it.
+                let _ = dioxus::document::eval(&format!(
+                    "var v=document.getElementById('{video_id}');if(v){{v.pause();}}"
+                ));
+                let overlay_id = overlay_id.clone();
+                spawn(async move { dims.set(element_dims(&overlay_id).await) });
+            } else {
+                pending.set(Vec::new());
             }
         }
     };
@@ -189,21 +322,85 @@ pub fn ReviewPlayer(
                     div { class: "text-xs text-muted-foreground", "No proxy rendition: {e}" }
                 },
                 Some(Ok(src)) => rsx! {
-                    video {
-                        id: video_id.clone(),
-                        src: src.proxy.clone(),
-                        controls: true,
-                        preload: "metadata",
-                        class: "w-full max-h-96 rounded bg-black/80",
-                        ontimeupdate: {
-                            let video_id = video_id.clone();
-                            move |_| {
+                    div { class: "relative",
+                        video {
+                            id: video_id.clone(),
+                            src: src.proxy.clone(),
+                            controls: !draw_mode(),
+                            preload: "metadata",
+                            class: "block w-full max-h-96 rounded bg-black/80",
+                            ontimeupdate: {
                                 let video_id = video_id.clone();
-                                spawn(async move { now.set(read_time(&video_id).await) });
+                                move |_| {
+                                    let video_id = video_id.clone();
+                                    spawn(async move { now.set(read_time(&video_id).await) });
+                                }
+                            },
+                        }
+                        // Annotation layer: normalized frame space
+                        // (`0..=1` both axes, stretched to the box), so a
+                        // drawing re-anchors across renditions and window
+                        // sizes (AC 3). Pointer-transparent unless drawing.
+                        svg {
+                            id: overlay_id.clone(),
+                            class: if draw_mode() { "absolute inset-0 h-full w-full cursor-crosshair touch-none" } else { "absolute inset-0 h-full w-full pointer-events-none" },
+                            view_box: "0 0 1 1",
+                            preserve_aspect_ratio: "none",
+                            onmousedown: move |evt: Event<MouseData>| {
+                                if !*draw_mode.peek() {
+                                    return;
+                                }
+                                let c = evt.data().element_coordinates();
+                                if let Some(p) = normalized_point(c.x, c.y, *dims.peek()) {
+                                    active.set(Some(AnnotationStroke {
+                                        points: vec![p],
+                                        color: STROKE_COLOR.into(),
+                                        width: STROKE_WIDTH,
+                                    }));
+                                }
+                            },
+                            onmousemove: move |evt: Event<MouseData>| {
+                                if active.peek().is_none() {
+                                    return;
+                                }
+                                let c = evt.data().element_coordinates();
+                                if let Some(p) = normalized_point(c.x, c.y, *dims.peek()) {
+                                    if let Some(stroke) = active.write().as_mut() {
+                                        stroke.points.push(p);
+                                    }
+                                }
+                            },
+                            onmouseup: move |_| {
+                                if let Some(stroke) = active.take() {
+                                    if stroke.points.len() > 1 {
+                                        pending.write().push(stroke);
+                                    }
+                                }
+                            },
+                            onmouseleave: move |_| {
+                                if let Some(stroke) = active.take() {
+                                    if stroke.points.len() > 1 {
+                                        pending.write().push(stroke);
+                                    }
+                                }
+                            },
+                            for stroke in viewing().iter().chain(pending().iter()).chain(active().iter()) {
+                                polyline {
+                                    points: points_attr(stroke),
+                                    fill: "none",
+                                    stroke: stroke.color.clone(),
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    // Non-scaling stroke: the viewBox is
+                                    // stretched non-uniformly, so width
+                                    // must be screen-space.
+                                    stroke_width: format!("{}", (f64::from(stroke.width) * dims().0).max(2.5)),
+                                    "vector-effect": "non-scaling-stroke",
+                                }
                             }
-                        },
+                        }
                     }
-                    div { class: "flex items-center gap-2",
+                    div { class: "flex items-center gap-2 flex-wrap",
                         Badge { variant: BadgeVariant::Outline, "{display_timecode(now())}" }
                         Input {
                             value: timecode_input,
@@ -215,6 +412,31 @@ pub fn ReviewPlayer(
                             size: ButtonSize::Small,
                             on_click: on_seek,
                             "Go"
+                        }
+                        Button {
+                            variant: if draw_mode() { ButtonVariant::Destructive } else { ButtonVariant::Outline },
+                            size: ButtonSize::Small,
+                            on_click: toggle_draw,
+                            if draw_mode() { "Cancel drawing" } else { "✏ Draw" }
+                        }
+                        if !pending().is_empty() {
+                            Button {
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Small,
+                                on_click: move |_| pending.set(Vec::new()),
+                                "Clear strokes"
+                            }
+                        }
+                        if !viewing().is_empty() && !draw_mode() {
+                            Button {
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Small,
+                                on_click: {
+                                    let mut viewing = viewing;
+                                    move |_| viewing.set(Vec::new())
+                                },
+                                "Hide drawing"
+                            }
                         }
                     }
                     if let Some(strip) = src.filmstrip.clone() {
@@ -233,10 +455,304 @@ pub fn ReviewPlayer(
                             },
                         }
                     }
+                    CommentsPanel {
+                        org,
+                        root_id,
+                        path,
+                        video_id: video_id.clone(),
+                        now,
+                        pending,
+                        viewing,
+                        draw_mode,
+                    }
                 },
             }}
         }
     }
+}
+
+/// The timecoded comment thread (issue #270 Phase B): every comment
+/// pins a timecode (click → seek) and records the file version it was
+/// made on; a comment from an older version wears a badge instead of
+/// silently blending in (AC 2's visible half).
+#[component]
+fn CommentsPanel(
+    org: ReadSignal<String>,
+    root_id: ReadSignal<Uuid>,
+    path: ReadSignal<String>,
+    /// The player element the timecode chips seek.
+    video_id: String,
+    /// The player's clock — what "Comment @ now" stamps.
+    now: ReadSignal<f64>,
+    /// Strokes authored in the player's draw mode — attached to the
+    /// next posted comment, then cleared (issue #270 Phase C).
+    pending: Signal<Vec<AnnotationStroke>>,
+    /// The player's view overlay — a row's saved drawing lands here.
+    viewing: Signal<Vec<AnnotationStroke>>,
+    /// Cleared when a drawing-carrying comment posts.
+    draw_mode: Signal<bool>,
+) -> Element {
+    let toast = use_toast();
+    let scope = use_resource(move || {
+        let (org, root_id, path) = (org(), root_id(), path());
+        async move { resolve_review(&org, root_id, &path).await }
+    });
+    let review_id = use_memo(move || match &*scope.read() {
+        Some(Ok(s)) => Some(s.review.id),
+        _ => None,
+    });
+    let mut comments = use_resource(move || {
+        let org = org();
+        let review_id = review_id();
+        async move {
+            match review_id {
+                Some(id) => Some(fetch_comments(&org, id).await),
+                None => None,
+            }
+        }
+    });
+
+    // Live: a comment landing anywhere (another reviewer, another
+    // device) re-reads this thread.
+    architect::use_stream(
+        move |tx| {
+            let org = org();
+            async move {
+                let Ok(stream) =
+                    task_ui_core::vox_clients::establish_for::<FilesServiceStreamClient>(&org)
+                        .await
+                else {
+                    return false;
+                };
+                stream.events(tx).await.is_ok()
+            }
+        },
+        move |event: FilesEvent| {
+            let mut comments = comments;
+            let touched = match &event {
+                FilesEvent::ReviewCommentAdded(c) | FilesEvent::ReviewCommentDeleted(c) => {
+                    Some(c.review_id)
+                }
+                _ => None,
+            };
+            if touched.is_some() && touched == *review_id.peek() {
+                comments.restart();
+            }
+        },
+    );
+
+    let author = use_signal(String::new);
+    let body = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    let post = move |_| {
+        let Some(Ok(s)) = scope.peek().clone() else {
+            return;
+        };
+        let text = body.peek().trim().to_string();
+        let strokes = pending.peek().clone();
+        // A drawing alone is a valid comment (the server allows text OR
+        // strokes); an empty everything is nothing to post.
+        if (text.is_empty() && strokes.is_empty()) || *busy.peek() {
+            return;
+        }
+        busy.set(true);
+        let org = org.peek().clone();
+        let comment = NewReviewComment {
+            timecode_secs: *now.peek(),
+            author: author.peek().trim().to_string(),
+            body: text,
+            commit_id: s.head_commit.clone(),
+            annotation: strokes,
+        };
+        let (mut body, mut pending, mut draw_mode) = (body, pending, draw_mode);
+        spawn(async move {
+            match post_comment(&org, s.review.id, comment).await {
+                Ok(_) => {
+                    body.set(String::new());
+                    pending.set(Vec::new());
+                    draw_mode.set(false);
+                    comments.restart();
+                }
+                Err(e) => {
+                    toast.error(
+                        "Couldn't comment".into(),
+                        ToastOptions::new().description(e),
+                    );
+                }
+            }
+            busy.set(false);
+        });
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2 pt-1",
+            {match &*scope.read_unchecked() {
+                None => rsx! {
+                    Text { variant: TextVariant::Muted, class: "text-xs", "Opening review…" }
+                },
+                Some(Err(e)) => rsx! {
+                    div { class: "text-xs text-muted-foreground", "No review: {e}" }
+                },
+                Some(Ok(s)) => {
+                    let head = s.head_commit.clone();
+                    rsx! {
+                        div { class: "flex items-center gap-2",
+                            Badge { variant: BadgeVariant::Secondary, "Review" }
+                            Text { variant: TextVariant::Muted, class: "text-xs", "{s.review.title}" }
+                        }
+                        {match &*comments.read_unchecked() {
+                            Some(Some(Ok(list))) if list.is_empty() => rsx! {
+                                Text { variant: TextVariant::Muted, class: "text-xs",
+                                    "No comments yet — be the first."
+                                }
+                            },
+                            Some(Some(Ok(list))) => rsx! {
+                                div { class: "flex flex-col gap-1",
+                                    for comment in list.iter().cloned() {
+                                        CommentRow {
+                                            key: "{comment.id}",
+                                            org,
+                                            comment,
+                                            head_commit: head.clone(),
+                                            video_id: video_id.clone(),
+                                            on_removed: move |()| comments.restart(),
+                                            on_view: {
+                                                let mut viewing = viewing;
+                                                move |strokes| viewing.set(strokes)
+                                            },
+                                        }
+                                    }
+                                }
+                            },
+                            Some(Some(Err(e))) => rsx! {
+                                div { class: "text-xs text-destructive", "Couldn't read comments: {e}" }
+                            },
+                            _ => rsx! {
+                                Text { variant: TextVariant::Muted, class: "text-xs", "Reading comments…" }
+                            },
+                        }}
+                        div { class: "flex items-center gap-2",
+                            Input {
+                                value: author,
+                                size: InputSize::Small,
+                                placeholder: "Name".to_string(),
+                                class: "max-w-28",
+                            }
+                            Input {
+                                value: body,
+                                size: InputSize::Small,
+                                placeholder: "Add a comment…".to_string(),
+                            }
+                            Button {
+                                variant: ButtonVariant::Secondary,
+                                size: ButtonSize::Small,
+                                disabled: busy(),
+                                on_click: post,
+                                if pending().is_empty() {
+                                    "Comment @ {display_timecode(now())}"
+                                } else {
+                                    "Comment @ {display_timecode(now())} ✏"
+                                }
+                            }
+                        }
+                    }
+                },
+            }}
+        }
+    }
+}
+
+/// One comment: its timecode chip (click → seek), author, text, and —
+/// when it was made on a version older than the current head — the
+/// version badge that keeps old feedback honestly attributed.
+#[component]
+fn CommentRow(
+    org: ReadSignal<String>,
+    comment: ReviewComment,
+    head_commit: String,
+    video_id: String,
+    on_removed: EventHandler<()>,
+    /// Show this comment's drawing over the frame (empty = clear the
+    /// overlay — clicking an undrawn comment hides a stale drawing).
+    on_view: EventHandler<Vec<AnnotationStroke>>,
+) -> Element {
+    let toast = use_toast();
+    let mut busy = use_signal(|| false);
+    let tc = comment.timecode_secs;
+    let stale = comment.commit_id != head_commit;
+    let author = if comment.author.is_empty() {
+        "Guest".to_string()
+    } else {
+        comment.author.clone()
+    };
+    let delete = {
+        let id = comment.id;
+        move |_| {
+            if *busy.peek() {
+                return;
+            }
+            busy.set(true);
+            let org = org.peek().clone();
+            spawn(async move {
+                match remove_comment(&org, id).await {
+                    Ok(()) => on_removed.call(()),
+                    Err(e) => {
+                        toast.error("Couldn't delete".into(), ToastOptions::new().description(e));
+                    }
+                }
+                busy.set(false);
+            });
+        }
+    };
+    rsx! {
+        div { class: "flex items-start gap-2 rounded-md border border-border/30 px-2 py-1.5 text-xs",
+            button {
+                class: "shrink-0 rounded bg-muted/40 px-1.5 py-0.5 font-mono tabular-nums hover:bg-muted/70",
+                onclick: {
+                    let video_id = video_id.clone();
+                    let strokes = comment.annotation.clone();
+                    // Jump to the moment AND show (or clear) its drawing
+                    // — the overlay always reflects the comment in focus.
+                    move |_| {
+                        seek_to(&video_id, tc);
+                        on_view.call(strokes.clone());
+                    }
+                },
+                "{display_timecode(tc)}"
+            }
+            div { class: "flex flex-col gap-0.5 min-w-0",
+                div { class: "flex items-center gap-2 flex-wrap",
+                    span { class: "font-medium", "{author}" }
+                    if !comment.annotation.is_empty() {
+                        Badge { variant: BadgeVariant::Secondary, "✏ drawing" }
+                    }
+                    if stale {
+                        // Feedback about an older cut stays attributed to
+                        // it (AC 2) — never silently re-anchored.
+                        Badge { variant: BadgeVariant::Outline,
+                            "on version {short_commit(&comment.commit_id)}"
+                        }
+                    }
+                }
+                span { class: "whitespace-pre-wrap break-words", "{comment.body}" }
+            }
+            div { class: "ml-auto",
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    disabled: busy(),
+                    on_click: delete,
+                    "✕"
+                }
+            }
+        }
+    }
+}
+
+/// First 12 hex chars — same display rule as the explorer's chain rows.
+fn short_commit(commit_id: &str) -> String {
+    commit_id.chars().take(12).collect()
 }
 
 #[cfg(test)]
@@ -271,6 +787,31 @@ mod tests {
         assert_eq!(display_timecode(3605.0), "1:00:05");
         assert_eq!(display_timecode(f64::NAN), "0:00");
         assert_eq!(display_timecode(-3.0), "0:00");
+    }
+
+    #[test]
+    fn pointer_positions_normalize_and_clamp_into_the_frame() {
+        let dims = (800.0, 450.0);
+        let p = normalized_point(400.0, 225.0, dims).expect("center");
+        assert!((p.x - 0.5).abs() < 1e-6 && (p.y - 0.5).abs() < 1e-6);
+        // Outside the box clamps to the edge rather than escaping 0..=1.
+        let p = normalized_point(-10.0, 9000.0, dims).expect("clamped");
+        assert_eq!((p.x, p.y), (0.0, 1.0));
+        // An unmeasured overlay captures nothing (no divide-by-zero).
+        assert!(normalized_point(10.0, 10.0, (0.0, 0.0)).is_none());
+    }
+
+    #[test]
+    fn strokes_render_as_normalized_polylines() {
+        let stroke = AnnotationStroke {
+            points: vec![
+                AnnotationPoint { x: 0.1, y: 0.2 },
+                AnnotationPoint { x: 0.5, y: 0.75 },
+            ],
+            color: "#ff3355".into(),
+            width: 0.004,
+        };
+        assert_eq!(points_attr(&stroke), "0.1,0.2 0.5,0.75");
     }
 
     #[test]
