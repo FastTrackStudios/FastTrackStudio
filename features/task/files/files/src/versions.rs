@@ -434,6 +434,7 @@ impl VaultVersions {
         &self,
         review: &Review,
         comment: NewReviewComment,
+        via_link: String,
     ) -> Result<ReviewComment> {
         let store = self.write_store::<ReviewComments>()?;
         // The review page is `<folder>/<stem>.md`; its comments live in
@@ -451,6 +452,7 @@ impl VaultVersions {
             body: comment.body,
             commit_id: comment.commit_id,
             annotation: comment.annotation,
+            via_link,
             created_at: Utc::now(),
         };
         store.create(model).map_err(entity_err)

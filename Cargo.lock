@@ -28402,6 +28402,7 @@ dependencies = [
  "finance-db",
  "finance-proto",
  "futures",
+ "futures-util",
  "git-config",
  "git-forgejo",
  "git-proto",

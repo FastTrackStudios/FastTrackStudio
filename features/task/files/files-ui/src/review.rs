@@ -983,6 +983,11 @@ fn CommentRow(
             div { class: "flex flex-col gap-0.5 min-w-0",
                 div { class: "flex items-center gap-2 flex-wrap",
                     span { class: "font-medium", "{author}" }
+                    if !comment.via_link.is_empty() {
+                        // Guest-lane feedback carries the link it came
+                        // through (issue #272 AC 1).
+                        Badge { variant: BadgeVariant::Outline, "via {comment.via_link}" }
+                    }
                     if !comment.annotation.is_empty() {
                         Badge { variant: BadgeVariant::Secondary, "✏ drawing" }
                     }
