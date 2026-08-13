@@ -27,6 +27,7 @@ use axum::extract::{Path as AxPath, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use files::FilesService as _;
+use futures_util::TryStreamExt as _;
 use sha2::{Digest, Sha256};
 use share_proto::{
     NewShareLink, ShareAccess, ShareCapabilities, ShareError, ShareLinkInfo, ShareService,
@@ -60,6 +61,14 @@ pub struct StoredLink {
     pub expires_unix: i64,
     #[serde(default)]
     pub disabled: bool,
+    /// Denormalized Review-target scope, written at mint (issue #272):
+    /// the serving routes run per HTTP hit — including every video
+    /// byte-range request — and must not re-scan the vault to learn
+    /// which file a review pins.
+    #[serde(default)]
+    pub review_root_id: Option<uuid::Uuid>,
+    #[serde(default)]
+    pub review_file_path: Option<String>,
     pub created_at: String,
 }
 
@@ -428,22 +437,21 @@ impl ShareService for ShareServiceImpl {
             }
         }
         // A Review link must point at a review that exists — a guest
-        // lane on a dangling id would 404 on every open.
+        // lane on a dangling id would 404 on every open. The review's
+        // scope is denormalized onto the link so serving never re-scans
+        // the vault per hit.
+        let mut review_scope: Option<(uuid::Uuid, String)> = None;
         if let ShareTarget::Review { id } = &target {
             let Some(files) = &self.files else {
                 return Err(ShareError::Invalid(
                     "review links need the Files backend mounted".into(),
                 ));
             };
-            let found = files
-                .list_reviews(None)
+            let review = files
+                .get_review(*id)
                 .await
-                .map_err(|e| ShareError::Invalid(format!("reviews: {e}")))?
-                .into_iter()
-                .any(|r| r.id == *id);
-            if !found {
-                return Err(ShareError::Invalid(format!("no review {id}")));
-            }
+                .map_err(|e| ShareError::Invalid(format!("review: {e}")))?;
+            review_scope = Some((review.root_id, review.file_path));
         }
         // 32 hex chars of UUIDv4 randomness — unguessable, URL-safe.
         let token = uuid::Uuid::new_v4().simple().to_string();
@@ -457,6 +465,8 @@ impl ShareService for ShareServiceImpl {
             password_sha256: None,
             expires_unix: 0,
             disabled: false,
+            review_root_id: review_scope.as_ref().map(|(root, _)| *root),
+            review_file_path: review_scope.map(|(_, path)| path),
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         apply_options(&mut link, options, true)?;
@@ -591,7 +601,7 @@ impl ShareService for ShareServiceImpl {
             return Err(ShareError::NotFound);
         };
         // Only a Slice link has a tree to promote into.
-        let ShareTarget::Slice { root_id, .. } = link.target() else {
+        let ShareTarget::Slice { root_id, subpath } = link.target() else {
             return Err(ShareError::Invalid("not a slice link".into()));
         };
         // The upload's name is a flat basename (the upload route wrote
@@ -603,36 +613,35 @@ impl ShareService for ShareServiceImpl {
         if dest_path.is_empty() || dest_path.split('/').any(|s| s == ".." || s.is_empty()) {
             return Err(ShareError::Invalid(format!("bad destination: {dest_path}")));
         }
+        // The destination is SLICE-relative: a link scoped to
+        // `client-deliverables/` promotes into that subtree only —
+        // the same visibility boundary its browsing had.
+        let dest_rel = if subpath.is_empty() {
+            dest_path.to_string()
+        } else {
+            format!("{subpath}/{dest_path}")
+        };
         let Some(files) = &self.files else {
             return Err(ShareError::Invalid(
                 "promotion needs the Files backend mounted".into(),
             ));
         };
-        let root = files
-            .get_root(root_id)
-            .await
-            .map_err(|e| ShareError::Invalid(format!("root: {e}")))?;
         let src = self.store.incoming_dir(&token).join(&name);
-        let dest = std::path::Path::new(&root.path).join(dest_path);
-        if dest.exists() {
-            // Never overwrite (AC 3): the versioned tree's files are
-            // the owner's; an upload never clobbers one.
-            return Err(ShareError::Invalid(format!(
-                "{dest_path}: already exists — promote to a different name"
-            )));
+        if !src.is_file() {
+            return Err(ShareError::NotFound);
         }
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ShareError::Storage(e.to_string()))?;
-        }
-        // Copy + remove rather than rename: the incoming area (org dir)
-        // and the root may live on different filesystems.
-        std::fs::copy(&src, &dest).map_err(|e| ShareError::Storage(format!("promote: {e}")))?;
+        // `place_file` carries the live-tree write safeguards the raw
+        // copy lacked: confinement (symlinked parents included), the
+        // root lock (a cadence capture can't snapshot a half-copied
+        // file), and never-overwrite.
+        files
+            .place_file(root_id, dest_rel.clone(), src.clone())
+            .await
+            .map_err(|e| ShareError::Invalid(format!("promote: {e}")))?;
         let _ = std::fs::remove_file(&src);
         // The cadence engine sees the arrival like any other save; a
         // hint makes the capture prompt.
-        let _ = files
-            .hint_activity(root_id, vec![dest_path.to_string()])
-            .await;
+        let _ = files.hint_activity(root_id, vec![dest_rel]).await;
         Ok(())
     }
 }
@@ -666,27 +675,54 @@ fn gate(
     pw: Option<&str>,
     interactive: bool,
 ) -> Result<(crate::OrgAppState, StoredLink), Box<Response>> {
+    // Wide-event enrichment (see the logging skill): the span is the
+    // wide event; every share hit records what it resolved to. Shape
+    // only — the token itself never lands in a field.
+    use task_telemetry::wide;
+    wide::set("org.slug", slug.to_owned());
     let Some(org) = state.org(slug) else {
+        wide::set("share.outcome", "org-not-found");
         return Err(Box::new(
             (StatusCode::NOT_FOUND, "no such org").into_response(),
         ));
     };
     let Some(link) = org.shares.resolve(token) else {
+        wide::set("share.outcome", "link-not-found");
         return Err(Box::new(
             (StatusCode::NOT_FOUND, "no such share link").into_response(),
         ));
     };
+    wide::set("share.label", link.label.clone());
+    wide::set(
+        "share.target_kind",
+        match link.target() {
+            ShareTarget::Note { .. } => "note",
+            ShareTarget::Slice { .. } => "slice",
+            ShareTarget::NamedVersion { .. } => "named-version",
+            ShareTarget::Review { .. } => "review",
+        },
+    );
     if link.disabled {
+        wide::set("share.outcome", "disabled");
         return Err(Box::new(
             (StatusCode::GONE, Html(disabled_html())).into_response(),
         ));
     }
     if link.expired(chrono::Utc::now().timestamp()) {
+        wide::set("share.outcome", "expired");
         return Err(Box::new(
             (StatusCode::GONE, Html(expired_html())).into_response(),
         ));
     }
     if !link.password_ok(pw) {
+        wide::set(
+            "share.outcome",
+            if pw.is_some() {
+                "password-wrong"
+            } else {
+                "password-missing"
+            },
+        );
         return Err(Box::new(match (pw, interactive) {
             // Wrong password ≠ no password: the former is a refusal,
             // the latter is the form (on HTML pages only).
@@ -705,6 +741,7 @@ fn gate(
                 .into_response(),
         }));
     }
+    wide::set("share.outcome", "ok");
     Ok((org, link))
 }
 
@@ -771,21 +808,24 @@ async fn files_scope(
         ShareTarget::Review { id } => {
             // The review pins the file; the guest lane (its own vox
             // route) carries the conversation. These HTML routes serve
-            // exactly the one file.
-            let review = org
-                .files
-                .list_reviews(None)
-                .await
-                .ok()
-                .and_then(|all| all.into_iter().find(|r| r.id == id));
-            let Some(review) = review else {
-                return Err((StatusCode::NOT_FOUND, "review gone").into_response());
+            // exactly the one file. The scope is denormalized on the
+            // link at mint — this runs on every byte-range request and
+            // must not scan the vault; the targeted lookup is only the
+            // legacy fallback for links minted before the field.
+            let (root_id, file_path) = match (&link.review_root_id, &link.review_file_path) {
+                (Some(root), Some(path)) => (*root, path.clone()),
+                _ => {
+                    let review = org.files.get_review(id).await.map_err(|e| {
+                        (StatusCode::NOT_FOUND, format!("review: {e}")).into_response()
+                    })?;
+                    (review.root_id, review.file_path)
+                }
             };
             Ok(Some(FilesScope {
-                root_id: review.root_id,
+                root_id,
                 subpath: String::new(),
                 at: None,
-                file_only: Some(review.file_path),
+                file_only: Some(file_path),
             }))
         }
     }
@@ -1007,26 +1047,16 @@ pub async fn share_guest_vox_handler(
     let ShareTarget::Review { id } = link.target() else {
         return (StatusCode::BAD_REQUEST, "not a review link").into_response();
     };
-    let review = match org.files.list_reviews(None).await {
-        Ok(all) => all.into_iter().find(|r| r.id == id),
-        Err(_) => None,
-    };
-    let Some(review) = review else {
-        return (StatusCode::NOT_FOUND, "review gone").into_response();
+    let review = match org.files.get_review(id).await {
+        Ok(review) => review,
+        Err(e) => return (StatusCode::NOT_FOUND, format!("review: {e}")).into_response(),
     };
     org.shares.log_access(&token, "guest", "");
-    // AC 1's attribution: every comment through this lane carries the
-    // link's identity, stamped server-side.
-    let attribution = format!(
-        "{} ({})",
-        link.label,
-        &link.token[..8.min(link.token.len())]
-    );
     let guest = crate::share_guest::GuestFilesService::new(
         org.files.clone(),
         review.clone(),
-        link.capabilities(),
-        attribution,
+        org.shares.clone(),
+        &link,
     );
     let media = crate::share_guest::GuestMediaService::new(
         crate::media::MediaServiceImpl::new(
@@ -1034,10 +1064,16 @@ pub async fn share_guest_vox_handler(
             org.slug.clone(),
             org.attachments.keypair.clone(),
         ),
+        org.shares.clone(),
+        &link,
         review.root_id,
     );
+    // The stream sibling rides too — the review page's live comment
+    // subscription works over the guest lane, fed by the service's own
+    // filtered event mirror (never the org-wide hub).
     let router = architect::LayerRouter::new()
-        .merge(files::files_service_layer(guest))
+        .merge(files::files_service_layer(guest.clone()))
+        .merge(files_proto::files_service_stream_layer(guest))
         .with(
             media_proto::media_service_service_descriptor(),
             media_proto::MediaServiceDispatcher::new(media),
@@ -1056,8 +1092,13 @@ pub async fn share_upload_handler(
     State(state): State<AppState>,
     AxPath((slug, token, name)): AxPath<(String, String, String)>,
     Query(q): Query<ShareQuery>,
-    body: axum::body::Bytes,
+    request: axum::extract::Request,
 ) -> Response {
+    /// A token's whole incoming area is bounded — anonymous holders
+    /// must not be able to fill the disk.
+    const MAX_INCOMING_FILES: usize = 100;
+    const MAX_INCOMING_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
     let (org, link) = match gate(&state, &slug, &token, q.pw.as_deref(), false) {
         Ok(v) => v,
         Err(resp) => return *resp,
@@ -1069,6 +1110,15 @@ pub async fn share_upload_handler(
         )
             .into_response();
     }
+    // Only a Slice link has a tree to promote into — an upload against
+    // any other target would be stranded forever.
+    if !matches!(link.target(), ShareTarget::Slice { .. }) {
+        return (
+            StatusCode::FORBIDDEN,
+            "file requests only work on slice links",
+        )
+            .into_response();
+    }
     // Flat basenames only — the incoming area is a single review queue,
     // not a tree.
     let name = sanitize_filename(name.rsplit('/').next().unwrap_or(&name));
@@ -1076,27 +1126,70 @@ pub async fn share_upload_handler(
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("incoming: {e}")).into_response();
     }
-    // Never overwrite: a second `notes.pdf` lands as `notes-2.pdf`.
-    let mut dest = dir.join(&name);
-    if dest.exists() {
-        let (stem, ext) = match name.rsplit_once('.') {
-            Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
-            _ => (name.clone(), String::new()),
-        };
-        for n in 2..1000 {
-            let candidate = dir.join(format!("{stem}-{n}{ext}"));
-            if !candidate.exists() {
-                dest = candidate;
-                break;
+    // Quota check (best-effort snapshot; the body-limit layer bounds
+    // any single request).
+    let (mut count, mut bytes) = (0usize, 0u64);
+    if let Ok(mut rd) = tokio::fs::read_dir(&dir).await {
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            if let Ok(meta) = entry.metadata().await {
+                count += 1;
+                bytes += meta.len();
             }
         }
     }
-    let saved = dest
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    if let Err(e) = tokio::fs::write(&dest, &body).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("upload: {e}")).into_response();
+    if count >= MAX_INCOMING_FILES || bytes >= MAX_INCOMING_BYTES {
+        return (
+            StatusCode::INSUFFICIENT_STORAGE,
+            "this link's incoming area is full — ask the owner to review it",
+        )
+            .into_response();
+    }
+    // Claim a destination with `create_new` — atomic against both the
+    // suffix loop falling through and two concurrent same-name uploads
+    // (the old exists()→write pair was TOCTOU-racy and could clobber).
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (name.clone(), String::new()),
+    };
+    let mut file_and_name = None;
+    for n in 1..=1000u32 {
+        let candidate_name = if n == 1 {
+            name.clone()
+        } else {
+            format!("{stem}-{n}{ext}")
+        };
+        match tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(dir.join(&candidate_name))
+            .await
+        {
+            Ok(file) => {
+                file_and_name = Some((file, candidate_name));
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("upload: {e}")).into_response();
+            }
+        }
+    }
+    let Some((mut file, saved)) = file_and_name else {
+        // 1000 collisions = someone is scripting; the quota above would
+        // have said "full" first in any honest flow.
+        return (StatusCode::INSUFFICIENT_STORAGE, "too many name collisions").into_response();
+    };
+    // Stream the body to disk — never buffer an anonymous upload in
+    // RAM (the body-limit layer caps the request; the heap must not
+    // pay for it).
+    let stream = request.into_body().into_data_stream();
+    let mut reader = tokio_util::io::StreamReader::new(stream.map_err(std::io::Error::other));
+    match tokio::io::copy(&mut reader, &mut file).await {
+        Ok(_) => {}
+        Err(e) => {
+            let _ = tokio::fs::remove_file(dir.join(&saved)).await;
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("upload: {e}")).into_response();
+        }
     }
     org.shares.log_access(&token, "upload", &saved);
     (StatusCode::OK, saved).into_response()

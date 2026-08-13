@@ -155,6 +155,10 @@ async fn guest_lane_comments_scoped_and_attributed() -> eyre::Result<()> {
         "attribution records the link: {}",
         posted.via_link
     );
+    assert_eq!(
+        posted.author, "External Client (guest)",
+        "identity is constrained at the boundary — a guest can't post as a member"
+    );
     assert_eq!(posted.annotation.len(), 1, "the drawing came through");
 
     // The owner sees the same attributed comment on the org lane.
@@ -223,6 +227,67 @@ async fn guest_lane_comments_scoped_and_attributed() -> eyre::Result<()> {
         )
         .await
         .expect_err("view-only guests cannot comment");
+
+    // ── Revocation is retroactive MID-CONNECTION: the link is
+    //    re-resolved on every call, not only at upgrade.
+    share
+        .set_link_disabled(link.token.clone(), true)
+        .await
+        .expect("disable");
+    guest
+        .review_comments(review.id)
+        .await
+        .expect_err("a disabled link cuts off connected guests");
+    share
+        .set_link_disabled(link.token.clone(), false)
+        .await
+        .expect("re-enable");
+    guest
+        .review_comments(review.id)
+        .await
+        .expect("re-enabling restores the connected guest");
+
+    // ── The live-comment stream rides the guest lane too, filtered to
+    //    this review.
+    {
+        let ws = base.replace("http://", "ws://");
+        let stream: files_proto::FilesServiceStreamClient =
+            vox::connect_lane(format!("{ws}/org/guest-test/share/{}/vox", link.token))
+                .establish()
+                .await
+                .map_err(|e| eyre::eyre!("stream connect: {e:?}"))?;
+        let (tx, mut rx) = vox::channel::<files_proto::FilesEvent>();
+        let sub = tokio::spawn(async move { stream.events(tx).await });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if sub.is_finished() {
+            panic!("guest stream subscribe ended early: {:?}", sub.await);
+        }
+        // An org-lane comment lands as a guest-visible event…
+        org.files
+            .add_review_comment(
+                review.id,
+                NewReviewComment {
+                    timecode_secs: 5.0,
+                    author: "Owner".into(),
+                    body: "replying".into(),
+                    commit_id: posted.commit_id.clone(),
+                    annotation: Vec::new(),
+                },
+            )
+            .await
+            .expect("owner comment");
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("event within 5s")
+            .expect("stream open")
+            .expect("one event");
+        let mut owned: Option<files_proto::FilesEvent> = None;
+        let _ = event.map(|ev| owned = Some(ev.clone()));
+        assert!(
+            matches!(owned, Some(files_proto::FilesEvent::ReviewCommentAdded(c)) if c.review_id == review.id),
+            "the guest stream carries this review's comments"
+        );
+    }
 
     // ── AC 4: password gates the lane (the upgrade itself refuses).
     share
@@ -360,6 +425,46 @@ async fn file_request_uploads_land_incoming_and_promote() -> eyre::Result<()> {
         )
         .await
         .expect_err("promotion never overwrites the tree");
+
+    // A slice-scoped link promotes INTO its slice, not beside it.
+    let scoped = share
+        .create_link(
+            ShareTarget::Slice {
+                root_id,
+                subpath: "inbox".into(),
+            },
+            NewShareLink {
+                label: "scoped drop".into(),
+                capabilities: Some(ShareCapabilities {
+                    comment: false,
+                    download: false,
+                    file_request: true,
+                }),
+                password: None,
+                expires_unix: None,
+            },
+        )
+        .await
+        .expect("scoped link");
+    let r = client
+        .post(format!(
+            "{base}/org/guest-test/share/{}/upload/brief.txt",
+            scoped.token
+        ))
+        .body("the brief")
+        .send()
+        .await?;
+    assert_eq!(r.status().as_u16(), 200);
+    share
+        .promote_incoming(scoped.token.clone(), "brief.txt".into(), "brief.txt".into())
+        .await
+        .expect("promote scoped");
+    assert!(
+        tmp.path()
+            .join("orgs/guest-test/files/session/inbox/brief.txt")
+            .is_file(),
+        "the destination is slice-relative — it landed under inbox/"
+    );
 
     // Upload receipts are in the access log.
     let log = share.access_log(link.token.clone()).await.expect("log");

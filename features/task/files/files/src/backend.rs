@@ -4195,6 +4195,60 @@ impl FilesBackend {
             .map_err(|e| rendition_read_err(file_id_hex, e))
     }
 
+    /// One review by id — the share routes' per-hit lookup (issue
+    /// #272): one targeted vault read, never an org-wide listing on a
+    /// byte-serving path.
+    pub async fn get_review(&self, id: Uuid) -> Result<files_proto::Review, FilesError> {
+        let this = self.clone();
+        blocking(move || this.versions.review(id)).await
+    }
+
+    /// Place an outside file into the root's live tree — the share
+    /// promotion path (issue #272 AC 3). Uses the same safeguards as
+    /// every other live-tree write: path confinement (including
+    /// symlinked parents — the deepest existing ancestor must
+    /// canonicalize inside the root), the root lock (a cadence capture
+    /// must not snapshot a half-copied file), and never-overwrite.
+    pub async fn place_file(
+        &self,
+        root_id: Uuid,
+        dest_rel: String,
+        src: PathBuf,
+    ) -> Result<(), FilesError> {
+        let this = self.clone();
+        blocking(move || {
+            let root = this.get_root_info(root_id)?;
+            let (disk, _repo_path) = this.resolve_root_file(&root, &dest_rel)?;
+            let root_canon = std::fs::canonicalize(&root.path).map_err(Error::Io)?;
+            let mut probe = disk.parent().map(std::path::Path::to_path_buf);
+            while let Some(p) = probe {
+                if p.exists() {
+                    let canon = std::fs::canonicalize(&p).map_err(Error::Io)?;
+                    if !canon.starts_with(&root_canon) {
+                        return Err(Error::BadRequest(format!(
+                            "{dest_rel}: destination escapes the root"
+                        )));
+                    }
+                    break;
+                }
+                probe = p.parent().map(std::path::Path::to_path_buf);
+            }
+            let lock = this.root_lock(root_id);
+            let _guard = lock.lock().expect("root lock poisoned");
+            if disk.exists() {
+                return Err(Error::AlreadyExists(format!(
+                    "{dest_rel}: already exists in the live tree"
+                )));
+            }
+            if let Some(parent) = disk.parent() {
+                std::fs::create_dir_all(parent).map_err(Error::Io)?;
+            }
+            std::fs::copy(&src, &disk).map_err(Error::Io)?;
+            Ok(())
+        })
+        .await
+    }
+
     /// The root's current checkpoint-head commit (hex) — what share
     /// serving pins a slice link's whole surface to (issue #271):
     /// listing and bytes must describe the same tree.
