@@ -797,22 +797,6 @@ impl FilesBackend {
         Ok(Some((repo, head)))
     }
 
-    /// Advance the cached checkpoint head, leaving the snapshot branch
-    /// where it is — every caller here is a checkpoint-line move, and a
-    /// mid-session reload must not forget the session's snapshots.
-    fn set_head(&self, root_id: Uuid, repo: Arc<ReadonlyRepo>, head: CommitId) {
-        let mut repos = self.repos.lock().expect("repo cache lock poisoned");
-        let snapshot_head = repos.get(&root_id).and_then(|rt| rt.snapshot_head.clone());
-        repos.insert(
-            root_id,
-            RootRuntime {
-                repo,
-                head,
-                snapshot_head,
-            },
-        );
-    }
-
     /// Set both heads at once — what a capture does (issue #260): a
     /// checkpoint moves the line and closes the branch, a snapshot
     /// leaves the line alone and extends the branch.
