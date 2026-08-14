@@ -123,14 +123,28 @@ impl OrgManagementService for OrgManagementImpl {
         let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
         let keypair = self.state.keypair.clone();
         let scope = self.state.scope.clone();
+        // The deployment's storage coordinator — a new org gets a view of
+        // the same registry every other org uses, never its own.
+        let storage = self.state.storage.clone();
         let slug = org_root.slug().to_owned();
+        // An org created at runtime joins the same cross-org identity as
+        // the ones scanned at boot — otherwise it would be the one org a
+        // home principal could never reach without a restart.
+        let home_identity = self.state.home_identity.clone();
         let built = tokio::runtime::Handle::current().block_on(async move {
             let auth = AuthState::open(&auth_db_url, &crate::auth_secret())
                 .await
                 .map_err(|e| OrgManagementError::Internal(format!("open auth: {e}")))?;
-            build_org_state(auth, &keypair, org_root, &scope)
-                .await
-                .map_err(|e| OrgManagementError::Internal(format!("build org: {e}")))
+            build_org_state(
+                auth,
+                &keypair,
+                org_root,
+                &scope,
+                &storage,
+                home_identity.as_ref(),
+            )
+            .await
+            .map_err(|e| OrgManagementError::Internal(format!("build org: {e}")))
         })?;
 
         self.state

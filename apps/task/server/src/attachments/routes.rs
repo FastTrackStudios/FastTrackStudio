@@ -175,7 +175,12 @@ async fn handle_download(
     match range {
         ByteRange::Satisfiable(start, end) => {
             let len = end - start + 1;
-            match state.service.store.get_blob_range(&content_hash, start, len).await {
+            match state
+                .service
+                .store
+                .get_blob_range(&content_hash, start, len)
+                .await
+            {
                 Ok(bytes) => (
                     StatusCode::PARTIAL_CONTENT,
                     base_headers(len),
@@ -263,19 +268,40 @@ mod range_tests {
 
     #[test]
     fn plain_ranges_resolve() {
-        assert_eq!(parse_byte_range("bytes=0-499", 1000), ByteRange::Satisfiable(0, 499));
-        assert_eq!(parse_byte_range("bytes=500-", 1000), ByteRange::Satisfiable(500, 999));
-        assert_eq!(parse_byte_range("bytes=-200", 1000), ByteRange::Satisfiable(800, 999));
+        assert_eq!(
+            parse_byte_range("bytes=0-499", 1000),
+            ByteRange::Satisfiable(0, 499)
+        );
+        assert_eq!(
+            parse_byte_range("bytes=500-", 1000),
+            ByteRange::Satisfiable(500, 999)
+        );
+        assert_eq!(
+            parse_byte_range("bytes=-200", 1000),
+            ByteRange::Satisfiable(800, 999)
+        );
         // end past EOF clamps
-        assert_eq!(parse_byte_range("bytes=900-2000", 1000), ByteRange::Satisfiable(900, 999));
+        assert_eq!(
+            parse_byte_range("bytes=900-2000", 1000),
+            ByteRange::Satisfiable(900, 999)
+        );
         // suffix longer than the blob → whole blob
-        assert_eq!(parse_byte_range("bytes=-5000", 1000), ByteRange::Satisfiable(0, 999));
+        assert_eq!(
+            parse_byte_range("bytes=-5000", 1000),
+            ByteRange::Satisfiable(0, 999)
+        );
     }
 
     #[test]
     fn unsatisfiable_ranges_416() {
-        assert_eq!(parse_byte_range("bytes=1000-", 1000), ByteRange::Unsatisfiable);
-        assert_eq!(parse_byte_range("bytes=5-2", 1000), ByteRange::Unsatisfiable);
+        assert_eq!(
+            parse_byte_range("bytes=1000-", 1000),
+            ByteRange::Unsatisfiable
+        );
+        assert_eq!(
+            parse_byte_range("bytes=5-2", 1000),
+            ByteRange::Unsatisfiable
+        );
         assert_eq!(parse_byte_range("bytes=-0", 1000), ByteRange::Unsatisfiable);
         assert_eq!(parse_byte_range("bytes=0-", 0), ByteRange::Unsatisfiable);
     }

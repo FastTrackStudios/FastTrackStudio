@@ -119,8 +119,8 @@ pub fn cached_suffix(org: &str, slug: &str) -> String {
 }
 
 async fn mint(org: &str, prefix: &str) -> Option<media_proto::MediaGrant> {
+    use crate::vox_clients::establish_for;
     use media_proto::MediaServiceClient;
-    use task_ui_core::vox_clients::establish_for;
 
     let client: MediaServiceClient = establish_for(org).await.ok()?;
     match client.media_grant(prefix.to_owned()).await {
@@ -160,7 +160,10 @@ mod tests {
         // mid-song; re-mint instead.
         grants().lock().unwrap().insert(
             ("org".into(), song_prefix("soon")),
-            ("?token=soon".into(), now_unix() + REFRESH_MARGIN_SECONDS / 2),
+            (
+                "?token=soon".into(),
+                now_unix() + REFRESH_MARGIN_SECONDS / 2,
+            ),
         );
         assert_eq!(cached_suffix("org", "soon"), "");
     }

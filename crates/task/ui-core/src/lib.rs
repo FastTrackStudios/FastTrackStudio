@@ -30,9 +30,11 @@
 //! put it in every consumer's dependency graph, which is exactly the
 //! coupling the split is undoing.
 
+pub mod avatar;
 pub mod feeds;
 pub mod format;
 pub mod frontmatter;
+pub mod media_grant;
 pub mod nav;
 pub mod orgs;
 pub mod states;

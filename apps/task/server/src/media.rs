@@ -140,12 +140,9 @@ impl MediaService for MediaServiceImpl {
             )));
         }
         let expires_unix = chrono::Utc::now().timestamp() + GRANT_TTL_SECONDS;
-        let token = crate::attachments::signed_url::BlobToken::media(
-            &self.slug,
-            prefix,
-            expires_unix,
-        )
-        .issue(&self.keypair);
+        let token =
+            crate::attachments::signed_url::BlobToken::media(&self.slug, prefix, expires_unix)
+                .issue(&self.keypair);
         Ok(MediaGrant {
             token,
             expires_unix,
@@ -168,10 +165,7 @@ mod tests {
             String::new(),
         ));
         let keypair = attachments.keypair.clone();
-        (
-            MediaServiceImpl::new(attachments, "test-org", keypair),
-            tmp,
-        )
+        (MediaServiceImpl::new(attachments, "test-org", keypair), tmp)
     }
 
     #[tokio::test]

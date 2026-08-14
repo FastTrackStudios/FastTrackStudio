@@ -335,6 +335,36 @@ impl ChunkStore {
         Ok(file_id)
     }
 
+    /// Derive the [`FileId`] `source` *would* have in this store,
+    /// writing nothing — no chunks, no manifest, no locks. The pure
+    /// half of [`ChunkStore::write_stream`]: same chunker config, same
+    /// per-chunk blake3, same manifest encoding, so the answer is
+    /// exactly the id a real write of the same bytes returns. This is
+    /// what lets an is-this-content-already-versioned comparison run
+    /// without persisting never-versioned bytes as orphaned store data
+    /// (PR #289 review).
+    pub async fn probe_stream<R>(&self, source: R) -> Result<FileId>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        let mut chunker = AsyncStreamCDC::new(
+            source,
+            self.chunker_config.min_size,
+            self.chunker_config.avg_size,
+            self.chunker_config.max_size,
+        );
+        let mut stream = std::pin::pin!(chunker.as_stream());
+        let mut chunks: Vec<ChunkRef> = Vec::new();
+        while let Some(item) = stream.next().await {
+            let data = item.map_err(|e| Error::Io(e.into()))?.data;
+            chunks.push(ChunkRef {
+                hash: blake3::hash(&data),
+                len: data.len() as u64,
+            });
+        }
+        Ok(Manifest::new(chunks).file_id())
+    }
+
     /// Stream the file named by `file_id` to `dest`, one chunk at a time.
     /// Bounded memory: chunks are copied to `dest` and dropped as they are
     /// read, never assembled into a whole-file buffer.
@@ -378,9 +408,156 @@ impl ChunkStore {
         Ok(buf)
     }
 
+    /// Total byte length of a file's content — the sum of its chunk
+    /// lengths, read from the manifest (no chunk bytes touched). Serving
+    /// an HTTP `Content-Range` needs the total up front.
+    pub async fn content_len(&self, file_id: FileId) -> Result<u64> {
+        Ok(self
+            .read_manifest(file_id)
+            .await?
+            .chunks
+            .iter()
+            .map(|c| c.len)
+            .sum())
+    }
+
+    /// Write the half-open byte range `[start, start + len)` of a file's
+    /// content to `dest`, reading only the chunks that overlap the
+    /// window — so an HTTP Range request (a `<video>` seek) doesn't read
+    /// the whole file. A window past the end is clamped. Chunk reads are
+    /// bounded memory (one chunk at a time, like `read_to`).
+    pub async fn read_range<W>(
+        &self,
+        file_id: FileId,
+        start: u64,
+        len: u64,
+        dest: &mut W,
+    ) -> Result<()>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        use tokio::io::AsyncWriteExt;
+        let manifest = self.read_manifest(file_id).await?;
+        let end = start.saturating_add(len); // exclusive
+        let mut offset = 0u64; // start of the current chunk in the file
+        for chunk in &manifest.chunks {
+            let chunk_start = offset;
+            let chunk_end = offset + chunk.len;
+            offset = chunk_end;
+            // Skip chunks entirely before or after the window.
+            if chunk_end <= start || chunk_start >= end {
+                continue;
+            }
+            let bytes = self.read_chunk(chunk.hash).await?;
+            // Overlap of [start,end) with this chunk, relative to it.
+            let from = start.saturating_sub(chunk_start) as usize;
+            let to = (end.min(chunk_end) - chunk_start) as usize;
+            // A blob shorter than the manifest claims must error like
+            // `read_to`'s length check, not panic on the slice.
+            if bytes.len() < to {
+                return Err(Error::MissingChunk(chunk.hash.to_hex().to_string()));
+            }
+            dest.write_all(&bytes[from..to]).await.map_err(Error::Io)?;
+        }
+        Ok(())
+    }
+
     /// Fetch the manifest for `file_id`, if this store has it.
     pub async fn manifest(&self, file_id: FileId) -> Result<Manifest> {
         self.read_manifest(file_id).await
+    }
+
+    /// Is this one chunk in the blob store? The chunk-level presence
+    /// probe replica reconcile plans transfers with (issue #264):
+    /// "resumable at chunk level" means asking this per chunk and
+    /// fetching only the misses.
+    pub async fn has_chunk(&self, hash: blake3::Hash) -> Result<bool> {
+        self.blobs
+            .has(*hash.as_bytes())
+            .await
+            .map_err(|e| Error::Store(format!("checking chunk {hash}: {e}")))
+    }
+
+    /// Read one chunk's bytes. Chunks are bounded by the chunker's max
+    /// size, so a whole-chunk `Vec` is bounded memory by construction.
+    pub async fn read_chunk(&self, hash: blake3::Hash) -> Result<Vec<u8>> {
+        let hash_bytes = *hash.as_bytes();
+        let mut reader = self.blobs.reader(hash_bytes);
+        let mut buf = Vec::new();
+        match tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buf).await {
+            Ok(_) => Ok(buf),
+            Err(io_err) => {
+                let present = self.blobs.has(hash_bytes).await.unwrap_or(true);
+                if present {
+                    Err(Error::Io(io_err))
+                } else {
+                    Err(Error::MissingChunk(hash.to_hex().to_string()))
+                }
+            }
+        }
+    }
+
+    /// A held guard that quiesces the GC protect scan for its lifetime —
+    /// the seam replica sync (issue #264) holds across a file's whole
+    /// chunk+manifest import so a chunk that has arrived but whose
+    /// manifest has not yet landed cannot be swept out from under the
+    /// import (PR #291 review). It is the SAME `write_lock.read()`
+    /// [`ChunkStore::write_stream`] holds for exactly this reason —
+    /// the protect callback takes `write_lock.write()`, so any read
+    /// guard blocks a sweep — just held across the import instead of a
+    /// single call. Owned so the caller can hold it across `.await`s.
+    pub async fn gc_quiesce_guard(&self) -> tokio::sync::OwnedRwLockReadGuard<()> {
+        self.write_lock.clone().read_owned().await
+    }
+
+    /// Store one chunk received from a peer, **verified**: the bytes are
+    /// hashed here and a payload that doesn't hash to `expected` is
+    /// refused — a sync peer is never trusted about content addresses
+    /// (issue #264's "iroh verified streaming" property, applied at this
+    /// store's boundary).
+    ///
+    /// The chunk has NO manifest referencing it yet, so it has no GC
+    /// protection of its own — the caller must hold a
+    /// [`ChunkStore::gc_quiesce_guard`] across the whole file import
+    /// (chunks + manifest) so nothing sweeps it before its manifest
+    /// lands (PR #291 review).
+    pub async fn import_chunk(&self, expected: blake3::Hash, bytes: Vec<u8>) -> Result<()> {
+        let actual = blake3::hash(&bytes);
+        if actual != expected {
+            return Err(Error::Store(format!(
+                "chunk payload hashes to {actual}, peer claimed {expected}"
+            )));
+        }
+        let _write_guard = self.write_lock.read().await;
+        let batch = self
+            .blobs
+            .batch()
+            .await
+            .map_err(|e| Error::Store(format!("opening a gc-protection batch: {e}")))?;
+        let _tag = batch
+            .add_bytes(bytes)
+            .await
+            .map_err(|e| Error::Store(format!("storing chunk {expected}: {e}")))?;
+        // The tag drops with the batch: liveness comes from the manifest
+        // the caller imports once every chunk is present (manifests are
+        // the GC roots).
+        Ok(())
+    }
+
+    /// Store a manifest received from a peer, returning its `FileId` —
+    /// **refused unless every chunk it references is already present**,
+    /// so an imported manifest never names content this store cannot
+    /// serve (a partial replica stays honest: absent files are stubs,
+    /// never half-manifests).
+    pub async fn import_manifest(&self, manifest: &Manifest) -> Result<FileId> {
+        for chunk in &manifest.chunks {
+            if !self.has_chunk(chunk.hash).await? {
+                return Err(Error::MissingChunk(chunk.hash.to_hex().to_string()));
+            }
+        }
+        let file_id = manifest.file_id();
+        self.write_manifest(file_id, manifest).await?;
+        Ok(file_id)
     }
 
     /// Whether a manifest for `file_id` is on disk. Does not verify that
@@ -654,5 +831,43 @@ mod tests {
         let repaired_id = store.write_stream(&content[..]).await.unwrap();
         assert_eq!(repaired_id, file_id);
         assert_eq!(store.read_to_vec(file_id).await.unwrap(), content);
+    }
+
+    /// `content_len` + `read_range` (the `<video>` seek path): the total
+    /// matches, a full range reads the whole file, and windows in the
+    /// middle / straddling the end return exactly the right bytes across
+    /// chunk boundaries.
+    #[tokio::test]
+    async fn read_range_returns_the_right_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ChunkStore::open(dir.path()).await.unwrap();
+        // Big + varied so it splits into many chunks and a window crosses
+        // chunk boundaries (the case the seek path cares about).
+        let content: Vec<u8> = (0..1_000_000u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 16) as u8)
+            .collect();
+        let file_id = store.write_stream(&content[..]).await.unwrap();
+
+        assert_eq!(
+            store.content_len(file_id).await.unwrap(),
+            content.len() as u64
+        );
+
+        let mut full = Vec::new();
+        store
+            .read_range(file_id, 0, content.len() as u64, &mut full)
+            .await
+            .unwrap();
+        assert_eq!(full, content, "full range == whole file");
+
+        for (start, len) in [(0u64, 10u64), (12_345, 40_000), (999_990, 50)] {
+            let mut got = Vec::new();
+            store
+                .read_range(file_id, start, len, &mut got)
+                .await
+                .unwrap();
+            let end = (start + len).min(content.len() as u64) as usize;
+            assert_eq!(got, content[start as usize..end], "window {start}+{len}");
+        }
     }
 }

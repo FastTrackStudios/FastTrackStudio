@@ -60,9 +60,9 @@ async fn authenticate(
 ) -> Result<(crate::OrgAppState, Uuid, Uuid), Response> {
     let token = bearer(headers)
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "missing bearer token").into_response())?;
-    let org = state
-        .org(slug)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("org `{slug}` not hosted")).into_response())?;
+    let org = state.org(slug).ok_or_else(|| {
+        (StatusCode::NOT_FOUND, format!("org `{slug}` not hosted")).into_response()
+    })?;
     let org_id = state
         .data_root
         .org(slug)
@@ -147,7 +147,7 @@ async fn timer_start(
     headers: HeaderMap,
     body: Option<Json<StartBody>>,
 ) -> Response {
-    let (org,org_id, user_id) = match authenticate(&state, &slug, &headers).await {
+    let (org, org_id, user_id) = match authenticate(&state, &slug, &headers).await {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -171,7 +171,7 @@ async fn timer_stop(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let (org,_org_id, user_id) = match authenticate(&state, &slug, &headers).await {
+    let (org, _org_id, user_id) = match authenticate(&state, &slug, &headers).await {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -187,7 +187,7 @@ async fn timer_active(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let (org,_org_id, user_id) = match authenticate(&state, &slug, &headers).await {
+    let (org, _org_id, user_id) = match authenticate(&state, &slug, &headers).await {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -204,7 +204,7 @@ async fn inbox_capture(
     headers: HeaderMap,
     Json(body): Json<CaptureBody>,
 ) -> Response {
-    let (org,_org_id, _user_id) = match authenticate(&state, &slug, &headers).await {
+    let (org, _org_id, _user_id) = match authenticate(&state, &slug, &headers).await {
         Ok(v) => v,
         Err(r) => return r,
     };

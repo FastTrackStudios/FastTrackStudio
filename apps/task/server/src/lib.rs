@@ -17,6 +17,7 @@
 //! `project-crdt` crates. CRDT now lives only at the per-file
 //! editor layer (future); vault is the sole storage path.
 
+pub mod admin_cli;
 #[cfg(feature = "plugin-agent")]
 pub mod agent_router;
 pub mod api_ref;
@@ -27,16 +28,19 @@ pub mod connections;
 pub mod identity_mgmt;
 pub mod link_sync;
 pub mod mcp;
-pub mod admin_cli;
 pub mod media;
+pub mod memberships;
 pub mod notifier;
 pub mod otlp;
 pub mod permits;
 pub mod presence;
 pub mod server_mgmt;
 pub mod share;
+pub mod share_guest;
 pub mod snapshot;
+pub mod storage;
 pub mod watch_bridge;
+pub mod webdav;
 #[cfg(feature = "plugin-forge")]
 pub mod webhooks;
 
@@ -57,6 +61,24 @@ use sea_orm::Database;
 use sea_orm_migration::MigratorTrait;
 
 use crate::capability::ServerKeypair;
+
+/// The home org's identity, which is this server's identity authority.
+///
+/// A principal is "a user in the home org's `auth.sqlite`, plus the orgs
+/// it has membership rows for". Every other org's lane consults this
+/// when a token is not one of its own — see
+/// `plans/one-account-per-server.md`.
+///
+/// `None` on a server whose orgs carry no `is_home`, or before
+/// `admin adopt-principal` has created the memberships store: both mean
+/// "no cross-org identity", and every lane behaves exactly as it did
+/// before this existed.
+#[derive(Clone)]
+pub struct HomeIdentity {
+    pub slug: String,
+    pub auth: AuthState,
+    pub memberships: Arc<crate::memberships::Memberships>,
+}
 
 #[derive(Clone)]
 pub struct AuthState {
@@ -151,6 +173,17 @@ pub struct OrgAppState {
     /// per-root jj repos live under `<org>/files/`, outside the vault
     /// (a File Root is never vault-replicated; see the glossary).
     pub files: files::FilesBackend,
+    /// WebDAV compat bridge over the same roots (issue #274) — mounted
+    /// at `/org/{slug}/dav`, current heads only, never the sync path.
+    /// Holds this org's per-root WebDAV policy and lock managers, so it
+    /// is built once per org rather than per request.
+    pub files_webdav: files_webdav::WebdavBridge,
+    /// This org's lane onto the Files placement layer (issue #262) — the
+    /// Storage Locations it was granted, and where its roots are placed.
+    /// The registry underneath is deployment-scoped and shared by every
+    /// org (see [`crate::storage`]); this backend is the org-confined
+    /// view of it.
+    pub storage: files_storage::StorageBackend,
     /// Task backend — walks every `type: task` page in the
     /// vault.
     pub tasks: task::TaskBackend,
@@ -369,9 +402,26 @@ pub struct AppState {
     /// it that way: clone the `OrgAppState` (see [`AppState::org`])
     /// rather than working under the guard.
     pub orgs: Arc<std::sync::RwLock<std::collections::HashMap<String, OrgAppState>>>,
+    /// The Files placement layer's coordinator (issue #262): the
+    /// deployment's Storage Location registry, its grants, its
+    /// placements, and the in-server Storage agent enrolled against
+    /// this data root.
+    ///
+    /// **One per process, owned here.** It is deployment-scoped — one
+    /// registry serving every org — so it belongs beside the data root
+    /// it was opened against rather than in a process-global that a
+    /// second `AppState` with a different data root would silently
+    /// inherit (PR #284 review). `build_org_state` and
+    /// `server_layer_router` both take it from here.
+    pub storage: Arc<files_storage::StorageCore>,
     /// Source data root. Held for `.well-known/task-server.json`
     /// discovery, manifest re-scans, and the keypair path.
     pub data_root: org_proto::DataRoot,
+    /// The home org's auth store + memberships table — this server's
+    /// identity authority. `None` when no org is marked `is_home`, or
+    /// when no memberships store exists yet, in which case every lane
+    /// behaves exactly as it did before cross-org identity existed.
+    pub home_identity: Option<HomeIdentity>,
     /// Construction scope for every backend resource (DB pools).
     /// Each org's SQLite pools register a finalizer here via
     /// architect's [`Resource::acquire_release`]; [`Scope::close`]
@@ -524,20 +574,51 @@ impl AppState {
             .map_err(|e| eyre::eyre!("load server keypair: {e}"))?;
 
         let scope = architect::Scope::new();
+        // The deployment's storage coordinator, opened once against the
+        // data root we just ensured. Fatal on failure: a registry that
+        // cannot be opened means placement is broken for every org, and
+        // half-mounting it was the policy split the review flagged.
+        let storage = crate::storage::open(data_root.path())?;
         let org_roots = pick_server_orgs(&data_root, slug_filter)?;
+
+        // The home org's identity, opened BEFORE the org loop so every
+        // lane can be built with it. A second connection to the same
+        // sqlite file (WAL, like the admin verbs) rather than plumbing
+        // the loop's own AuthState out of it — the home org is not
+        // guaranteed to be built first, and ordering the loop by
+        // is_home to arrange that would be a subtle trap for whoever
+        // next touches it.
+        let home_identity = build_home_identity(&org_roots).await;
+        if let Some(home) = &home_identity {
+            tracing::info!(
+                home.slug = home.slug,
+                "cross-org identity: home org is this server's identity authority"
+            );
+        }
+
         let mut orgs = std::collections::HashMap::new();
         for org_root in org_roots {
             let slug = org_root.slug().to_owned();
             let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
             let auth = AuthState::open(&auth_db_url, &auth_secret()).await?;
-            let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
+            let org_state = build_org_state(
+                auth,
+                &keypair,
+                org_root,
+                &scope,
+                &storage,
+                home_identity.as_ref(),
+            )
+            .await?;
             orgs.insert(slug, org_state);
         }
 
         let state = Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
+            storage,
             data_root,
+            home_identity,
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -561,18 +642,22 @@ impl AppState {
             .ensure()
             .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
         let scope = architect::Scope::new();
+        let storage = crate::storage::open(data_root.path())?;
         let mut org_roots = pick_server_orgs(&data_root, None)?;
         let org_root = org_roots
             .pop()
             .ok_or_else(|| eyre::eyre!("no org to host"))?;
         let slug = org_root.slug().to_owned();
-        let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
+        let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage, None).await?;
         let mut orgs = std::collections::HashMap::new();
         orgs.insert(slug, org_state);
         Ok(Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
+            storage,
             data_root,
+            // Test helpers host a single org: no cross-org identity.
+            home_identity: None,
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -591,14 +676,18 @@ impl AppState {
         let data_root =
             org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
         let scope = architect::Scope::new();
+        let storage = crate::storage::open(data_root.path())?;
         let slug = org_root.slug().to_owned();
-        let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
+        let org_state = build_org_state(auth, &keypair, org_root, &scope, &storage, None).await?;
         let mut orgs = std::collections::HashMap::new();
         orgs.insert(slug, org_state);
         Ok(Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
+            storage,
             data_root,
+            // Test helpers host a single org: no cross-org identity.
+            home_identity: None,
             scope,
             write_gate: snapshot::WriteGate::new(),
             snapshot_cycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -672,11 +761,56 @@ where
 /// Build one [`OrgAppState`] for a single org's
 /// [`OrgRoot`]. Opens every backend the vox dispatcher
 /// will mount.
+/// Open the home org's auth store + memberships table, if this server
+/// has both.
+///
+/// Every failure here degrades to `None` — no `is_home` org, no
+/// memberships file yet, or a store that will not open — because the
+/// fallback it powers is an ADDITION to per-org auth, never a
+/// replacement. A server that cannot answer "which orgs does this
+/// principal belong to" must still serve every org exactly as it did
+/// before, rather than refuse to boot.
+async fn build_home_identity(org_roots: &[org_proto::OrgRoot]) -> Option<HomeIdentity> {
+    let home = org_roots
+        .iter()
+        .find(|r| r.manifest().is_ok_and(|m| m.is_home))?;
+    let db = home.memberships_db();
+    if !db.exists() {
+        tracing::debug!(
+            path = %db.display(),
+            "no memberships store — cross-org identity off (run `admin adopt-principal`)"
+        );
+        return None;
+    }
+    let memberships = match crate::memberships::Memberships::open(&db).await {
+        Ok(m) => Arc::new(m),
+        Err(e) => {
+            tracing::warn!(error = %e, "memberships store failed to open — cross-org identity off");
+            return None;
+        }
+    };
+    let url = format!("sqlite://{}?mode=rwc", home.auth_db().display());
+    let auth = match AuthState::open(&url, &auth_secret()).await {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!(error = %e, "home auth store failed to open — cross-org identity off");
+            return None;
+        }
+    };
+    Some(HomeIdentity {
+        slug: home.slug().to_owned(),
+        auth,
+        memberships,
+    })
+}
+
 pub(crate) async fn build_org_state(
     auth: AuthState,
     keypair: &ServerKeypair,
     org_root: org_proto::OrgRoot,
     scope: &std::sync::Arc<architect::Scope>,
+    storage: &Arc<files_storage::StorageCore>,
+    home_identity: Option<&HomeIdentity>,
 ) -> eyre::Result<OrgAppState> {
     {
         // The org's effective plugin set, resolved once from the
@@ -798,12 +932,13 @@ pub(crate) async fn build_org_state(
         // applies nothing. There is a regression test for that in
         // `agent-runners`; do not co-locate this with agent-tasks.
         #[cfg(feature = "plugin-agent")]
-        let agent_runners_url = std::env::var("TASK_SERVER_AGENT_RUNNERS_URL").unwrap_or_else(|_| {
-            format!(
-                "sqlite://{}?mode=rwc",
-                org_root.path().join("agent-runners.sqlite").display()
-            )
-        });
+        let agent_runners_url =
+            std::env::var("TASK_SERVER_AGENT_RUNNERS_URL").unwrap_or_else(|_| {
+                format!(
+                    "sqlite://{}?mode=rwc",
+                    org_root.path().join("agent-runners.sqlite").display()
+                )
+            });
         #[cfg(feature = "plugin-agent")]
         let agent_runners_conn =
             open_sqlite_pool(scope, agent_runners_url, "agent-runners", |db| {
@@ -1172,8 +1307,45 @@ pub(crate) async fn build_org_state(
         let goals = goal::GoalBackend::new(vault_root.clone());
         let milestones = milestone::MilestoneBackend::new(vault_root.clone());
         let workstreams = workstream::WorkstreamBackend::new(vault_root.clone());
-        let files = files::FilesBackend::new(org_root.path().join("files"))
+        // Root content lives outside the vault (`<org>/files/`); the
+        // Named / Project Version entities that reference it are
+        // ordinary vault pages, so the backend gets both paths.
+        let files = files::FilesBackend::new(org_root.path().join("files"), vault_root.clone())
             .map_err(|e| eyre::eyre!("files backend: {e}"))?;
+        let files_webdav = files_webdav::WebdavBridge::new(files.clone());
+        // Placement lane. The coordinator is the deployment's, owned by
+        // `AppState` and passed in — this is just this org's view of it.
+        let storage = files_storage::StorageBackend::new(storage.clone(), org_root.slug());
+        // The Files cadence engine (issue #260): one driver task ticks
+        // the engine, and every root gets an inotify watch feeding it
+        // activity hints. The interval only bounds how promptly a due
+        // capture happens — the cadence itself (10-minute auto-
+        // snapshots, 30-minute quiescence) is the engine's.
+        files.enable_watching().await;
+        files.spawn_cadence_driver(std::time::Duration::from_secs(30));
+        // Derived media (issue #269): wire the real ffmpeg driver when
+        // the toolchain is on PATH. Without it the rendition RPC (and
+        // the Review page's player, issue #270) reports "no transcoder
+        // configured" — everything else works, so absence is a warn,
+        // not an error.
+        match tokio::process::Command::new("ffprobe")
+            .arg("-version")
+            .output()
+            .await
+        {
+            Ok(out) if out.status.success() => {
+                files.set_transcoder(std::sync::Arc::new(
+                    files_transcode::transcoder::ffmpeg::FfmpegTranscoder,
+                ));
+                tracing::info!(org = org_root.slug(), "files: ffmpeg transcoder wired");
+            }
+            _ => {
+                tracing::warn!(
+                    org = org_root.slug(),
+                    "files: ffmpeg/ffprobe not on PATH — media renditions disabled"
+                );
+            }
+        }
         let tasks = task::TaskBackend::new(vault_root.clone());
         // Locations + mealplan / pantry each hold their own
         // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.
@@ -1366,7 +1538,12 @@ pub(crate) async fn build_org_state(
             sqlite_conns.push(store.conn().clone());
         }
 
-        let permissions = Arc::new(build_org_permissions_gate(&auth, &plugins, org_root.slug()));
+        let permissions = Arc::new(build_org_permissions_gate(
+            &auth,
+            &plugins,
+            org_root.slug(),
+            home_identity,
+        ));
         // Coverage + dry-run, once per org at boot: how many mounted
         // services carry a permit table, which do not, and what a
         // signed-in member would be denied if enforcement were on. The
@@ -1397,6 +1574,8 @@ pub(crate) async fn build_org_state(
             milestones,
             workstreams,
             files,
+            files_webdav,
+            storage,
             tasks,
             #[cfg(feature = "plugin-home")]
             locations,
@@ -1668,7 +1847,7 @@ fn pick_server_orgs(
 /// or the suffix form `bytes=-N`) against a known total size, returning the
 /// inclusive `[start, end]` it resolves to. Multi-range and unsatisfiable
 /// requests return `None` (the caller then serves the full body).
-fn parse_byte_range(value: &str, total: u64) -> Option<(u64, u64)> {
+pub(crate) fn parse_byte_range(value: &str, total: u64) -> Option<(u64, u64)> {
     if total == 0 {
         return None;
     }
@@ -1804,7 +1983,10 @@ async fn authorize_media(
             None => false,
         };
         wide::set("media.authorized", ok);
-        wide::set("media.auth_via", if ok { "bearer" } else { "bearer-invalid" });
+        wide::set(
+            "media.auth_via",
+            if ok { "bearer" } else { "bearer-invalid" },
+        );
         if ok {
             return None;
         }
@@ -1873,7 +2055,8 @@ async fn per_org_media_handler(
     if rel.split('/').any(|s| s == ".." || s.is_empty()) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    if let Some(refusal) = authorize_media(&state, &slug, &rel, q.token.as_deref(), &headers).await {
+    if let Some(refusal) = authorize_media(&state, &slug, &rel, q.token.as_deref(), &headers).await
+    {
         return refusal;
     }
     let file = state
@@ -1956,6 +2139,138 @@ async fn per_org_media_handler(
     }
 }
 
+/// Rendition streaming (issue #270): `GET
+/// /org/{slug}/files/renditions/{root_id}/{kind}/{file_id}` serves a
+/// derived rendition (issue #269 — proxy, filmstrip, peaks) out of the
+/// root's *private* rendition CAS. Originals are never reachable here:
+/// `file_id` must be a rendition content id in this root's rendition
+/// store, and the source-content read paths can't see that store.
+///
+/// Honours a single HTTP byte range with `206 Partial Content`, reading
+/// only the chunks overlapping the window — the `<video>` proxy seek
+/// path, so a scrub never pulls the whole file.
+///
+/// Authorization matches `/org/{slug}/media` exactly (same channels,
+/// same `TASK_ENFORCE_MEDIA_TOKEN` flag): a browser media element can't
+/// set headers, so the grant is a signed `?token=` minted over vox —
+/// prefix `files/renditions/{root_id}` covers a review's whole
+/// rendition ladder — or an `Authorization: Bearer` session token for
+/// native clients.
+///
+/// Content-Type comes from the `{kind}` path segment (the stable
+/// rendition tag, e.g. `proxy-720`), never from sniffing the bytes.
+async fn files_rendition_handler(
+    State(state): State<AppState>,
+    axum::extract::Path((slug, root_id, kind, file_id)): axum::extract::Path<(
+        String,
+        uuid::Uuid,
+        String,
+        String,
+    )>,
+    axum::extract::Query(q): axum::extract::Query<MediaQuery>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    let rel = format!("files/renditions/{root_id}/{kind}/{file_id}");
+    if let Some(refusal) = authorize_media(&state, &slug, &rel, q.token.as_deref(), &headers).await
+    {
+        return refusal;
+    }
+    let Some(kind) = files::TranscodeRenditionKind::from_tag(&kind) else {
+        return (StatusCode::NOT_FOUND, "unknown rendition kind").into_response();
+    };
+    let Some(org) = state.org(&slug) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let total = match org.files.rendition_len(root_id, &file_id).await {
+        Ok(n) => n,
+        Err(files::FilesError::NotFound(_)) => {
+            return (StatusCode::NOT_FOUND, "no such rendition").into_response();
+        }
+        Err(files::FilesError::BadRequest(m)) => {
+            return (StatusCode::BAD_REQUEST, m).into_response();
+        }
+        Err(e) => {
+            tracing::error!(%root_id, file_id, ?e, "rendition: stat failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "rendition store error").into_response();
+        }
+    };
+
+    // Single byte range → 206; absent/malformed/unsatisfiable → full
+    // body 200, still advertising range support (same contract as the
+    // `/media` route — browser media elements need `Accept-Ranges` to
+    // consider the source seekable at all).
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| parse_byte_range(s, total));
+    rendition_stream_response(&org, root_id, &file_id, kind.mime(), total, range)
+}
+
+/// Stream a rendition's bytes (whole, or one byte range → 206) as a
+/// response — shared by the org rendition route above and the share
+/// serving routes (issue #271).
+///
+/// Streams, never buffers: a rendition can be a full-length proxy, and
+/// `read_rendition_range` takes an `AsyncWrite` precisely so memory
+/// stays bounded to one chunk. The status is already on the wire when
+/// the read runs, so a mid-stream failure (e.g. the source-tied GC
+/// sweeping this rendition between the caller's stat and here) can only
+/// truncate the body — the client sees a short read against the
+/// advertised Content-Length, not a 500.
+pub(crate) fn rendition_stream_response(
+    org: &OrgAppState,
+    root_id: uuid::Uuid,
+    file_id: &str,
+    mime: &str,
+    total: u64,
+    range: Option<(u64, u64)>,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    use axum::response::IntoResponse;
+    let (start, len) = match range {
+        Some((start, end)) => (start, end - start + 1),
+        None => (0, total),
+    };
+    let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+    let files = org.files.clone();
+    let read_file_id = file_id.to_string();
+    tokio::spawn(async move {
+        if let Err(e) = files
+            .read_rendition_range(root_id, &read_file_id, start, len, &mut writer)
+            .await
+        {
+            match e {
+                files::FilesError::NotFound(_) => {
+                    tracing::debug!(%root_id, file_id = read_file_id, "rendition: swept mid-stream");
+                }
+                other => {
+                    tracing::warn!(%root_id, file_id = read_file_id, ?other, "rendition: ranged read failed");
+                }
+            }
+        }
+    });
+    let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(reader));
+    let base_headers = [
+        (header::CONTENT_TYPE, mime.to_string()),
+        (header::ACCEPT_RANGES, "bytes".to_string()),
+        (header::CONTENT_LENGTH, len.to_string()),
+    ];
+    match range {
+        Some((start, end)) => (
+            StatusCode::PARTIAL_CONTENT,
+            base_headers,
+            [(
+                header::CONTENT_RANGE,
+                format!("bytes {start}-{end}/{total}"),
+            )],
+            body,
+        )
+            .into_response(),
+        None => (StatusCode::OK, base_headers, body).into_response(),
+    }
+}
+
 pub fn router(state: AppState) -> Router {
     use attachments::routes::AttachmentRouteState;
     use axum::routing::any;
@@ -1999,7 +2314,38 @@ pub fn router(state: AppState) -> Router {
         .route("/org/{slug}/health", get(per_org_health_handler))
         .route("/org/{slug}/api", get(per_org_api_handler))
         .route("/org/{slug}/vox", any(per_org_vox_handler))
-        .route("/org/{slug}/share/{token}", get(share_landing_handler))
+        .route(
+            "/org/{slug}/share/{token}",
+            get(share::share_landing_handler),
+        )
+        // Files share serving (issue #271): scoped browse, view-only
+        // renditions, capability-gated downloads with receipts.
+        .route(
+            "/org/{slug}/share/{token}/b/{*rel}",
+            get(share::share_browse_handler),
+        )
+        .route(
+            "/org/{slug}/share/{token}/rendition/{kind}/{*rel}",
+            get(share::share_rendition_handler),
+        )
+        .route(
+            "/org/{slug}/share/{token}/download/{*rel}",
+            get(share::share_download_handler),
+        )
+        // The guest lane (issue #272): the real RPC surface over an
+        // anonymous WebSocket, scoped to the link's Review.
+        .route(
+            "/org/{slug}/share/{token}/vox",
+            any(share::share_guest_vox_handler),
+        )
+        // The file-request inbox (issue #272): uploads land in the
+        // link's incoming area, never the tree. Media runs far past
+        // axum's 2 MB default body cap.
+        .route(
+            "/org/{slug}/share/{token}/upload/{*name}",
+            axum::routing::post(share::share_upload_handler)
+                .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024)),
+        )
         // MCP — Task as a tool surface for agents (Hermes gateway,
         // Claude Code, any MCP client). See `mcp`.
         .route("/org/{slug}/mcp", axum::routing::post(mcp::mcp_handler))
@@ -2007,6 +2353,11 @@ pub fn router(state: AppState) -> Router {
         // can reach, instead of one registration per org.
         .route("/mcp", axum::routing::post(mcp::mcp_account_handler))
         .route("/org/{slug}/media/{*path}", get(per_org_media_handler))
+        // Derived-rendition streaming for the Review page (issue #270).
+        .route(
+            "/org/{slug}/files/renditions/{root_id}/{kind}/{file_id}",
+            get(files_rendition_handler),
+        )
         .with_state(state.clone());
 
     // Server-management vox: `OrgManagementService` +
@@ -2051,7 +2402,34 @@ pub fn router(state: AppState) -> Router {
     };
     #[cfg(feature = "plugin-forge")]
     let router = router.merge(webhook_routes);
-    router.layer(cors_layer()).with_state(state)
+
+    // Files WebDAV bridge (issue #274) — mount an org's File Roots from
+    // Finder/Explorer. `any` because WebDAV's verbs (PROPFIND, MKCOL,
+    // MOVE, LOCK, …) are not in axum's method router, and all three
+    // path shapes because a collection is addressed with a trailing
+    // slash (`/dav/` is what a client PROPFINDs at mount time), which
+    // axum's wildcard does not match — it needs at least one character
+    // — while `/dav` without one is what a user types into the dialog.
+    //
+    // Merged AFTER `cors_layer()` so these routes sit outside it.
+    // tower-http's `Cors` short-circuits *any* request whose method is
+    // `OPTIONS` — it does not require an `Origin` or
+    // `Access-Control-Request-Method` header — returning a bare 200 and
+    // never calling the inner service. Finder/Explorer/gvfs begin a
+    // mount with exactly that: `OPTIONS /org/{slug}/dav/` with no CORS
+    // headers, and they read `DAV:` and `Allow:` off the response to
+    // decide whether this is a WebDAV server at all. Under the layer
+    // they got a bare 200 with neither header and refused to mount, and
+    // `webdav_handler` was never reached — so nothing authenticated
+    // either. WebDAV clients are not browsers; CORS has nothing to say
+    // about them (PR #287 review).
+    let dav = Router::new()
+        .route("/org/{slug}/dav", any(webdav::webdav_handler))
+        .route("/org/{slug}/dav/", any(webdav::webdav_handler))
+        .route("/org/{slug}/dav/{*path}", any(webdav::webdav_handler))
+        .with_state(state.clone());
+
+    router.layer(cors_layer()).merge(dav).with_state(state)
 }
 
 /// CORS policy. **Default is unchanged**: with `TASK_CORS_ALLOWED_ORIGINS`
@@ -2133,6 +2511,33 @@ async fn permissions_report_handler(headers: axum::http::HeaderMap) -> axum::res
     .into_response()
 }
 
+/// Does the bearer belong to `slug` by way of the home org?
+///
+/// Validates the token against the home org's auth store (this server's
+/// identity authority) and then requires a membership row. False on
+/// every failure — no home identity, an unreadable table, a token the
+/// home org does not know — because discovery must never claim
+/// membership the org lane would then refuse.
+async fn home_membership(state: &AppState, token: &str, slug: &str) -> bool {
+    let Some(home) = &state.home_identity else {
+        return false;
+    };
+    let Ok(bundle) = home
+        .auth
+        .auth
+        .current_session(architect_auth::CurrentSession {
+            token: token.to_owned(),
+        })
+        .await
+    else {
+        return false;
+    };
+    home.memberships
+        .role_for(bundle.user.id, slug)
+        .await
+        .is_ok_and(|m| m.is_some())
+}
+
 /// `.well-known/task-server.json` — federation discovery.
 /// Lists every org this server hosts plus its routing URL
 /// suffix. Public, no auth required.
@@ -2172,17 +2577,35 @@ async fn well_known_handler(
         // can tell "signed out" from "signed in and not a member" — the
         // former must still show every org (that's the sign-in path), the
         // latter must not.
-        let member = match (&bearer, state.org(&slug)) {
-            (Some(token), Some(org)) => Some(
-                org.auth
-                    .auth
-                    .current_session(architect_auth::CurrentSession {
-                        token: token.clone(),
-                    })
-                    .await
-                    .is_ok(),
-            ),
-            _ => None,
+        // Membership, in two steps. A token this org issued still means
+        // membership — that is what it meant before cross-org identity,
+        // and an org detached onto its own server must keep working. If
+        // it did not, the token may still be a home-org one, in which
+        // case the memberships table is the authority.
+        //
+        // The client turns this tag into what "All organizations" means
+        // (`orgs::my_orgs_with_links`), so a `false` here is exactly the
+        // org disappearing from every multi-org view.
+        let member = match &bearer {
+            None => None,
+            Some(token) => {
+                let own = match state.org(&slug) {
+                    Some(org) => org
+                        .auth
+                        .auth
+                        .current_session(architect_auth::CurrentSession {
+                            token: token.clone(),
+                        })
+                        .await
+                        .is_ok(),
+                    None => false,
+                };
+                if own {
+                    Some(true)
+                } else {
+                    Some(home_membership(&state, token, &slug).await)
+                }
+            }
         };
         orgs.push(serde_json::json!({
             "slug": slug,
@@ -2335,6 +2758,27 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
             crate::identity_mgmt::IdentityServiceImpl::new(state.clone()),
         )
     };
+    // The Files placement layer's operator + agent lanes (issue #262).
+    // Both are deployment-scoped, so they belong here rather than on any
+    // org router: the operator registers locations and admits orgs onto
+    // them, and Storage agents enroll, heartbeat, take directives and
+    // report outcomes.
+    //
+    // Neither is unauthenticated. `/server/vox` has no permission gate
+    // in front of it, so — exactly like the three services below — the
+    // operator lane validates a session token itself (against the home
+    // org, or trusting the in-process transport), and the agent lane
+    // requires the per-agent enrollment secret on every call after
+    // enrollment (PR #284 review).
+    let storage_admin = if local_trusted {
+        files_storage::StorageAdminBackend::new_local_trusted(state.storage.clone())
+    } else {
+        files_storage::StorageAdminBackend::new(
+            state.storage.clone(),
+            std::sync::Arc::new(crate::storage::HomeOrgOperator::new(state.clone())),
+        )
+    };
+
     architect::LayerRouter::new()
         .with(
             org_proto::org_management_descriptor(),
@@ -2348,6 +2792,19 @@ pub fn server_layer_router(state: &AppState, local_trusted: bool) -> architect::
             identity_proto::identity_descriptor(),
             identity_proto::serve_identity(identity),
         )
+        .with(
+            files_storage::storage_admin_descriptor(),
+            files_storage::serve_storage_admin(storage_admin),
+        )
+        .with(
+            files_storage::storage_agent_descriptor(),
+            files_storage::serve_storage_agent(files_storage::StorageAgentBackend::new(
+                state.storage.clone(),
+            )),
+        )
+        .merge(files_storage::storage_agent_stream_layer(
+            files_storage::StorageAgentBackend::new(state.storage.clone()),
+        ))
 }
 
 /// `/vox` — legacy single-org alias. Dispatches into the
@@ -2442,15 +2899,31 @@ fn build_org_permissions_gate(
     auth: &AuthState,
     plugins: &task_plugin::PluginSet,
     slug: &str,
+    home_identity: Option<&HomeIdentity>,
 ) -> architect::permissions_gate::PermissionsGate {
     use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
-    // Wrapped so every RPC's wide event carries WHY the principal came out
-    // the way it did — "no token presented" vs "token rejected" are the
-    // same `Principal::Anonymous` without it (see `AuditedIdentityResolver`).
-    let identity = permits::AuditedIdentityResolver::new(
-        architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone()),
-        slug,
-    );
+    let own = architect_auth::identity::SessionIdentityResolver::new(auth.auth.clone());
+    // Cross-org identity: a token this org does not know may still be a
+    // home-org token belonging to a principal with a membership row for
+    // this org. Not installed on the home org itself (its own resolver
+    // already IS the home resolver) or when there is no home identity.
+    let resolver: Arc<dyn architect_permissions::IdentityResolver + Send + Sync> =
+        match home_identity {
+            Some(home) if home.slug != slug => Arc::new(permits::AuditedIdentityResolver::new(
+                permits::HomeFallbackResolver::new(
+                    own,
+                    architect_auth::identity::SessionIdentityResolver::new(home.auth.auth.clone()),
+                    Arc::clone(&home.memberships),
+                    slug,
+                ),
+                slug,
+            )),
+            // Wrapped so every RPC's wide event carries WHY the principal came out
+            // the way it did — "no token presented" vs "token rejected" are the
+            // same `Principal::Anonymous` without it (see `AuditedIdentityResolver`).
+            _ => Arc::new(permits::AuditedIdentityResolver::new(own, slug)),
+        };
+    let identity = resolver;
     let enforce = enforce_permissions();
     let audit = permits::GateAudit::new(enforce, permission_deny_ledger(), DEFAULT_ORG_ROLE);
     let gate = PermissionsGate::new(org_permission_engine(), Arc::new(identity))
@@ -2554,6 +3027,7 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
                 org.shares.clone(),
                 org.slug.clone(),
                 share_public_base(),
+                Some(org.files.clone()),
             )),
         );
 
@@ -2864,6 +3338,17 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         // `#[subscribe]` stream sibling, served from the hub on the
         // `FilesBackend` above.
         .merge(files::files_service_stream_layer(org.files.clone()))
+        // Placement — Storage Locations this org was granted, where its
+        // roots live, and blob replicas (issue #262). The operator and
+        // agent lanes of the same layer sit on the SERVER router, not
+        // here: the registry is deployment-scoped.
+        .with(
+            files_storage::storage_service_descriptor(),
+            files_storage::serve_storage_service(org.storage.clone()),
+        )
+        .merge(files_storage::storage_service_stream_layer(
+            org.storage.clone(),
+        ))
         .with(
             task::task_service_descriptor(),
             // The raw backend serves directly. There used to be a
@@ -3074,8 +3559,19 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         )
 }
 
+/// The public base only when explicitly configured — `None` on the
+/// bind-address fallback. A guest's `server=` hint must never carry
+/// the bind address (a remote browser would dial 127.0.0.1); absent,
+/// the guest app falls back to same-origin, which is right in prod.
+pub(crate) fn share_public_base_explicit() -> Option<String> {
+    std::env::var("TASK_SHARE_PUBLIC_BASE")
+        .or_else(|_| std::env::var("TASK_SERVER_PUBLIC_URL"))
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
 /// Public base URL share links are composed against.
-fn share_public_base() -> String {
+pub(crate) fn share_public_base() -> String {
     std::env::var("TASK_SHARE_PUBLIC_BASE")
         .or_else(|_| std::env::var("TASK_SERVER_PUBLIC_URL"))
         .ok()
@@ -3087,30 +3583,8 @@ fn share_public_base() -> String {
         })
 }
 
-/// `GET /org/{slug}/share/{token}` — the share landing page. The token is
-/// checked on EVERY hit so disabling a link is retroactive: unknown → 404,
-/// disabled → 410, live → the landing page (which opens the note in the
-/// app at `TASK_SHARE_APP_ORIGIN`, default same-origin).
-async fn share_landing_handler(
-    State(state): State<AppState>,
-    axum::extract::Path((slug, token)): axum::extract::Path<(String, String)>,
-) -> axum::response::Response {
-    use axum::http::StatusCode;
-    use axum::response::{Html, IntoResponse};
-    let Some(org) = state.org(&slug) else {
-        return (StatusCode::NOT_FOUND, "no such org").into_response();
-    };
-    match org.shares.resolve(&token) {
-        None => (StatusCode::NOT_FOUND, "no such share link").into_response(),
-        Some(link) if link.disabled => {
-            (StatusCode::GONE, Html(share::disabled_html())).into_response()
-        }
-        Some(link) => {
-            let app_origin = std::env::var("TASK_SHARE_APP_ORIGIN").unwrap_or_default();
-            Html(share::landing_html(&link, &app_origin)).into_response()
-        }
-    }
-}
+// The share landing / browse / rendition / download handlers live in
+// `share` (issue #271) — token-gated, re-checked on every hit.
 
 /// The WebSocket subprotocol every Task client offers, and the one the
 /// server selects. A client that offers subprotocols gets no connection at
@@ -3250,7 +3724,10 @@ mod upgrade_bearer_tests {
         // An empty bearer must read as "anonymous", not as a token that
         // will resolve to nothing and muddy `auth.outcome`.
         assert_eq!(
-            upgrade_bearer(&headers(&[("sec-websocket-protocol", "vox.v1, vox.bearer.")])),
+            upgrade_bearer(&headers(&[(
+                "sec-websocket-protocol",
+                "vox.v1, vox.bearer."
+            )])),
             None
         );
         assert_eq!(

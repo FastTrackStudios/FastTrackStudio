@@ -27,6 +27,10 @@ task-plugin.workspace = true
 vox-core.workspace = true
 vox-websocket.workspace = true
 
+# `media_grant` — the signed-URL grants any media-URL-building surface
+# (stem player, review player) mints and caches here.
+media-proto = { workspace = true, features = ["vox"] }
+
 tracing.workspace = true
 futures-channel.workspace = true
 # `join_all` for the multi-org fan-out (`feeds::fan_out`).

@@ -6,17 +6,27 @@
 //! `apps/task/docs/adr/0001-files-version-store-jj-cas.md`). This
 //! ticket (#259) is the RPC surface v1: create a File Root from an
 //! existing folder, browse it, read a file's version chain, trigger a
-//! checkpoint on demand.
+//! checkpoint on demand. Issue #261 adds the curated half — Named
+//! Versions and Project Versions, which are *Vault* entities
+//! referencing `(root id, change id)` rather than store constructs,
+//! plus the Vault-protected GC pass that makes them immortal.
 //!
 //! This proto owns the wasm-clean wire surface — [`model`]'s types plus
 //! the [`service::FilesService`] trait. The sibling `files` crate sits
 //! on top and owns the version-store-backed [`FilesBackend`](../files/struct.FilesBackend.html)
 //! side, exactly like `milestone` sits on top of `milestone-proto`.
 
+pub mod consts;
 pub mod model;
 pub mod service;
 
-pub use model::{BrowseEntry, ChainEntry, CheckpointInfo, FileRootInfo, RootFlavor};
+pub use consts::{GIT_DIR, MARKER_FILE, STORE_DIR};
+pub use model::{
+    AnnotationPoint, AnnotationStroke, BrowseEntry, ChainEntry, CheckpointInfo, DivergenceChoice,
+    DivergenceInfo, DivergenceSide, FileRootInfo, GcReport, HydrationChange, HydrationReport,
+    NamedVersion, NewReviewComment, ProjectVersion, RenditionInfo, RenditionKind, RestartMode,
+    Review, ReviewComment, RootFlavor, SavePoint, SnapshotInfo, TreeNode, VersionRef,
+};
 pub use service::{FilesError, FilesEvent, FilesService};
 
 // architect-emitted vox bits: the async client / dispatcher / descriptor

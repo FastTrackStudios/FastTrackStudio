@@ -41,6 +41,18 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{f
 
 #[component]
 pub fn App() -> Element {
+    // Share-guest entry (issue #272): a `/share-review?org=…&token=…`
+    // boot skips the ENTIRE shell — no auth restore, no org discovery,
+    // no router — and mounts the guest review page over the scoped
+    // vox lane. The branch is decided once per page load (a share URL
+    // is a full navigation), so the hook order below stays consistent
+    // for this component's lifetime.
+    if let Some(session) = crate::guest_share::detect() {
+        return rsx! {
+            crate::guest_share::GuestShell { session }
+        };
+    }
+
     // Stage 4b-1: the in-browser session engine is no longer seeded with the
     // demo setlist at app boot. The `type: setlist` page now builds a
     // per-setlist engine on demand via `session_engine::build_for_setlist`
@@ -65,18 +77,23 @@ pub fn App() -> Element {
 
     // Multi-server registry (add/select servers by URL). Provided for the
     // Servers UI + auth (which writes tokens back into the active entry).
-    let server_registry =
-        use_context_provider(crate::server_registry::ServerRegistry::new);
+    let server_registry = use_context_provider(crate::server_registry::ServerRegistry::new);
     // Seed the process-global active-server holder synchronously from the
     // persisted active entry, so the very first org discovery + connection
     // dial the right server (before any effect has run).
     crate::vox_session::set_active_server(server_registry.active_entry().map(|e| {
-        crate::vox_session::ActiveServer { url: e.server_url, token: e.session_token }
+        crate::vox_session::ActiveServer {
+            url: e.server_url,
+            token: e.session_token,
+        }
     }));
     // Keep the holder in lock-step with the active selection / entries.
     use_effect(move || {
         crate::vox_session::set_active_server(server_registry.active_entry().map(|e| {
-            crate::vox_session::ActiveServer { url: e.server_url, token: e.session_token }
+            crate::vox_session::ActiveServer {
+                url: e.server_url,
+                token: e.session_token,
+            }
         }));
     });
 
@@ -197,8 +214,7 @@ pub fn App() -> Element {
 
     // Surface the discovery outcome so the Servers UI can show *why* it
     // didn't resolve (native fetch failures are otherwise invisible).
-    let mut discovery_err =
-        use_context_provider(|| crate::orgs::DiscoveryError(Signal::new(None)));
+    let mut discovery_err = use_context_provider(|| crate::orgs::DiscoveryError(Signal::new(None)));
     use_effect(move || match &*orgs_res.read_unchecked() {
         Some(Ok(list)) => {
             if *org_list.peek() != *list {
@@ -327,6 +343,7 @@ pub fn App() -> Element {
         let registry = task_widgets::WidgetRegistry::new();
         registry.register(task_player_ui::widgets());
         registry.register(task_note_tabs::widgets());
+        registry.register(files_ui::widgets());
         registry
     });
     // Keep the registry pointed at the ACTIVE org's enabled plugin set
@@ -357,13 +374,19 @@ pub fn App() -> Element {
     rsx! {
         style { dangerous_inner_html: MOBILE_BASELINE_CSS }
         ThemeProvider { state: theme_state,
-            div { class: "min-h-screen bg-background text-foreground",
-                // Unauthenticated visitors land on sign-in rather than on
-                // a shell full of empty panels (#109 criterion 5). The
-                // gate is presentation only — the server is what actually
-                // refuses data.
-                crate::auth::SignInGate {
-                    Router::<Route> {}
+            // App-wide toast host: any component under the router can
+            // `use_toast()` to surface the result of a mutation (a named
+            // version, a restored file, a resolved divergence — issue
+            // #267 is the first consumer).
+            ToastProvider {
+                div { class: "min-h-screen bg-background text-foreground",
+                    // Unauthenticated visitors land on sign-in rather than on
+                    // a shell full of empty panels (#109 criterion 5). The
+                    // gate is presentation only — the server is what actually
+                    // refuses data.
+                    crate::auth::SignInGate {
+                        Router::<Route> {}
+                    }
                 }
             }
         }

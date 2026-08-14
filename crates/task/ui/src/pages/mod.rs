@@ -10,6 +10,7 @@ pub mod bases;
 pub mod bookings;
 pub mod contacts;
 pub mod cook_mode;
+pub mod files;
 pub mod finances;
 pub mod fitness;
 pub mod gantt;

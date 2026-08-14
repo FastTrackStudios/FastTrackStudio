@@ -19,8 +19,19 @@ async fn boot_server() -> eyre::Result<(String, String, tempfile::TempDir)> {
     // shape as `collection_e2e` — blobs land under the default data
     // root's org, vault under the temp dir).
     unsafe {
+        // Sandbox the DATA root too — see `collection_e2e`'s note: a
+        // vault-root-only override leaves `DataRoot::from_env` pointing
+        // at `$HOME/.task` (PR #284 review).
+        std::env::set_var("TASK_DATA_ROOT", tmp.path().join("data"));
         std::env::set_var("TASK_SERVER_VAULT_ROOT", tmp.path());
     }
+    let data_root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    data_root
+        .ensure()
+        .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
+    data_root
+        .init_org("home", "Home", true)
+        .map_err(|e| eyre::eyre!("scaffold home org: {e}"))?;
     let state = AppState::new(None).await?;
     drop(guard);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
