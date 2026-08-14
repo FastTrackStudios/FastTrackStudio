@@ -134,6 +134,23 @@ pub struct CookStep {
     /// is what splits gathering from prep from the cook itself.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub section: Option<String>,
+    /// Asides hanging off this step — cooklang's `> …` blocks.
+    ///
+    /// These are not instructions and must not be numbered as though
+    /// they were. "Don't brown it, it turns bitter" is a warning about
+    /// the step you just read, and presenting it as the next thing to
+    /// do actively misleads: the cook looks for something to *do* and
+    /// finds a caution about something already done.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub notes: Vec<String>,
+
+    /// Cookware this step reaches for, positioned in the text the same
+    /// way [`CookStep::ingredients`] are — so "wide pan" in a step can
+    /// point at the wide pan in the equipment list rather than being a
+    /// word that happens to match one.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub cookware: Vec<StepCookware>,
+
     /// Which ingredients this step calls for, and where each sits in
     /// [`CookStep::text`].
     ///
@@ -144,6 +161,21 @@ pub struct CookStep {
     /// reading view can put the amount right where the eye already is.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub ingredients: Vec<StepIngredient>,
+}
+
+/// A piece of cookware as it appears inside one step's text.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct StepCookware {
+    /// Index into [`Recipe::cookware`].
+    pub index: u32,
+    /// The text written in the step.
+    pub name: String,
+    /// Byte offset of `name` within [`CookStep::text`], on a char
+    /// boundary — the name is spliced in whole.
+    pub start: u32,
+    /// Byte length of `name`.
+    pub len: u32,
 }
 
 /// An ingredient as it appears inside one step's text.

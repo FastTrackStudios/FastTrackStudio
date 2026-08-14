@@ -11,7 +11,7 @@ use cooklang::{Converter, CooklangParser, Extensions, Value};
 use thiserror::Error;
 
 use crate::model::{
-    CookStep, CookSteps, Ingredient, Recipe, RecipeTimer, StepIngredient, StringList,
+    CookStep, CookSteps, Ingredient, Recipe, RecipeTimer, StepCookware, StepIngredient, StringList,
 };
 
 #[derive(Debug, Error)]
@@ -145,17 +145,48 @@ pub fn parse_cook_at(
     // cook mode can walk "Prep" and "Cook" as separate phases. An
     // unnamed section (or a recipe with no `=` headings at all) leaves
     // `section: None` — one anonymous run of steps, exactly as before.
-    let cook_steps: Vec<CookStep> = parsed
-        .sections
-        .iter()
-        .flat_map(|s| {
-            let name = s.name.clone().filter(|n| !n.trim().is_empty());
-            s.content.iter().map(move |c| (name.clone(), c))
-        })
-        .filter_map(|(section, c)| {
-            project_content(c, &parsed, &listed_index).map(|step| CookStep { section, ..step })
-        })
-        .collect();
+    let mut pending_lead: Vec<(Option<String>, String)> = Vec::new();
+    // A cooklang `> …` block is an aside, not an instruction. Fold each
+    // one into the notes of the step it follows rather than emitting it
+    // as a numbered step of its own — a warning about what you just did
+    // reads as nonsense when presented as the next thing to do. A note
+    // with no step before it in its section opens that section instead.
+    let mut cook_steps: Vec<CookStep> = Vec::new();
+    for section in &parsed.sections {
+        let name = section.name.clone().filter(|n| !n.trim().is_empty());
+        let first_of_section = cook_steps.len();
+        for content in &section.content {
+            match content {
+                cooklang::Content::Step(step) => {
+                    let mut projected = project_step(step, &parsed, &listed_index);
+                    projected.section = name.clone();
+                    cook_steps.push(projected);
+                }
+                cooklang::Content::Text(t) => {
+                    let text = t.trim();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    match cook_steps.len() > first_of_section {
+                        true => cook_steps
+                            .last_mut()
+                            .expect("a step exists in this section")
+                            .notes
+                            .push(text.to_string()),
+                        // Nothing to hang it on yet — carry it to the
+                        // first step of the section as its lead-in.
+                        false => pending_lead.push((name.clone(), text.to_string())),
+                    }
+                }
+            }
+        }
+    }
+    // Leading notes belong to the step that opens their section.
+    for (section, note) in pending_lead {
+        if let Some(step) = cook_steps.iter_mut().find(|s| s.section == section) {
+            step.notes.insert(0, note);
+        }
+    }
     let steps: StringList = cook_steps.iter().map(|s| s.text.clone()).collect();
 
     Ok(Recipe {
@@ -217,29 +248,6 @@ fn number_value(v: &Value) -> Option<f64> {
     }
 }
 
-fn project_content(
-    c: &cooklang::Content,
-    recipe: &cooklang::Recipe,
-    listed_index: &[Option<u32>],
-) -> Option<CookStep> {
-    match c {
-        cooklang::Content::Step(step) => Some(project_step(step, recipe, listed_index)),
-        cooklang::Content::Text(t) => {
-            let trimmed = t.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(CookStep {
-                    text: trimmed.to_string(),
-                    timers: Vec::new(),
-                    section: None,
-                    ingredients: Vec::new(),
-                })
-            }
-        }
-    }
-}
-
 /// Render one step to readable text, resolving each `Item`'s index into
 /// the recipe-level component vecs so ingredient / cookware / timer
 /// names land inline, and collecting the step's timers as structured
@@ -252,6 +260,7 @@ fn project_step(
     let mut text = String::new();
     let mut timers = Vec::new();
     let mut ingredients: Vec<StepIngredient> = Vec::new();
+    let mut cookware: Vec<StepCookware> = Vec::new();
     for item in &step.items {
         match item {
             cooklang::Item::Text { value } => text.push_str(value),
@@ -274,7 +283,14 @@ fn project_step(
             }
             cooklang::Item::Cookware { index } => {
                 if let Some(cw) = recipe.cookware.get(*index) {
+                    let start = text.len();
                     text.push_str(&cw.name);
+                    cookware.push(StepCookware {
+                        index: *index as u32,
+                        name: cw.name.clone(),
+                        start: start as u32,
+                        len: cw.name.len() as u32,
+                    });
                 }
             }
             cooklang::Item::Timer { index } => {
@@ -297,14 +313,20 @@ fn project_step(
     for si in &mut ingredients {
         si.start = si.start.saturating_sub(lead);
     }
+    for cw in &mut cookware {
+        cw.start = cw.start.saturating_sub(lead);
+    }
     // Anything the trailing trim ate can no longer be pointed at.
     ingredients.retain(|si| (si.start + si.len) as usize <= text.len());
+    cookware.retain(|cw| (cw.start + cw.len) as usize <= text.len());
 
     CookStep {
         text,
         timers,
         // Filled in by the caller, which knows the enclosing section.
         section: None,
+        notes: Vec::new(),
+        cookware,
         ingredients,
     }
 }
@@ -451,6 +473,47 @@ Cook the @pasta{400%g}.
         )
         .unwrap();
         assert!(!r.nested_recipes.is_empty());
+    }
+
+    #[test]
+    fn a_note_is_an_aside_not_a_step() {
+        // `>` blocks are warnings and asides. Numbering one as a step
+        // tells the cook to *do* something that already happened.
+        let src = ">> title: X\n\nFry the @garlic{2%clove}.\n\n> Don't brown it — it turns bitter.\n\nAdd @stock{200%ml}.";
+        let r = parse_cook("Cookbook/X.cook", src).unwrap();
+        assert_eq!(r.cook_steps.len(), 2, "two instructions, not three");
+        assert_eq!(
+            r.cook_steps[0].notes,
+            vec!["Don't brown it — it turns bitter."]
+        );
+        assert!(
+            r.cook_steps[1].notes.is_empty(),
+            "the note hangs off the step it followed"
+        );
+    }
+
+    #[test]
+    fn a_note_opening_a_section_leads_its_first_step() {
+        let src =
+            ">> title: X\n\n= Cook\n\n> Get everything to hand first.\n\nFry the @garlic{2%clove}.";
+        let r = parse_cook("Cookbook/X.cook", src).unwrap();
+        assert_eq!(r.cook_steps.len(), 1);
+        assert_eq!(r.cook_steps[0].notes, vec!["Get everything to hand first."]);
+    }
+
+    #[test]
+    fn steps_point_at_the_cookware_they_use() {
+        let src = ">> title: X\n\nWarm the @oil{1%tbsp} in a #wide pan{}.";
+        let r = parse_cook("Cookbook/X.cook", src).unwrap();
+        let step = &r.cook_steps[0];
+        assert_eq!(step.cookware.len(), 1);
+        let cw = &step.cookware[0];
+        assert_eq!(cw.name, "wide pan");
+        // The span must slice back out exactly, so the mention can be
+        // marked in place and linked to the equipment list.
+        let start = cw.start as usize;
+        assert_eq!(&step.text[start..start + cw.len as usize], "wide pan");
+        assert_eq!(r.cookware[cw.index as usize], "wide pan");
     }
 
     #[test]

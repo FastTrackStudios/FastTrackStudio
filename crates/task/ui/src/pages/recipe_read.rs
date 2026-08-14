@@ -40,10 +40,10 @@
 
 use std::collections::HashSet;
 
-use cookbook_proto::{CookStep, Ingredient, Recipe, StepIngredient};
+use cookbook_proto::{CookStep, Ingredient, Recipe, StepCookware, StepIngredient};
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    ChevronLeft, Clock, CookingPot, ExternalLink, Flame, Hourglass, Lock, Pencil,
+    ChevronLeft, Clock, CookingPot, ExternalLink, Flame, Hourglass, Info, Lock, Pencil,
     Timer as TimerIcon, Users,
 };
 use fts_ui::prelude::*;
@@ -108,30 +108,152 @@ impl Density {
 enum Seg<'a> {
     Text(&'a str),
     Ing(&'a StepIngredient),
+    Cook(&'a StepCookware),
 }
 
 /// Split a step's text on its ingredient spans. The parser records
 /// spans in source order and guarantees they slice cleanly, so this is
 /// a walk rather than a search — no matching step words against
 /// ingredient names and hoping.
-fn segments(step: &CookStep) -> Vec<Seg<'_>> {
-    let mut refs: Vec<&StepIngredient> = step.ingredients.iter().collect();
-    refs.sort_by_key(|r| r.start);
+fn segments<'a>(step: &'a CookStep, from: usize, to: usize) -> Vec<Seg<'a>> {
+    // Both marker kinds, merged in source order, clipped to the slice
+    // being rendered so a sentence only claims its own marks.
+    let mut marks: Vec<Seg<'a>> = Vec::new();
+    for r in &step.ingredients {
+        marks.push(Seg::Ing(r));
+    }
+    for c in &step.cookware {
+        marks.push(Seg::Cook(c));
+    }
+    marks.sort_by_key(|m| match m {
+        Seg::Ing(r) => r.start,
+        Seg::Cook(c) => c.start,
+        Seg::Text(_) => 0,
+    });
+
     let mut out = Vec::new();
-    let mut cursor = 0usize;
-    for r in refs {
-        let (start, end) = (r.start as usize, (r.start + r.len) as usize);
-        if start < cursor || end > step.text.len() {
+    let mut cursor = from;
+    for m in marks {
+        let (start, len) = match &m {
+            Seg::Ing(r) => (r.start as usize, r.len as usize),
+            Seg::Cook(c) => (c.start as usize, c.len as usize),
+            Seg::Text(_) => continue,
+        };
+        let end = start + len;
+        if start < cursor || end > to {
             continue;
         }
         if start > cursor {
             out.push(Seg::Text(&step.text[cursor..start]));
         }
-        out.push(Seg::Ing(r));
+        out.push(m);
         cursor = end;
     }
-    if cursor < step.text.len() {
-        out.push(Seg::Text(&step.text[cursor..]));
+    if cursor < to {
+        out.push(Seg::Text(&step.text[cursor..to]));
+    }
+    out
+}
+
+/// How a step's text breaks into a lead-in and a run of actions.
+struct Actions {
+    /// Text before the first bullet — "While the pasta cooks:". `None`
+    /// when the step is just a run of actions.
+    lead: Option<(usize, usize)>,
+    /// One byte range per action.
+    items: Vec<(usize, usize)>,
+}
+
+/// Break a step into the actions it actually contains.
+///
+/// Two sources, in order of how much they mean:
+///
+/// 1. **Bullets the author wrote.** Cooklang normalises newlines inside
+///    a step, so `- warm the pan` on its own line arrives mid-sentence
+///    as a literal `- `. The line break is gone but the intent isn't,
+///    and honouring it beats guessing.
+/// 2. **Sentences.** Failing that, split on terminal punctuation. This
+///    is typographic, not invented — the sentences are already there,
+///    and one action to a row can be scanned by someone whose hands are
+///    busy. A break needs punctuation, whitespace, and a capital after
+///    it, which leaves `0.25` and `2 min.` intact.
+fn actions(text: &str) -> Actions {
+    if let Some(bullets) = bullet_ranges(text) {
+        return bullets;
+    }
+    Actions {
+        lead: None,
+        items: sentence_ranges(text),
+    }
+}
+
+/// Ranges delimited by literal `- ` / `• ` markers, with anything before
+/// the first one kept as the lead-in.
+fn bullet_ranges(text: &str) -> Option<Actions> {
+    let mut marks: Vec<usize> = Vec::new();
+    let b = text.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        let at_start = i == 0;
+        let after_space = i > 0 && b[i - 1].is_ascii_whitespace();
+        let is_marker = (b[i] == b'-' || text[i..].starts_with('•'))
+            && (at_start || after_space)
+            && text[i..].chars().nth(1).is_some_and(char::is_whitespace);
+        if is_marker {
+            marks.push(i);
+        }
+        i += 1;
+    }
+    // One bullet isn't a list, it's a dash in a sentence.
+    if marks.len() < 2 {
+        return None;
+    }
+    let lead = (marks[0] > 0).then(|| (0, trim_end_at(text, marks[0])));
+    let mut items = Vec::new();
+    for (n, start) in marks.iter().copied().enumerate() {
+        let end = marks.get(n + 1).copied().unwrap_or(text.len());
+        // Skip the marker itself and the space after it.
+        let from = text[start..end]
+            .char_indices()
+            .nth(1)
+            .map_or(end, |(o, _)| start + o);
+        let from = from + (text[from..end].len() - text[from..end].trim_start().len());
+        items.push((from, trim_end_at(text, end)));
+    }
+    Some(Actions { lead, items })
+}
+
+/// `to`, walked back over trailing whitespace and separators.
+fn trim_end_at(text: &str, to: usize) -> usize {
+    let s = &text[..to];
+    to - (s.len() - s.trim_end_matches([' ', '\t', ':', ';', ',']).len())
+}
+
+fn sentence_ranges(text: &str) -> Vec<(usize, usize)> {
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < b.len() {
+        if matches!(b[i], b'.' | b'!' | b'?') {
+            let mut j = i + 1;
+            while j < b.len() && b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            let breaks = j > i + 1
+                && j < b.len()
+                && text[j..].chars().next().is_some_and(char::is_uppercase);
+            if breaks {
+                out.push((start, i + 1));
+                start = j;
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    if start < text.len() {
+        out.push((start, text.len()));
     }
     out
 }
@@ -558,9 +680,8 @@ fn StepRow(
     on_focus: EventHandler<Option<u32>>,
     on_toggle: EventHandler<()>,
 ) -> Element {
-    let segs = segments(&step);
-    // The markers are the spine's rhythm, so they have to read as
-    // structure at a glance rather than as faint noise beside the text.
+    let acts = actions(&step.text);
+    let lines = acts.items.clone();
     let marker = if done {
         "border-success bg-success text-success-foreground"
     } else {
@@ -595,35 +716,88 @@ fn StepRow(
 
             // Body.
             div { class: "min-w-0 flex-1 pb-7",
-                p {
-                    class: if done {
-                        "text-[17px] leading-[1.65] text-muted-foreground line-through sm:text-[18px] lg:text-[19px]"
-                    } else {
-                        "text-[17px] leading-[1.65] text-foreground sm:text-[18px] lg:text-[19px]"
-                    },
-                    for (k, seg) in segs.iter().enumerate() {
-                        match seg {
-                            Seg::Text(t) => rsx! { span { key: "{k}", "{t}" } },
-                            Seg::Ing(r) => {
-                                let idx = r.index;
-                                let lit = focus_now == Some(idx);
-                                let cls = if lit {
-                                    "rounded bg-accent/60 px-0.5 font-medium text-accent-foreground"
+
+                // One action per line. A step written as a paragraph is
+                // a wall when you're mid-task with your hands busy; the
+                // same words, one sentence to a row, can be scanned.
+                // Single-sentence steps get no bullet — a list of one is
+                // just noise.
+                if let Some((lf, lt)) = acts.lead {
+                    p { class: "mb-1.5 text-[15px] leading-[1.5] text-muted-foreground",
+                        for (k, seg) in segments(&step, lf, lt).iter().enumerate() {
+                            match seg {
+                                Seg::Text(t) => rsx! { span { key: "{k}", "{t}" } },
+                                Seg::Ing(r) => rsx! { span { key: "{k}", class: "font-medium text-foreground", "{r.name}" } },
+                                Seg::Cook(c) => rsx! { span { key: "{k}", "{c.name}" } },
+                            }
+                        }
+                    }
+                }
+                ul { class: "flex flex-col gap-1.5",
+                    for (li, (from, to)) in lines.iter().copied().enumerate() {
+                        li {
+                            key: "{li}",
+                            class: if lines.len() > 1 {
+                                "relative pl-4 before:absolute before:left-0 before:top-[0.7em] before:size-1.5 before:rounded-full before:bg-muted-foreground/50"
+                            } else {
+                                ""
+                            },
+                            span {
+                                class: if done {
+                                    "text-[17px] leading-[1.6] text-muted-foreground line-through sm:text-[18px] lg:text-[19px]"
                                 } else {
-                                    "rounded px-0.5 font-medium text-foreground decoration-muted-foreground/50 decoration-dotted underline underline-offset-[5px]"
-                                };
-                                rsx! {
-                                    span {
-                                        key: "{k}",
-                                        class: "{cls} cursor-pointer transition-colors",
-                                        onmouseenter: move |_| on_focus.call(Some(idx)),
-                                        onmouseleave: move |_| on_focus.call(None),
-                                        onclick: move |_| on_focus.call(if lit { None } else { Some(idx) }),
-                                        "{r.name}"
+                                    "text-[17px] leading-[1.6] text-foreground sm:text-[18px] lg:text-[19px]"
+                                },
+                                for (k, seg) in segments(&step, from, to).iter().enumerate() {
+                                    match seg {
+                                        Seg::Text(t) => rsx! { span { key: "{k}", "{t}" } },
+                                        Seg::Ing(r) => {
+                                            let idx = r.index;
+                                            let lit = focus_now == Some(idx);
+                                            let cls = if lit {
+                                                "rounded bg-accent/60 px-0.5 font-medium text-accent-foreground"
+                                            } else {
+                                                "rounded px-0.5 font-medium text-foreground decoration-muted-foreground/50 decoration-dotted underline underline-offset-[5px]"
+                                            };
+                                            rsx! {
+                                                span {
+                                                    key: "{k}",
+                                                    class: "{cls} cursor-pointer transition-colors",
+                                                    onmouseenter: move |_| on_focus.call(Some(idx)),
+                                                    onmouseleave: move |_| on_focus.call(None),
+                                                    onclick: move |_| on_focus.call(if lit { None } else { Some(idx) }),
+                                                    "{r.name}"
+                                                }
+                                            }
+                                        }
+                                        // Cookware reads differently from an
+                                        // ingredient on purpose: you fetch it
+                                        // once and it isn't consumed, so it
+                                        // gets a quieter mark than something
+                                        // you measure out.
+                                        Seg::Cook(c) => rsx! {
+                                            span {
+                                                key: "{k}",
+                                                class: "font-medium text-muted-foreground decoration-muted-foreground/30 decoration-dotted underline underline-offset-[5px]",
+                                                title: "Equipment",
+                                                "{c.name}"
+                                            }
+                                        },
                                     }
                                 }
                             }
                         }
+                    }
+                }
+
+                // Asides — cooklang `> …` blocks. Not instructions, so
+                // never numbered and never in the run of actions.
+                for (k, note) in step.notes.iter().enumerate() {
+                    div {
+                        key: "note-{k}",
+                        class: "mt-2.5 flex items-start gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-[13px] leading-relaxed text-muted-foreground",
+                        span { class: "mt-0.5 shrink-0", Info { size: 13 } }
+                        span { "{note}" }
                     }
                 }
 
