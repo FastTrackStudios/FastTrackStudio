@@ -884,86 +884,6 @@ async fn show_memberships(args: &[String]) -> eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod merge_principals_tests {
-    use super::*;
-
-    fn u(n: u128) -> uuid::Uuid {
-        uuid::Uuid::from_u128(n)
-    }
-
-    #[test]
-    fn the_home_org_supplies_the_canonical_id() {
-        let orgs = vec![
-            ("cbu".into(), false, vec![(u(2), Some("a@b.com".into()))]),
-            (
-                "codywright".into(),
-                true,
-                vec![(u(1), Some("a@b.com".into()))],
-            ),
-        ];
-        let (principals, _) = plan_principals(&orgs);
-        assert_eq!(principals.len(), 1);
-        assert_eq!(principals[0].canonical.user_id, u(1));
-        assert_eq!(principals[0].canonical.slug, "codywright");
-        assert_eq!(principals[0].absorbed.len(), 1);
-        assert_eq!(principals[0].absorbed[0].slug, "cbu");
-    }
-
-    #[test]
-    fn without_a_home_account_the_first_slug_wins_deterministically() {
-        // Directory iteration order must not decide which id survives.
-        let orgs = vec![
-            ("zeta".into(), false, vec![(u(9), Some("a@b.com".into()))]),
-            ("alpha".into(), false, vec![(u(3), Some("a@b.com".into()))]),
-        ];
-        let (principals, _) = plan_principals(&orgs);
-        assert_eq!(principals[0].canonical.slug, "alpha");
-        assert_eq!(principals[0].absorbed[0].slug, "zeta");
-    }
-
-    #[test]
-    fn email_case_does_not_split_a_principal() {
-        let orgs = vec![
-            (
-                "codywright".into(),
-                true,
-                vec![(u(1), Some("Cody@Example.com".into()))],
-            ),
-            (
-                "cbu".into(),
-                false,
-                vec![(u(2), Some("cody@example.com".into()))],
-            ),
-        ];
-        let (principals, _) = plan_principals(&orgs);
-        assert_eq!(principals.len(), 1, "one login, one principal");
-        // Reported in the casing the home org stored — what was typed.
-        assert_eq!(principals[0].email, "Cody@Example.com");
-    }
-
-    #[test]
-    fn a_single_org_account_is_a_principal_with_nothing_absorbed() {
-        let orgs = vec![(
-            "tombrooksmusic".into(),
-            false,
-            vec![(u(7), Some("carter@x.invalid".into()))],
-        )];
-        let (principals, _) = plan_principals(&orgs);
-        assert_eq!(principals[0].absorbed, vec![]);
-        assert_eq!(principals[0].org_slugs(), vec!["tombrooksmusic".to_owned()]);
-    }
-
-    #[test]
-    fn an_account_without_an_email_is_reported_not_merged() {
-        let orgs = vec![("cbu".into(), false, vec![(u(5), None)])];
-        let (principals, warnings) = plan_principals(&orgs);
-        assert!(principals.is_empty());
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("no email"));
-    }
-}
-
 /// `admin seed` — stand up (or top up) a LOCAL multi-org dev vault with
 /// demo data so a fresh `task-server` has something to sign into and
 /// exercise: an owner account with known credentials in every org, a
@@ -2041,4 +1961,84 @@ fn webdav(args: &[String]) -> eyre::Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod merge_principals_tests {
+    use super::*;
+
+    fn u(n: u128) -> uuid::Uuid {
+        uuid::Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn the_home_org_supplies_the_canonical_id() {
+        let orgs = vec![
+            ("cbu".into(), false, vec![(u(2), Some("a@b.com".into()))]),
+            (
+                "codywright".into(),
+                true,
+                vec![(u(1), Some("a@b.com".into()))],
+            ),
+        ];
+        let (principals, _) = plan_principals(&orgs);
+        assert_eq!(principals.len(), 1);
+        assert_eq!(principals[0].canonical.user_id, u(1));
+        assert_eq!(principals[0].canonical.slug, "codywright");
+        assert_eq!(principals[0].absorbed.len(), 1);
+        assert_eq!(principals[0].absorbed[0].slug, "cbu");
+    }
+
+    #[test]
+    fn without_a_home_account_the_first_slug_wins_deterministically() {
+        // Directory iteration order must not decide which id survives.
+        let orgs = vec![
+            ("zeta".into(), false, vec![(u(9), Some("a@b.com".into()))]),
+            ("alpha".into(), false, vec![(u(3), Some("a@b.com".into()))]),
+        ];
+        let (principals, _) = plan_principals(&orgs);
+        assert_eq!(principals[0].canonical.slug, "alpha");
+        assert_eq!(principals[0].absorbed[0].slug, "zeta");
+    }
+
+    #[test]
+    fn email_case_does_not_split_a_principal() {
+        let orgs = vec![
+            (
+                "codywright".into(),
+                true,
+                vec![(u(1), Some("Cody@Example.com".into()))],
+            ),
+            (
+                "cbu".into(),
+                false,
+                vec![(u(2), Some("cody@example.com".into()))],
+            ),
+        ];
+        let (principals, _) = plan_principals(&orgs);
+        assert_eq!(principals.len(), 1, "one login, one principal");
+        // Reported in the casing the home org stored — what was typed.
+        assert_eq!(principals[0].email, "Cody@Example.com");
+    }
+
+    #[test]
+    fn a_single_org_account_is_a_principal_with_nothing_absorbed() {
+        let orgs = vec![(
+            "tombrooksmusic".into(),
+            false,
+            vec![(u(7), Some("carter@x.invalid".into()))],
+        )];
+        let (principals, _) = plan_principals(&orgs);
+        assert_eq!(principals[0].absorbed, vec![]);
+        assert_eq!(principals[0].org_slugs(), vec!["tombrooksmusic".to_owned()]);
+    }
+
+    #[test]
+    fn an_account_without_an_email_is_reported_not_merged() {
+        let orgs = vec![("cbu".into(), false, vec![(u(5), None)])];
+        let (principals, warnings) = plan_principals(&orgs);
+        assert!(principals.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("no email"));
+    }
 }
