@@ -261,7 +261,7 @@ fn RecipeRow(recipe: Recipe, pending: bool) -> Element {
                             variant: ButtonVariant::Secondary,
                             size: ButtonSize::Small,
                             on_click: move |_| {
-                                nav.push(crate::routes::Route::RecipeCookRoute { path: path.clone() });
+                                nav.push(crate::routes::Route::RecipeReadRoute { path: path.clone() });
                             },
                             "Cook"
                         }

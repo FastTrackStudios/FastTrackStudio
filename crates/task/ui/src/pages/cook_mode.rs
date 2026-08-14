@@ -745,7 +745,7 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
 /// numeric `qty` when present; otherwise keeps the original display
 /// form (ranges / fractions / text) unscaled — at `factor == 1` it
 /// reads exactly as written.
-fn scaled_qty(ing: &cookbook_proto::Ingredient, factor: f64) -> String {
+pub(crate) fn scaled_qty(ing: &cookbook_proto::Ingredient, factor: f64) -> String {
     match ing.qty {
         Some(q) => {
             let num = fmt_num(q * factor);
@@ -776,7 +776,7 @@ fn skip_reason_label(reason: SkipReason) -> &'static str {
 
 /// Trim a scaled quantity to a tidy form — whole numbers lose the
 /// decimal, others keep up to two places without trailing zeros.
-fn fmt_num(v: f64) -> String {
+pub(crate) fn fmt_num(v: f64) -> String {
     if (v.fract()).abs() < 1e-9 {
         format!("{}", v.round() as i64)
     } else {

@@ -30,6 +30,7 @@ pub mod project_detail;
 pub mod projects;
 pub mod recall;
 pub mod recipe_edit;
+pub mod recipe_read;
 pub mod repos;
 pub mod schedule;
 pub mod settings;

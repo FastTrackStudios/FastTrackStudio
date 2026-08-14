@@ -424,6 +424,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::MealplanRoute {} => "Mealplan",
         Route::ShoppingRoute {} => "Shopping",
         Route::RecipeCookRoute { .. } => "Cook",
+        Route::RecipeReadRoute { .. } => "Recipe",
         Route::RecipeEditRoute { .. } => "Edit recipe",
         Route::ScheduleRoute {} => "Schedule",
         Route::BookingsRoute {} => "Bookings",

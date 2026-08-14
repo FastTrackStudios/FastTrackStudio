@@ -14,11 +14,11 @@ use vault_proto::BaseView;
 use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
 
 /// Where a base row opens. Recipes are `.cook` files, not notes — the
-/// vault viewer would show raw cooklang, so they go straight to cook
-/// mode instead. Everything else is a note.
+/// vault viewer would show raw cooklang, so they open in the recipe
+/// reader instead. Everything else is a note.
 fn open_route(path: String) -> crate::routes::Route {
     if path.ends_with(".cook") {
-        crate::routes::Route::RecipeCookRoute { path }
+        crate::routes::Route::RecipeReadRoute { path }
     } else {
         crate::routes::Route::VaultRoute {
             path,

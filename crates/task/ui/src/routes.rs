@@ -88,6 +88,10 @@ pub enum Route {
         #[route("/mealplan/recipe/edit?:path")]
         RecipeEditRoute { path: String },
 
+        // The whole recipe on one page — steps as a timeline.
+        #[route("/mealplan/recipe/read?:path")]
+        RecipeReadRoute { path: String },
+
         // The two-pass shopping run (kitchen, then store).
         #[route("/mealplan/shopping")]
         ShoppingRoute {},
@@ -305,6 +309,13 @@ fn MealplanRoute() -> Element {
 fn RecipeCookRoute(path: String) -> Element {
     rsx! {
         crate::plugin_gate::PluginGate { plugin: "mealplan", pages::cook_mode::RecipeCookView { path } }
+    }
+}
+
+#[component]
+fn RecipeReadRoute(path: String) -> Element {
+    rsx! {
+        crate::plugin_gate::PluginGate { plugin: "mealplan", pages::recipe_read::RecipeReadView { path } }
     }
 }
 

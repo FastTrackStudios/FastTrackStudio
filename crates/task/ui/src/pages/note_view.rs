@@ -532,7 +532,7 @@ pub(crate) fn NoteView(
                         // cook-along rather than raw cooklang in the pane.
                         on_open: move |p: String| {
                             if p.ends_with(".cook") {
-                                nav_links.push(crate::routes::Route::RecipeCookRoute { path: p });
+                                nav_links.push(crate::routes::Route::RecipeReadRoute { path: p });
                             } else {
                                 on_open.call(FileMeta { path: p, sha256: String::new() });
                             }
