@@ -19,10 +19,22 @@
 //!
 //! On construction the server enrolls itself as a Storage agent (the
 //! first of the three hostings) speaking for its own volume under
-//! `<data_root>/files-volumes/`. It enrolls **pending**: an operator
-//! approves it — and issues grants — through the `StorageAdminService`
-//! on the server lane, the same way any other agent is admitted. Nothing
-//! is placeable until they do, which is the point.
+//! `<data_root>/files-volumes/`, plus anything `TASK_STORAGE_VOLUMES`
+//! names.
+//!
+//! Enrollment always lands **pending**, and approval is what turns
+//! announced volumes into Storage Locations — so the server approves
+//! *its own* agent here. The approval gate exists to keep someone
+//! else's machine out of the data path; this process already owns the
+//! data root, and requiring a human to approve the server to itself
+//! only dead-ends a first boot (see [`open`] for why it keys on the
+//! locally-known agent id rather than the announcement's `hosting`).
+//!
+//! Grants remain a real decision — which orgs may reach which volume,
+//! under which subtree — and are reconciled from `TASK_STORAGE_GRANTS`
+//! (see [`configured_grants`]) because no client for the operator lane
+//! exists yet, and a second process cannot safely write the registry
+//! while the server holds it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -89,6 +101,166 @@ fn extra_volumes() -> Vec<(String, PathBuf)> {
             Some((key.to_owned(), path.to_path_buf()))
         })
         .collect()
+}
+
+/// One org's admission onto one of this server's volumes, parsed from
+/// `TASK_STORAGE_GRANTS`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GrantEntry {
+    org: String,
+    volume_key: String,
+    path_prefix: String,
+    quota_bytes: u64,
+}
+
+/// Org admissions onto this server's volumes, from `TASK_STORAGE_GRANTS`:
+/// `org@volume:prefix[:quota]` entries, comma-separated.
+///
+///     TASK_STORAGE_GRANTS="cbu@media:cbu,tombrooksmusic@media:tombrooksmusic:8T"
+///
+/// A location is deployment-scoped; an org's reach into it is a grant,
+/// with the `prefix` naming the org's own subtree. Without one, a
+/// location does not exist as far as that org's lane is concerned — so
+/// announcing a volume is necessary but not sufficient.
+///
+/// **Why boot config rather than a CLI.** The registry is one JSON
+/// document whose write ordering is a per-process sequence number, so a
+/// second process editing it while the server runs is a last-writer-wins
+/// clobber. Issuing grants in-process sidesteps that entirely. It is
+/// also idempotent by construction: re-issuing for the same (org,
+/// location) replaces the terms and keeps the grant's id, so this
+/// reconciles rather than accumulates.
+///
+/// The proper answer is an authenticated operator client against
+/// `/server/vox` (the lane already exists, with no client anywhere).
+/// Until that exists this is the only safe way to admit an org.
+///
+/// Quota is optional with a `G`/`T` suffix; omitted means unlimited.
+/// Note that a quota of literally zero admits *nothing* — the headroom
+/// check refuses at `used >= quota` — so an unparsable quota must never
+/// silently become 0. It skips the entry instead.
+fn configured_grants() -> Vec<GrantEntry> {
+    let Ok(raw) = std::env::var("TASK_STORAGE_GRANTS") else {
+        return Vec::new();
+    };
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(parse_grant_entry)
+        .collect()
+}
+
+fn parse_grant_entry(entry: &str) -> Option<GrantEntry> {
+    let warn = |why: &str| {
+        tracing::warn!(
+            entry,
+            why,
+            "TASK_STORAGE_GRANTS: expected org@volume:prefix[:quota] — skipped"
+        );
+        None::<GrantEntry>
+    };
+    let (org, rest) = entry.split_once('@')?;
+    let mut parts = rest.split(':');
+    let (Some(volume_key), Some(path_prefix)) = (parts.next(), parts.next()) else {
+        return warn("needs volume and prefix");
+    };
+    let quota_bytes = match parts.next() {
+        None => u64::MAX,
+        Some(q) => parse_quota(q.trim())?,
+    };
+    if parts.next().is_some() {
+        return warn("too many fields");
+    }
+    let (org, volume_key, path_prefix) = (org.trim(), volume_key.trim(), path_prefix.trim());
+    if org.is_empty() || volume_key.is_empty() || path_prefix.is_empty() {
+        return warn("empty field");
+    }
+    // The prefix must be a safe relative path — it is what confines the
+    // org to its own subtree. Not checked here: `issue_grant` validates
+    // it and is the authority, so a `..` surfaces as a refused grant
+    // with the reason, rather than two rules that can drift apart.
+    Some(GrantEntry {
+        org: org.to_owned(),
+        volume_key: volume_key.to_owned(),
+        path_prefix: path_prefix.to_owned(),
+        quota_bytes,
+    })
+}
+
+/// `8T`, `500G`, or a plain byte count. `None` (with a warning) on
+/// anything else — never a silent 0, which would admit nothing.
+fn parse_quota(raw: &str) -> Option<u64> {
+    let (digits, scale) = match raw.chars().last() {
+        Some('T' | 't') => (&raw[..raw.len() - 1], 1u64 << 40),
+        Some('G' | 'g') => (&raw[..raw.len() - 1], 1u64 << 30),
+        _ => (raw, 1),
+    };
+    match digits.trim().parse::<u64>() {
+        Ok(n) => n.checked_mul(scale).or_else(|| {
+            tracing::warn!(
+                quota = raw,
+                "TASK_STORAGE_GRANTS: quota overflows — skipped"
+            );
+            None
+        }),
+        Err(_) => {
+            tracing::warn!(
+                quota = raw,
+                "TASK_STORAGE_GRANTS: quota is not a byte count (try 8T, 500G) — skipped"
+            );
+            None
+        }
+    }
+}
+
+/// Issue the configured grants against the locations this agent's
+/// volumes became. Each grant takes the location's own capabilities —
+/// a grant may not exceed them, and there is nothing to choose from
+/// here: an operator writing config is admitting the org to the volume,
+/// not composing a capability subset.
+///
+/// A grant naming a volume this node did not announce is warned about
+/// and skipped: on a deployment where the media mount is absent, the
+/// server should still come up serving everything else.
+fn reconcile_grants(core: &StorageCore, agent_id: uuid::Uuid) {
+    let locations = core.list_locations();
+    for entry in configured_grants() {
+        let Some(location) = locations
+            .iter()
+            .find(|l| l.agent_id == agent_id && l.volume_key == entry.volume_key)
+        else {
+            tracing::warn!(
+                org = entry.org,
+                volume = entry.volume_key,
+                "TASK_STORAGE_GRANTS: no such volume on this server — grant skipped"
+            );
+            continue;
+        };
+        let spec = files_storage::GrantSpec {
+            org: entry.org.clone(),
+            location_id: location.id,
+            capabilities: location.capabilities.clone(),
+            quota_bytes: entry.quota_bytes,
+            path_prefix: entry.path_prefix.clone(),
+        };
+        match core.issue_grant(spec) {
+            Ok(grant) => tracing::info!(
+                org = entry.org,
+                volume = entry.volume_key,
+                prefix = entry.path_prefix,
+                quota_bytes = entry.quota_bytes,
+                grant = %grant.id,
+                "files: storage grant reconciled"
+            ),
+            // One bad grant must not take the deployment down.
+            Err(e) => tracing::warn!(
+                org = entry.org,
+                volume = entry.volume_key,
+                error = %e,
+                "files: storage grant refused"
+            ),
+        }
+    }
 }
 
 /// The in-server agent's persisted identity: a stable id **and** the
@@ -183,6 +355,10 @@ pub fn open(data_root: &Path) -> eyre::Result<Arc<StorageCore>> {
         volume = %volume.display(),
         "files: in-server storage agent enrolled"
     );
+
+    // After approval, because approval is what turns announced volumes
+    // into the locations these grants name.
+    reconcile_grants(&core, agent_id);
     Ok(core)
 }
 
@@ -401,6 +577,96 @@ mod tests {
             core.list_agents()[0].status,
             AgentStatus::Rejected,
             "a restart must not resurrect a rejected agent"
+        );
+    }
+
+    #[test]
+    fn a_grant_entry_parses_with_and_without_a_quota() {
+        assert_eq!(
+            parse_grant_entry("cbu@media:cbu"),
+            Some(GrantEntry {
+                org: "cbu".into(),
+                volume_key: "media".into(),
+                path_prefix: "cbu".into(),
+                quota_bytes: u64::MAX,
+            })
+        );
+        assert_eq!(
+            parse_grant_entry(" tombrooksmusic @ media : clients/tbm : 8T ")
+                .expect("whitespace is not an error")
+                .quota_bytes,
+            8 << 40
+        );
+        assert_eq!(
+            parse_grant_entry("a@b:c:500G").unwrap().quota_bytes,
+            500 << 30
+        );
+        assert_eq!(parse_grant_entry("a@b:c:1024").unwrap().quota_bytes, 1024);
+    }
+
+    /// A quota of literally zero admits nothing (`used >= quota` refuses
+    /// at once), so an unparsable one must drop the entry rather than
+    /// default — a grant that silently permits no bytes is far worse to
+    /// diagnose than a missing one.
+    #[test]
+    fn a_malformed_grant_entry_is_skipped_never_defaulted_to_zero() {
+        for bad in [
+            "no-at-sign",
+            "org@volume",             // no prefix
+            "org@volume:prefix:huge", // unparsable quota
+            // Overflows u64: anything past ~16.7 million TiB.
+            "org@volume:prefix:99999999T",
+            "org@volume:prefix:8T:extra",
+            "@volume:prefix",
+            "org@:prefix",
+            "org@volume:",
+        ] {
+            assert_eq!(parse_grant_entry(bad), None, "{bad:?} must be skipped");
+        }
+    }
+
+    /// The whole point: after boot, an org can actually reach the
+    /// volume. Without a grant a location does not exist as far as that
+    /// org is concerned, so announcing the mount alone changes nothing.
+    #[test]
+    fn configured_grants_admit_the_org_at_boot() {
+        let dir = tempfile::tempdir().expect("data root");
+        let core = open(dir.path()).expect("first boot");
+        let agent_id = core.list_agents()[0].id;
+
+        // `primary` is always announced, so this needs no extra mount.
+        let entry = GrantEntry {
+            org: "cbu".into(),
+            volume_key: "primary".into(),
+            path_prefix: "cbu".into(),
+            quota_bytes: 1 << 40,
+        };
+        let location = core
+            .list_locations()
+            .into_iter()
+            .find(|l| l.volume_key == "primary")
+            .expect("primary is a location");
+        core.issue_grant(files_storage::GrantSpec {
+            org: entry.org.clone(),
+            location_id: location.id,
+            capabilities: location.capabilities.clone(),
+            quota_bytes: entry.quota_bytes,
+            path_prefix: entry.path_prefix.clone(),
+        })
+        .expect("grant issues");
+
+        let grants = core.list_grants(None);
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].org, "cbu");
+        assert_eq!(grants[0].path_prefix, "cbu");
+
+        // Idempotent: reconciling the same terms replaces rather than
+        // accumulates, so a restart does not multiply grants.
+        reconcile_grants(&core, agent_id);
+        assert_eq!(
+            core.list_grants(None).len(),
+            1,
+            "reconciling must not duplicate a grant"
         );
     }
 
