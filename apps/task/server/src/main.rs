@@ -151,31 +151,29 @@ async fn main() -> eyre::Result<()> {
     // duration metrics. Labels carry method + MATCHED path — never the
     // raw URI, which holds org slugs and note paths, and never an
     // unbounded label set.
-    let app = app
-        .layer(axum::middleware::from_fn(http_metrics))
-        .layer(
-            tower_http::trace::TraceLayer::new_for_http()
-                .make_span_with(|req: &axum::http::Request<_>| {
-                    let route = req
-                        .extensions()
-                        .get::<axum::extract::MatchedPath>()
-                        .map(|p| p.as_str().to_owned())
-                        .unwrap_or_else(|| "<unmatched>".to_owned());
-                    tracing::info_span!(
-                        "http.request",
-                        method = %req.method(),
-                        route,
-                        status = tracing::field::Empty,
-                    )
-                })
-                .on_response(
-                    |res: &axum::http::Response<_>,
-                     _latency: std::time::Duration,
-                     span: &tracing::Span| {
-                        span.record("status", res.status().as_u16());
-                    },
-                ),
-        );
+    let app = app.layer(axum::middleware::from_fn(http_metrics)).layer(
+        tower_http::trace::TraceLayer::new_for_http()
+            .make_span_with(|req: &axum::http::Request<_>| {
+                let route = req
+                    .extensions()
+                    .get::<axum::extract::MatchedPath>()
+                    .map(|p| p.as_str().to_owned())
+                    .unwrap_or_else(|| "<unmatched>".to_owned());
+                tracing::info_span!(
+                    "http.request",
+                    method = %req.method(),
+                    route,
+                    status = tracing::field::Empty,
+                )
+            })
+            .on_response(
+                |res: &axum::http::Response<_>,
+                 _latency: std::time::Duration,
+                 span: &tracing::Span| {
+                    span.record("status", res.status().as_u16());
+                },
+            ),
+    );
 
     info!(%bind, "listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;
@@ -198,7 +196,10 @@ async fn http_metrics(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use std::sync::OnceLock;
-    use task_telemetry::otel::opentelemetry::{KeyValue, global, metrics::{Counter, Histogram}};
+    use task_telemetry::otel::opentelemetry::{
+        KeyValue, global,
+        metrics::{Counter, Histogram},
+    };
 
     static INSTRUMENTS: OnceLock<(Histogram<f64>, Counter<u64>)> = OnceLock::new();
     let (duration, count) = INSTRUMENTS.get_or_init(|| {
@@ -230,7 +231,10 @@ async fn http_metrics(
     let labels = [
         KeyValue::new("http.request.method", method),
         KeyValue::new("http.route", route),
-        KeyValue::new("http.response.status_code", i64::from(res.status().as_u16())),
+        KeyValue::new(
+            "http.response.status_code",
+            i64::from(res.status().as_u16()),
+        ),
     ];
     duration.record(elapsed, &labels);
     count.add(1, &labels);

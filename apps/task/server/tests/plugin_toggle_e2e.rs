@@ -42,12 +42,17 @@ async fn disabled_plugin_is_unmounted_and_reported() {
 
     let state = AppState::new(None).await.expect("boot AppState");
     let org = state.org("alpha").expect("alpha is hosted");
-    assert!(!org.plugins.contains("mealplan"), "manifest deny-list resolved");
+    assert!(
+        !org.plugins.contains("mealplan"),
+        "manifest deny-list resolved"
+    );
     assert!(org.plugins.contains("fitness"), "only mealplan is off");
 
     // ── wire: mealplan refuses, task answers ─────────────────────
     let scope = Scope::new();
-    let local = state.local_server("alpha", &scope).expect("local transport");
+    let local = state
+        .local_server("alpha", &scope)
+        .expect("local transport");
 
     let tasks: task::TaskServiceClient = local.establish().await.expect("task client");
     let listed = tasks.list().await;
@@ -77,15 +82,14 @@ async fn disabled_plugin_is_unmounted_and_reported() {
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
-    let body: serde_json::Value =
-        reqwest::get(format!("http://127.0.0.1:{port}/org/alpha/api"))
-            .await
-            .expect("GET /org/alpha/api")
-            .error_for_status()
-            .expect("200")
-            .json()
-            .await
-            .expect("json body");
+    let body: serde_json::Value = reqwest::get(format!("http://127.0.0.1:{port}/org/alpha/api"))
+        .await
+        .expect("GET /org/alpha/api")
+        .error_for_status()
+        .expect("200")
+        .json()
+        .await
+        .expect("json body");
 
     let plugins = body["plugins"].as_array().expect("plugins catalog");
     let mealplan = plugins
@@ -102,16 +106,14 @@ async fn disabled_plugin_is_unmounted_and_reported() {
     );
 
     let services = body["services"].as_array().expect("services");
-    let (off, on): (Vec<_>, Vec<_>) = services
-        .iter()
-        .partition(|s| s["mounted"] == false);
+    let (off, on): (Vec<_>, Vec<_>) = services.iter().partition(|s| s["mounted"] == false);
     assert!(
         !off.is_empty() && off.iter().all(|s| s["plugin"] == "mealplan"),
         "exactly the mealplan services are listed unmounted"
     );
-    assert!(on.iter().any(|s| s["alias"] == "task"), "task stays mounted");
-    assert_eq!(
-        body["mounted_count"].as_u64().unwrap() as usize,
-        on.len(),
+    assert!(
+        on.iter().any(|s| s["alias"] == "task"),
+        "task stays mounted"
     );
+    assert_eq!(body["mounted_count"].as_u64().unwrap() as usize, on.len(),);
 }

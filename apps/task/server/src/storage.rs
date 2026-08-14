@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use files_storage::core::{in_server_announcement, registry_dir, server_volume};
-use files_storage::{InServerAgent, StorageCore, StorageError};
+use files_storage::{AgentStatus, InServerAgent, StorageCore, StorageError};
 use serde::{Deserialize, Serialize};
 
 /// The volume the server speaks for, under the data root.
@@ -155,9 +155,31 @@ pub fn open(data_root: &Path) -> eyre::Result<Arc<StorageCore>> {
         )?;
     }
 
+    // Approve our own agent. Enrollment always lands `Pending`, and a
+    // location can only be registered on an APPROVED agent — so without
+    // this a fresh deployment cannot use its own disk until a human
+    // approves the server to itself. Approval exists to gate *someone
+    // else's* machine offering storage; this process already owns the
+    // data root.
+    //
+    // Keyed on the agent id we generated or loaded here, never on the
+    // announcement's `hosting` field: that field arrives over the agent
+    // lane verbatim, so approving anything that merely *claims* to be
+    // in-server would let any remote enrollee approve itself.
+    //
+    // Pending only. An operator who deliberately rejected this agent
+    // (decommissioning the server's local disk) must not have that
+    // decision undone by a restart.
+    let status = enrollment.agent.status;
+    if status == AgentStatus::Pending {
+        core.approve_agent(agent_id, true)
+            .map_err(|e| eyre::eyre!("approving the in-server storage agent: {e}"))?;
+    }
+
     tracing::info!(
         agent = %agent_id,
-        status = ?enrollment.agent.status,
+        status = ?status,
+        self_approved = status == AgentStatus::Pending,
         volume = %volume.display(),
         "files: in-server storage agent enrolled"
     );
@@ -333,6 +355,52 @@ mod tests {
             core.list_agents().len(),
             1,
             "a refused boot must not have enrolled a second agent"
+        );
+    }
+
+    /// A deployment must be able to use its own disk without a human
+    /// approving the server to itself: enrollment lands `Pending`, and a
+    /// Storage Location can only be registered on an approved agent, so
+    /// an unapproved in-server agent means no location, no grant, no
+    /// File Root — a self-hoster's first boot dead-ends.
+    #[test]
+    fn the_in_server_agent_is_usable_on_first_boot() {
+        let dir = tempfile::tempdir().expect("data root");
+        let core = open(dir.path()).expect("first boot");
+
+        let agent = core.list_agents().pop().expect("the in-server agent");
+        assert_eq!(agent.status, AgentStatus::Approved);
+
+        // The property that actually matters: the announced volume is
+        // already a Storage Location, with no operator step in between.
+        // (Approval mints one per announced volume — so the whole
+        // announce/approve/register ceremony collapses to nothing for
+        // the server's own disks, and grants are the only operator
+        // action left.)
+        let locations = core.list_locations();
+        assert!(
+            locations.iter().any(|l| l.volume_key == "primary"),
+            "the server's own volume must be a location on first boot, got {locations:?}"
+        );
+    }
+
+    /// ...but self-approval must not override an operator who
+    /// deliberately rejected this agent (decommissioning the server's
+    /// local disk). A restart is not a way to undo that.
+    #[test]
+    fn a_rejected_in_server_agent_stays_rejected_across_a_restart() {
+        let dir = tempfile::tempdir().expect("data root");
+        let root = dir.path();
+        let core = open(root).expect("first boot");
+        let id = core.list_agents()[0].id;
+        core.approve_agent(id, false).expect("operator rejects it");
+        drop(core);
+
+        let core = open(root).expect("second boot");
+        assert_eq!(
+            core.list_agents()[0].status,
+            AgentStatus::Rejected,
+            "a restart must not resurrect a rejected agent"
         );
     }
 

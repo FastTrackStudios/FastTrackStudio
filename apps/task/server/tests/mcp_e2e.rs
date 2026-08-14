@@ -49,12 +49,7 @@ async fn rpc(
 
 /// A tool call's decoded payload: the content text parsed as JSON,
 /// plus the isError flag.
-async fn call_tool(
-    client: &reqwest::Client,
-    url: &str,
-    name: &str,
-    args: Value,
-) -> (bool, Value) {
+async fn call_tool(client: &reqwest::Client, url: &str, name: &str, args: Value) -> (bool, Value) {
     let res = rpc(
         client,
         url,
@@ -106,7 +101,9 @@ async fn mcp_surface_end_to_end() {
 
     // ── initialize: unauthenticated, carries orientation ─────────
     let init = rpc(&client, &url, None, "initialize", json!({})).await;
-    let instructions = init["result"]["instructions"].as_str().expect("instructions");
+    let instructions = init["result"]["instructions"]
+        .as_str()
+        .expect("instructions");
     assert!(instructions.contains("org `alpha`"));
 
     // ── auth: refused without (or with a wrong) bearer ───────────
@@ -129,7 +126,10 @@ async fn mcp_surface_end_to_end() {
         .filter_map(|t| t["name"].as_str())
         .collect();
     for core in ["create_task", "claim_task", "api_reference", "write_note"] {
-        assert!(names.contains(&core), "core tool `{core}` missing: {names:?}");
+        assert!(
+            names.contains(&core),
+            "core tool `{core}` missing: {names:?}"
+        );
     }
     for sched in ["list_events", "book_slot", "upsert_day_plan"] {
         assert!(
@@ -208,10 +208,17 @@ async fn mcp_surface_end_to_end() {
     );
 
     // Single-service expansion carries permits.
-    let (err, task_api) =
-        call_tool(&client, &url, "api_reference", json!({ "service": "TaskService" })).await;
+    let (err, task_api) = call_tool(
+        &client,
+        &url,
+        "api_reference",
+        json!({ "service": "TaskService" }),
+    )
+    .await;
     assert!(!err, "api_reference(service) failed: {task_api}");
-    let methods = task_api["services"][0]["methods"].as_array().expect("methods");
+    let methods = task_api["services"][0]["methods"]
+        .as_array()
+        .expect("methods");
     let create = methods
         .iter()
         .find(|m| m["name"] == "create")
