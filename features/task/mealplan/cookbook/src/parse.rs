@@ -83,11 +83,20 @@ pub fn parse_cook_at(
     // Structured steps: ingredient / cookware / timer names kept inline
     // (no more `·` placeholders) and timers extracted. `steps` is the
     // same text, kept for the existing index/grep/wiki consumers.
+    // Each step carries the name of the `= Section` it sits under, so
+    // cook mode can walk "Prep" and "Cook" as separate phases. An
+    // unnamed section (or a recipe with no `=` headings at all) leaves
+    // `section: None` — one anonymous run of steps, exactly as before.
     let cook_steps: Vec<CookStep> = parsed
         .sections
         .iter()
-        .flat_map(|s| s.content.iter())
-        .filter_map(|c| project_content(c, &parsed))
+        .flat_map(|s| {
+            let name = s.name.clone().filter(|n| !n.trim().is_empty());
+            s.content.iter().map(move |c| (name.clone(), c))
+        })
+        .filter_map(|(section, c)| {
+            project_content(c, &parsed).map(|step| CookStep { section, ..step })
+        })
         .collect();
     let steps: StringList = cook_steps.iter().map(|s| s.text.clone()).collect();
 
@@ -153,6 +162,7 @@ fn project_content(c: &cooklang::Content, recipe: &cooklang::Recipe) -> Option<C
                 Some(CookStep {
                     text: trimmed.to_string(),
                     timers: Vec::new(),
+                    section: None,
                 })
             }
         }
@@ -196,6 +206,8 @@ fn project_step(step: &cooklang::Step, recipe: &cooklang::Recipe) -> CookStep {
     CookStep {
         text: text.trim().to_string(),
         timers,
+        // Filled in by the caller, which knows the enclosing section.
+        section: None,
     }
 }
 
@@ -341,6 +353,39 @@ Cook the @pasta{400%g}.
         )
         .unwrap();
         assert!(!r.nested_recipes.is_empty());
+    }
+
+    #[test]
+    fn steps_carry_their_section_name() {
+        let src = "\
+>> title: Sectioned
+
+= Prep
+
+Chop @onion{1}.
+
+= Cook
+
+Fry the onion for ~{5%min}.
+
+Season and serve.
+";
+        let r = parse_cook("Cookbook/Sectioned.cook", src).unwrap();
+        let sections: Vec<_> = r.cook_steps.iter().map(|s| s.section.as_deref()).collect();
+        assert_eq!(
+            sections,
+            vec![Some("Prep"), Some("Cook"), Some("Cook")],
+            "each step should report the `= heading` it sits under"
+        );
+    }
+
+    #[test]
+    fn unsectioned_recipe_leaves_section_none() {
+        let r = parse_cook("Cookbook/Flat.cook", "Boil @pasta{200%g}.\nDrain it.").unwrap();
+        assert!(
+            r.cook_steps.iter().all(|s| s.section.is_none()),
+            "a recipe with no `=` headings stays one anonymous run of steps"
+        );
     }
 }
 

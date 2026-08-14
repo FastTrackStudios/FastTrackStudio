@@ -128,6 +128,12 @@ pub struct CookStep {
     pub text: String,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub timers: Vec<RecipeTimer>,
+    /// The cooklang section this step came from (`= Prep`), or
+    /// `None` for steps written before the first `=` heading.
+    /// Cook mode walks the recipe one section at a time, so this
+    /// is what splits gathering from prep from the cook itself.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub section: Option<String>,
 }
 
 /// `Vec<CookStep>` newtype — JSON column.
