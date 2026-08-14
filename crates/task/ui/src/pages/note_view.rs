@@ -285,7 +285,10 @@ pub(crate) fn NoteView(
     // flags aggregate (OR) across all claimants.
     let nav_links = use_navigator();
     let open_note = use_callback(move |p: String| {
-        nav_links.push(crate::routes::Route::VaultRoute { path: p, org: home() });
+        nav_links.push(crate::routes::Route::VaultRoute {
+            path: p,
+            org: home(),
+        });
     });
     let note_href = task_ui_core::nav::use_note_href();
     let widget_ctx = {
@@ -314,7 +317,11 @@ pub(crate) fn NoteView(
                     crate::pages::vault::frontmatter_value(raw, "type")
                         .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
                 });
-                Some(task_widgets::ResolvedTarget { path, note_type, content })
+                Some(task_widgets::ResolvedTarget {
+                    path,
+                    note_type,
+                    content,
+                })
             }),
         }
     };
@@ -521,7 +528,15 @@ pub(crate) fn NoteView(
                 if is_base && !edit_base_source() {
                     crate::pages::bases::BaseDoc {
                         base_path: current.clone(),
-                        on_open: move |p: String| on_open.call(FileMeta { path: p, sha256: String::new() }),
+                        // Recipes aren't notes — a `.cook` row opens the
+                        // cook-along rather than raw cooklang in the pane.
+                        on_open: move |p: String| {
+                            if p.ends_with(".cook") {
+                                nav_links.push(crate::routes::Route::RecipeCookRoute { path: p });
+                            } else {
+                                on_open.call(FileMeta { path: p, sha256: String::new() });
+                            }
+                        },
                     }
                 } else if is_video {
                     crate::pages::watch::WatchView {
@@ -644,6 +659,9 @@ mod note_body_tests {
             note_body_visible(false, true),
             "a non-setlist note is never suppressed by the setlist flag"
         );
-        assert!(note_body_visible(false, false), "a plain note edits normally");
+        assert!(
+            note_body_visible(false, false),
+            "a plain note edits normally"
+        );
     }
 }

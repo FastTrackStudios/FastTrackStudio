@@ -51,6 +51,7 @@
 // they go away in the slice-3 server rip.
 pub mod bases;
 pub mod blocks;
+pub mod cook;
 pub mod lexorank;
 pub mod lookup;
 pub mod mutate;

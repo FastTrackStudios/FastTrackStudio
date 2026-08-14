@@ -722,6 +722,21 @@ pub(crate) async fn build_org_state(
         // convention the wiki backend already uses on line 304.
         let vault_sync_state = vault::Backend::single("default", vault_root.clone())
             .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
+        // Recipes are `.cook` files under the wiki root, outside the
+        // vault this backend serves — so a `.base` filtering
+        // `type: recipe` matches nothing unless the backend is told
+        // where the cookbook lives. Read-only, `base_views` only; the
+        // `cookbook` service still owns every read and write.
+        #[cfg(feature = "plugin-mealplan")]
+        let vault_sync_state = vault_sync_state.with_recipe_roots(
+            [(
+                "default".to_string(),
+                std::env::var("TASK_SERVER_WIKI_ROOT")
+                    .map_or_else(|_| org_root.wiki_knowledge_dir(), PathBuf::from),
+            )]
+            .into_iter()
+            .collect(),
+        );
         // Per-file CRDT collaboration over the same backend. Doc
         // persistence (snapshot + update log, one dir per doc id)
         // lives at `<org>/crdt/` — file-per-doc fits the plain-text
