@@ -9,9 +9,10 @@
 //! - Track name + number
 
 use crate::controls::{
-    Collapse, EnvelopeButton, ControlSync, FxButton, IoButton, MeterFeed, MonitorButton, MuteButton, PanAnchor,
-    PanKnob, PhaseButton, RecordArmButton, RecordInputLabel, SoloButton, TrackMeter, TrackName,
-    VolumeFader, VolumeWidget, use_daw_tracks, use_track_store,
+    Caret, Collapse, EnvelopeButton, ControlSync, FxButton, IoButton, MeterFeed, MonitorButton,
+    MuteButton, PanAnchor, PanKnob, PhaseButton, RecordArmButton, RecordInputLabel, SoloButton,
+    TrackMeter, TrackName, VolumeFader, VolumeWidget, record_input_name, use_daw_tracks,
+    use_live_track, use_track_store,
 };
 use crate::prelude::*;
 use daw_proto::Track;
@@ -173,57 +174,18 @@ pub fn ChannelStripPreview(
     }
 }
 
-/// The strip's own geometry, from `rtconfig.txt` at scale 1 in wide mode.
-///
-/// `mcp_w` is 86 and the sections are a function of height — which is the
-/// thing to know about this panel, and what [`Collapse`] resolves.
-const STRIP_W: f32 = 86.0;
-// The section heights come from the same constants `Collapse` computes the
-// stretch residual with — stated once, in `daw_theme_art::collapse`, so a
-// remeasurement there cannot leave the drawn sections and the residual
-// arithmetic disagreeing.
+// The strip's geometry — every rtconfig-derived and measured number — lives
+// in `daw_theme_art::geometry::mcp`, one home for the panel's facts, guarded
+// against the theme by `fts-themer thresholds --check`. The section heights
+// come from the same constants `Collapse` computes the stretch residual
+// with, so a remeasurement there cannot leave the drawn sections and the
+// residual arithmetic disagreeing.
 use daw_theme_art::collapse::{BOTTOM_SECTION, FX_SECTION};
-/// Where the pill sits inside the FX section — measured, not nominal.
-const FX_PILL_TOP: f32 = 9.0;
-/// The meter's block, scale included. It starts at x=4 and REAPER's fader
-/// cap starts at 30, so 26 is the room there is.
-const METER_W: u32 = 26;
-/// `mcp.recinput` and `mcp.recmode` are both 16 rows.
-const INPUT_FIELD_H: f32 = 16.0;
-/// `mcp_pan`'s cell.
-const PAN_KNOB_W: f32 = 24.0;
-/// `mcp.recmode`'s field. Wide enough for the word and the caret with a
-/// gap between them — at 42 with a 12-column right pad the two were
-/// almost touching.
-const IN_FIELD_W: f32 = 38.0;
-/// The axis the right-hand column centres on: `mcp.recmon` and everything
-/// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
-/// cell rather than in the middle, which is why it is placed separately.
-const COLUMN: f32 = 55.0;
-/// `mcp.recmon`, `mcp.mute` and `mcp.solo` are all 21 wide. Stated because
-/// the column has to *be* that wide: left to shrink-wrap, `align-items:
-/// center` centres every button on the widest child — the IO button, which
-/// `rtconfig` writes as `mcp.solo + [-1 23 23 30]`, deliberately one column
-/// left and two wider — and the whole stack drifted a pixel right of the
-/// record arm above it.
-const BUTTON_W: f32 = 21.0;
-/// The one vertical axis the arm and the column share.
-const COLUMN_AXIS: f32 = COLUMN + BUTTON_W / 2.0;
-/// `mcp_recarm_*` is a 36-wide cell whose ring is centred at 0.486 of it,
-/// not at 18 — so the cell's left edge is not the axis minus half its width.
-const ARM_CELL_W: f32 = 36.0;
-const ARM_LEFT: f32 = COLUMN_AXIS - ARM_CELL_W * 0.486;
-
-/// The chain `rtconfig` writes down the right-hand column, each step a
-/// `[dx dy w h]` offset from the control above it.
-const RECMON_FROM_ARM: f32 = 20.0;
-const MUTE_FROM_RECMON: f32 = 19.0;
-const SOLO_FROM_MUTE: f32 = 21.0;
-const IO_FROM_SOLO: f32 = 23.0;
-/// `mcp.env`'s own height, which is the gap it leaves above the stretch
-/// section's floor, and phase's above that.
-const ENV_FROM_FLOOR: f32 = 30.0;
-const PHASE_FROM_ENV: f32 = 18.0;
+use daw_theme_art::geometry::mcp::{
+    ARM_CELL_H, ARM_LEFT, ARM_OVERHANG, BUTTON_W, COLUMN, ENV_FROM_FLOOR, FX_PILL_TOP,
+    IN_FIELD_W, INPUT_FIELD_H, IO_FROM_SOLO, METER_W, MUTE_FROM_RECMON, NAME_PLATE, PAN_KNOB_W,
+    PHASE_FROM_ENV, PHASE_W, RECMON_FROM_ARM, SOLO_FROM_MUTE, STRIP_W,
+};
 
 /// One control in the right-hand column.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -247,7 +209,7 @@ impl Stacked {
             Self::Io => column - 1.0,
             // 16 wide against the column's 21, so it centres rather than
             // hanging off the left.
-            Self::Phase => column + (BUTTON_W - 16.0) / 2.0,
+            Self::Phase => column + (BUTTON_W - PHASE_W) / 2.0,
             // `mcp.env` is written `+ [1 ...]` off the IO button, which is
             // itself a column left — so it lands back on the column.
             Self::Envelope => column,
@@ -255,26 +217,10 @@ impl Stacked {
         }
     }
 }
-/// `mcp.label` — 26 of the bottom section's 47, above the 20-row index
-/// plate and the row that divides them.
-const NAME_PLATE: u32 = 26;
-/// How far the record arm's housing hangs below the coloured band.
-///
-/// Derived, not chosen: `mcp_recarm_*` is a 36x24 cell whose housing flares
-/// out at 45° and then goes vertical at
-/// [`HOUSING_SHOULDER`][daw_theme_art::vector_controls::HOUSING_SHOULDER].
-/// Everything below that is a plain rectangle, and REAPER sinks exactly
-/// that rectangle into the dark — so the flare emerges from the background
-/// instead of the button sitting on top of the colour with a seam under it.
-///
-/// Measuring it off a screenshot undercounts: below the band the housing is
-/// dark on dark, which is the whole point of it.
-const ARM_CELL_H: f32 = 24.0;
-const ARM_OVERHANG: f32 =
-    ARM_CELL_H * (1.0 - daw_theme_art::vector_controls::HOUSING_SHOULDER);
 /// The strip's own grey — `mcp_namebg`'s, and the same one the plate under
-/// the track name uses.
-const BODY_GREY: &str = "#262626";
+/// the track name uses. A measured token, not a local hex, so a re-palette
+/// reaches it (#240).
+use daw_theme::defaults::STRIP_BODY as BODY_GREY;
 
 // ── Channel Strip ───────────────────────────────────────────────────
 
@@ -298,13 +244,8 @@ impl PartialEq for ChannelStripProps {
 
 #[component]
 fn ChannelStrip(props: ChannelStripProps) -> Element {
-    // The store first, the prop as the seed. Everything else on the strip
-    // already follows the track stream, so reading colour and name off the
-    // prop left the band and the plate a poll behind the buttons beside
-    // them — a recolour in REAPER took up to two seconds to arrive.
-    let store = use_track_store();
-    let guid = props.track.guid.clone();
-    let live = use_memo(use_reactive!(|guid| store.track(&guid)));
+    // The store first, the prop as the seed — see `use_live_track`.
+    let live = use_live_track(&props.track);
     let live = live.read();
     let track = live.as_ref().unwrap_or(&props.track);
 
@@ -527,7 +468,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                                     font-size:9px; color:{ink}; white-space:nowrap; \
                                     overflow:hidden; text-overflow:ellipsis; \
                                     font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                            "{input_name(track)}"
+                            "{record_input_name(track)}"
                         }
                         Caret { x: STRIP_W - 12.0 - 10.0, y: INPUT_FIELD_H / 2.0 - 2.0, ink: caret.clone() }
                     }
@@ -662,32 +603,3 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     }
 }
 
-/// What the record-input field reads.
-fn input_name(track: &Track) -> String {
-    use daw_proto::track::RecordInput;
-    match track.record_input {
-        RecordInput::None => "No input".to_string(),
-        RecordInput::Audio { channel } => format!("Input {}", channel + 1),
-        RecordInput::Midi { device_id, channel } => match (device_id, channel) {
-            (Some(d), Some(c)) => format!("MIDI {d} ch {}", c + 1),
-            (Some(d), None) => format!("MIDI {d}"),
-            (None, Some(c)) => format!("MIDI all ch {}", c + 1),
-            (None, None) => "MIDI".to_string(),
-        },
-        RecordInput::Raw(v) => format!("Input #{v}"),
-    }
-}
-
-/// A dropdown's caret. A triangle rather than a glyph, so it does not
-/// depend on a font having one.
-#[component]
-fn Caret(x: f32, y: f32, ink: String) -> Element {
-    rsx! {
-        svg {
-            style: "position:absolute; left:{x}px; top:{y}px;",
-            width: "7", height: "4", view_box: "0 0 7 4",
-            xmlns: "http://www.w3.org/2000/svg",
-            path { d: "M 0 0 h 7 l -3.5 4 z", fill: "{ink}" }
-        }
-    }
-}

@@ -152,7 +152,10 @@ fn the_colour_lands_on_the_index_plate_and_not_the_name_plate() {
         dioxus_ssr::render(&mount(coloured, || rsx! { ChannelStripPreview { track: coloured() } }));
 
     assert!(!name.contains("#ff8800"), "the name plate took the track colour:\n{name}");
-    assert!(name.contains("#262626"), "the name plate is not `mcp_namebg`:\n{name}");
+    assert!(
+        name.contains(daw_theme::defaults::STRIP_BODY),
+        "the name plate is not `mcp_namebg`'s token:\n{name}"
+    );
     // The *tinted* colour, not the raw one: REAPER paints a panel at 70%
     // of the track's colour, measured in one screenshot holding both
     // renders of the same project. #ff8800 shaded 30% toward black.
@@ -229,7 +232,7 @@ fn a_pan_drag_leads_the_engine_and_ignores_its_echo() {
 /// the other's events.
 #[test]
 fn holding_one_value_does_not_suppress_the_other() {
-    let mut dom = mount(base, || rsx! { PanKnob { track: "T1" } });
+    let dom = mount(base, || rsx! { PanKnob { track: "T1" } });
     dom.in_runtime(|| {
         let mut store = store();
         store.drafts().set_pan("T1", 0.5);

@@ -27,94 +27,25 @@ use daw_theme_art::dress::Panel;
 use daw_theme_art::vector_controls as art;
 
 use crate::controls::{
-    EnvelopeButton, FxButton, IoButton, MuteButton, PanKnob, PhaseButton, RecordArmButton,
-    SoloButton, TrackMeter, use_track_store,
+    Caret, EnvelopeButton, FxButton, IoButton, MuteButton, PanKnob, PhaseButton, RecordArmButton,
+    SoloButton, TrackMeter, record_input_name, use_live_track, use_track_store,
 };
 use crate::prelude::*;
 
-/// The row's own geometry, measured off REAPER itself rather than off the
-/// panel sheet.
-///
-/// The sheet is a useful reference for *drawing* the controls, but it puts
-/// the meter inside the tint, and REAPER does not: with `meterRight` set —
-/// which this theme sets — `rtconfig` moves the whole meter section to the
-/// right edge of the panel, past mute and solo. Measured in a REAPER
-/// screenshot, a row's tint ends at 296, the gutter runs to 343, mute and
-/// solo occupy 318..339, and what is left at the end of the row is the
-/// meter's.
-const ROW_H: f32 = 70.0;
-/// The tinted part. Everything after it is REAPER's meter section.
-const TINT_W: f32 = 296.0;
-/// The meter section: mute and solo, then the meter at the very end.
-const GUTTER_W: f32 = 47.0;
-const ROW_W: f32 = TINT_W + GUTTER_W;
-/// Mute and solo, 21 into the section — measured at 318 against a section
-/// starting at 297.
-const GUTTER_BUTTON_X: f32 = 21.0;
-/// Solo's top, measured at 25 of the row — mute is 21 above it.
-const SOLO_TOP: f32 = 25.0;
-/// The meter: a vertical strip at the *start* of the section, before mute
-/// and solo rather than after them. Measured at 297..316 against a section
-/// starting at 297 — grey at rest, which is why it is easy to mistake for
-/// the section's own background.
-/// Where phase and the fixed-lanes button sit, and the heights below
-/// which each goes. From the theme:
-///
-///     phaseHide_h            = 12 + element_h + tcp.solo{1} + tcp.solo{3}
-///     phaseHide_h           += 17 when the lanes button is shown
-///     fixed_lanes_hide_h     = phaseHide_h - 17
-///     tcp.phase              = [tcp.solo meter_sec{3}] + [3 -24 16 20]
-///     tcp.custom.fixed_lanes = [tcp.solo meter_sec{3}] + [1 -47 20 24]
-///
-/// Both hang off the *bottom* of the meter section, which is why they end
-/// up in the row's bottom-right corner with the lanes button above phase.
-/// A 70-row row is below both thresholds and shows neither — REAPER's own
-/// rows at that height do not have them either.
-const PHASE_HIDE_H: f32 = 12.0 + 20.0 + 25.0 + 20.0 + 17.0;
-const LANES_HIDE_H: f32 = PHASE_HIDE_H - 17.0;
-const PHASE_FROM_FLOOR: f32 = 24.0;
-const LANES_FROM_FLOOR: f32 = 47.0;
+// The row's geometry — measured off REAPER itself rather than off the
+// panel sheet — lives in `daw_theme_art::geometry::tcp`, one home for the
+// panel's facts. The measurement notes travel with the numbers.
+use daw_theme_art::geometry::tcp::{
+    COLUMN_RULE_X, FIELD_H, FX_IN_X, GUTTER_BUTTON_X, GUTTER_W, LANES_FROM_FLOOR, LANES_HIDE_H,
+    METER_W as TCP_METER_W, METER_X as TCP_METER_X, NAME_FIELD_H, NAME_FIELD_W, NAME_FIELD_X,
+    PAN_KNOB_X, PHASE_FROM_FLOOR, PHASE_HIDE_H, ROUTING_X, ROW_H, ROW_ONE, ROW_TWO, ROW_W,
+    SOLO_TOP, TINT_W, VOLUME_KNOB_X,
+};
 
-const TCP_METER_X: f32 = 1.0;
-const TCP_METER_W: u32 = 19;
-/// Row one's field, which the record arm and the volume knob sit on.
-/// Measured: it runs 26..230 and is 24 tall, not the 17 the other fields
-/// are.
-/// Measured across one of REAPER's rows at a scanline above the text:
-/// the field runs 33..161, the volume knob follows it at 159..180, pan at
-/// 183..207, the routing widget 214..239 and the FX pill 248..283, with
-/// the tint ending at 296.
-const NAME_FIELD_X: f32 = 33.0;
-const NAME_FIELD_W: f32 = 136.0;
-const NAME_FIELD_H: f32 = 24.0;
-/// The field stops *midway through* the knob, and its right edge is square.
-///
-/// The two scanlines that looked like a field wrapping the knob say this
-/// instead: above the knob's centre the dark ends at 161, and across the
-/// centre it runs to 179 — which is the knob's own body, not the field.
-/// A circle straddling a square edge reads exactly like a rounded end from
-/// one row and exactly like a longer box from another. So the field runs
-/// 33..169, ending at the knob's centre, and the knob is a plain circle
-/// sitting half on it and half on the tint.
-/// Centred on the field's right edge at 169, so the knob is 24 wide from
-/// 157 — the same 24 the field is tall, and sharing its top and bottom.
-const VOLUME_KNOB_X: f32 = 157.0;
-/// Centred at 195, between the field's end and the routing widget —
-/// measured, its chord runs 191..200 at a row above the knobs' centres.
-const PAN_KNOB_X: f32 = 184.0;
-/// The rule between the left column and the row, at 20.
-const COLUMN_RULE_X: f32 = 20.0;
-const ROUTING_X: f32 = 214.0;
-const FX_IN_X: f32 = 248.0;
 /// The panel's own grey — the same one the mixer strip's body and name
-/// plate use.
-const BODY_GREY: &str = "#262626";
-/// Both rows of fields are 17 tall, at these tops.
-const ROW_ONE: f32 = 6.0;
-const ROW_TWO: f32 = 34.0;
-/// 20, measured — the sheet's 17 left a three-row gap under every field
-/// in the second row.
-const FIELD_H: f32 = 20.0;
+/// plate use. A measured token, not a local hex, so a re-palette reaches
+/// it (#240).
+use daw_theme::defaults::STRIP_BODY as BODY_GREY;
 
 /// One track's row in the panel.
 ///
@@ -132,14 +63,9 @@ pub fn TrackRow(
     #[props(default = ROW_H)]
     height: f32,
 ) -> Element {
-    // The store first, the prop as the seed — a rename or a recolour in
-    // REAPER reaches the row on the track stream rather than on a poll.
-    // The mixer strip read its colour off the prop and sat a poll behind
-    // every button beside it.
+    // The store first, the prop as the seed — see `use_live_track`.
     let row_h = height;
-    let store = use_track_store();
-    let guid = track.guid.clone();
-    let live = use_memo(use_reactive!(|guid| store.track(&guid)));
+    let live = use_live_track(&track);
     let live = live.read();
     let track = live.as_ref().unwrap_or(&track);
 
@@ -210,7 +136,10 @@ pub fn TrackRow(
                 style: "position:absolute; left:{COLUMN_RULE_X}px; top:0; \
                         width:1px; height:{row_h}px; background:{combo};",
             }
-            div { style: "position:absolute; left:8px; top:6px;",
+            // At (7,5): the pushpin's 11x11 box carries the needle's
+            // corner, so it sits a pixel up and left of where the old
+            // 9x9 star did to keep the head on the same spot.
+            div { style: "position:absolute; left:7px; top:5px;",
                 art::TrackPin { colour: combo.clone() }
             }
             div { style: "position:absolute; left:7px; top:{row_h - 10.0}px;",
@@ -312,16 +241,10 @@ pub fn TrackRow(
                     style: "line-height:{FIELD_H}px; font-size:11px; text-align:center; \
                             color:{combo_ink}; white-space:nowrap; overflow:hidden; \
                             font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                    "{input_label(track)}"
+                    "{record_input_name(track)}"
                 }
-                // The combo's caret. A triangle rather than a glyph, so it
-                // does not depend on a font having one.
-                svg {
-                    style: "position:absolute; left:181px; top:8px;",
-                    width: "7", height: "4", view_box: "0 0 7 4",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    path { d: "M 0 0 h 7 l -3.5 4 z", fill: "{caret}" }
-                }
+                // The combo's caret — the shared triangle, not a glyph.
+                Caret { x: 181.0, y: 8.0, ink: caret }
             }
 
             // ── The meter section: the meter, then mute over solo ──
@@ -377,23 +300,110 @@ pub fn TrackRow(
     }
 }
 
-/// What the input combo reads.
+/// The envelope control panel row — the TCP-side half of an envelope
+/// lane.
 ///
-/// The row shows the track's record input, which is the same fact the
-/// mixer's `RecordInputLabel` shows — spelled out here rather than
-/// abbreviated, because the field is 186 wide instead of 86.
-fn input_label(track: &Track) -> String {
-    use daw_proto::track::RecordInput;
-    match track.record_input {
-        RecordInput::None => "No input".to_string(),
-        RecordInput::Audio { channel } => format!("Input {}", channel + 1),
-        RecordInput::Midi { device_id, channel } => match (device_id, channel) {
-            (Some(d), Some(c)) => format!("MIDI {d} ch {}", c + 1),
-            (Some(d), None) => format!("MIDI {d}"),
-            (None, Some(c)) => format!("MIDI all ch {}", c + 1),
-            (None, None) => "MIDI".to_string(),
-        },
-        RecordInput::Raw(v) => format!("Input #{v}"),
+/// Layout is WALTER's `calcEnvFlow`, read out of `rtconfig.txt` rather
+/// than invented: elements flow left to right at `element_h` 20 —
+/// **arm (20) → bypass (15) → label (min 30) → fader → hide (36)** — and
+/// an FX-parameter envelope (`envcp_type==4`) adds the **parammod and
+/// learn plates (30 each)**. The value readout takes the right 60. The
+/// panel indents 24 (`main_sec + [24 0 -30]`), the row floor is
+/// `envcp_min_height 27`, and every part is the envelope panel's own
+/// vector art from #117.
+#[component]
+pub fn EnvcpRow(
+    name: String,
+    /// The lane's height — the same number the arrange lane draws at,
+    /// through `plan_rows`.
+    height: f32,
+    #[props(default)] armed: bool,
+    #[props(default)] bypassed: bool,
+    /// An FX-parameter envelope grows the mod/learn plates.
+    #[props(default)]
+    fx_param: bool,
+    /// Fader position 0..1.
+    #[props(default = 0.7)]
+    value: f32,
+    /// The readout's text.
+    #[props(default)]
+    readout: String,
+) -> Element {
+    let t = daw_theme::Theme::default();
+    // The envelope panel's own dark ground — a step below the track rows
+    // it hangs from.
+    let bg = t.chrome.hardware_edge.shade(0.05).css();
+    let label_ink = t.chrome.hardware_mark.shade(0.35).css();
+    let value_ink = t.chrome.accent.css();
+    let rule = t.chrome.hardware_edge.shade(-0.3).css();
+    // `element_h` at scale 1; the flow compresses below squash height.
+    let el_h = 20.0f32;
+    let pad_y = ((height - el_h) / 2.0).max(1.0);
+    let fader_w = 56.0f32;
+    let cap_at = 4.0 + (fader_w - 22.0) * value.clamp(0.0, 1.0);
+
+    rsx! {
+        div {
+            style: "position:relative; width:{ROW_W}px; height:{height + 1.0}px; \
+                    background:{bg}; border-bottom:1px solid {rule}; \
+                    overflow:hidden;",
+            div {
+                style: "position:absolute; left:24px; top:{pad_y}px; \
+                        display:flex; align-items:center; height:{el_h}px; \
+                        width:{ROW_W - 24.0 - 6.0}px;",
+                div { style: "flex:0 0 auto; line-height:0;",
+                    art::EnvcpArmButton { armed, cell: (20.0, 20.0) }
+                }
+                div { style: "flex:0 0 auto; line-height:0;",
+                    art::EnvcpBypassButton { bypassed, cell: (15.0, 20.0) }
+                }
+                div {
+                    style: "flex:1 1 auto; min-width:30px; padding:0 4px; \
+                            font-size:9px; color:{label_ink}; white-space:nowrap; \
+                            overflow:hidden; text-overflow:ellipsis; \
+                            font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                    "{name}"
+                }
+                // The horizontal fader: the slab, and the cap slid to the
+                // value.
+                div {
+                    style: "flex:0 0 auto; position:relative; width:{fader_w}px; \
+                            height:{el_h}px;",
+                    div { style: "position:absolute; left:0; top:6px; line-height:0;",
+                        art::EnvcpPanel {
+                            part: art::EnvcpPart::FaderTrack,
+                            cell: (fader_w, 8.0),
+                        }
+                    }
+                    div { style: "position:absolute; left:{cap_at}px; top:0; line-height:0;",
+                        art::EnvcpPanel {
+                            part: art::EnvcpPart::FaderCap,
+                            cell: (22.0, 20.0),
+                        }
+                    }
+                }
+                if fx_param {
+                    div { style: "flex:0 0 auto; line-height:0; margin-left:4px;",
+                        art::EnvcpPlate { glyph: art::EnvcpGlyph::ParamMod }
+                    }
+                    div { style: "flex:0 0 auto; line-height:0;",
+                        art::EnvcpPlate { glyph: art::EnvcpGlyph::Learn }
+                    }
+                }
+                div { style: "flex:0 0 auto; line-height:0; margin-left:4px;",
+                    art::EnvcpOptionsButton { cell: (36.0, 20.0) }
+                }
+                if !readout.is_empty() {
+                    div {
+                        style: "flex:0 0 auto; width:52px; text-align:right; \
+                                font-size:8px; color:{value_ink}; \
+                                font-variant-numeric:tabular-nums; \
+                                font-family:DejaVu Sans Mono, monospace;",
+                        "{readout}"
+                    }
+                }
+            }
+        }
     }
 }
 
