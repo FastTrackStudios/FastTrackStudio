@@ -461,6 +461,55 @@ pub enum ShoppingCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Tick an entry off because it's already in the kitchen —
+    /// the first pass, before leaving for the shop. Unlike
+    /// `mark-purchased` this never touches pantry stock.
+    MarkHave {
+        item: String,
+        /// Put it back on the list instead (after a miscount).
+        #[arg(long)]
+        undo: bool,
+        #[arg(long)]
+        list: Option<String>,
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Put every entry back to `needed`, keeping the rows — run
+    /// the same list again next week without retyping it.
+    Reset {
+        #[arg(long)]
+        list: Option<String>,
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Keep a list's rows as a reusable template.
+    SaveTemplate {
+        /// Name for the template.
+        name: String,
+        #[arg(long)]
+        list: Option<String>,
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start a fresh run from a template; the template is left
+    /// untouched so it can be started again.
+    Start {
+        /// Template name.
+        template: String,
+        /// Name for the new run (default: the template's name).
+        #[arg(long)]
+        name: Option<String>,
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// First list in the vault (or by `--list` name); creates a
@@ -489,6 +538,8 @@ async fn pick_list(
             name: "Shopping".into(),
             store_location_id: None,
             entries: mealplan::shopping::ShoppingEntries::default(),
+            is_template: false,
+            from_template: None,
             date_created: None,
             date_modified: None,
             details: String::new(),
@@ -502,10 +553,22 @@ fn print_list(l: &ShoppingList, json: bool) -> eyre::Result<()> {
         println!("{}", serde_json::to_string_pretty(l)?);
         return Ok(());
     }
-    let open = l.entries.iter().filter(|e| !e.purchased).count();
-    println!("{}  ({} open / {} total)", l.name, open, l.entries.len());
+    let open = l.entries.iter().filter(|e| !e.is_settled()).count();
+    let kind = if l.is_template { " [template]" } else { "" };
+    println!(
+        "{}{kind}  ({} open / {} total)",
+        l.name,
+        open,
+        l.entries.len()
+    );
     for e in l.entries.iter() {
-        let mark = if e.purchased { "x" } else { " " };
+        // `h` distinguishes "found it in the kitchen" from "bought it",
+        // which is the whole point of the two-stage run.
+        let mark = match e.status {
+            mealplan::shopping::EntryStatus::Needed => " ",
+            mealplan::shopping::EntryStatus::Have => "h",
+            mealplan::shopping::EntryStatus::Purchased => "x",
+        };
         let qty = e
             .qty
             .map(|q| format!("{q} {} ", e.unit).trim_end().to_string() + " ")
@@ -520,12 +583,12 @@ fn print_list(l: &ShoppingList, json: bool) -> eyre::Result<()> {
     Ok(())
 }
 
-/// Index of the entry named `item` — prefers an unpurchased row.
+/// Index of the entry named `item` — prefers a row still outstanding.
 fn find_entry(l: &ShoppingList, item: &str) -> Option<usize> {
     let t = item.to_lowercase();
     l.entries
         .iter()
-        .position(|e| !e.purchased && e.name.to_lowercase() == t)
+        .position(|e| !e.is_settled() && e.name.to_lowercase() == t)
         .or_else(|| l.entries.iter().position(|e| e.name.to_lowercase() == t))
 }
 
@@ -623,6 +686,93 @@ pub async fn run_shopping(cmd: ShoppingCmd) -> eyre::Result<()> {
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
             print_list(&updated, json)?;
+        }
+        ShoppingCmd::MarkHave {
+            item,
+            undo,
+            list,
+            remote,
+            json,
+        } => {
+            let client: ShoppingServiceClient = establish_for_url(&remote.url()?).await?;
+            let l = pick_list(&client, list.as_deref()).await?;
+            // When undoing, the row is already settled, so search the
+            // whole list rather than preferring outstanding rows.
+            let idx = if undo {
+                let t = item.to_lowercase();
+                l.entries.iter().position(|e| e.name.to_lowercase() == t)
+            } else {
+                find_entry(&l, &item)
+            }
+            .ok_or_else(|| eyre::eyre!("no entry named `{item}` on `{}`", l.name))?;
+            let entry_id = l.entries[idx].id;
+            let updated = client
+                .mark_have(l.id.to_string(), entry_id.to_string(), !undo)
+                .await
+                .map_err(|e| eyre::eyre!("mark-have: {e:?}"))?;
+            if !json {
+                if undo {
+                    println!("{item} back on the list");
+                } else {
+                    println!("{item} already in the kitchen — no pantry change");
+                }
+            }
+            print_list(&updated, json)?;
+        }
+        ShoppingCmd::Reset { list, remote, json } => {
+            let client: ShoppingServiceClient = establish_for_url(&remote.url()?).await?;
+            let l = pick_list(&client, list.as_deref()).await?;
+            let updated = client
+                .reset(l.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("reset: {e:?}"))?;
+            if !json {
+                println!("`{}` reset — every row outstanding again", updated.name);
+            }
+            print_list(&updated, json)?;
+        }
+        ShoppingCmd::SaveTemplate {
+            name,
+            list,
+            remote,
+            json,
+        } => {
+            let client: ShoppingServiceClient = establish_for_url(&remote.url()?).await?;
+            let l = pick_list(&client, list.as_deref()).await?;
+            let created = client
+                .save_as_template(l.id.to_string(), name.clone())
+                .await
+                .map_err(|e| eyre::eyre!("save-template: {e:?}"))?;
+            if !json {
+                println!("saved template `{name}` from `{}`", l.name);
+            }
+            print_list(&created, json)?;
+        }
+        ShoppingCmd::Start {
+            template,
+            name,
+            remote,
+            json,
+        } => {
+            let client: ShoppingServiceClient = establish_for_url(&remote.url()?).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let t = template.to_lowercase();
+            let tpl = rows
+                .iter()
+                .find(|l| l.is_template && l.name.to_lowercase() == t)
+                .ok_or_else(|| eyre::eyre!("no template named `{template}`"))?;
+            let run_name = name.unwrap_or_else(|| tpl.name.clone());
+            let started = client
+                .start_from_template(tpl.id.to_string(), run_name)
+                .await
+                .map_err(|e| eyre::eyre!("start: {e:?}"))?;
+            if !json {
+                println!("started `{}` from template `{}`", started.name, tpl.name);
+            }
+            print_list(&started, json)?;
         }
     }
     Ok(())

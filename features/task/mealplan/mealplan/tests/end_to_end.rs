@@ -261,6 +261,8 @@ Toss with @butter{20%g} and shaved @truffles{5%g}.
             name: "Weekly Grocery Run".into(),
             store_location_id: None,
             entries: mealplan::shopping::ShoppingEntries::default(),
+            is_template: false,
+            from_template: None,
             date_created: None,
             date_modified: None,
             details: String::new(),

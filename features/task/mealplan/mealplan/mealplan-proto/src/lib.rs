@@ -17,6 +17,7 @@
 pub mod fulfillment;
 pub mod model;
 pub mod service;
+pub mod shopping;
 
 pub use fulfillment::{
     CookReceipt, DeductionLine, Fulfillment, HaveLine, Shortage, ShortageReason, SkipReason,
@@ -24,6 +25,18 @@ pub use fulfillment::{
 };
 pub use model::{Meal, PantryDeduction, PantryDeductions, Slot, Status, StringList};
 pub use service::{MealplanError, MealplanService, MealplanServiceRpc};
+pub use shopping::{
+    EntryStatus, ShoppingEntries, ShoppingEntry, ShoppingError, ShoppingList, ShoppingService,
+    ShoppingServiceRpc,
+};
+
+#[cfg(feature = "vox")]
+pub use shopping::{
+    Service as ShoppingServiceBridge, ShoppingServiceClient,
+    ShoppingServiceRpcDispatcher as ShoppingDispatcher, layer as shopping_service_layer,
+    serve as serve_shopping_service,
+    shopping_service_rpc_service_descriptor as shopping_service_descriptor,
+};
 
 #[cfg(feature = "vox")]
 pub use service::{

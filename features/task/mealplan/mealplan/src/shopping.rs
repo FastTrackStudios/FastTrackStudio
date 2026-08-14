@@ -13,190 +13,30 @@
 
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{NaiveDate, Utc};
 use cookbook::CookbookService;
-use facet::Facet;
 use pantry::{PantryService, Store as PantryStore};
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use uuid::Uuid;
 use vault::{Vault, VaultPage};
 
 use crate::fulfillment::{Fulfillment, Shortage, ShortageReason};
 
-// ── Model ────────────────────────────────────────────────────
+// ── Model + service (re-exported from the wasm-clean proto) ──
+//
+// The model and the `ShoppingService` trait live in
+// `mealplan_proto::shopping` so the web UI can bind the client
+// directly; this crate keeps the parse / serialize / vault-backed
+// `Store` side.
+pub use mealplan_proto::shopping::{
+    EntryStatus, ShoppingEntries, ShoppingEntry, ShoppingError, ShoppingList, ShoppingService,
+    ShoppingServiceRpc,
+};
 
-/// `Vec<ShoppingEntry>` newtype — JSON column.
-#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
-#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
-#[repr(transparent)]
-#[serde(transparent)]
-pub struct ShoppingEntries(pub Vec<ShoppingEntry>);
-
-impl ShoppingEntries {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl From<Vec<ShoppingEntry>> for ShoppingEntries {
-    fn from(v: Vec<ShoppingEntry>) -> Self {
-        Self(v)
-    }
-}
-
-impl std::ops::Deref for ShoppingEntries {
-    type Target = Vec<ShoppingEntry>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for ShoppingEntries {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
-#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-#[architect(table_name = "shopping_lists", repo)]
-pub struct ShoppingList {
-    #[serde(skip)]
-    #[architect(filterable, sortable)]
-    pub path: String,
-
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
-    pub id: Uuid,
-
-    #[architect(filterable, sortable, fulltext)]
-    pub name: String,
-
-    /// Optional default store (a `locations::Location` of
-    /// `kind: venue`). Lets the UI group lists by where
-    /// you'll shop.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        default,
-        rename = "storeLocationId"
-    )]
-    #[architect(filterable)]
-    pub store_location_id: Option<Uuid>,
-
-    #[serde(default)]
-    #[architect(json)]
-    pub entries: ShoppingEntries,
-
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        default,
-        rename = "dateCreated"
-    )]
-    pub date_created: Option<DateTime<Utc>>,
-
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        default,
-        rename = "dateModified"
-    )]
-    pub date_modified: Option<DateTime<Utc>>,
-
-    #[serde(skip)]
-    pub details: String,
-}
-
-#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct ShoppingEntry {
-    pub id: Uuid,
-
-    /// Optional `pantry::PantryItem` id. When set,
-    /// `mark_purchased` will call
-    /// `pantry::PantryService::add_stock` against this id
-    /// so the row lands in stock immediately.
-    #[serde(skip_serializing_if = "Option::is_none", default, rename = "itemId")]
-    pub item_id: Option<Uuid>,
-
-    /// Display name. Required even when `item_id` is set —
-    /// the list reads independently of the pantry catalog.
-    pub name: String,
-
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub qty: Option<f64>,
-
-    #[serde(default)]
-    pub unit: String,
-
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub note: Option<String>,
-
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub purchased: bool,
-}
-
-// ── Errors + service ─────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
-#[repr(u8)]
-pub enum ShoppingError {
-    #[error("not found: {0}")]
-    NotFound(String),
-    #[error("already exists: {0}")]
-    AlreadyExists(String),
-    #[error("bad request: {0}")]
-    BadRequest(String),
-    #[error("pantry: {0}")]
-    Pantry(String),
-    #[error("io: {0}")]
-    Io(String),
-}
-
-#[architect::rpc]
-pub trait ShoppingService {
-    fn list(&self) -> Result<Vec<ShoppingList>, ShoppingError>;
-
-    fn get(&self, id: &str) -> Result<ShoppingList, ShoppingError>;
-
-    fn create(&self, list: ShoppingList) -> Result<ShoppingList, ShoppingError>;
-
-    fn update(&self, list: ShoppingList) -> Result<ShoppingList, ShoppingError>;
-
-    fn delete(&self, id: &str) -> Result<(), ShoppingError>;
-
-    /// Add every shortage from `recipe`'s fulfillment to
-    /// `list_id`. `recipe_path` is the vault-relative
-    /// `.cook` file path.
-    fn add_missing_for_recipe(
-        &self,
-        list_id: &str,
-        recipe_path: &str,
-        servings: u32,
-    ) -> Result<ShoppingList, ShoppingError>;
-
-    /// Add every pantry item at or below its `minimum`
-    /// reorder threshold to `list_id`.
-    fn add_low_stock(&self, list_id: &str) -> Result<ShoppingList, ShoppingError>;
-
-    /// Add every pantry item with a stock entry already
-    /// past its `best_before` as of `today`.
-    fn add_expired_or_overdue(
-        &self,
-        list_id: &str,
-        today: NaiveDate,
-    ) -> Result<ShoppingList, ShoppingError>;
-
-    /// Drop all entries from the list (keeps the list
-    /// itself). Useful after a grocery run.
-    fn clear(&self, id: &str) -> Result<ShoppingList, ShoppingError>;
-
-    /// Mark `entry_id` as purchased. When the entry has an
-    /// `item_id`, also calls
-    /// `pantry::PantryService::add_stock` against that id
-    /// (creates a single batch row using `entry.qty` and
-    /// today's date as `purchased_date`).
-    fn mark_purchased(&self, list_id: &str, entry_id: &str) -> Result<ShoppingList, ShoppingError>;
-}
+#[cfg(feature = "vox")]
+pub use mealplan_proto::shopping::{
+    Service, ShoppingServiceClient, ShoppingServiceRpcDispatcher, layer, serve,
+    shopping_service_rpc_service_descriptor,
+};
 
 // ── Parse / write ────────────────────────────────────────────
 
@@ -259,10 +99,19 @@ fn parse_page(page: &VaultPage) -> Option<ShoppingList> {
                         .get("note")
                         .and_then(|v| v.as_str())
                         .map(std::string::ToString::to_string);
-                    let purchased = m
-                        .get("purchased")
-                        .and_then(serde_yaml::Value::as_bool)
-                        .unwrap_or(false);
+                    // `status` is authoritative; `purchased: true` is
+                    // the pre-two-stage spelling and still parses so
+                    // lists written before templates keep their ticks.
+                    let status = m
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .and_then(EntryStatus::from_str)
+                        .or_else(|| {
+                            m.get("purchased")
+                                .and_then(serde_yaml::Value::as_bool)
+                                .and_then(|p| p.then_some(EntryStatus::Purchased))
+                        })
+                        .unwrap_or_default();
                     Some(ShoppingEntry {
                         id: entry_id,
                         item_id,
@@ -270,7 +119,7 @@ fn parse_page(page: &VaultPage) -> Option<ShoppingList> {
                         qty,
                         unit,
                         note,
-                        purchased,
+                        status,
                     })
                 })
                 .collect()
@@ -278,6 +127,11 @@ fn parse_page(page: &VaultPage) -> Option<ShoppingList> {
         .unwrap_or_default();
     let date_created = take_str("dateCreated").and_then(|s| s.parse().ok());
     let date_modified = take_str("dateModified").and_then(|s| s.parse().ok());
+    let is_template = map
+        .get("isTemplate")
+        .and_then(serde_yaml::Value::as_bool)
+        .unwrap_or(false);
+    let from_template = take_str("fromTemplate").and_then(|s| Uuid::parse_str(&s).ok());
 
     Some(ShoppingList {
         path: page.rel_path.clone(),
@@ -285,6 +139,8 @@ fn parse_page(page: &VaultPage) -> Option<ShoppingList> {
         name,
         store_location_id,
         entries: ShoppingEntries(entries),
+        is_template,
+        from_template,
         date_created,
         date_modified,
         details: body.to_string(),
@@ -414,7 +270,7 @@ fn push_or_merge(list: &mut ShoppingList, entry: ShoppingEntry) {
     // Merge same (item_id, unit) rows by summing qty —
     // mirrors grocy's "add to existing if present".
     if let Some(existing) = list.entries.iter_mut().find(|e| {
-        !e.purchased
+        !e.is_settled()
             && e.unit.eq_ignore_ascii_case(&entry.unit)
             && match (e.item_id, entry.item_id) {
                 (Some(a), Some(b)) => a == b,
@@ -562,7 +418,7 @@ impl ShoppingService for Store {
                     qty: if need > 0.0 { Some(need) } else { None },
                     unit: item.unit.clone(),
                     note: Some("low stock".into()),
-                    purchased: false,
+                    status: EntryStatus::Needed,
                 },
             );
         }
@@ -590,7 +446,7 @@ impl ShoppingService for Store {
                         qty: None,
                         unit: item.unit.clone(),
                         note: Some("replace — expired".into()),
-                        purchased: false,
+                        status: EntryStatus::Needed,
                     },
                 );
             }
@@ -613,7 +469,7 @@ impl ShoppingService for Store {
             .iter_mut()
             .find(|e| e.id == entry_uuid)
             .ok_or_else(|| ShoppingError::NotFound(format!("entry: {entry_id}")))?;
-        entry.purchased = true;
+        entry.status = EntryStatus::Purchased;
         let pantry_item_id = entry.item_id;
         let qty = entry.qty;
         let unit = entry.unit.clone();
@@ -646,6 +502,96 @@ impl ShoppingService for Store {
         }
         self.update(list)
     }
+
+    fn mark_have(
+        &self,
+        list_id: &str,
+        entry_id: &str,
+        have: bool,
+    ) -> Result<ShoppingList, ShoppingError> {
+        let entry_uuid = Uuid::parse_str(entry_id)
+            .map_err(|e| ShoppingError::BadRequest(format!("entry_id: {e}")))?;
+        let mut list = self.get(list_id)?;
+        let entry = list
+            .entries
+            .iter_mut()
+            .find(|e| e.id == entry_uuid)
+            .ok_or_else(|| ShoppingError::NotFound(format!("entry: {entry_id}")))?;
+        // No pantry write in either direction: the stock was already
+        // there (or was never counted), so touching it would invent
+        // quantities that don't exist.
+        entry.status = if have {
+            EntryStatus::Have
+        } else {
+            EntryStatus::Needed
+        };
+        self.update(list)
+    }
+
+    fn reset(&self, id: &str) -> Result<ShoppingList, ShoppingError> {
+        let mut list = self.get(id)?;
+        for entry in list.entries.iter_mut() {
+            entry.status = EntryStatus::Needed;
+        }
+        self.update(list)
+    }
+
+    fn start_from_template(
+        &self,
+        template_id: &str,
+        name: &str,
+    ) -> Result<ShoppingList, ShoppingError> {
+        let template = self.get(template_id)?;
+        let entries = template
+            .entries
+            .iter()
+            // Fresh entry ids: the run is its own thing, and reusing
+            // the template's would make `mark_purchased` on a run
+            // ambiguous across concurrent runs of the same template.
+            .map(|e| ShoppingEntry {
+                id: Uuid::new_v4(),
+                status: EntryStatus::Needed,
+                ..e.clone()
+            })
+            .collect::<Vec<_>>();
+        self.create(ShoppingList {
+            path: String::new(),
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            store_location_id: template.store_location_id,
+            entries: ShoppingEntries(entries),
+            is_template: false,
+            from_template: Some(template.id),
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+        })
+    }
+
+    fn save_as_template(&self, list_id: &str, name: &str) -> Result<ShoppingList, ShoppingError> {
+        let source = self.get(list_id)?;
+        let entries = source
+            .entries
+            .iter()
+            .map(|e| ShoppingEntry {
+                id: Uuid::new_v4(),
+                status: EntryStatus::Needed,
+                ..e.clone()
+            })
+            .collect::<Vec<_>>();
+        self.create(ShoppingList {
+            path: String::new(),
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            store_location_id: source.store_location_id,
+            entries: ShoppingEntries(entries),
+            is_template: true,
+            from_template: None,
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+        })
+    }
 }
 
 fn shortage_to_entry(short: Shortage) -> ShoppingEntry {
@@ -661,6 +607,6 @@ fn shortage_to_entry(short: Shortage) -> ShoppingEntry {
             ShortageReason::UnitMismatch => "unit mismatch — check recipe".into(),
             ShortageReason::OptionalNoQty => "optional — qty TBD".into(),
         }),
-        purchased: false,
+        status: EntryStatus::Needed,
     }
 }

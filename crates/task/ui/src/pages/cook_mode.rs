@@ -18,7 +18,8 @@ use std::collections::HashSet;
 use cookbook_proto::{Recipe, RecipeTimer};
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    Check, CircleCheck, Clock, Flame, Play, Receipt, TriangleAlert, Users, UtensilsCrossed, X,
+    Check, CircleCheck, Clock, Flame, Play, Receipt, ShoppingCart, TriangleAlert, Users,
+    UtensilsCrossed, X,
 };
 use fts_ui::prelude::*;
 use mealplan_proto::{CookReceipt, Fulfillment, SkipReason};
@@ -92,6 +93,7 @@ fn build_phases(recipe: &Recipe) -> Vec<Phase> {
 
 #[component]
 pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
+    let nav_to_shopping = use_navigator();
     let mut timers = use_signal(Vec::<RunningTimer>::new);
     let mut next_id = use_signal(|| 0u64);
     let mut gathered = use_signal(HashSet::<usize>::new);
@@ -173,6 +175,32 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                 }
             }
             checking.set(false);
+        });
+    };
+
+    // "Add missing to shopping list" — the shortages the pantry check
+    // just reported, appended to the working list (created on first
+    // use). Navigates there so the run is ready to walk.
+    let mut listing = use_signal(|| false);
+    let mut add_to_list = move || {
+        if listing() {
+            return;
+        }
+        let Some(s) = slug() else { return };
+        let path = recipe_path();
+        let servings = target_servings();
+        listing.set(true);
+        spawn(async move {
+            match crate::pages::shopping::add_recipe_shortages(&s, path, servings).await {
+                Ok(l) => {
+                    notices.info(format!("Added to “{}”.", l.name));
+                    nav_to_shopping.push(crate::routes::Route::ShoppingRoute {});
+                }
+                Err(e) => {
+                    notices.error(format!("Couldn't build the shopping list: {e}"));
+                }
+            }
+            listing.set(false);
         });
     };
 
@@ -373,6 +401,18 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                                             }
                                         }
                                     }
+                                }
+                            }
+                            // Turn the shortages into a shopping run in
+                            // one tap, rather than copying them by hand.
+                            div { class: "flex justify-end",
+                                Button {
+                                    variant: ButtonVariant::Secondary,
+                                    size: ButtonSize::Small,
+                                    disabled: listing(),
+                                    on_click: move |_| add_to_list(),
+                                    ShoppingCart { size: 14 }
+                                    if listing() { "Adding…" } else { "Add missing to shopping list" }
                                 }
                             }
                         }

@@ -5,8 +5,8 @@
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    BookOpen, BookUser, Bot, Brain, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell, Flag,
-    FolderKanban, GitBranch, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package,
+    BookOpen, BookUser, Bot, Brain, CalendarClock, CalendarDays, ChartGantt, CircleCheck, Dumbbell,
+    Flag, FolderKanban, GitBranch, House, Inbox as InboxIcon, Mail, MapPin, Notebook, Package,
     ReceiptText, Scale, Settings as SettingsIcon, Target, Timer, Users, Utensils, Wallet,
     Waypoints, Youtube,
 };
@@ -196,7 +196,9 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Scripture",
             plugin: "scripture",
             icon: icon_scripture,
-            route: Route::ScriptureRoute { reference: String::new() },
+            route: Route::ScriptureRoute {
+                reference: String::new(),
+            },
         },
         NavTab {
             label: "Milestones",
@@ -297,7 +299,9 @@ pub fn nav_tabs() -> Vec<NavTab> {
             label: "Agents",
             plugin: "agent",
             icon: icon_agents,
-            route: Route::AgentsRoute { session: String::new() },
+            route: Route::AgentsRoute {
+                session: String::new(),
+            },
         },
         NavTab {
             label: "Repos",
@@ -409,6 +413,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::MilestonesRoute {} => "Milestones",
         Route::FitnessRoute {} => "Fitness",
         Route::MealplanRoute {} => "Mealplan",
+        Route::ShoppingRoute {} => "Shopping",
         Route::RecipeCookRoute { .. } => "Cook",
         Route::RecipeEditRoute { .. } => "Edit recipe",
         Route::ScheduleRoute {} => "Schedule",
