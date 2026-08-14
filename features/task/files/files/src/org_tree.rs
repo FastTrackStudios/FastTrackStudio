@@ -320,6 +320,18 @@ fn media_roots_from_frontmatter(text: &str) -> Vec<uuid::Uuid> {
     }
 }
 
+// ── entry constructors ────────────────────────────────────────────
+
+fn virtual_dir(name: &str) -> BrowseEntry {
+    BrowseEntry {
+        name: name.to_string(),
+        is_dir: true,
+        size: None,
+        stub: false,
+        divergent: false,
+    }
+}
+
 #[cfg(test)]
 mod frontmatter_tests {
     use super::media_roots_from_frontmatter as parse;
@@ -365,17 +377,5 @@ mod frontmatter_tests {
     fn broken_yaml_yields_no_links_rather_than_an_error() {
         assert!(parse("---\nmedia_roots: [unclosed\n---\n").is_empty());
         assert!(parse("---\nno terminator\n").is_empty());
-    }
-}
-
-// ── entry constructors ────────────────────────────────────────────
-
-fn virtual_dir(name: &str) -> BrowseEntry {
-    BrowseEntry {
-        name: name.to_string(),
-        is_dir: true,
-        size: None,
-        stub: false,
-        divergent: false,
     }
 }

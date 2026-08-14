@@ -1,6 +1,7 @@
 # Media roots at scale: versioning without duplication, binding without names
 
-**Status:** designed 2026-08-14, not started
+**Status:** designed 2026-08-14; both fixes BUILT the same day. What is
+left is operational, not code — see "Sequencing" at the bottom.
 
 Two blockers found while putting ~5 TB of real production media under
 Task on a NAS with 1.1 TB free.
@@ -34,6 +35,35 @@ honest:
 Shape: in the CAS write path, a file above a threshold (~64–256 MB) is
 stored **whole, via `FICLONE`**, rather than FastCDC-chunked. Small files
 keep chunking.
+
+**Built** as `ChunkStore::write_path` / `probe_path`, threshold 64 MiB.
+Two things made it smaller than designed:
+
+- iroh-blobs' own `ImportMode::Copy` *already* reflinks (its import path
+  tries `FICLONE` and falls back to a copy), so no new storage tier was
+  needed — just importing by path instead of streaming bytes in.
+  `TryReference` was rejected: it points the store at the live file, so
+  a later edit would destroy the version meant to survive it. `Copy` is
+  clone-then-own, and CoW handles divergence correctly.
+- A whole-stored file is a one-entry manifest whose hash is the file's
+  blake3, so the manifest format, GC liveness and read paths are all
+  unchanged.
+
+Measured on btrfs, 256 MiB of incompressible data: **258 MiB consumed
+chunked, 1 MiB stored whole** (the residue is the bao outboard, ~0.4%).
+The measurement needed a `sync` and incompressible content to mean
+anything — with delayed allocation and `compress=zstd` a full copy reads
+back as free.
+
+Two consequences worth knowing:
+
+- `read_range` no longer buffers a whole chunk — with one blob per file
+  a `<video>` seek would have pulled the entire file into memory. It
+  seeks the blob and copies only the window.
+- `probe_path` must make the *same* size decision as `write_path`, since
+  a whole-stored file and a chunked one have different ids for identical
+  bytes. Getting that wrong would make every capture re-import every
+  large file forever; a test pins it on both sides of the threshold.
 
 The trade is losing chunk-level dedup between versions of a large file.
 For media that is nearly worthless — a re-encode changes every byte —
@@ -85,11 +115,22 @@ are already needed:
 
 ## Sequencing
 
-1. **Bind by id** — small, unblocks correct registration, no data risk.
-2. **Reflink storage** — the bigger change; until it lands, register
-   roots without checkpointing, or with media excluded via the per-root
-   ignore set.
-3. Only then turn checkpointing on across the tree.
+1. ~~**Bind by id**~~ — done.
+2. ~~**Reflink storage**~~ — done.
+3. **Deploy, then register.** What remains is operational: the image
+   carrying both fixes plus `TASK_STORAGE_VOLUMES`, then the Storage
+   Location, the per-org grants (CBU vs TomBrooksMusic path prefixes),
+   and the roots themselves.
+
+   Register the first root **with media excluded via its ignore set**
+   even so, and lift the exclusion once one real root has checkpointed
+   and the free space on `/mnt/storage` has been checked against the
+   1 MiB-per-256 MiB figure above. The cadence engine starts
+   checkpointing a new root within 30 s, on a filesystem with 1.1 TB
+   free and several TB of media — a wrong assumption about reflink on
+   *that* mount (XFS `reflink=1` is verified, but the store and the
+   source must also be on the same filesystem, which the `.fts-files/`
+   layout gives us) fills the array before anyone notices.
 
 ## What is registrable today
 

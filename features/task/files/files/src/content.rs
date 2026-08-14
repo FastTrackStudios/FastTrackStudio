@@ -17,11 +17,18 @@
 //!   file's identity *without writing anything*; the checkpoint compares
 //!   that to the head tree first and skips untouched files entirely. On
 //!   a tracking day where two files out of ten thousand changed, the
-//!   other 9998 cost one streaming hash each and no object writes.
-//!   (The CAS backend has no cheap probe — its id is a chunk-manifest
-//!   hash — so media roots still write-then-compare, where the chunk
-//!   store dedups. Cheap stat-based skipping for both flavors belongs
+//!   other 9998 cost one streaming hash each and no object writes. The
+//!   CAS flavor's probe is not as cheap — its id is a chunk-manifest
+//!   hash, so the probe still reads the bytes — but it likewise writes
+//!   nothing. (Cheap *stat*-based skipping for both flavors belongs
 //!   with the cadence engine's watcher state, #260.)
+//! - **Don't copy what can be cloned.** Both CAS entry points here take
+//!   the disk **path**, not a reader, which is what lets
+//!   `ChunkStore::write_path` bring a large file in with a reflink
+//!   rather than a copy. `Backend::write_file`'s signature cannot
+//!   express that — it has only a reader — and going through it is how
+//!   a media root's first checkpoint ends up writing a second copy of
+//!   every byte in the root.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -69,22 +76,23 @@ impl<'a> ContentStore<'a> {
     /// `None` only when the backend has no way to know it in advance.
     ///
     /// Git: blob ids are a pure function of the bytes. CAS: the chunk
-    /// store's `probe_stream` runs the same chunk/hash/manifest
-    /// derivation as a real write, minus every store touch — which is
-    /// what keeps an is-this-already-versioned comparison from
+    /// store's `probe_path` runs the same size decision, hashing and
+    /// manifest derivation as a real write, minus every store touch —
+    /// which is what keeps an is-this-already-versioned comparison from
     /// persisting never-versioned bytes as orphaned chunks (PR #289
-    /// review). The reader is a plain std file behind `AllowStdIo`, so
-    /// no async runtime is required.
+    /// review).
     pub fn probe(&self, disk_path: &Path) -> Result<Option<FileId>> {
         match self {
             Self::Cas {
                 version_store: Some(vs),
                 ..
             } => {
-                use tokio_util::compat::FuturesAsyncReadCompatExt as _;
-                let file = std::io::BufReader::new(std::fs::File::open(disk_path)?);
-                let reader = futures_util::io::AllowStdIo::new(file).compat();
-                let id = pollster::block_on(vs.chunks().probe_stream(reader))
+                // Path-taking, not reader-taking: the store's size
+                // decision (chunk vs. store whole — see
+                // `ChunkStore::write_path`) has to be the same one the
+                // write will make, or an untouched file probes as
+                // changed on every capture.
+                let id = pollster::block_on(vs.chunks().probe_path(disk_path))
                     .map_err(|e| Error::Repo(format!("{}: probing: {e}", disk_path.display())))?;
                 Ok(Some(FileId::new(id.as_bytes().to_vec())))
             }
@@ -120,7 +128,26 @@ impl<'a> ContentStore<'a> {
         probed: Option<FileId>,
     ) -> Result<FileId> {
         match self {
-            Self::Cas { backend, .. } => {
+            Self::Cas {
+                version_store: Some(vs),
+                ..
+            } => {
+                // By path, so a large file can be brought in with a
+                // reflink instead of a copy (`ChunkStore::write_path`) —
+                // the difference between a media root's first checkpoint
+                // costing metadata and it costing a second copy of the
+                // whole root. `Backend::write_file` cannot do this: its
+                // signature has only a reader, no file to clone.
+                let id =
+                    vs.chunks().write_path(disk_path).await.map_err(|e| {
+                        Error::Repo(format!("{}: writing: {e}", disk_path.display()))
+                    })?;
+                Ok(FileId::new(id.as_bytes().to_vec()))
+            }
+            Self::Cas {
+                backend,
+                version_store: None,
+            } => {
                 // `Backend::write_file` reads through futures-io; tokio's
                 // file handle wears the `compat()` adapter (the same seam
                 // the version-store backend uses internally).
