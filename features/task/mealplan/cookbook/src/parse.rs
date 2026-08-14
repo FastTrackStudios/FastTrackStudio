@@ -74,10 +74,20 @@ pub fn parse_cook_at(
 
     let cookware = parsed.cookware.iter().map(|c| c.name.clone()).collect();
 
+    // Every `@@` reference, whether or not it carries a path. Cooklang
+    // only builds a `reference` for a path-ish form like `@@./sauce`;
+    // a bare `@@sauce` is still a recipe reference, just without one.
+    // Collecting the name in that case lets the resolver find it by
+    // stem instead of dropping the link on the floor.
     let nested_recipes = parsed
         .ingredients
         .iter()
-        .filter_map(|i| i.reference.as_ref().map(|r| r.path("/")))
+        .filter(|i| i.modifiers().contains(cooklang::Modifiers::RECIPE))
+        .map(|i| {
+            i.reference
+                .as_ref()
+                .map_or_else(|| i.name.clone(), |r| r.path("/"))
+        })
         .collect();
 
     // Structured steps: ingredient / cookware / timer names kept inline
