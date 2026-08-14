@@ -6,7 +6,8 @@
 //! Area semantics:
 //! - `Projects/` — a JOIN: every vault project folder (`Projects/*`
 //!   and `Albums/*`), with a virtual `Media/` entry when a File Root
-//!   is registered to the project (by name, or `Album — <name>`).
+//!   is linked to the project — by id from the note's `media_roots:`
+//!   frontmatter, falling back to name-matching for unlinked projects.
 //!   Descending into `Media/` resolves to [`TreeNode::Root`] — the
 //!   client mounts the full root explorer there.
 //! - `Vault/`, `Wiki/` — the physical directory tree, straight
