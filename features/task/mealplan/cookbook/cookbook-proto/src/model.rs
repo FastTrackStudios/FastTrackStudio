@@ -134,6 +134,33 @@ pub struct CookStep {
     /// is what splits gathering from prep from the cook itself.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub section: Option<String>,
+    /// Which ingredients this step calls for, and where each sits in
+    /// [`CookStep::text`].
+    ///
+    /// A recipe written in prose can only tell a reader "add the
+    /// garlic" and leave them to scroll back for how much. Because
+    /// cooklang marks its ingredients, we know the step, the name, the
+    /// quantity, and the exact span of characters to point at — so a
+    /// reading view can put the amount right where the eye already is.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub ingredients: Vec<StepIngredient>,
+}
+
+/// An ingredient as it appears inside one step's text.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct StepIngredient {
+    /// Index into [`Recipe::ingredients`] — the row carrying the
+    /// quantity and unit.
+    pub index: u32,
+    /// The text actually written in the step, which is the alias when
+    /// the recipe used one (`@garlic|it{}` reads "it").
+    pub name: String,
+    /// Byte offset of `name` within [`CookStep::text`]. Always on a
+    /// char boundary: the name is spliced in whole.
+    pub start: u32,
+    /// Byte length of `name`.
+    pub len: u32,
 }
 
 /// `Vec<CookStep>` newtype — JSON column.

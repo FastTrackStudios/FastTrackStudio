@@ -10,7 +10,9 @@ use chrono::{DateTime, Utc};
 use cooklang::{Converter, CooklangParser, Extensions, Value};
 use thiserror::Error;
 
-use crate::model::{CookStep, CookSteps, Ingredient, Recipe, RecipeTimer, StringList};
+use crate::model::{
+    CookStep, CookSteps, Ingredient, Recipe, RecipeTimer, StepIngredient, StringList,
+};
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -66,6 +68,22 @@ pub fn parse_cook_at(
     let servings = parsed.metadata.servings().and_then(|s| s.as_number());
 
     let cookware = parsed.cookware.iter().map(|c| c.name.clone()).collect();
+
+    // cooklang indexes a step's ingredients against its own full list,
+    // which includes rows we don't list (references, and repeat
+    // mentions of something already introduced). Our `ingredients` drops
+    // those, so a step's index has to be translated before it can point
+    // at a row the reader can actually see.
+    let mut listed_index: Vec<Option<u32>> = Vec::with_capacity(parsed.ingredients.len());
+    let mut listed = 0u32;
+    for i in &parsed.ingredients {
+        if i.modifiers().should_be_listed() {
+            listed_index.push(Some(listed));
+            listed += 1;
+        } else {
+            listed_index.push(None);
+        }
+    }
 
     // Every `@@` reference, whether or not it carries a path. Cooklang
     // only builds a `reference` for a path-ish form like `@@./sauce`;
@@ -133,7 +151,7 @@ pub fn parse_cook_at(
             s.content.iter().map(move |c| (name.clone(), c))
         })
         .filter_map(|(section, c)| {
-            project_content(c, &parsed).map(|step| CookStep { section, ..step })
+            project_content(c, &parsed, &listed_index).map(|step| CookStep { section, ..step })
         })
         .collect();
     let steps: StringList = cook_steps.iter().map(|s| s.text.clone()).collect();
@@ -189,9 +207,13 @@ fn number_value(v: &Value) -> Option<f64> {
     }
 }
 
-fn project_content(c: &cooklang::Content, recipe: &cooklang::Recipe) -> Option<CookStep> {
+fn project_content(
+    c: &cooklang::Content,
+    recipe: &cooklang::Recipe,
+    listed_index: &[Option<u32>],
+) -> Option<CookStep> {
     match c {
-        cooklang::Content::Step(step) => Some(project_step(step, recipe)),
+        cooklang::Content::Step(step) => Some(project_step(step, recipe, listed_index)),
         cooklang::Content::Text(t) => {
             let trimmed = t.trim();
             if trimmed.is_empty() {
@@ -201,6 +223,7 @@ fn project_content(c: &cooklang::Content, recipe: &cooklang::Recipe) -> Option<C
                     text: trimmed.to_string(),
                     timers: Vec::new(),
                     section: None,
+                    ingredients: Vec::new(),
                 })
             }
         }
@@ -211,15 +234,32 @@ fn project_content(c: &cooklang::Content, recipe: &cooklang::Recipe) -> Option<C
 /// the recipe-level component vecs so ingredient / cookware / timer
 /// names land inline, and collecting the step's timers as structured
 /// [`RecipeTimer`]s for one-tap countdowns.
-fn project_step(step: &cooklang::Step, recipe: &cooklang::Recipe) -> CookStep {
+fn project_step(
+    step: &cooklang::Step,
+    recipe: &cooklang::Recipe,
+    listed_index: &[Option<u32>],
+) -> CookStep {
     let mut text = String::new();
     let mut timers = Vec::new();
+    let mut ingredients: Vec<StepIngredient> = Vec::new();
     for item in &step.items {
         match item {
             cooklang::Item::Text { value } => text.push_str(value),
             cooklang::Item::Ingredient { index } => {
                 if let Some(ing) = recipe.ingredients.get(*index) {
-                    text.push_str(ing.alias.as_deref().unwrap_or(&ing.name));
+                    let name = ing.alias.as_deref().unwrap_or(&ing.name);
+                    // Span recorded before the splice, so it points at
+                    // this occurrence and not a later identical one.
+                    let start = text.len();
+                    text.push_str(name);
+                    if let Some(Some(row)) = listed_index.get(*index) {
+                        ingredients.push(StepIngredient {
+                            index: *row,
+                            name: name.to_string(),
+                            start: start as u32,
+                            len: name.len() as u32,
+                        });
+                    }
                 }
             }
             cooklang::Item::Cookware { index } => {
@@ -241,11 +281,21 @@ fn project_step(step: &cooklang::Step, recipe: &cooklang::Recipe) -> CookStep {
             }
         }
     }
+    // Trimming shifts every span left by whatever led the string.
+    let lead = (text.len() - text.trim_start().len()) as u32;
+    let text = text.trim().to_string();
+    for si in &mut ingredients {
+        si.start = si.start.saturating_sub(lead);
+    }
+    // Anything the trailing trim ate can no longer be pointed at.
+    ingredients.retain(|si| (si.start + si.len) as usize <= text.len());
+
     CookStep {
-        text: text.trim().to_string(),
+        text,
         timers,
         // Filled in by the caller, which knows the enclosing section.
         section: None,
+        ingredients,
     }
 }
 
@@ -391,6 +441,53 @@ Cook the @pasta{400%g}.
         )
         .unwrap();
         assert!(!r.nested_recipes.is_empty());
+    }
+
+    #[test]
+    fn steps_point_at_the_ingredients_they_use() {
+        let src =
+            ">> title: X\n\nFry @garlic{4%clove} in @olive oil{3%tbsp}.\n\nAdd @salt{1%pinch}.";
+        let r = parse_cook("Cookbook/X.cook", src).unwrap();
+
+        let first = &r.cook_steps[0];
+        let names: Vec<&str> = first.ingredients.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, vec!["garlic", "olive oil"]);
+
+        // Every span must slice back out of the step text exactly —
+        // that is what lets a reader highlight the word in place.
+        for si in first.ingredients.iter() {
+            let start = si.start as usize;
+            let end = start + si.len as usize;
+            assert_eq!(
+                &first.text[start..end],
+                si.name,
+                "span mismatch in {:?}",
+                first.text
+            );
+        }
+
+        // And the index must land on the row carrying the quantity.
+        let garlic = &r.ingredients[first.ingredients[0].index as usize];
+        assert_eq!(garlic.name, "garlic");
+        assert_eq!(garlic.qty, Some(4.0));
+
+        let second = &r.cook_steps[1];
+        assert_eq!(second.ingredients.len(), 1);
+        let salt = &r.ingredients[second.ingredients[0].index as usize];
+        assert_eq!(salt.name, "salt");
+    }
+
+    #[test]
+    fn step_spans_survive_a_leading_trim() {
+        let r = parse_cook(
+            "Cookbook/X.cook",
+            ">> title: X\n\n  Add @flour{200%g} slowly.",
+        )
+        .unwrap();
+        let step = &r.cook_steps[0];
+        let si = &step.ingredients[0];
+        let start = si.start as usize;
+        assert_eq!(&step.text[start..start + si.len as usize], "flour");
     }
 
     #[test]
