@@ -280,15 +280,17 @@ fn flatten(
         .collect();
 
     for (stem, child) in resolved {
-        // `@@./sauce{2}` means two servings of the sauce; a bare
-        // `@@./sauce{}` means one.
+        let base = f64::from(child.servings.unwrap_or(1).max(1));
+        // `[[Sauce]]{2}` calls for two of the sauce's servings. With no
+        // quantity — `[[Sauce]]{}` — you're making the whole thing,
+        // which is what a component recipe usually means: one batch of
+        // dough, one batch of sauce.
         let want = recipe
             .ingredients
             .iter()
             .find(|ing| ing.is_recipe_ref && stem.eq_ignore_ascii_case(&ing.name))
             .and_then(|ing| ing.qty)
-            .unwrap_or(1.0);
-        let base = f64::from(child.servings.unwrap_or(1).max(1));
+            .unwrap_or(base);
         let child_scale = (want * scale) / base;
         out.extend(flatten(child, index, child_scale, visited, depth + 1));
     }

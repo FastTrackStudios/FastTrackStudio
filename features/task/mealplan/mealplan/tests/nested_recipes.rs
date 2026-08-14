@@ -144,3 +144,108 @@ fn a_bare_reference_resolves_by_name() {
         "`@@sauce` without a path should still find the recipe, got {names:?}"
     );
 }
+
+// ── Vault link form ─────────────────────────────────────────────────
+//
+// `[[Sauce]]{n}` is the spelling to prefer: the same syntax every other
+// note in the vault uses, so recipes participate in the wiki graph
+// rather than carrying a private path convention.
+
+#[test]
+fn a_wikilink_reference_pulls_the_recipe_in() {
+    let tmp = tempdir().unwrap();
+    let all = cookbook_with(
+        tmp.path(),
+        &[
+            ("sauce", SAUCE),
+            (
+                "bowl",
+                ">> title: Bowl\n>> servings: 4\n\nServe @rice{300%g} with [[Sauce]]{4}.\n",
+            ),
+        ],
+    );
+
+    let flat = fulfillment::check_nested(find(&all, "bowl"), &all, &[], 4);
+    let names: Vec<&str> = flat.missing.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        names.contains(&"yogurt") && names.contains(&"hot sauce"),
+        "the linked recipe's ingredients should reach the list, got {names:?}"
+    );
+    assert!(
+        !names.iter().any(|n| n.eq_ignore_ascii_case("sauce")),
+        "and the link itself shouldn't also be counted, got {names:?}"
+    );
+}
+
+/// The reason the braces are load-bearing. Recipes link to concepts,
+/// techniques and each other in prose; if a bare wikilink counted as a
+/// reference, "see also [[Sauce]]" would put its ingredients on your
+/// shopping list.
+#[test]
+fn a_bare_wikilink_is_not_a_recipe_reference() {
+    let tmp = tempdir().unwrap();
+    let all = cookbook_with(
+        tmp.path(),
+        &[
+            ("sauce", SAUCE),
+            (
+                "bowl",
+                ">> title: Bowl\n>> servings: 4\n\nServe @rice{300%g}. Good with [[Sauce]] too.\n",
+            ),
+        ],
+    );
+
+    let flat = fulfillment::check_nested(find(&all, "bowl"), &all, &[], 4);
+    let names: Vec<&str> = flat.missing.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        !names.contains(&"yogurt"),
+        "a prose mention must not drag in ingredients, got {names:?}"
+    );
+}
+
+#[test]
+fn a_wikilink_without_a_quantity_means_one_whole_batch() {
+    let tmp = tempdir().unwrap();
+    // Sauce serves 4 on 200 g of yogurt.
+    let all = cookbook_with(
+        tmp.path(),
+        &[
+            ("sauce", SAUCE),
+            (
+                "bowl",
+                ">> title: Bowl\n>> servings: 1\n\nServe @rice{100%g} with [[Sauce]]{}.\n",
+            ),
+        ],
+    );
+
+    let flat = fulfillment::check_nested(find(&all, "bowl"), &all, &[], 1);
+    let yogurt = flat
+        .missing
+        .iter()
+        .find(|s| s.name == "yogurt")
+        .expect("yogurt shortage");
+    assert!(
+        (yogurt.need - 200.0).abs() < 0.01,
+        "a batch is the whole 200 g, got {}",
+        yogurt.need
+    );
+}
+
+#[test]
+fn a_wikilink_alias_still_resolves() {
+    let tmp = tempdir().unwrap();
+    let all = cookbook_with(
+        tmp.path(),
+        &[
+            ("sauce", SAUCE),
+            (
+                "bowl",
+                ">> title: Bowl\n>> servings: 4\n\nServe @rice{300%g} with [[Sauce|the good stuff]]{4}.\n",
+            ),
+        ],
+    );
+
+    let flat = fulfillment::check_nested(find(&all, "bowl"), &all, &[], 4);
+    let names: Vec<&str> = flat.missing.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"yogurt"), "got {names:?}");
+}

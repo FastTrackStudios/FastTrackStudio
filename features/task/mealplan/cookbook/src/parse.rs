@@ -65,13 +65,6 @@ pub fn parse_cook_at(
 
     let servings = parsed.metadata.servings().and_then(|s| s.as_number());
 
-    let ingredients = parsed
-        .ingredients
-        .iter()
-        .filter(|i| i.modifiers().should_be_listed())
-        .map(project_ingredient)
-        .collect();
-
     let cookware = parsed.cookware.iter().map(|c| c.name.clone()).collect();
 
     // Every `@@` reference, whether or not it carries a path. Cooklang
@@ -79,7 +72,7 @@ pub fn parse_cook_at(
     // a bare `@@sauce` is still a recipe reference, just without one.
     // Collecting the name in that case lets the resolver find it by
     // stem instead of dropping the link on the floor.
-    let nested_recipes = parsed
+    let mut nested_recipes: Vec<String> = parsed
         .ingredients
         .iter()
         .filter(|i| i.modifiers().contains(cooklang::Modifiers::RECIPE))
@@ -89,6 +82,41 @@ pub fn parse_cook_at(
                 .map_or_else(|| i.name.clone(), |r| r.path("/"))
         })
         .collect();
+
+    // …plus the vault's own link form, `[[Hot Honey]]{6}`. This is the
+    // spelling to prefer: it is the same syntax every other note in the
+    // vault uses to point at a page, so the cookbook participates in
+    // the wiki graph instead of carrying a private path convention.
+    // Cooklang passes `[[…]]` through as plain text, so each one also
+    // becomes a synthetic recipe-ref ingredient — that is the shape a
+    // `@@ref` already produces, and it lets fulfillment treat both
+    // identically (see `mealplan::fulfillment::flatten`).
+    let mut ingredients: Vec<Ingredient> = parsed
+        .ingredients
+        .iter()
+        .filter(|i| i.modifiers().should_be_listed())
+        .map(project_ingredient)
+        .collect();
+    for link in crate::wiki::scan_recipe_links(source) {
+        if nested_recipes
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&link.target))
+        {
+            continue;
+        }
+        ingredients.push(Ingredient {
+            name: link.target.clone(),
+            alias: None,
+            qty: link.servings,
+            unit: String::new(),
+            qty_display: link.servings.map(|q| format!("{q}")),
+            note: None,
+            optional: false,
+            is_recipe_ref: true,
+        });
+        nested_recipes.push(link.target);
+    }
+    let nested_recipes: StringList = nested_recipes.into_iter().collect();
 
     // Structured steps: ingredient / cookware / timer names kept inline
     // (no more `·` placeholders) and timers extracted. `steps` is the
@@ -119,7 +147,7 @@ pub fn parse_cook_at(
         prep_minutes,
         cook_minutes,
         servings,
-        ingredients,
+        ingredients: ingredients.into_iter().collect(),
         steps,
         cook_steps: CookSteps::from(cook_steps),
         cookware,
