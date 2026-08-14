@@ -92,3 +92,57 @@ fn refuses_anything_that_isnt_an_image() {
         "an image endpoint should not hand out recipe sources"
     );
 }
+
+#[test]
+fn writes_an_image_and_reads_it_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("wiki");
+    let store = fixture(&root);
+    store
+        .put_image("Cookbook/pasta.2.jpg", b"\xff\xd8\xff-new".to_vec())
+        .unwrap();
+    assert_eq!(
+        store.image("Cookbook/pasta.2.jpg").unwrap(),
+        b"\xff\xd8\xff-new"
+    );
+
+    // And it joins the recipe, at the step it names.
+    let r = store.get("Cookbook/pasta.cook").unwrap();
+    assert!(r.images.iter().any(|i| i.step_index == Some(2)));
+}
+
+#[test]
+fn writing_obeys_the_same_guards_as_reading() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("wiki");
+    let store = fixture(&root);
+    assert!(
+        store.put_image("../escaped.jpg", b"x".to_vec()).is_err(),
+        "a write must not escape the cookbook root"
+    );
+    assert!(
+        store.put_image("/tmp/escaped.jpg", b"x".to_vec()).is_err(),
+        "nor accept an absolute path"
+    );
+    assert!(
+        store
+            .put_image("Cookbook/evil.cook", b"x".to_vec())
+            .is_err(),
+        "nor be a way to overwrite recipe sources"
+    );
+    assert!(
+        !root.parent().unwrap().join("escaped.jpg").exists(),
+        "nothing should have landed outside"
+    );
+}
+
+#[test]
+fn refuses_an_oversized_image() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("wiki");
+    let store = fixture(&root);
+    // These reach the client inlined as data URLs, so the ceiling is
+    // about keeping every later read of that recipe usable.
+    let huge = vec![0u8; 9 * 1024 * 1024];
+    assert!(store.put_image("Cookbook/pasta.9.jpg", huge).is_err());
+}

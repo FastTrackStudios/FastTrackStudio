@@ -65,4 +65,11 @@ pub trait CookbookService {
     /// an unauthenticated path into that tree is a bigger thing to own
     /// than a method behind the permit system already guarding recipes.
     fn image(&self, path: &str) -> Result<Vec<u8>, CookbookError>;
+
+    /// Write one image into the cookbook, addressed the same way
+    /// [`CookbookService::image`] reads it. Overwrites.
+    ///
+    /// The counterpart to the reader, and it needs the same suspicion:
+    /// this puts caller-supplied bytes at a caller-supplied path.
+    fn put_image(&self, path: &str, bytes: Vec<u8>) -> Result<(), CookbookError>;
 }

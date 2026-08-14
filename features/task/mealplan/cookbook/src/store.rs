@@ -83,6 +83,61 @@ impl Store {
         }
         std::fs::read(&file).map_err(map_io)
     }
+
+    /// Write an image into the cookbook, creating the directory if the
+    /// recipe's folder doesn't exist yet.
+    ///
+    /// Same guards as reading, plus a size ceiling: these travel to the
+    /// client inlined as data URLs, so an unbounded upload is a way to
+    /// make every subsequent read of that recipe painful.
+    pub fn write_image(&self, rel: &str, bytes: &[u8]) -> Result<(), CookbookError> {
+        const MAX: usize = 8 * 1024 * 1024;
+        Self::guard_image_path(rel)?;
+        if bytes.len() > MAX {
+            return Err(CookbookError::Io(format!(
+                "image is {} bytes; the cap is {MAX}",
+                bytes.len()
+            )));
+        }
+        let abs = self.vault_root.join(rel);
+        // Resolve the *parent*, since the file itself may not exist yet,
+        // and confirm it really sits under the cookbook root.
+        let root = self.vault_root.canonicalize().map_err(map_io)?;
+        let parent = abs
+            .parent()
+            .ok_or_else(|| CookbookError::NotFound(rel.to_string()))?;
+        std::fs::create_dir_all(parent).map_err(map_io)?;
+        let parent = parent.canonicalize().map_err(map_io)?;
+        if !parent.starts_with(&root) {
+            return Err(CookbookError::NotFound(rel.to_string()));
+        }
+        std::fs::write(parent.join(abs.file_name().unwrap_or_default()), bytes).map_err(map_io)
+    }
+
+    /// The path rules both image methods share: no climbing out, no
+    /// absolute paths, and pictures only — the recipe sources live in
+    /// the same directory and these methods have no business touching
+    /// them.
+    fn guard_image_path(rel: &str) -> Result<(), CookbookError> {
+        if rel.split(['/', '\\']).any(|c| c == ".." || c.is_empty()) || Path::new(rel).is_absolute()
+        {
+            return Err(CookbookError::NotFound(rel.to_string()));
+        }
+        let ok_ext = Path::new(rel)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| {
+                matches!(
+                    e.to_ascii_lowercase().as_str(),
+                    "jpg" | "jpeg" | "png" | "webp" | "gif"
+                )
+            });
+        if ok_ext {
+            Ok(())
+        } else {
+            Err(CookbookError::NotFound(rel.to_string()))
+        }
+    }
 }
 
 fn map_io(e: impl std::fmt::Display) -> CookbookError {
@@ -100,6 +155,10 @@ impl CookbookService for Store {
 
     fn image(&self, path: &str) -> Result<Vec<u8>, CookbookError> {
         self.read_image(path)
+    }
+
+    fn put_image(&self, path: &str, bytes: Vec<u8>) -> Result<(), CookbookError> {
+        self.write_image(path, &bytes)
     }
 
     fn get(&self, path: &str) -> Result<Recipe, CookbookError> {
