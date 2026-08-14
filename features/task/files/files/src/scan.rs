@@ -143,6 +143,24 @@ fn walk_dir(
         let child_repo_path = dir_repo_path.join(&component);
 
         if file_type.is_dir() {
+            // A nested root is a SUBMODULE, not content. Its own store
+            // owns its history, so the outer root walks around it —
+            // exactly as git records a gitlink rather than the
+            // submodule's files.
+            //
+            // Without this the parent would ingest the child's entire
+            // version store as ordinary files on every checkpoint: the
+            // child's history duplicated inside the parent's, growing
+            // each time the child is checkpointed. That is why
+            // `create_root` refused nested roots outright before this
+            // existed, and why the prune has to land before the
+            // containment check is relaxed.
+            //
+            // One `stat` per directory, on a walk that already reads
+            // every directory and stats every entry.
+            if path.join(MARKER_FILE).exists() {
+                continue;
+            }
             let child_ignored = dir_ignored || ignores.matches_dir(&child_repo_path);
             if child_ignored && !ctx.tracks_anything_under(&child_repo_path) {
                 // Ignored and holding no history: pruned unvisited.

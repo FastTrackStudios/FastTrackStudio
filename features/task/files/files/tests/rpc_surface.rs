@@ -313,10 +313,26 @@ async fn filesystem_access_is_confined() {
     scope.close().await;
 }
 
-/// PR #280 review finding 5: an outer root must not be creatable
-/// around (or inside) an existing root — either direction.
+/// Nested roots are **submodules**, in both directions.
+///
+/// This test previously asserted the opposite — PR #280 review finding 5
+/// refused a root inside (or around) an existing root, because an outer
+/// root's checkpoint would walk into the inner one and ingest its entire
+/// version store as ordinary content. That reasoning was correct, and
+/// the refusal was the right answer *until the walk learned to prune*.
+///
+/// It now does: `scan::walk_live_tree` skips any directory carrying
+/// another root's marker, so the parent walks around its children.
+/// Containment is therefore allowed and only exact-path duplication is
+/// refused. The properties that finding protected are pinned in
+/// `tests/nested_roots.rs` — a parent keeps its own files, and tracks
+/// nothing from inside a child.
+///
+/// The nesting matters because it is the shape the work is in: an album
+/// over its songs, a venue over its shows. Each child keeps its own
+/// history and its own share link; the parent keeps material of its own.
 #[tokio::test(flavor = "multi_thread")]
-async fn nested_roots_are_rejected() {
+async fn nested_roots_are_submodules() {
     let data_dir = tempfile::tempdir().expect("data tempdir");
     let backend =
         FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
@@ -324,7 +340,7 @@ async fn nested_roots_are_rejected() {
     let local = LocalServer::serve(router(backend), scope.clone());
     let client: FilesServiceClient = local.establish().await.expect("establish client");
 
-    // Outer root first; a descendant root creation is rejected.
+    // Outer root first; a descendant root is now permitted.
     let outer = data_dir.path().join("outer");
     std::fs::create_dir(&outer).unwrap();
     client
@@ -346,12 +362,13 @@ async fn nested_roots_are_rejected() {
         )
         .await;
     assert!(
-        nested.is_err(),
-        "a root nested inside an existing root must be rejected"
+        nested.is_ok(),
+        "a root nested inside an existing root is a submodule: {nested:?}"
     );
 
-    // The other direction: an existing (deeper) root blocks a new
-    // ancestor root from being created around it.
+    // The other direction too: registering the container AFTER its
+    // children is the ordinary case when an album's songs were tracked
+    // first and the album is added later.
     let parent = data_dir.path().join("parent");
     let child = parent.join("child");
     std::fs::create_dir_all(&child).unwrap();
@@ -371,8 +388,23 @@ async fn nested_roots_are_rejected() {
         )
         .await;
     assert!(
-        ancestor.is_err(),
-        "a root that would ancestor an existing root must be rejected"
+        ancestor.is_ok(),
+        "a container registered around existing roots is a submodule parent: {ancestor:?}"
+    );
+
+    // What is still refused: the same directory twice. Relaxing
+    // containment must not relax identity — two roots over one tree
+    // would be two histories of the same files.
+    let duplicate = client
+        .create_root(
+            child.to_str().unwrap().to_string(),
+            "Child Again".to_string(),
+            RootFlavor::Media,
+        )
+        .await;
+    assert!(
+        duplicate.is_err(),
+        "the same path twice is still a conflict"
     );
 
     scope.close().await;
