@@ -48,8 +48,8 @@ pub fn resolve(
 
 /// The default a project inherits, walking up the parent chain.
 ///
-/// Split out from [`resolve`] so a project page can show "inherited
-/// from <parent>" without inventing a ticket to ask about.
+/// Split out from [`resolve`] so a project page can show
+/// `"inherited from <parent>"` without inventing a ticket to ask about.
 #[must_use]
 pub fn project_default(project_id: Option<Uuid>, projects: &[ProjectInfo]) -> Option<String> {
     let mut current = project_id?;
