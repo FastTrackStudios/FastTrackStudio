@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::model::Recipe;
 use crate::parse::parse_cook;
-use crate::scan::scan_cookbook;
+use crate::scan::{image_paths_for, scan_cookbook};
 use crate::service::{CookbookError, CookbookService};
 use crate::write::{delete_cook, rename_cook, write_cook};
 
@@ -33,6 +33,56 @@ impl Store {
     pub fn vault_root(&self) -> &Path {
         self.vault_root.as_path()
     }
+
+    /// Fill in the pictures sitting beside the recipe file.
+    ///
+    /// Images aren't declared in the cooklang, so the parser can't know
+    /// about them — they're found by name on disk, which is why this
+    /// belongs to the store rather than to parsing.
+    fn attach_images(&self, recipe: &mut Recipe) {
+        recipe.images = image_paths_for(self.vault_root.as_path(), &recipe.path)
+            .into_iter()
+            .map(|i| crate::model::RecipeImage {
+                path: i.path,
+                step_index: i.step_index.map(|n| n as u32),
+            })
+            .collect();
+    }
+
+    /// The bytes of one image belonging to the cookbook.
+    ///
+    /// Refuses anything that isn't an image this recipe convention
+    /// produces, and anything that tries to climb out of the cookbook
+    /// root — this reads arbitrary paths off disk on behalf of a
+    /// caller, so it gets to be paranoid rather than convenient.
+    pub fn read_image(&self, rel: &str) -> Result<Vec<u8>, CookbookError> {
+        if rel.split(['/', '\\']).any(|c| c == ".." || c.is_empty()) || Path::new(rel).is_absolute()
+        {
+            return Err(CookbookError::NotFound(rel.to_string()));
+        }
+        let ok_ext = Path::new(rel)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| {
+                matches!(
+                    e.to_ascii_lowercase().as_str(),
+                    "jpg" | "jpeg" | "png" | "webp" | "gif"
+                )
+            });
+        if !ok_ext {
+            return Err(CookbookError::NotFound(rel.to_string()));
+        }
+        let abs = self.vault_root.join(rel);
+        // Belt and braces: resolve and confirm it really landed inside.
+        let root = self.vault_root.canonicalize().map_err(map_io)?;
+        let file = abs
+            .canonicalize()
+            .map_err(|_| CookbookError::NotFound(rel.to_string()))?;
+        if !file.starts_with(&root) {
+            return Err(CookbookError::NotFound(rel.to_string()));
+        }
+        std::fs::read(&file).map_err(map_io)
+    }
 }
 
 fn map_io(e: impl std::fmt::Display) -> CookbookError {
@@ -41,7 +91,15 @@ fn map_io(e: impl std::fmt::Display) -> CookbookError {
 
 impl CookbookService for Store {
     fn list(&self) -> Result<Vec<Recipe>, CookbookError> {
-        Ok(scan_cookbook(self.vault_root.as_path()))
+        let mut out = scan_cookbook(self.vault_root.as_path());
+        for r in &mut out {
+            self.attach_images(r);
+        }
+        Ok(out)
+    }
+
+    fn image(&self, path: &str) -> Result<Vec<u8>, CookbookError> {
+        self.read_image(path)
     }
 
     fn get(&self, path: &str) -> Result<Recipe, CookbookError> {
@@ -56,6 +114,7 @@ impl CookbookService for Store {
             .map(chrono::DateTime::<chrono::Utc>::from);
         let mut r = parse_cook(path, &src).map_err(map_io)?;
         r.date_modified = mtime;
+        self.attach_images(&mut r);
         Ok(r)
     }
 

@@ -163,6 +163,56 @@ pub struct CookStep {
     pub ingredients: Vec<StepIngredient>,
 }
 
+/// `Vec<RecipeImage>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct RecipeImages(pub Vec<RecipeImage>);
+
+impl RecipeImages {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<RecipeImage>> for RecipeImages {
+    fn from(v: Vec<RecipeImage>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<RecipeImage> for RecipeImages {
+    fn from_iter<I: IntoIterator<Item = RecipeImage>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for RecipeImages {
+    type Target = Vec<RecipeImage>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// An image found beside a recipe file.
+///
+/// Discovered by filename convention rather than declared in the
+/// recipe — `Pasta.jpg` is the dish, `Pasta.0.jpg` belongs to the first
+/// step. That's the convention cooklang-find, CookCLI, cooklang-chef
+/// and cooklang-obsidian all landed on independently, so a cookbook
+/// carried between them keeps its pictures.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct RecipeImage {
+    /// Wiki-relative path, forward-slash separated.
+    pub path: String,
+    /// `None` for the dish's own image; `Some(n)` for step `n`.
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "stepIndex")]
+    pub step_index: Option<u32>,
+}
+
 /// A piece of cookware as it appears inside one step's text.
 #[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
@@ -333,6 +383,13 @@ pub struct Recipe {
     /// Raw cooklang source. The source of truth — editors
     /// mutate this and re-parse.
     pub source: String,
+
+    /// Images sitting beside the recipe file, by naming convention.
+    /// Filled in by the store when it reads from disk; the parser can't
+    /// know about them because they aren't in the cooklang.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[architect(json)]
+    pub images: RecipeImages,
 }
 
 /// Quantities scale unless cooklang says otherwise, so that's the

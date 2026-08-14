@@ -99,6 +99,7 @@ fitness-proto = { workspace = true, features = ["vox", "atom"] }
 # (ingredient stock) / mealplan (planned meals) service clients
 # for the `/mealplan` route. Wasm-clean (serde-only client side),
 # `vox` feature only (no `native` → never pulls `inventory`).
+base64 = { workspace = true }
 cookbook-proto = { workspace = true, features = ["vox", "atom"] }
 pantry-proto = { workspace = true, features = ["vox", "atom"] }
 mealplan-proto = { workspace = true, features = ["vox"] }

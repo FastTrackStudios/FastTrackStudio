@@ -572,6 +572,7 @@ mod tests {
             source_url: None,
             date_modified: None,
             source: String::new(),
+            images: Default::default(),
         }
     }
 

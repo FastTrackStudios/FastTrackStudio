@@ -568,6 +568,13 @@ feeds! {
         import_recipe(url: String) -> cookbook_proto::Recipe
             = import(url) as "import recipe";
 
+        /// Raw bytes of one recipe image, addressed by the wiki-relative
+        /// path carried on `Recipe::images`. Served over the org's RPC
+        /// rather than a public HTTP route, so it inherits the same
+        /// permit gate as the recipes themselves.
+        fetch_recipe_image(path: String) -> Vec<u8>
+            = image(path) as "recipe image";
+
         /// Save edits to a recipe's `.cook` source. The server writes the
         /// source verbatim then re-parses, so the returned recipe carries fresh
         /// structured steps / ingredients / timers.

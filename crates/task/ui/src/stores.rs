@@ -699,7 +699,6 @@ impl StoreEntity for OrgTask {
     }
 }
 
-
 /// Tasks across the selected orgs as one [`AtomResult`].
 pub fn use_task_list() -> AtomResult<Vec<(Id<Uuid>, OrgTask)>, String> {
     use_multi_org_list(use_task_store(), |slugs| async move {
@@ -889,7 +888,6 @@ impl StoreEntity for OrgProject {
     }
 }
 
-
 /// Projects across the selected orgs as one [`AtomResult`]. Hydrates
 /// the shared store, so `/projects/:id` is instant after a list visit.
 pub fn use_project_list() -> AtomResult<Vec<(Id<Uuid>, OrgProject)>, String> {
@@ -928,7 +926,6 @@ pub fn use_project(id: String) -> AtomResult<OrgProject, String> {
         }
     })
 }
-
 
 /// A new project from just a title — active, normal priority, the
 /// backend fills id/path/dates. The one draft literal (CLI has its
@@ -1043,7 +1040,6 @@ pub fn use_goal_list() -> AtomResult<Vec<(Id<Uuid>, OrgGoal)>, String> {
 
 // ── locations ───────────────────────────────────────────────────────
 
-
 /// Unsaved placeholder row for an optimistic location insert. The
 /// backend assigns the real `id` and vault `path` on create.
 pub fn draft_location(
@@ -1066,7 +1062,6 @@ pub fn draft_location(
     }
 }
 
-
 impl LocationMutations {
     pub fn create(&self, slug: String, draft: locations_proto::Location) {
         run_create(self.write, self.store, draft, move |loc| async move {
@@ -1076,7 +1071,6 @@ impl LocationMutations {
 }
 
 // ── inventory ───────────────────────────────────────────────────────
-
 
 /// Unsaved placeholder row for an optimistic inventory insert.
 pub fn draft_item(name: String, category: String) -> inventory_proto::Item {
@@ -1101,7 +1095,6 @@ pub fn draft_item(name: String, category: String) -> inventory_proto::Item {
     }
 }
 
-
 impl ItemMutations {
     pub fn create(&self, slug: String, draft: inventory_proto::Item) {
         run_create(self.write, self.store, draft, move |item| async move {
@@ -1111,7 +1104,6 @@ impl ItemMutations {
 }
 
 // ── milestones ──────────────────────────────────────────────────────
-
 
 /// Unsaved placeholder row for an optimistic milestone insert.
 pub fn draft_milestone(
@@ -1135,7 +1127,6 @@ pub fn draft_milestone(
     }
 }
 
-
 impl MilestoneMutations {
     pub fn create(&self, slug: String, draft: milestone_proto::Milestone) {
         run_create(self.write, self.store, draft, move |ms| async move {
@@ -1145,7 +1136,6 @@ impl MilestoneMutations {
 }
 
 // ── fitness: body metrics + exercises ───────────────────────────────
-
 
 /// Unsaved placeholder row for an optimistic body-metric insert.
 pub fn draft_body_metric(
@@ -1168,7 +1158,6 @@ pub fn draft_body_metric(
     }
 }
 
-
 impl BodyMetricMutations {
     pub fn create(&self, slug: String, draft: fitness_proto::body::BodyMetric) {
         run_create(self.write, self.store, draft, move |metric| async move {
@@ -1176,7 +1165,6 @@ impl BodyMetricMutations {
         });
     }
 }
-
 
 /// Unsaved placeholder row for an optimistic exercise insert.
 pub fn draft_exercise(name: String, category: String) -> fitness_proto::exercises::Exercise {
@@ -1202,7 +1190,6 @@ pub fn draft_exercise(name: String, category: String) -> fitness_proto::exercise
     }
 }
 
-
 impl ExerciseMutations {
     pub fn create(&self, slug: String, draft: fitness_proto::exercises::Exercise) {
         run_create(self.write, self.store, draft, move |exercise| async move {
@@ -1212,7 +1199,6 @@ impl ExerciseMutations {
 }
 
 // ── mealplan: recipes + pantry ──────────────────────────────────────
-
 
 /// Unsaved placeholder row for an optimistic recipe insert. Identity is
 /// the vault-relative `path`; the store keys the draft by a typed
@@ -1237,9 +1223,10 @@ pub fn draft_recipe(name: String) -> cookbook_proto::Recipe {
         tags: cookbook_proto::StringList::default(),
         source_url: None,
         date_modified: None,
+        // Found on disk by the server; a new draft has none yet.
+        images: cookbook_proto::RecipeImages::default(),
     }
 }
-
 
 impl RecipeMutations {
     pub fn create(&self, slug: String, draft: cookbook_proto::Recipe) {
@@ -1262,7 +1249,6 @@ impl RecipeMutations {
         );
     }
 }
-
 
 /// Unsaved placeholder row for an optimistic pantry insert.
 pub fn draft_pantry_item(name: String, qty: Option<f64>, unit: String) -> pantry_proto::PantryItem {
@@ -1302,7 +1288,6 @@ pub fn draft_pantry_item(name: String, qty: Option<f64>, unit: String) -> pantry
     }
 }
 
-
 impl PantryMutations {
     pub fn create(&self, slug: String, draft: pantry_proto::PantryItem) {
         run_create(self.write, self.store, draft, move |item| async move {
@@ -1312,7 +1297,6 @@ impl PantryMutations {
 }
 
 // ── inbox ───────────────────────────────────────────────────────────
-
 
 impl InboxMutations {
     /// Capture a fresh item: it appears instantly, then persists.
@@ -1410,7 +1394,6 @@ impl InboxMutations {
 
 // ── recall (spaced-repetition deck) ─────────────────────────────────
 
-
 impl RecallMutations {
     /// Author a fresh card: it appears instantly, then persists.
     pub fn create(&self, slug: String, card: recall_proto::RecallCard) {
@@ -1468,7 +1451,6 @@ impl RecallMutations {
 
 // ── contacts (vault-backed people directory) ────────────────────────
 
-
 impl ContactMutations {
     /// Author a fresh contact: it appears instantly, then persists.
     pub fn create(&self, slug: String, contact: contacts_proto::Contact) {
@@ -1511,7 +1493,6 @@ impl ContactMutations {
 
 // ── bookings + event types ──────────────────────────────────────────
 
-
 /// Bookings for the first selected org, soonest start first.
 pub fn use_booking_list() -> AtomResult<Vec<(Id<String>, scheduling_proto::Booking)>, String> {
     use_first_org_list(use_booking_store(), |slug| async move {
@@ -1521,7 +1502,6 @@ pub fn use_booking_list() -> AtomResult<Vec<(Id<String>, scheduling_proto::Booki
         })
     })
 }
-
 
 impl BookingMutations {
     /// Cancel a booking: the row vanishes instantly; restored (and the
@@ -1540,7 +1520,6 @@ impl BookingMutations {
     }
 }
 
-
 /// Draft a bookable event type (client-minted stable id; the backend
 /// derives the vault `path`).
 pub fn draft_event_type(title: String, duration_min: u16) -> scheduling_proto::EventType {
@@ -1558,7 +1537,6 @@ pub fn draft_event_type(title: String, duration_min: u16) -> scheduling_proto::E
         published: true,
     }
 }
-
 
 impl EventTypeMutations {
     pub fn create(&self, slug: String, draft: scheduling_proto::EventType) {
@@ -1589,7 +1567,6 @@ impl StoreEntity for DayPlanRow {
         self.date
     }
 }
-
 
 /// The template a date defaults to: `weekend` for Sat/Sun, else
 /// `weekday`; falls back to the first template if those ids are absent.
@@ -1686,7 +1663,6 @@ fn clamp_time(min: u16) -> scheduling_proto::TimeOfDay {
         minutes_since_midnight: min.min(1440),
     }
 }
-
 
 impl DayPlanMutations {
     /// The shared save lifecycle: patch one date's plan, mark every
@@ -1829,7 +1805,6 @@ impl StoreEntity for OrgSession {
     }
 }
 
-
 /// Sessions across the selected orgs, newest first. The running timer
 /// is *derived* from this one list (the open row for the active org +
 /// owner) — the single-record `active_timer` round-trip is gone.
@@ -1865,7 +1840,6 @@ pub fn draft_session(req: &StartTimerRequest) -> WorkSession {
         updated_at: now,
     }
 }
-
 
 impl TimerMutations {
     /// Start a timer: an open session appears instantly, then
@@ -2021,7 +1995,6 @@ impl StoreEntity for OrgInvoice {
     }
 }
 
-
 /// Invoices across the selected orgs, newest first.
 pub fn use_invoice_list() -> AtomResult<Vec<(Id<Uuid>, OrgInvoice)>, String> {
     use_multi_org_list(use_invoice_store(), |slugs| async move {
@@ -2162,7 +2135,6 @@ impl InvoiceMutations {
 
 // ── threads + messages (per-entity conversations) ───────────────────
 
-
 /// Threads anchored to one project, as one [`AtomResult`]. `key` is
 /// `(owning slug, project id)` — `None` while the project itself is
 /// still resolving keeps the phase at `Loading`.
@@ -2179,7 +2151,6 @@ pub fn use_project_threads(
         }
     })
 }
-
 
 /// Messages of the selected thread. `key` is `(owning slug, thread
 /// id)`; `None` (nothing selected) stays `Loading` — render its

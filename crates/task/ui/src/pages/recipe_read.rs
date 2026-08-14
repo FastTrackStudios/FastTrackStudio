@@ -258,6 +258,33 @@ fn sentence_ranges(text: &str) -> Vec<(usize, usize)> {
     out
 }
 
+/// Load one recipe image and hand back a `data:` URL.
+///
+/// The bytes come over the org's RPC rather than a URL the browser can
+/// hit, because the pictures live in the wiki beside the recipes and an
+/// unauthenticated route into that tree isn't worth opening for a
+/// photo. Inlining as a data URL keeps the img tag dumb and works the
+/// same on the desktop build, where there is no origin to fetch from.
+fn use_recipe_image(slug: Memo<Option<String>>, path: Option<String>) -> Option<String> {
+    let res = use_resource(move || {
+        let path = path.clone();
+        async move {
+            let (s, p) = (slug()?, path?);
+            let bytes = crate::feeds::fetch_recipe_image(&s, p.clone()).await.ok()?;
+            let mime = match p.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()) {
+                Some(e) if e == "png" => "image/png",
+                Some(e) if e == "webp" => "image/webp",
+                Some(e) if e == "gif" => "image/gif",
+                _ => "image/jpeg",
+            };
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            Some(format!("data:{mime};base64,{b64}"))
+        }
+    });
+    res.read().clone().flatten()
+}
+
 /// Seconds a step will keep you waiting.
 fn dwell(step: &CookStep) -> u32 {
     step.timers.iter().map(|t| t.seconds).sum()
@@ -314,6 +341,23 @@ pub fn RecipeReadView(path: String) -> Element {
 #[component]
 fn Reader(recipe: Recipe) -> Element {
     let nav = use_navigator();
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let slug = use_memo(move || {
+        crate::orgs::selected_slugs(&selection.read(), &org_list.read())
+            .into_iter()
+            .next()
+    });
+
+    // The dish's own picture, if one sits beside the recipe file.
+    let title_image = use_recipe_image(
+        slug,
+        recipe
+            .images
+            .iter()
+            .find(|i| i.step_index.is_none())
+            .map(|i| i.path.clone()),
+    );
 
     // Checked ingredients are keyed by NAME, not row index, so a
     // rescale — which rebuilds the rows — doesn't wipe what you've
@@ -398,9 +442,17 @@ fn Reader(recipe: Recipe) -> Element {
                 div { class: "mx-auto w-full max-w-6xl px-4 pb-20 pt-6 sm:px-6",
 
                     // ── Title block ──────────────────────────────
-                    // The dish leads. Everything here is a fact you'd
-                    // want before committing an evening to it.
+                    // The dish leads — literally, when there's a photo
+                    // of it. Everything here is a fact you'd want before
+                    // committing an evening to the thing.
                     header { class: "flex flex-col gap-3 border-b border-border pb-6",
+                        if let Some(src) = &title_image {
+                            img {
+                                class: "mb-2 aspect-[16/9] w-full rounded-2xl object-cover sm:aspect-[21/9]",
+                                src: "{src}",
+                                alt: "{recipe.name}",
+                            }
+                        }
                         Heading {
                             level: HeadingLevel::H1,
                             class: "text-3xl font-semibold leading-[1.1] tracking-tight sm:text-4xl",
@@ -635,6 +687,12 @@ fn Reader(recipe: Recipe) -> Element {
                                                     key: "{i}",
                                                     step: step.clone(),
                                                     number: i + 1,
+                                                    image: recipe
+                                                        .images
+                                                        .iter()
+                                                        .find(|im| im.step_index == Some(i as u32))
+                                                        .map(|im| im.path.clone()),
+                                                    slug,
                                                     ingredients: recipe.ingredients.iter().cloned().collect::<Vec<_>>(),
                                                     factor,
                                                     scaled,
@@ -669,6 +727,8 @@ fn Reader(recipe: Recipe) -> Element {
 fn StepRow(
     step: CookStep,
     number: usize,
+    image: Option<String>,
+    slug: Memo<Option<String>>,
     ingredients: Vec<Ingredient>,
     factor: f64,
     scaled: bool,
@@ -682,6 +742,7 @@ fn StepRow(
 ) -> Element {
     let acts = actions(&step.text);
     let lines = acts.items.clone();
+    let step_image = use_recipe_image(slug, image);
     let marker = if done {
         "border-success bg-success text-success-foreground"
     } else {
@@ -787,6 +848,18 @@ fn StepRow(
                                 }
                             }
                         }
+                    }
+                }
+
+                // A picture of this step, when one exists. Floated
+                // beside the text where there's room, because a step's
+                // words and its photo describe the same moment and
+                // should be readable together.
+                if let Some(src) = &step_image {
+                    img {
+                        class: "mt-3 w-full rounded-xl object-cover sm:float-right sm:ml-4 sm:mt-0 sm:w-2/5",
+                        src: "{src}",
+                        alt: "Step {number}",
                     }
                 }
 

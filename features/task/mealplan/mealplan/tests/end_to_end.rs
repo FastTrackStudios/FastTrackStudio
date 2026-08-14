@@ -180,6 +180,7 @@ Toss with @butter{20%g} and shaved @truffles{5%g}.
         source_url: None,
         date_modified: None,
         source: recipe_src.into(),
+        images: Default::default(),
     };
     draft = cookbook.create(draft).unwrap();
     assert_eq!(draft.servings, Some(2));

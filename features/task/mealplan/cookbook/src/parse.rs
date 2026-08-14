@@ -207,6 +207,8 @@ pub fn parse_cook_at(
         source_url,
         date_modified,
         source: source.to_string(),
+        // Found on disk by the store, not written in the cooklang.
+        images: crate::model::RecipeImages::default(),
     })
 }
 
