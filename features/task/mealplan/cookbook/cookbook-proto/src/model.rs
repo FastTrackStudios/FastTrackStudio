@@ -303,6 +303,16 @@ pub struct Recipe {
     pub source: String,
 }
 
+/// Quantities scale unless cooklang says otherwise, so that's the
+/// serde default and the case worth writing out is the pinned one.
+fn scalable_default() -> bool {
+    true
+}
+
+fn is_scalable(b: &bool) -> bool {
+    *b
+}
+
 /// One ingredient line. `qty` is the numeric quantity for math;
 /// `qty_display` keeps the original display form (ranges,
 /// fractions, text). Held inline as JSON inside
@@ -318,12 +328,30 @@ pub struct Ingredient {
     pub alias: Option<String>,
 
     /// Numeric quantity. `None` for `"to taste"` / text values.
+    /// For a range (`{1-2%tbsp}`) this is the low end and
+    /// [`Self::qty_max`] the high one.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub qty: Option<f64>,
+
+    /// High end of a range quantity; `None` for a plain number.
+    /// Kept so scaling a range produces a range — `1-2 tbsp` doubled
+    /// is `2-4 tbsp`, not `3`.
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "qtyMax")]
+    pub qty_max: Option<f64>,
 
     /// Free-form unit string. Empty when no unit.
     #[serde(default)]
     pub unit: String,
+
+    /// Whether this quantity moves when the recipe is scaled.
+    ///
+    /// Cooklang lets a quantity be pinned with `=` — `@salt{=1%tsp}`
+    /// is one teaspoon whether you cook one portion or six, which is
+    /// how you write "season the pan", not "season per head". Scaling
+    /// a fixed quantity is a real mistake, so the flag has to survive
+    /// the trip to whatever does the scaling.
+    #[serde(default = "scalable_default", skip_serializing_if = "is_scalable")]
+    pub scalable: bool,
 
     /// Original display form, including ranges / fractions /
     /// text. Use for rendering; use [`Self::qty`] for math.

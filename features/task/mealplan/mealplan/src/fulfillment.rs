@@ -354,20 +354,42 @@ fn resolve_ref<'a>(
     })
 }
 
+/// Combine repeated mentions of the same ingredient into one row.
+///
+/// Units are reconciled through cooklang's own unit database rather
+/// than by comparing strings, so a recipe calling for 500 g of flour
+/// and a sub-recipe calling for 0.5 kg produce a single 1 kg row
+/// instead of two that each look short. Amounts land in the unit of
+/// the first mention, which is the one the reader has already seen.
+///
+/// Rows whose units genuinely don't reconcile — grams against cloves —
+/// stay separate. That is information, not a failure: nothing sensible
+/// can be added there, and silently picking one would be a lie.
 fn fold_same_ingredient(rows: &mut Vec<cookbook::Ingredient>) {
     let mut i = 0;
     while i < rows.len() {
         let mut j = i + 1;
         while j < rows.len() {
-            let merge_ok = rows[i].name.eq_ignore_ascii_case(&rows[j].name)
-                && rows[i].unit.eq_ignore_ascii_case(&rows[j].unit);
-            if merge_ok {
-                let add = rows[j].qty.unwrap_or(0.0);
-                let base = rows[i].qty.unwrap_or(0.0);
-                rows[i].qty = Some(base + add);
-                rows.remove(j);
-            } else {
+            if !rows[i].name.eq_ignore_ascii_case(&rows[j].name) {
                 j += 1;
+                continue;
+            }
+            // Bring j into i's unit before adding. A missing quantity
+            // contributes nothing but still folds away, so "salt" twice
+            // is one line.
+            let add = match rows[j].qty {
+                None => Some(0.0),
+                Some(q) => cookbook::convert(q, &rows[j].unit, &rows[i].unit),
+            };
+            match add {
+                Some(add) => {
+                    let base = rows[i].qty.unwrap_or(0.0);
+                    rows[i].qty = Some(base + add);
+                    // A merged row is a sum, not a range any more.
+                    rows[i].qty_max = None;
+                    rows.remove(j);
+                }
+                None => j += 1,
             }
         }
         i += 1;
@@ -558,8 +580,10 @@ mod tests {
             name: name.into(),
             alias: None,
             qty: Some(qty),
+            qty_max: None,
             unit: unit.into(),
             qty_display: None,
+            scalable: true,
             note: None,
             optional: false,
             is_recipe_ref: false,

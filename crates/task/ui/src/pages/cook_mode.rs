@@ -741,20 +741,29 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
     }
 }
 
-/// The gather-list quantity prefix, scaled by `factor`. Scales the
-/// numeric `qty` when present; otherwise keeps the original display
-/// form (ranges / fractions / text) unscaled — at `factor == 1` it
-/// reads exactly as written.
+/// The quantity prefix for an ingredient, scaled by `factor`.
+///
+/// Three things the parser tells us and this has to honour:
+///
+/// - **Pinned quantities don't move.** `@salt{=1%tsp}` seasons the pan,
+///   not each head, so cooklang marks it `scalable: false` and doubling
+///   the recipe must leave it alone.
+/// - **A range stays a range.** `1-2 tbsp` doubled is `2-4 tbsp`; both
+///   ends scale.
+/// - **Text quantities are untouchable.** There is no twice-a-pinch, so
+///   `qty: None` falls back to the written form.
+///
+/// At `factor == 1` the result reads exactly as written.
 pub(crate) fn scaled_qty(ing: &cookbook_proto::Ingredient, factor: f64) -> String {
-    match ing.qty {
-        Some(q) => {
-            let num = fmt_num(q * factor);
-            if ing.unit.is_empty() {
-                num
-            } else {
-                format!("{num} {}", ing.unit)
-            }
-        }
+    let f = if ing.scalable { factor } else { 1.0 };
+    let num = match (ing.qty, ing.qty_max) {
+        (Some(lo), Some(hi)) => Some(format!("{}–{}", fmt_num(lo * f), fmt_num(hi * f))),
+        (Some(q), None) => Some(fmt_num(q * f)),
+        _ => None,
+    };
+    match num {
+        Some(n) if ing.unit.is_empty() => n,
+        Some(n) => format!("{n} {}", ing.unit),
         None => match (&ing.qty_display, ing.unit.as_str()) {
             (Some(q), "") => q.clone(),
             (Some(q), u) => format!("{q} {u}"),

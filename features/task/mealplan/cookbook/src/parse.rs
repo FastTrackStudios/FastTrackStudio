@@ -126,8 +126,10 @@ pub fn parse_cook_at(
             name: link.target.clone(),
             alias: None,
             qty: link.servings,
+            qty_max: None,
             unit: String::new(),
             qty_display: link.servings.map(|q| format!("{q}")),
+            scalable: true,
             note: None,
             optional: false,
             is_recipe_ref: true,
@@ -178,21 +180,29 @@ pub fn parse_cook_at(
 }
 
 fn project_ingredient(i: &cooklang::Ingredient) -> Ingredient {
-    let (qty, unit, qty_display) = match &i.quantity {
+    // `scalable` is cooklang's own answer to "does this move when the
+    // recipe does" — `@salt{=1%tsp}` is pinned. Ranges keep both ends
+    // so scaling `1-2 tbsp` gives `2-4`, not the midpoint doubled.
+    let (qty, qty_max, unit, qty_display, scalable) = match &i.quantity {
         Some(q) => {
             let unit = q.unit().unwrap_or_default().to_string();
-            let qty = number_value(q.value());
+            let (qty, qty_max) = match q.value() {
+                Value::Range { start, end } => (Some(start.value()), Some(end.value())),
+                other => (number_value(other), None),
+            };
             let display = Some(format!("{}", q.value()));
-            (qty, unit, display)
+            (qty, qty_max, unit, display, q.scalable())
         }
-        None => (None, String::new(), None),
+        None => (None, None, String::new(), None, true),
     };
     Ingredient {
         name: i.name.clone(),
         alias: i.alias.clone(),
         qty,
+        qty_max,
         unit,
         qty_display,
+        scalable,
         note: i.note.clone(),
         optional: i.modifiers().contains(cooklang::Modifiers::OPT),
         is_recipe_ref: i.modifiers().contains(cooklang::Modifiers::RECIPE),
