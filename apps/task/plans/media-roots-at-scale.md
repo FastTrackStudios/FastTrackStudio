@@ -122,15 +122,21 @@ are already needed:
    Location, the per-org grants (CBU vs TomBrooksMusic path prefixes),
    and the roots themselves.
 
-   Register the first root **with media excluded via its ignore set**
-   even so, and lift the exclusion once one real root has checkpointed
-   and the free space on `/mnt/storage` has been checked against the
-   1 MiB-per-256 MiB figure above. The cadence engine starts
-   checkpointing a new root within 30 s, on a filesystem with 1.1 TB
-   free and several TB of media — a wrong assumption about reflink on
-   *that* mount (XFS `reflink=1` is verified, but the store and the
-   source must also be on the same filesystem, which the `.fts-files/`
-   layout gives us) fills the array before anyone notices.
+   There is more room here than it first looked: the cadence engine is
+   **activity-driven**, not periodic (`cadence/engine.rs` — a session
+   opens on a write hint, snapshots after 10 min of uncaptured activity,
+   checkpoints 30 min after activity stops). A freshly registered root
+   nobody is writing to captures nothing at all, so registration is not
+   itself a trigger.
+
+   Still, register the first root and then **watch free space on
+   `/mnt/storage` before adding the rest**. The reflink verification so
+   far is btrfs here and a `cp --reflink=always` probe there; what has
+   not been observed is task-server's own writes landing as clones on
+   that mount. The store lives in `.fts-files/` inside the root, so it
+   is on the same filesystem as its source — the requirement — but the
+   array has 1.1 TB free against several TB of media, and a wrong
+   assumption fills it before anyone notices.
 
 ## What is registrable today
 
