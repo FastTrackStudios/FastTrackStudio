@@ -36,6 +36,61 @@ fn volume_root(data_root: &Path) -> PathBuf {
     data_root.join("files-volumes").join("primary")
 }
 
+/// Extra volumes this server speaks for, from `TASK_STORAGE_VOLUMES`:
+/// `key=/abs/path` pairs, comma-separated.
+///
+///     TASK_STORAGE_VOLUMES="media=/mnt/storage/Task"
+///
+/// The in-server agent announces only `primary`, under the data root —
+/// which on a cluster deployment is the server's own PVC. Media that
+/// was never going to fit there (a NAS mount, an external volume) is
+/// therefore unannounceable, and since a Storage Location can only be
+/// admitted from an ANNOUNCED volume, a File Root on that media could
+/// not be granted at all. This is how such a mount enters the registry.
+///
+/// A path that does not exist is SKIPPED with a warning rather than
+/// failing the boot: the mount may simply not be present on this node
+/// yet, and refusing to start a server because a media volume is
+/// missing would take the whole instance down for a storage detail.
+///
+/// Malformed entries are likewise warned about and skipped — an
+/// operator typo should cost one volume, not the deployment.
+fn extra_volumes() -> Vec<(String, PathBuf)> {
+    let Ok(raw) = std::env::var("TASK_STORAGE_VOLUMES") else {
+        return Vec::new();
+    };
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|entry| {
+            let Some((key, path)) = entry.split_once('=') else {
+                tracing::warn!(
+                    entry,
+                    "TASK_STORAGE_VOLUMES: expected key=/abs/path — skipped"
+                );
+                return None;
+            };
+            let (key, path) = (key.trim(), Path::new(path.trim()));
+            if key.is_empty() || !path.is_absolute() {
+                tracing::warn!(
+                    entry,
+                    "TASK_STORAGE_VOLUMES: needs a key and an absolute path — skipped"
+                );
+                return None;
+            }
+            if !path.is_dir() {
+                tracing::warn!(
+                    key,
+                    path = %path.display(),
+                    "TASK_STORAGE_VOLUMES: not a directory on this node — skipped"
+                );
+                return None;
+            }
+            Some((key.to_owned(), path.to_path_buf()))
+        })
+        .collect()
+}
+
 /// The in-server agent's persisted identity: a stable id **and** the
 /// enrollment secret it must present to re-announce. Both live beside
 /// the registry so a restart comes back as the same agent, keeping its
@@ -64,12 +119,18 @@ pub fn open(data_root: &Path) -> eyre::Result<Arc<StorageCore>> {
         .unwrap_or_else(uuid::Uuid::new_v4);
     core.register_local_agent(Arc::new(InServerAgent::new(agent_id)));
 
+    let mut volumes = vec![server_volume("primary", "Server primary", &volume)];
+    for (key, path) in extra_volumes() {
+        tracing::info!(key, path = %path.display(), "announcing extra storage volume");
+        volumes.push(server_volume(key.clone(), key, &path));
+    }
+
     let enrollment = core
         .announce(in_server_announcement(
             agent_id,
             "task-server",
             identity.as_ref().map(|i| i.token.clone()),
-            vec![server_volume("primary", "Server primary", &volume)],
+            volumes,
         ))
         .map_err(|e| match e {
             // A stored token the coordinator rejects means the registry
