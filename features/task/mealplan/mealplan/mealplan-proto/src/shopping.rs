@@ -249,6 +249,22 @@ pub trait ShoppingService {
         servings: u32,
     ) -> Result<ShoppingList, ShoppingError>;
 
+    /// Add *every* ingredient the recipe calls for at `servings`,
+    /// regardless of what the pantry says.
+    ///
+    /// The counterpart to [`ShoppingService::add_missing_for_recipe`],
+    /// and the right one for building a gather checklist: that method
+    /// does the kitchen pass for you against recorded stock, which is
+    /// only as good as how faithfully the pantry has been kept. This
+    /// one lists the lot and lets the first pass be an actual look at
+    /// an actual shelf — what doesn't turn up is the shopping list.
+    fn add_recipe_ingredients(
+        &self,
+        list_id: &str,
+        recipe_path: &str,
+        servings: u32,
+    ) -> Result<ShoppingList, ShoppingError>;
+
     /// Add every pantry item at or below its `minimum`
     /// reorder threshold to `list_id`.
     fn add_low_stock(&self, list_id: &str) -> Result<ShoppingList, ShoppingError>;

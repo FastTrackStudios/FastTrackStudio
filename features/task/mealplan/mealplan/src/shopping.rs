@@ -398,6 +398,43 @@ impl ShoppingService for Store {
         self.update(list)
     }
 
+    fn add_recipe_ingredients(
+        &self,
+        list_id: &str,
+        recipe_path: &str,
+        servings: u32,
+    ) -> Result<ShoppingList, ShoppingError> {
+        let recipe = self
+            .cookbook
+            .get(recipe_path)
+            .map_err(|e| ShoppingError::NotFound(format!("recipe {recipe_path}: {e}")))?;
+        // Scale to the batch being cooked, the same way cook mode's
+        // gather list does. A recipe with no declared yield scales 1:1.
+        let base = recipe.servings.unwrap_or(1).max(1);
+        let factor = f64::from(servings.max(1)) / f64::from(base);
+
+        let mut list = self.get(list_id)?;
+        for ing in recipe.ingredients.iter() {
+            // Optional extras aren't part of "what this dish needs".
+            if ing.optional {
+                continue;
+            }
+            push_or_merge(
+                &mut list,
+                ShoppingEntry {
+                    id: Uuid::new_v4(),
+                    item_id: None,
+                    name: ing.name.clone(),
+                    qty: ing.qty.map(|q| q * factor),
+                    unit: ing.unit.clone(),
+                    note: Some(format!("for {}", recipe.name)),
+                    status: EntryStatus::Needed,
+                },
+            );
+        }
+        self.update(list)
+    }
+
     fn add_low_stock(&self, list_id: &str) -> Result<ShoppingList, ShoppingError> {
         let mut list = self.get(list_id)?;
         let items = self

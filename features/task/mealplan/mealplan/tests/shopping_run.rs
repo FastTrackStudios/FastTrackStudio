@@ -217,3 +217,49 @@ fn legacy_purchased_flag_still_reads() {
         "`purchased: true` keeps its tick under the new model"
     );
 }
+
+/// `add_recipe_ingredients` lists everything the dish needs, scaled to
+/// the batch — the gather checklist, before any pantry opinion.
+#[test]
+fn recipe_ingredients_build_a_gather_list() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("Cookbook")).unwrap();
+    std::fs::write(
+        root.join("Cookbook/pasta.cook"),
+        ">> title: Pasta\n>> servings: 2\n\nBoil @spaghetti{200%g} with @salt{1%pinch}.\n\n\
+         Toss with @olive oil{3%tbsp} and @?parmesan{30%g}.\n",
+    )
+    .unwrap();
+    let store = ShoppingStore::new(fresh_vault(root))
+        .with_cookbook(cookbook::Store::new(root.to_path_buf()));
+
+    let list = store.create(list_named("Gather", false, &[])).unwrap();
+    let list = store
+        .add_recipe_ingredients(&list.id.to_string(), "Cookbook/pasta.cook", 4)
+        .unwrap();
+
+    let names: Vec<&str> = list.entries.iter().map(|e| e.name.as_str()).collect();
+    assert!(
+        names.contains(&"spaghetti") && names.contains(&"olive oil"),
+        "every required ingredient lands on the list, got {names:?}"
+    );
+    assert!(
+        !names.contains(&"parmesan"),
+        "an optional `@?` ingredient isn't something the dish needs"
+    );
+
+    // 2 servings → 4 doubles the quantities.
+    let spaghetti = list
+        .entries
+        .iter()
+        .find(|e| e.name == "spaghetti")
+        .expect("spaghetti row");
+    assert_eq!(spaghetti.qty, Some(400.0), "scaled to the batch");
+    assert_eq!(spaghetti.unit, "g");
+    assert!(
+        list.entries.iter().all(|e| e.status == EntryStatus::Needed),
+        "a gather list starts with everything outstanding — the kitchen \
+         pass is the cook's job, not the pantry's guess"
+    );
+}

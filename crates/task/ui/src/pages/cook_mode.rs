@@ -204,6 +204,31 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
         });
     };
 
+    // "Make a shopping list" — every ingredient, not just what the
+    // pantry thinks is short, so the kitchen pass is a real look at a
+    // real shelf.
+    let mut gather_list = move || {
+        if listing() {
+            return;
+        }
+        let Some(s) = slug() else { return };
+        let path = recipe_path();
+        let servings = target_servings();
+        listing.set(true);
+        spawn(async move {
+            match crate::pages::shopping::add_recipe_gather_list(&s, path, servings).await {
+                Ok(l) => {
+                    notices.info(format!("Added to \u{201c}{}\u{201d}.", l.name));
+                    nav_to_shopping.push(crate::routes::Route::ShoppingRoute {});
+                }
+                Err(e) => {
+                    notices.error(format!("Couldn't build the shopping list: {e}"));
+                }
+            }
+            listing.set(false);
+        });
+    };
+
     // Keep the screen awake while cooking — phones lock mid-recipe
     // otherwise. Acquired on mount, released on unmount; re-acquired on
     // tab refocus (the lock drops when hidden). No-op off the web.
@@ -533,6 +558,20 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                     // Ingredients — tap to check off as you gather.
                     if matches!(current_phase, Some(Phase::Gather)) {
                         section { class: "flex flex-col gap-2",
+                            // Take the whole ingredient list shopping —
+                            // check the shelves there, buy what's missing.
+                            // Not the same as the pantry check's
+                            // "add missing", which trusts recorded stock.
+                            div { class: "flex justify-end",
+                                Button {
+                                    variant: ButtonVariant::Ghost,
+                                    size: ButtonSize::Small,
+                                    disabled: listing(),
+                                    on_click: move |_| gather_list(),
+                                    ShoppingCart { size: 14 }
+                                    "Make a shopping list"
+                                }
+                            }
                             div { class: "flex items-center justify-between gap-3",
                                 Heading { level: HeadingLevel::H3, class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground", "Ingredients" }
                                 // Servings scaler — only when the recipe declares a yield.

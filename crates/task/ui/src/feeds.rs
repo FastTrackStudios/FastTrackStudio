@@ -656,6 +656,13 @@ feeds! {
             -> mealplan_proto::ShoppingList
             = add_missing_for_recipe(list_id, recipe_path, servings) as "add missing for recipe";
 
+        /// Add everything a recipe calls for at `servings`, whatever the
+        /// pantry says — the gather checklist, where the kitchen pass is
+        /// an actual look at an actual shelf rather than a stock guess.
+        add_recipe_ingredients(list_id: String, recipe_path: String, servings: u32)
+            -> mealplan_proto::ShoppingList
+            = add_recipe_ingredients(list_id, recipe_path, servings) as "add recipe ingredients";
+
         /// Add every pantry item at or below its reorder minimum.
         add_low_stock(list_id: String) -> mealplan_proto::ShoppingList
             = add_low_stock(list_id) as "add low stock";

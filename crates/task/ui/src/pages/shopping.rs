@@ -475,18 +475,39 @@ pub async fn add_recipe_shortages(
     recipe_path: String,
     servings: u32,
 ) -> Result<ShoppingList, String> {
-    let existing = crate::feeds::fetch_shopping_lists(slug)
-        .await
-        .map_err(|e| e.to_string())?;
-    let target = match existing.into_iter().find(|l| !l.is_template) {
-        Some(l) => l,
-        None => crate::feeds::create_shopping_list(slug, new_list_draft("Shopping"))
-            .await
-            .map_err(|e| e.to_string())?,
-    };
+    let target = working_list(slug).await?;
     crate::feeds::add_missing_for_recipe(slug, target.id.to_string(), recipe_path, servings)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Put *everything* `recipe_path` calls for onto the working list — the
+/// gather checklist. Unlike [`add_recipe_shortages`] this doesn't
+/// consult the pantry, so the kitchen pass is a real look at a real
+/// shelf and whatever doesn't turn up becomes the shopping.
+pub async fn add_recipe_gather_list(
+    slug: &str,
+    recipe_path: String,
+    servings: u32,
+) -> Result<ShoppingList, String> {
+    let target = working_list(slug).await?;
+    crate::feeds::add_recipe_ingredients(slug, target.id.to_string(), recipe_path, servings)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The org's working run — the first non-template list, which is what
+/// [`ShoppingView`] opens by default. Created on first use.
+async fn working_list(slug: &str) -> Result<ShoppingList, String> {
+    let existing = crate::feeds::fetch_shopping_lists(slug)
+        .await
+        .map_err(|e| e.to_string())?;
+    match existing.into_iter().find(|l| !l.is_template) {
+        Some(l) => Ok(l),
+        None => crate::feeds::create_shopping_list(slug, new_list_draft("Shopping"))
+            .await
+            .map_err(|e| e.to_string()),
+    }
 }
 
 /// An empty list draft. The backend assigns the vault `path` and
