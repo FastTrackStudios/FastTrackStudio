@@ -985,19 +985,6 @@ impl FilesBackend {
         );
     }
 
-    /// Forget a root's cached repo handle, releasing the store's lock
-    /// with it. Needed before re-opening the same store from a new
-    /// path (see the move case in `create_root`) — the guard is dropped
-    /// before the `Arc` so the release does not happen under the cache
-    /// lock.
-    fn evict_root(&self, root_id: Uuid) {
-        let evicted = {
-            let mut repos = self.repos.lock().expect("repo cache lock poisoned");
-            repos.remove(&root_id)
-        };
-        drop(evicted);
-    }
-
     fn root_lock(&self, root_id: Uuid) -> Arc<Mutex<()>> {
         self.root_locks
             .lock()
