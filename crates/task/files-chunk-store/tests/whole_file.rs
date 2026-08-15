@@ -273,11 +273,145 @@ async fn storing_a_large_file_does_not_consume_a_second_copy() {
     assert_eq!(store.read_to_vec(file_id).await.unwrap(), bytes);
 }
 
-/// Editing the live file must not disturb the version already stored —
-/// with a reflink that means copy-on-write does its job, and without one
-/// it is trivially true. Either way, history stays real.
+/// The requirement in one test: **the content cannot be lost by
+/// deleting the original.** Not "cheap to store" — safe. A hardlinked
+/// blob keeps the inode alive, so removing the live file frees nothing
+/// and the store still returns the exact bytes.
+///
+/// This is the property that makes a link acceptable instead of a copy,
+/// and it is the one that would silently disappear if the placement
+/// ladder ever fell through to something referential.
 #[tokio::test]
-async fn editing_the_live_file_leaves_the_stored_version_intact() {
+async fn deleting_the_original_does_not_lose_the_stored_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_at(dir.path()).await;
+    let bytes = incompressible(64 * 1024 * 1024);
+    let path = dir.path().join("only-copy.wav");
+    tokio::fs::write(&path, &bytes).await.unwrap();
+
+    let file_id = store.write_path(&path).await.unwrap();
+
+    // The live file goes away entirely — the accident this protects
+    // against.
+    tokio::fs::remove_file(&path).await.unwrap();
+    assert!(!path.exists());
+
+    assert_eq!(
+        store.read_to_vec(file_id).await.unwrap(),
+        bytes,
+        "the store must still hold the content after the original is deleted"
+    );
+
+    // And it survives a reopen: the bytes are on disk, not in a handle
+    // this process happens to be holding.
+    store.shutdown().await.unwrap();
+    let store = store_at(dir.path()).await;
+    assert_eq!(store.read_to_vec(file_id).await.unwrap(), bytes);
+}
+
+/// Storing content that is already on the same filesystem must consume
+/// (essentially) nothing, at ANY size — the property that makes
+/// importing an existing multi-terabyte archive possible at all.
+///
+/// No reflink probe here, unlike the measurement below it: a hardlink
+/// needs only one filesystem, which a tempdir always satisfies.
+#[tokio::test]
+async fn linking_content_in_consumes_no_space() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_at(dir.path()).await;
+    let bytes = incompressible(256 * 1024 * 1024);
+    let path = dir.path().join("archive-original.wav");
+    tokio::fs::write(&path, &bytes).await.unwrap();
+    store.shutdown().await.unwrap();
+    let store = store_at(dir.path()).await;
+
+    let before = free_bytes(dir.path());
+    let file_id = store.write_path(&path).await.unwrap();
+    store.shutdown().await.unwrap();
+    let after = free_bytes(dir.path());
+
+    let consumed = before.saturating_sub(after);
+    // Generous against filesystem noise; a copy would be 256 MiB, which
+    // is 16x outside this.
+    let budget = 16 * 1024 * 1024;
+    assert!(
+        consumed < budget,
+        "linking a {} MiB file consumed {} MiB — that is a copy, not a link",
+        bytes.len() / 1024 / 1024,
+        consumed / 1024 / 1024,
+    );
+
+    let store = store_at(dir.path()).await;
+    assert_eq!(store.read_to_vec(file_id).await.unwrap(), bytes);
+}
+
+/// A whole-tier blob nothing references is reclaimed. Without this the
+/// linked inode would outlive its history forever — space that only
+/// looks free until the original is deleted too.
+#[tokio::test]
+async fn gc_reclaims_an_unreferenced_whole_blob() {
+    use std::collections::BTreeSet;
+    use std::time::{Duration, SystemTime};
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = ChunkStore::open_with_gc(
+        dir.path(),
+        ChunkerConfig::default(),
+        task_files_chunk_store::GcConfig {
+            interval: Duration::from_secs(3600),
+        },
+    )
+    .await
+    .unwrap();
+
+    let path = dir.path().join("transient.wav");
+    tokio::fs::write(&path, content(8 * 1024 * 1024))
+        .await
+        .unwrap();
+    let file_id = store.write_path(&path).await.unwrap();
+    assert!(store.has(file_id).await);
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let stats = store.gc(&BTreeSet::new(), SystemTime::now()).await.unwrap();
+    assert_eq!(stats.manifests_swept, 1);
+
+    let whole: Vec<_> = walk(&dir.path().join("whole"));
+    assert!(
+        whole.is_empty(),
+        "the whole tier must be swept with its manifest, found {whole:?}"
+    );
+}
+
+/// Every regular file under `dir`, recursively.
+fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Replacing the live file — the ordinary save: write a new file, or
+/// truncate and rewrite — versions correctly, and the previous version
+/// stays readable.
+///
+/// Scoped deliberately to *replacement*, because that is what the
+/// placement ladder actually guarantees everywhere. A reflink gives
+/// separate inodes sharing extents, so even an in-place rewrite leaves
+/// the stored version untouched; a hardlink does not, and asserting the
+/// stronger property here would pass on btrfs/XFS and fail on ext4 —
+/// green for the wrong reason, which is worse than not testing it.
+/// In-place rewriting is out of scope by decision, not by accident.
+#[tokio::test]
+async fn replacing_the_live_file_versions_it_and_keeps_the_old_one() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_at(dir.path()).await;
     let original = content(2 * 1024 * 1024);
@@ -285,10 +419,14 @@ async fn editing_the_live_file_leaves_the_stored_version_intact() {
     tokio::fs::write(&path, &original).await.unwrap();
     let v1 = store.write_path(&path).await.unwrap();
 
+    // Replace via a fresh file + rename, the safe-save pattern: the old
+    // inode survives, so the store's link to it does too.
     let mut edited = original.clone();
     edited[..4096].fill(0xAB);
     edited.extend_from_slice(&content(1024));
-    tokio::fs::write(&path, &edited).await.unwrap();
+    let staged = dir.path().join("edited.wav.new");
+    tokio::fs::write(&staged, &edited).await.unwrap();
+    tokio::fs::rename(&staged, &path).await.unwrap();
     let v2 = store.write_path(&path).await.unwrap();
 
     assert_ne!(v1, v2);

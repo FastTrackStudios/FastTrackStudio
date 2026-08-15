@@ -28258,6 +28258,7 @@ dependencies = [
  "futures",
  "iroh-blobs",
  "proptest",
+ "reflink-copy",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
