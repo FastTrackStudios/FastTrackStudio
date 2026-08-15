@@ -22,10 +22,8 @@ members = [
     "libs/utils",
     "libs/monarchy/monarchy",
     "libs/monarchy/monarchy-derive",
-    "libs/vox-discover",
     "libs/installer-core",
     "libs/engine-launcher",
-    "libs/neural-amp-modeler",
     # ── crates/ — domain cores ────────────────────────────────────────
     "crates/audiocore/audiocore-core",
     "crates/audiocore/audiocore-dsp",
@@ -320,10 +318,9 @@ nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch 
 nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 utils = { path = "libs/utils" }
-vox-discover = { path = "libs/vox-discover" }
 installer-core = { path = "libs/installer-core" }
 engine-launcher = { path = "libs/engine-launcher" }
-neural-amp-modeler = { path = "libs/neural-amp-modeler" }
+neural-amp-modeler = { git = "https://github.com/FastTrackStudios/neural-amp-modeler-rs", tag = "v0.1.0" }
 audiocore-core = { path = "crates/audiocore/audiocore-core" }
 audiocore-dsp = { path = "crates/audiocore/audiocore-dsp", default-features = false }
 audiocore-gui = { path = "crates/audiocore/audiocore-gui" }
