@@ -249,16 +249,8 @@ members = [
     "features/plugin-host",
     "features/reaper/signal-extension",
     "features/reaper/signal-reaper-controller",
-    # ── crates/patchbay — PipeWire studio-routing domain ──────────────
-    # `patchbay` is the facade (engine + services); `patchbay-proto` is
-    # the wire contract; `patchbay-ui` the Dioxus surface.
-    "crates/patchbay/patchbay",
-    "crates/patchbay/proto",
-    "crates/patchbay/ui",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/fasttrackstudio",
-    "apps/patchbay",
-    "apps/patchbay/web",
     "apps/installer",
     "apps/fasttrackstudio/cli",
     "apps/site",
@@ -414,9 +406,6 @@ daw-theme-reaper = { path = "features/daw-ui/daw-theme-reaper" }
 # `session` is the facade — the only public API surface for the session
 # domain. session-proto is INTERNAL (session-ui and session-guide are the
 # documented exceptions: Dioxus components / the guide engine).
-patchbay = { path = "crates/patchbay/patchbay" }
-patchbay-proto = { path = "crates/patchbay/proto" }
-patchbay-ui = { path = "crates/patchbay/ui" }
 session = { path = "crates/session/session" }
 session-proto = { path = "crates/session/proto" }
 session-ui = { path = "crates/session/ui", default-features = false }
