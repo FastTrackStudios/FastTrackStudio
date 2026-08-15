@@ -2,7 +2,7 @@
 #
 # Subtree-imported from the standalone fasttrackstudio-site repo (history
 # preserved) and dissolved into the root workspace: intra-tree deps
-# (keyflow, fts-ui, dioxus pins) come from [workspace.dependencies]; the
+# (keyflow, architect-ui, dioxus pins) come from [workspace.dependencies]; the
 # Editor crates stay a git dep (external repo — its keyflow.git references
 # fold onto the in-tree crates via the root [patch] table).
 [package]
@@ -35,7 +35,7 @@ editor-keyflow = { workspace = true }
 editor-keyflow-lang = { workspace = true }
 
 # FTS design system (components, layout, typography, theme tokens)
-fts-ui = { workspace = true }
+architect-ui = { workspace = true }
 
 # /guides vault — knowledge graph of the markdown notes (wasm-clean SVG view)
 view-knowledge-graph = { workspace = true }

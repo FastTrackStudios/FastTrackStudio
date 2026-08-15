@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use fts_ui::prelude::*;
+use architect_ui::prelude::*;
 use input_config_proto::{KeybindDef, kebab_to_title};
 
 use super::colors::category_color;

@@ -22,8 +22,8 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use editor::editor_view::DecorationSource;
 use editor::{Editor, EditorState, markdown};
-use fts_ui::lucide_dioxus::{FileText, Folder, Keyboard, Lightbulb, Wrench};
-use fts_ui::prelude::*;
+use architect_ui::lucide_dioxus::{FileText, Folder, Keyboard, Lightbulb, Wrench};
+use architect_ui::prelude::*;
 use view_knowledge_graph::{KnowledgeGraphView, WikiFile, build_wiki_graph};
 
 use crate::Route;
