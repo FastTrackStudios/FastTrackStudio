@@ -961,10 +961,9 @@ vox-codegen = "0.10.0-rc.5"
 #
 # NOTE: the codeberg fts-ui.git patch table is gone. It existed only to
 # fold dioxus-launcher's `launcher-ui` fts-ui git dep onto the in-tree
-# crate; fts-ui left this tree in the 2026-08 split (it is architect-ui
-# in the architect repo now), so there is nothing local to route it to.
-# launcher-ui resolves its own fts-ui straight from Codeberg (that repo
-# is still alive), at the cost of one extra package in the graph.
+# crate. Both sides of that are now retired: the launcher engine is
+# vendored in architect as architect-launcher-*, and fts-ui is
+# architect-ui. Nothing resolves a crate named `fts-ui` any more.
 
 [patch.crates-io]
 # Blitz from the FTS fork (0.3.0-beta.1 line, upstream 02523b83 +
