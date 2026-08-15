@@ -102,6 +102,13 @@ pub struct BatchConfig {
     /// Stop after this many patches are sampled in this run. Lets a long job be
     /// taken in sittings — the next run resumes where this one stopped.
     pub limit: Option<usize>,
+    /// Re-sample patches that already have a pack, instead of skipping them.
+    ///
+    /// Without this, "re-sample this patch" means "delete its pack first" — you
+    /// have to destroy the existing recording *before* finding out whether the
+    /// new settings are any better. The old pack is left untouched until the
+    /// new one is built, so a failed or abandoned re-run costs nothing.
+    pub force: bool,
 }
 
 /// Filesystem-safe folder name.
@@ -143,7 +150,13 @@ pub fn run(config: &BatchConfig) -> Result<Vec<BatchResult>> {
                 entry.slot,
                 entry.slot,
                 dir.display(),
-                if pack.exists() { "skip" } else { "sample" }
+                if pack.exists() && !config.force {
+                    "skip"
+                } else if pack.exists() {
+                    "RE-SAMPLE (pack exists, --force)"
+                } else {
+                    "sample"
+                }
             );
             out.push(BatchResult {
                 entry: entry.clone(),
@@ -179,9 +192,10 @@ pub fn run(config: &BatchConfig) -> Result<Vec<BatchResult>> {
         }
         let (out_dir, pack_path) = paths_for(&config.out_root, &entry.name);
 
-        // Resume: a finished pack means this patch is done. Deleting the pack
-        // is how you ask for one to be redone.
-        if pack_path.exists() {
+        // Resume: a finished pack means this patch is done, unless `force`
+        // asks for it again. The existing pack stays in place until the new one
+        // overwrites it, so nothing is lost if the re-run fails.
+        if pack_path.exists() && !config.force {
             tracing::info!(
                 "[{}/{}] slot {} {} — pack exists, skipping",
                 i + 1,

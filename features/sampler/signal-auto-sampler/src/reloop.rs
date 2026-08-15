@@ -66,6 +66,11 @@ pub struct SearchRange {
     /// honest and better sounding than looping it badly. The adaptive tail
     /// already captured the whole decay, so an unlooped zone is complete.
     pub min_score: f32,
+    /// How much the seam score weights level continuity alongside waveform
+    /// shape, 0-1. See `loopfind::seam_score` — 0 scores shape alone (what a
+    /// listener judges a seam by, validated by ear), 1 also penalises a level
+    /// jump (what catches a modulation cut mid-cycle).
+    pub level_weight: f32,
 }
 
 impl Default for SearchRange {
@@ -75,6 +80,7 @@ impl Default for SearchRange {
             max_len_ms: 2500,
             window_ms: 80,
             min_score: 0.0,
+            level_weight: 0.0,
         }
     }
 }
@@ -223,8 +229,15 @@ fn search_zone(
     let max_len = ms(range.max_len_ms).min(ceiling);
     let min_len = ms(range.min_len_ms);
 
-    let found = crate::loopfind::best_loop(&mono, end, min_len, max_len, ms(range.window_ms))
-        .ok_or_else(|| eyre!("no candidate loop fits in {file}"))?;
+    let found = crate::loopfind::best_loop_weighted(
+        &mono,
+        end,
+        min_len,
+        max_len,
+        ms(range.window_ms),
+        range.level_weight,
+    )
+    .ok_or_else(|| eyre!("no candidate loop fits in {file}"))?;
 
     let start = end.saturating_sub(found.len) as u32;
     // The crossfade blends material from before `start`, so it can be no longer

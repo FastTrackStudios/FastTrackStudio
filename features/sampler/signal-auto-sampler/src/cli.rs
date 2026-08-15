@@ -88,6 +88,11 @@ struct ReloopArgs {
     /// Sample rate of the recordings.
     #[arg(long, default_value_t = 48_000)]
     sample_rate: u32,
+    /// How much the seam score weights level continuity, 0-1. 0 scores
+    /// waveform shape alone; 1 also penalises a level jump at the wrap, which
+    /// is what catches a tremolo or LFO cut mid-cycle.
+    #[arg(long, default_value_t = 0.0)]
+    level_weight: f32,
     /// Also rebuild this pack from the updated spec.
     #[arg(long)]
     pack: Option<PathBuf>,
@@ -144,6 +149,11 @@ struct BatchArgs {
     /// a pack already built are skipped.
     #[arg(long)]
     limit: Option<usize>,
+    /// Re-sample patches that already have a pack, instead of skipping them.
+    /// The old pack survives until the new one is built, so you never have to
+    /// delete a good recording to try different settings.
+    #[arg(long)]
+    force: bool,
     /// Skip the per-patch loop search (faster, but loops are fixed-length and
     /// more likely to be audible).
     #[arg(long)]
@@ -447,6 +457,7 @@ fn reloop(args: ReloopArgs) -> Result<()> {
         max_len_ms: args.search_max,
         window_ms: args.search_window,
         min_score: args.min_seam,
+        level_weight: args.level_weight,
     });
     let report = crate::reloop::run_with_search(
         &args.samples_dir,
@@ -586,10 +597,14 @@ fn batch(args: BatchArgs) -> Result<()> {
 
     let per_patch = cells(&template.grid).len();
     let worst_cell = args.note_length + args.max_tail + args.settle;
-    let remaining = entries
-        .iter()
-        .filter(|e| !crate::batch::paths_for(&args.out_root, &e.name).1.exists())
-        .count();
+    let remaining = if args.force {
+        entries.len()
+    } else {
+        entries
+            .iter()
+            .filter(|e| !crate::batch::paths_for(&args.out_root, &e.name).1.exists())
+            .count()
+    };
     let planned = args.limit.map_or(remaining, |l| l.min(remaining));
     println!(
         "{} patch(es), {} already done, {remaining} remaining{}",
@@ -622,6 +637,7 @@ fn batch(args: BatchArgs) -> Result<()> {
         decent: !args.no_decent,
         amp_vel_track: args.amp_vel_track,
         limit: args.limit,
+        force: args.force,
     };
     let results = crate::batch::run(&config)?;
 

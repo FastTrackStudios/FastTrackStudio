@@ -83,15 +83,19 @@ pub fn shortest_useful_hold(
         let min_len = ms(search.min_len_ms);
         if available >= min_len {
             let max_len = ms(search.max_len_ms).min(available);
-            // Level-weighted: the probe must not mistake a tremolo caught
-            // mid-cycle for a steady tone, which shape alone cannot see.
+            // Judged by the SAME criterion the loop search will later apply.
+            // The probe's job is "what hold does the search need?", so scoring
+            // it differently makes it answer a question nobody asked: measured
+            // on real audio, a stricter bar here declared defeat on patches the
+            // search then looped happily (Sirus Piano-Wurlitzer, 459 loops
+            // shape-only vs 145 level-weighted).
             if let Some(found) = loopfind::best_loop_weighted(
                 mono,
                 loop_end,
                 min_len,
                 max_len,
                 ms(search.window_ms),
-                1.0,
+                search.level_weight,
             )
                 && found.score >= search.min_score
             {
@@ -105,8 +109,12 @@ pub fn shortest_useful_hold(
         hold += STEP_MS;
     }
 
+    // Nothing loops at any hold. Fall back to the configured length, NOT the
+    // maximum: since the probe scores by the same bar as the search, "no hold
+    // works" means the extra recording time buys nothing — it would just make
+    // every note 4x longer to produce a patch that still cannot loop.
     ProbeResult {
-        note_length_ms: max_ms,
+        note_length_ms: min_ms,
         score: None,
         gave_up: true,
     }
@@ -182,6 +190,18 @@ mod tests {
             max_len_ms: 2500,
             window_ms: 80,
             min_score: 0.97,
+            level_weight: 0.0,
+        }
+    }
+
+    /// Level-aware variant. Cross-correlation is scale-invariant, so shape
+    /// alone cannot tell a tremolo caught mid-cycle from a steady tone; this
+    /// weighting can. It is not the default because measured on real material
+    /// it rejects far more than it catches — see `seam_score`.
+    fn level_aware_search() -> SearchRange {
+        SearchRange {
+            level_weight: 1.0,
+            ..search()
         }
     }
 
@@ -219,10 +239,10 @@ mod tests {
     fn a_slowly_evolving_pad_needs_a_longer_hold() {
         // 0.5 Hz LFO = a 2 s cycle. A loop must span whole cycles, so the hold
         // has to cover the attack skip, guard, and at least one full cycle.
+        let s = level_aware_search();
         let steady_hold =
-            shortest_useful_hold(&steady(12.0), SR, 1500, 12_000, &policy(), &search())
-                .note_length_ms;
-        let pad = shortest_useful_hold(&evolving(12.0, 0.5), SR, 1500, 12_000, &policy(), &search());
+            shortest_useful_hold(&steady(12.0), SR, 1500, 12_000, &policy(), &s).note_length_ms;
+        let pad = shortest_useful_hold(&evolving(12.0, 0.5), SR, 1500, 12_000, &policy(), &s);
         assert!(
             pad.note_length_ms > steady_hold,
             "pad needed {} ms, steady tone needed {steady_hold} ms — the probe is not \
@@ -243,7 +263,11 @@ mod tests {
             .collect();
         let r = shortest_useful_hold(&noise, SR, 1500, 6000, &policy(), &search());
         assert!(r.gave_up, "should not claim a loop it cannot make");
-        assert_eq!(r.note_length_ms, 6000, "falls back to the maximum");
+        assert_eq!(
+            r.note_length_ms, 1500,
+            "gives up to the CONFIGURED length, not the maximum — recording 4x \
+             longer cannot rescue material that does not loop"
+        );
         assert!(r.score.is_none());
     }
 
@@ -252,16 +276,11 @@ mod tests {
         // The whole point: re-running the same check at the chosen hold must
         // succeed, or the sampler would record material it cannot loop.
         let audio = evolving(12.0, 0.5);
-        let r = shortest_useful_hold(&audio, SR, 1500, 12_000, &policy(), &search());
+        let s = level_aware_search();
+        let r = shortest_useful_hold(&audio, SR, 1500, 12_000, &policy(), &s);
         assert!(!r.gave_up);
-        let verify = shortest_useful_hold(
-            &audio,
-            SR,
-            r.note_length_ms,
-            r.note_length_ms,
-            &policy(),
-            &search(),
-        );
+        let verify =
+            shortest_useful_hold(&audio, SR, r.note_length_ms, r.note_length_ms, &policy(), &s);
         assert!(!verify.gave_up, "chosen hold does not actually loop");
         assert!(verify.score.unwrap() >= search().min_score);
     }
