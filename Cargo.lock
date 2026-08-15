@@ -30361,6 +30361,7 @@ dependencies = [
  "architect",
  "architect-auth",
  "auth-proto",
+ "base64 0.22.1",
  "chrono",
  "contacts-proto",
  "cookbook-proto",

@@ -250,41 +250,146 @@ fn flatten(
     }
     visited.insert(recipe.path.clone());
 
+    // Resolve first: an unresolved reference has to stay in the
+    // ingredient list as an opaque row, or the sauce vanishes from the
+    // shopping list entirely instead of showing up as "buy this".
+    let resolved: Vec<(String, &Recipe)> = recipe
+        .nested_recipes
+        .iter()
+        .filter_map(|nested| {
+            resolve_ref(nested, &recipe.path, index).map(|child| (ref_stem(nested), child))
+        })
+        .collect();
+
     let mut out: Vec<cookbook::Ingredient> = recipe
         .ingredients
         .iter()
+        // A `@@sauce` reference is also listed as an ingredient. Once
+        // it's expanded into what the sauce is actually made of, keeping
+        // the row too would count it twice.
+        .filter(|ing| {
+            !(ing.is_recipe_ref
+                && resolved
+                    .iter()
+                    .any(|(stem, _)| stem.eq_ignore_ascii_case(&ing.name)))
+        })
         .map(|ing| cookbook::Ingredient {
             qty: ing.qty.map(|q| q * scale),
             ..ing.clone()
         })
         .collect();
 
-    for nested_path in recipe.nested_recipes.iter() {
-        if let Some(child) = index.get(nested_path.as_str()) {
-            let base = f64::from(child.servings.unwrap_or(1).max(1));
-            let child_scale = scale / base;
-            out.extend(flatten(child, index, child_scale, visited, depth + 1));
-        }
+    for (stem, child) in resolved {
+        let base = f64::from(child.servings.unwrap_or(1).max(1));
+        // `[[Sauce]]{2}` calls for two of the sauce's servings. With no
+        // quantity — `[[Sauce]]{}` — you're making the whole thing,
+        // which is what a component recipe usually means: one batch of
+        // dough, one batch of sauce.
+        let want = recipe
+            .ingredients
+            .iter()
+            .find(|ing| ing.is_recipe_ref && stem.eq_ignore_ascii_case(&ing.name))
+            .and_then(|ing| ing.qty)
+            .unwrap_or(base);
+        let child_scale = (want * scale) / base;
+        out.extend(flatten(child, index, child_scale, visited, depth + 1));
     }
 
     visited.remove(&recipe.path);
     out
 }
 
+/// The bare name a reference ends in — `./Cookbook/hot-honey` →
+/// `hot-honey`. This is what cooklang also uses as the reference
+/// ingredient's display name, so it's how the two get paired up.
+fn ref_stem(reference: &str) -> String {
+    reference
+        .trim_start_matches("./")
+        .rsplit('/')
+        .next()
+        .unwrap_or(reference)
+        .trim_end_matches(".cook")
+        .to_string()
+}
+
+/// Resolve a cooklang recipe reference against the recipe index.
+///
+/// Cooklang hands back the reference exactly as written — `@@./sauce`
+/// becomes `./sauce` — while recipes are indexed by vault path
+/// (`Cookbook/sauce.cook`). Those never match, so before this every
+/// reference silently resolved to nothing: the child's ingredients
+/// never reached a pantry check or a shopping list, and no error said
+/// so. Try the literal string, then the reference resolved relative to
+/// the referring recipe's own folder, then a bare filename, and
+/// finally a case-insensitive match on file stem or display name.
+fn resolve_ref<'a>(
+    reference: &str,
+    referrer_path: &str,
+    index: &std::collections::HashMap<&str, &'a Recipe>,
+) -> Option<&'a Recipe> {
+    if let Some(found) = index.get(reference) {
+        return Some(found);
+    }
+
+    let rel = reference.trim_start_matches("./");
+    let dir = referrer_path.rsplit_once('/').map_or("", |(d, _)| d);
+    let mut candidates = Vec::with_capacity(4);
+    if !dir.is_empty() {
+        candidates.push(format!("{dir}/{rel}.cook"));
+        candidates.push(format!("{dir}/{rel}"));
+    }
+    candidates.push(format!("{rel}.cook"));
+    candidates.push(rel.to_string());
+    for candidate in &candidates {
+        if let Some(found) = index.get(candidate.as_str()) {
+            return Some(found);
+        }
+    }
+
+    // Last resort, so `@@./Nashville Hot Honey` finds
+    // `Cookbook/nashville-hot-honey.cook`.
+    let want = ref_stem(reference);
+    index.values().copied().find(|r| {
+        ref_stem(&r.path).eq_ignore_ascii_case(&want) || r.name.eq_ignore_ascii_case(&want)
+    })
+}
+
+/// Combine repeated mentions of the same ingredient into one row.
+///
+/// Units are reconciled through cooklang's own unit database rather
+/// than by comparing strings, so a recipe calling for 500 g of flour
+/// and a sub-recipe calling for 0.5 kg produce a single 1 kg row
+/// instead of two that each look short. Amounts land in the unit of
+/// the first mention, which is the one the reader has already seen.
+///
+/// Rows whose units genuinely don't reconcile — grams against cloves —
+/// stay separate. That is information, not a failure: nothing sensible
+/// can be added there, and silently picking one would be a lie.
 fn fold_same_ingredient(rows: &mut Vec<cookbook::Ingredient>) {
     let mut i = 0;
     while i < rows.len() {
         let mut j = i + 1;
         while j < rows.len() {
-            let merge_ok = rows[i].name.eq_ignore_ascii_case(&rows[j].name)
-                && rows[i].unit.eq_ignore_ascii_case(&rows[j].unit);
-            if merge_ok {
-                let add = rows[j].qty.unwrap_or(0.0);
-                let base = rows[i].qty.unwrap_or(0.0);
-                rows[i].qty = Some(base + add);
-                rows.remove(j);
-            } else {
+            if !rows[i].name.eq_ignore_ascii_case(&rows[j].name) {
                 j += 1;
+                continue;
+            }
+            // Bring j into i's unit before adding. A missing quantity
+            // contributes nothing but still folds away, so "salt" twice
+            // is one line.
+            let add = match rows[j].qty {
+                None => Some(0.0),
+                Some(q) => cookbook::convert(q, &rows[j].unit, &rows[i].unit),
+            };
+            match add {
+                Some(add) => {
+                    let base = rows[i].qty.unwrap_or(0.0);
+                    rows[i].qty = Some(base + add);
+                    // A merged row is a sum, not a range any more.
+                    rows[i].qty_max = None;
+                    rows.remove(j);
+                }
+                None => j += 1,
             }
         }
         i += 1;
@@ -467,6 +572,7 @@ mod tests {
             source_url: None,
             date_modified: None,
             source: String::new(),
+            images: Default::default(),
         }
     }
 
@@ -475,8 +581,10 @@ mod tests {
             name: name.into(),
             alias: None,
             qty: Some(qty),
+            qty_max: None,
             unit: unit.into(),
             qty_display: None,
+            scalable: true,
             note: None,
             optional: false,
             is_recipe_ref: false,

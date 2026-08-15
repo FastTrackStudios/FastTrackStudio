@@ -580,6 +580,7 @@ table!(INVENTORY, "inventory", "inventory/**", [
 #[cfg(feature = "plugin-mealplan")]
 table!(COOKBOOK, "cookbook", "mealplan/cookbook/**", [
     rd "list", rd "get", wr "create", wr "update", wr "rename", wa "delete", wr "import",
+    rd "image", wr "put_image",
 ]);
 #[cfg(feature = "plugin-mealplan")]
 table!(MEALPLAN, "mealplan", "mealplan/plan/**", [
@@ -595,8 +596,9 @@ table!(PANTRY, "pantry", "mealplan/pantry/**", [
 #[cfg(feature = "plugin-mealplan")]
 table!(SHOPPING, "shopping", "mealplan/shopping/**", [
     rd "list", rd "get", wr "create", wr "update", wa "delete",
-    wr "add_missing_for_recipe", wr "add_low_stock", wr "add_expired_or_overdue",
-    wr "clear", wr "mark_purchased",
+    wr "add_missing_for_recipe", wr "add_recipe_ingredients", wr "add_low_stock",
+    wr "add_expired_or_overdue", wr "clear", wr "mark_purchased", wr "mark_have",
+    wr "reset", wr "start_from_template", wr "save_as_template",
 ]);
 #[cfg(feature = "plugin-mealplan")]
 table!(SUBSTITUTIONS, "substitutions", "mealplan/substitutions/**", [

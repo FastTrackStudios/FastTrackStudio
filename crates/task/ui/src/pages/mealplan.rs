@@ -19,6 +19,7 @@
 
 use architect::Id;
 use dioxus::prelude::*;
+use fts_ui::lucide_dioxus::ShoppingCart;
 use fts_ui::prelude::*;
 use uuid::Uuid;
 
@@ -47,12 +48,20 @@ pub fn MealplanView() -> Element {
 
     rsx! {
         div { class: "mx-auto flex max-w-3xl flex-col gap-8 p-4 sm:p-6 lg:p-10",
-            div { class: "flex flex-col gap-1",
-                Heading { level: HeadingLevel::H1, "Mealplan" }
-                Text {
-                    variant: TextVariant::Muted,
-                    class: "text-sm",
-                    "The cookbook, what's in the pantry, and the meals on the calendar.",
+            div { class: "flex items-start gap-3",
+                div { class: "flex flex-1 flex-col gap-1",
+                    Heading { level: HeadingLevel::H1, "Mealplan" }
+                    Text {
+                        variant: TextVariant::Muted,
+                        class: "text-sm",
+                        "The cookbook, what's in the pantry, and the meals on the calendar.",
+                    }
+                }
+                Link {
+                    to: crate::routes::Route::ShoppingRoute {},
+                    class: "inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted",
+                    ShoppingCart { size: 14 }
+                    "Shopping"
                 }
             }
 
@@ -252,7 +261,7 @@ fn RecipeRow(recipe: Recipe, pending: bool) -> Element {
                             variant: ButtonVariant::Secondary,
                             size: ButtonSize::Small,
                             on_click: move |_| {
-                                nav.push(crate::routes::Route::RecipeCookRoute { path: path.clone() });
+                                nav.push(crate::routes::Route::RecipeReadRoute { path: path.clone() });
                             },
                             "Cook"
                         }

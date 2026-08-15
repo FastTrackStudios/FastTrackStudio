@@ -13,6 +13,20 @@ use vault_proto::BaseView;
 
 use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
 
+/// Where a base row opens. Recipes are `.cook` files, not notes — the
+/// vault viewer would show raw cooklang, so they open in the recipe
+/// reader instead. Everything else is a note.
+fn open_route(path: String) -> crate::routes::Route {
+    if path.ends_with(".cook") {
+        crate::routes::Route::RecipeReadRoute { path }
+    } else {
+        crate::routes::Route::VaultRoute {
+            path,
+            org: String::new(),
+        }
+    }
+}
+
 /// Display label for a base path (`Scripture/Songs.base` → `Songs`).
 fn base_label(path: &str) -> String {
     path.rsplit('/')
@@ -90,7 +104,7 @@ pub fn BasesView() -> Element {
                 div { class: "flex flex-col gap-6",
                     for view in views.clone() {
                         BaseViewRender { key: "{view.name}", view, on_open: move |path: String| {
-                            nav.push(crate::routes::Route::VaultRoute { path, org: String::new() });
+                            nav.push(open_route(path));
                         } }
                     }
                 }

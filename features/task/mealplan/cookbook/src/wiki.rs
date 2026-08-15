@@ -35,9 +35,10 @@ pub enum WikiEdgeKind {
     /// `#cookware` → wikilink to the cookware's wiki page
     /// (`[[skillet]]`, etc.).
     Cookware,
-    /// `@@./path/to/recipe{}` → wikilink to another recipe.
-    /// `target` is the relative path (cooklang convention),
-    /// not a basename.
+    /// A reference to another recipe — `[[Hot Honey]]{6}` in the
+    /// vault's own link syntax, or cooklang's `@@./hot-honey{}`.
+    /// `target` is whatever the reference named: a display name for
+    /// the wikilink form, a relative path for the cooklang one.
     RecipeRef,
     /// `[[wikilink]]` embedded in a step body — concept
     /// pages, techniques, related recipes. Cooklang treats
@@ -85,11 +86,18 @@ pub fn recipe_wiki_edges(recipe: &Recipe) -> Vec<WikiEdge> {
     }
 
     for path in recipe.nested_recipes.iter() {
-        out.push(WikiEdge {
-            source: recipe.path.clone(),
-            target: path.clone(),
-            kind: WikiEdgeKind::RecipeRef,
-        });
+        let key = (path.to_ascii_lowercase(), WikiEdgeKind::RecipeRef);
+        if seen.insert(key) {
+            out.push(WikiEdge {
+                source: recipe.path.clone(),
+                target: path.clone(),
+                kind: WikiEdgeKind::RecipeRef,
+            });
+        }
+        // A `[[Sauce]]{}` reference is a wikilink too, so claim it as a
+        // concept as well — otherwise the scan below re-emits the same
+        // target as a weaker `Concept` edge alongside this one.
+        seen.insert((path.to_ascii_lowercase(), WikiEdgeKind::Concept));
     }
 
     // `[[wikilinks]]` embedded in step text. Cooklang passes
@@ -119,6 +127,63 @@ pub fn recipe_wiki_edges(recipe: &Recipe) -> Vec<WikiEdge> {
         }
     }
 
+    out
+}
+
+/// A recipe called for by another recipe, written in the vault's own
+/// link syntax: `[[Hot Honey]]{6}`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecipeLink {
+    /// The wikilink target — a recipe's display name or file stem.
+    pub target: String,
+    /// Servings of the referenced recipe. `None` for `[[X]]{}`, which
+    /// means one whole batch of it.
+    pub servings: Option<f64>,
+}
+
+/// Find every `[[target]]{…}` in `s` — a recipe reference in vault
+/// link form.
+///
+/// The trailing brace is what makes it a reference, and it is not
+/// decoration. Recipes link to plenty of things that are not recipes —
+/// concepts, techniques, a "see also" pointing at another dish — and
+/// treating a bare `[[Garlic Pasta]]` as a reference would quietly
+/// add spaghetti to the shopping list of whatever mentioned it. So a
+/// bare wikilink stays an ordinary wiki edge, and only the braced form
+/// pulls a recipe in.
+#[must_use]
+pub fn scan_recipe_links(s: &str) -> Vec<RecipeLink> {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
+            let rest = &s[i + 2..];
+            if let Some(end) = rest.find("]]") {
+                let target = rest[..end].trim();
+                let target = target.split('|').next().unwrap_or(target).trim();
+                let after = &rest[end + 2..];
+                if !target.is_empty()
+                    && !target.contains('\n')
+                    && let Some(brace) = after.strip_prefix('{')
+                    && let Some(close) = brace.find('}')
+                {
+                    let qty = brace[..close].trim();
+                    out.push(RecipeLink {
+                        target: target.to_string(),
+                        servings: if qty.is_empty() {
+                            None
+                        } else {
+                            qty.parse::<f64>().ok()
+                        },
+                    });
+                }
+                i += 2 + end + 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
     out
 }
 
@@ -191,6 +256,23 @@ Reference [[render fat]] again to dedupe.
         // Dedup: "render fat" appears twice in source but
         // only once in edges.
         assert_eq!(concepts.iter().filter(|t| **t == "render fat").count(), 1);
+    }
+
+    #[test]
+    fn a_recipe_link_is_one_edge_not_two() {
+        let src = "Serve @rice{100%g} with [[Hot Honey]]{6}.";
+        let r = parse_cook("Cookbook/Bowl.cook", src).unwrap();
+        let edges = recipe_wiki_edges(&r);
+        let hits: Vec<&WikiEdge> = edges
+            .iter()
+            .filter(|e| e.target.eq_ignore_ascii_case("Hot Honey"))
+            .collect();
+        assert_eq!(hits.len(), 1, "one edge per link, got {hits:?}");
+        assert_eq!(
+            hits[0].kind,
+            WikiEdgeKind::RecipeRef,
+            "and it should be the specific kind, not a generic concept"
+        );
     }
 
     #[test]

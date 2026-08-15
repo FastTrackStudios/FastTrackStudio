@@ -17,13 +17,14 @@ use crate::track::{resolve_project, resolve_track};
 use daw_proto::{
     Automation, ProjectContext,
     automation::{
-        AddPointParams, Envelope, EnvelopeLocation, EnvelopePoint, EnvelopeRef, EnvelopeShape,
-        EnvelopeType, SetPointParams, TimeRangeParams,
+        AddAutomationItemParams, AddPointParams, AutomationItem, Envelope, EnvelopeLocation,
+        EnvelopePoint, EnvelopeRef, EnvelopeShape, EnvelopeType, LaneParams,
+        SetAutomationItemParams, SetPointParams, TimeRangeParams,
     },
     primitives::{AutomationMode, PositionInSeconds},
     track::TrackRef,
 };
-use daw_proto::{ItemRef, TakeEnvelopeKind, TakeRef};
+use daw_proto::{DawError, DawResult, Duration, ItemRef, TakeEnvelopeKind, TakeRef};
 use reaper_high::Reaper;
 use reaper_low::raw::TrackEnvelope;
 use reaper_medium::ProjectContext as ReaperProjectContext;
@@ -31,6 +32,52 @@ use tracing::debug;
 
 /// Map a raw REAPER shape index to the proto enum. Unknown values
 /// default to `Linear`.
+/// The theme's `envcp_min_height` — the floor a lane cannot go below.
+const ENVCP_MIN_HEIGHT: u32 = 27;
+
+/// Read an envelope's chunk, change its lane state, write it back.
+///
+/// Every one of visibility, arm, automation mode and the lane lives in
+/// the state chunk and nowhere else in REAPER's API, so they all take
+/// this one read-modify-splice-write path — and the splice leaves every
+/// other line (points, shapes, parameter identity) exactly as REAPER
+/// wrote it.
+fn edit_lane_state(
+    project: &ProjectContext,
+    location: &EnvelopeLocation,
+    f: impl FnOnce(&mut env_sw::LaneState),
+) -> DawResult<()> {
+    let env = resolve_envelope(project, location, IfMissing::Decline)
+        .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
+    let low = Reaper::get().medium_reaper().low();
+    let chunk = env_sw::get_envelope_state_chunk(low, env)
+        .ok_or_else(|| DawError::operation_failed("read envelope chunk"))?;
+    let mut state = env_sw::parse_lane_state(&chunk);
+    f(&mut state);
+    let patched = env_sw::splice_lane_state(&chunk, state);
+    if !env_sw::set_envelope_state_chunk(low, env, &patched) {
+        return Err(DawError::operation_failed("write envelope chunk"));
+    }
+    Ok(())
+}
+
+/// REAPER's automation-mode numbering, as `ACT`'s second field.
+///
+/// `-1` means "follow the track's mode", which is what Trim/Read is
+/// per-envelope. `Off` is not a mode in this field — REAPER expresses a
+/// bypassed envelope through `ACT`'s *first* field, so it is handled by
+/// the caller (see [`edit_lane_state`]) and maps to Trim/Read here.
+fn automation_mode_raw(mode: AutomationMode) -> i32 {
+    match mode {
+        AutomationMode::TrimRead | AutomationMode::Off => -1,
+        AutomationMode::Read => 1,
+        AutomationMode::Touch => 2,
+        AutomationMode::Write => 3,
+        AutomationMode::Latch => 4,
+        AutomationMode::LatchPreview => 5,
+    }
+}
+
 fn shape_from_raw(raw: i32) -> EnvelopeShape {
     match raw {
         0 => EnvelopeShape::Linear,
@@ -300,6 +347,13 @@ fn build_envelope(
     let low = Reaper::get().medium_reaper().low();
     let name = env_sw::get_envelope_name(low, env).unwrap_or_default();
     let point_count = env_sw::count_envelope_points(low, env);
+    // The lane facts live in the state chunk — `GetEnvelopeInfo_Value`'s
+    // `I_TCPH` reports the laid-out height, which is 0 for a lane that
+    // exists but is scrolled out, so the chunk is the honest source.
+    let lane = env_sw::get_envelope_state_chunk(low, env)
+        .map(|c| env_sw::parse_lane_state(&c))
+        .unwrap_or_default();
+    let automation_item_count = env_sw::count_automation_items(low, env);
     Envelope {
         track_guid: track_guid.to_string(),
         envelope_type,
@@ -311,6 +365,9 @@ fn build_envelope(
         visible: true,
         armed: false,
         automation_mode: AutomationMode::TrimRead,
+        in_own_lane: lane.in_own_lane,
+        lane_height: lane.height,
+        automation_item_count,
         point_count,
     }
 }
@@ -402,21 +459,182 @@ impl Automation for crate::Reaper {
         Some(build_envelope(&track_guid, ty, env))
     }
 
-    fn set_visible(&self, _project: ProjectContext, _location: EnvelopeLocation, _visible: bool) {
-        debug!("Reaper::set_visible — Phase 2, not implemented");
+    fn set_visible(&self, project: ProjectContext, location: EnvelopeLocation, visible: bool) {
+        debug!("Reaper::set_visible");
+        let _ = edit_lane_state(&project, &location, |s| s.visible = visible);
     }
 
-    fn set_armed(&self, _project: ProjectContext, _location: EnvelopeLocation, _armed: bool) {
-        debug!("Reaper::set_armed — Phase 2, not implemented");
+    fn set_armed(&self, project: ProjectContext, location: EnvelopeLocation, armed: bool) {
+        debug!("Reaper::set_armed");
+        let _ = edit_lane_state(&project, &location, |s| s.armed = armed);
+    }
+
+    fn set_lane(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        lane: LaneParams,
+    ) -> DawResult<()> {
+        edit_lane_state(&project, &location, |s| {
+            s.in_own_lane = lane.in_own_lane;
+            // REAPER clamps its own minimum; passing the theme's floor
+            // keeps a drag past the stop from writing an unusable height.
+            s.height = if lane.in_own_lane {
+                lane.height.max(ENVCP_MIN_HEIGHT)
+            } else {
+                0
+            };
+            // A lane nobody can see is not what "give it a lane" means.
+            if lane.in_own_lane {
+                s.visible = true;
+            }
+        })
+    }
+
+    fn automation_items(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+    ) -> Vec<AutomationItem> {
+        let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) else {
+            return Vec::new();
+        };
+        let low = Reaper::get().medium_reaper().low();
+        let count = env_sw::count_automation_items(low, env);
+        (0..count)
+            .map(|index| {
+                let f = |desc: &str| env_sw::get_automation_item_info(low, env, index, desc);
+                AutomationItem {
+                    index,
+                    pool_id: f("P_POOL_ID") as i32,
+                    name: env_sw::get_automation_item_name(low, env, index).unwrap_or_default(),
+                    position: PositionInSeconds::from_seconds(f("D_POS")),
+                    length: Duration::from_seconds(f("D_LENGTH")),
+                    start_offset: Duration::from_seconds(f("D_STARTOFFS")),
+                    play_rate: f("D_PLAYRATE"),
+                    baseline: f("D_BASELINE"),
+                    amplitude: f("D_AMPLITUDE"),
+                    loop_source: f("D_LOOPSRC") != 0.0,
+                    selected: f("D_UISEL") != 0.0,
+                }
+            })
+            .collect()
+    }
+
+    fn automation_item_points(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        index: u32,
+    ) -> Vec<EnvelopePoint> {
+        let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) else {
+            return Vec::new();
+        };
+        let low = Reaper::get().medium_reaper().low();
+        env_sw::get_automation_item_points(low, env, index)
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| EnvelopePoint {
+                index: i as u32,
+                time: PositionInSeconds::from_seconds(p.time),
+                value: p.value,
+                shape: shape_from_raw(p.shape),
+                tension: p.tension,
+                selected: p.selected,
+            })
+            .collect()
+    }
+
+    fn add_automation_item(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: AddAutomationItemParams,
+    ) -> DawResult<u32> {
+        // Create the envelope if it is missing: adding automation to a
+        // parameter that has none is the ordinary way to start.
+        let env = resolve_envelope(&project, &location, IfMissing::Create)
+            .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
+        let low = Reaper::get().medium_reaper().low();
+        env_sw::insert_automation_item(
+            low,
+            env,
+            params.pool_id,
+            params.position.as_seconds(),
+            params.length.as_seconds(),
+        )
+        .ok_or_else(|| DawError::operation_failed("insert automation item"))
+    }
+
+    fn set_automation_item(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: SetAutomationItemParams,
+    ) -> DawResult<()> {
+        let env = resolve_envelope(&project, &location, IfMissing::Decline)
+            .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
+        let low = Reaper::get().medium_reaper().low();
+        let mut set = |desc: &str, value: f64| {
+            env_sw::set_automation_item_info(low, env, params.index, desc, value)
+        };
+        if let Some(v) = params.position {
+            set("D_POS", v.as_seconds());
+        }
+        if let Some(v) = params.length {
+            set("D_LENGTH", v.as_seconds());
+        }
+        if let Some(v) = params.start_offset {
+            set("D_STARTOFFS", v.as_seconds());
+        }
+        if let Some(v) = params.play_rate {
+            set("D_PLAYRATE", v);
+        }
+        if let Some(v) = params.baseline {
+            set("D_BASELINE", v);
+        }
+        if let Some(v) = params.amplitude {
+            set("D_AMPLITUDE", v);
+        }
+        if let Some(v) = params.loop_source {
+            set("D_LOOPSRC", if v { 1.0 } else { 0.0 });
+        }
+        if let Some(v) = params.selected {
+            set("D_UISEL", if v { 1.0 } else { 0.0 });
+        }
+        Ok(())
+    }
+
+    fn delete_automation_item(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        index: u32,
+    ) -> DawResult<()> {
+        let env = resolve_envelope(&project, &location, IfMissing::Decline)
+            .ok_or_else(|| DawError::not_found("envelope", "the location does not resolve"))?;
+        let low = Reaper::get().medium_reaper().low();
+        // REAPER has no delete call: a zero length is how an automation
+        // item is removed through this API.
+        env_sw::set_automation_item_info(low, env, index, "D_LENGTH", 0.0);
+        Ok(())
     }
 
     fn set_automation_mode(
         &self,
-        _project: ProjectContext,
-        _location: EnvelopeLocation,
-        _mode: AutomationMode,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        mode: AutomationMode,
     ) {
-        debug!("Reaper::set_automation_mode — Phase 2, not implemented");
+        debug!("Reaper::set_automation_mode");
+        let raw = automation_mode_raw(mode);
+        // `Off` is REAPER's inactive envelope, which is `ACT`'s first
+        // field rather than a mode number.
+        let active = mode != AutomationMode::Off;
+        let _ = edit_lane_state(&project, &location, |s| {
+            s.automation_mode = raw;
+            s.active = active;
+        });
     }
 
     fn points(&self, project: ProjectContext, location: EnvelopeLocation) -> Vec<EnvelopePoint> {

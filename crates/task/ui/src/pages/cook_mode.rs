@@ -18,7 +18,8 @@ use std::collections::HashSet;
 use cookbook_proto::{Recipe, RecipeTimer};
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    Check, CircleCheck, Clock, Flame, Play, Receipt, TriangleAlert, Users, UtensilsCrossed, X,
+    Check, CircleCheck, Clock, Flame, Play, Receipt, ShoppingCart, TriangleAlert, Users,
+    UtensilsCrossed, X,
 };
 use fts_ui::prelude::*;
 use mealplan_proto::{CookReceipt, Fulfillment, SkipReason};
@@ -35,8 +36,64 @@ struct RunningTimer {
     remaining: u32,
 }
 
+/// One stage of the walkthrough. The cook works through these in order:
+/// gather everything, then one phase per cooklang `= Section` — so a
+/// recipe written with `= Prep` / `= Cook` walks as Gather → Prep →
+/// Cook. A recipe with no headings collapses to a single "Steps" phase,
+/// which reads exactly like the old flat list.
+#[derive(Clone, PartialEq)]
+enum Phase {
+    /// The ingredient checklist.
+    Gather,
+    /// A named run of steps — `label` plus indices into `cook_steps`.
+    Steps { label: String, steps: Vec<usize> },
+}
+
+impl Phase {
+    fn label(&self) -> &str {
+        match self {
+            Phase::Gather => "Gather",
+            Phase::Steps { label, .. } => label,
+        }
+    }
+}
+
+/// Split a recipe into walkthrough phases: the gather list (when the
+/// recipe has ingredients) followed by one phase per consecutive run of
+/// steps sharing a section name.
+fn build_phases(recipe: &Recipe) -> Vec<Phase> {
+    let mut out = Vec::new();
+    if !recipe.ingredients.is_empty() {
+        out.push(Phase::Gather);
+    }
+
+    let mut current: Option<(Option<String>, Vec<usize>)> = None;
+    for (i, step) in recipe.cook_steps.iter().enumerate() {
+        match &mut current {
+            Some((name, idxs)) if *name == step.section => idxs.push(i),
+            _ => {
+                if let Some((name, steps)) = current.take() {
+                    out.push(Phase::Steps {
+                        label: name.unwrap_or_else(|| "Steps".to_string()),
+                        steps,
+                    });
+                }
+                current = Some((step.section.clone(), vec![i]));
+            }
+        }
+    }
+    if let Some((name, steps)) = current {
+        out.push(Phase::Steps {
+            label: name.unwrap_or_else(|| "Steps".to_string()),
+            steps,
+        });
+    }
+    out
+}
+
 #[component]
 pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
+    let nav_to_shopping = use_navigator();
     let mut timers = use_signal(Vec::<RunningTimer>::new);
     let mut next_id = use_signal(|| 0u64);
     let mut gathered = use_signal(HashSet::<usize>::new);
@@ -62,13 +119,15 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
     // ingredients we couldn't touch. Pinned under the header until
     // dismissed so the cook can see what was used and what wasn't.
     let mut receipt = use_signal(|| None::<CookReceipt>);
-    let recipe_path = recipe.path.clone();
+    // Held in a signal, not captured directly, so `mark_cooked` stays
+    // `Copy` — the header and the footer both call it.
+    let recipe_path = use_signal(|| recipe.path.clone());
     let mut mark_cooked = move || {
         if deducting() {
             return;
         }
         let Some(s) = slug() else { return };
-        let path = recipe_path.clone();
+        let path = recipe_path();
         let servings = target_servings();
         deducting.set(true);
         spawn(async move {
@@ -116,6 +175,57 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                 }
             }
             checking.set(false);
+        });
+    };
+
+    // "Add missing to shopping list" — the shortages the pantry check
+    // just reported, appended to the working list (created on first
+    // use). Navigates there so the run is ready to walk.
+    let mut listing = use_signal(|| false);
+    let mut add_to_list = move || {
+        if listing() {
+            return;
+        }
+        let Some(s) = slug() else { return };
+        let path = recipe_path();
+        let servings = target_servings();
+        listing.set(true);
+        spawn(async move {
+            match crate::pages::shopping::add_recipe_shortages(&s, path, servings).await {
+                Ok(l) => {
+                    notices.info(format!("Added to “{}”.", l.name));
+                    nav_to_shopping.push(crate::routes::Route::ShoppingRoute {});
+                }
+                Err(e) => {
+                    notices.error(format!("Couldn't build the shopping list: {e}"));
+                }
+            }
+            listing.set(false);
+        });
+    };
+
+    // "Make a shopping list" — every ingredient, not just what the
+    // pantry thinks is short, so the kitchen pass is a real look at a
+    // real shelf.
+    let mut gather_list = move || {
+        if listing() {
+            return;
+        }
+        let Some(s) = slug() else { return };
+        let path = recipe_path();
+        let servings = target_servings();
+        listing.set(true);
+        spawn(async move {
+            match crate::pages::shopping::add_recipe_gather_list(&s, path, servings).await {
+                Ok(l) => {
+                    notices.info(format!("Added to \u{201c}{}\u{201d}.", l.name));
+                    nav_to_shopping.push(crate::routes::Route::ShoppingRoute {});
+                }
+                Err(e) => {
+                    notices.error(format!("Couldn't build the shopping list: {e}"));
+                }
+            }
+            listing.set(false);
         });
     };
 
@@ -174,6 +284,25 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
     let prechecked = precheck.read().clone();
     let total_steps = recipe.cook_steps.len().max(recipe.steps.len());
     let done_count = done_steps.read().len();
+
+    // Walkthrough state. `active` is clamped rather than trusted so a
+    // recipe that reloads with fewer phases can't strand the cook on an
+    // index that no longer exists.
+    let mut active = use_signal(|| 0usize);
+    let phases = build_phases(&recipe);
+    let phase_count = phases.len();
+    let active_idx = active().min(phase_count.saturating_sub(1));
+    let gathered_now = gathered.read().clone();
+    let done_now = done_steps.read().clone();
+    let phase_done: Vec<bool> = phases
+        .iter()
+        .map(|p| match p {
+            Phase::Gather => (0..recipe.ingredients.len()).all(|i| gathered_now.contains(&i)),
+            Phase::Steps { steps, .. } => steps.iter().all(|i| done_now.contains(i)),
+        })
+        .collect();
+    let current_phase = phases.get(active_idx).cloned();
+    let next_label = phases.get(active_idx + 1).map(|p| p.label().to_string());
 
     rsx! {
         div { class: "fixed inset-0 z-50 flex flex-col bg-background text-foreground",
@@ -299,6 +428,18 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                                     }
                                 }
                             }
+                            // Turn the shortages into a shopping run in
+                            // one tap, rather than copying them by hand.
+                            div { class: "flex justify-end",
+                                Button {
+                                    variant: ButtonVariant::Secondary,
+                                    size: ButtonSize::Small,
+                                    disabled: listing(),
+                                    on_click: move |_| add_to_list(),
+                                    ShoppingCart { size: 14 }
+                                    if listing() { "Adding…" } else { "Add missing to shopping list" }
+                                }
+                            }
                         }
                         if !f.have.is_empty() {
                             details { class: "text-sm",
@@ -375,13 +516,62 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                 }
             }
 
+            // ── Phase rail ───────────────────────────────────────
+            // Gather → Prep → Cook, straight off the recipe's cooklang
+            // sections. Tappable so the cook can jump back mid-cook;
+            // a completed phase keeps its tick.
+            if phase_count > 1 {
+                nav {
+                    class: "flex gap-1.5 overflow-x-auto border-b border-border px-3 py-2",
+                    aria_label: "Cooking phases",
+                    for (pi, ph) in phases.iter().enumerate() {
+                        {
+                            let label = ph.label().to_string();
+                            let complete = phase_done[pi];
+                            let current = pi == active_idx;
+                            let cls = if current {
+                                "border-primary bg-primary/15 text-foreground"
+                            } else if complete {
+                                "border-success/50 bg-success/10 text-success"
+                            } else {
+                                "border-border text-muted-foreground hover:bg-muted"
+                            };
+                            rsx! {
+                                button {
+                                    key: "{pi}",
+                                    class: "inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors {cls}",
+                                    aria_current: if current { "step" },
+                                    onclick: move |_| active.set(pi),
+                                    if complete { Check { size: 13 } }
+                                    "{label}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── Scrollable body ──────────────────────────────────
-            div { class: "flex-1 overflow-y-auto px-3 pb-[calc(2rem+env(safe-area-inset-bottom,0px))] pt-3",
+            div { class: "flex-1 overflow-y-auto px-3 pb-6 pt-3",
                 div { class: "mx-auto flex w-full max-w-2xl flex-col gap-5",
 
                     // Ingredients — tap to check off as you gather.
-                    if !recipe.ingredients.is_empty() {
+                    if matches!(current_phase, Some(Phase::Gather)) {
                         section { class: "flex flex-col gap-2",
+                            // Take the whole ingredient list shopping —
+                            // check the shelves there, buy what's missing.
+                            // Not the same as the pantry check's
+                            // "add missing", which trusts recorded stock.
+                            div { class: "flex justify-end",
+                                Button {
+                                    variant: ButtonVariant::Ghost,
+                                    size: ButtonSize::Small,
+                                    disabled: listing(),
+                                    on_click: move |_| gather_list(),
+                                    ShoppingCart { size: 14 }
+                                    "Make a shopping list"
+                                }
+                            }
                             div { class: "flex items-center justify-between gap-3",
                                 Heading { level: HeadingLevel::H3, class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground", "Ingredients" }
                                 // Servings scaler — only when the recipe declares a yield.
@@ -447,10 +637,14 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                     }
 
                     // Steps — each with its inline text + one-tap timers.
+                    // Only the active phase's steps render, so the cook
+                    // sees prep on its own, then the cook itself.
+                    if let Some(Phase::Steps { label, steps }) = &current_phase {
                     section { class: "flex flex-col gap-2",
-                        Heading { level: HeadingLevel::H3, class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground", "Steps" }
-                        for (i, step) in recipe.cook_steps.iter().enumerate() {
+                        Heading { level: HeadingLevel::H3, class: "text-sm font-semibold uppercase tracking-wide text-muted-foreground", "{label}" }
+                        for i in steps.iter().copied() {
                             {
+                                let step = &recipe.cook_steps[i];
                                 let done = done_steps.read().contains(&i);
                                 let card = if done {
                                     "border-border/60 bg-card/30 opacity-60"
@@ -508,26 +702,68 @@ pub fn CookMode(recipe: Recipe, on_close: EventHandler<()>) -> Element {
                             }
                         }
                     }
+                    }
+                }
+            }
+
+            // ── Walkthrough footer ───────────────────────────────
+            // The one big control: finish this phase, move to the next.
+            // Hidden for single-phase recipes, which have nowhere to go.
+            if phase_count > 1 {
+                div { class: "border-t border-border bg-card/40 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]",
+                    div { class: "mx-auto flex w-full max-w-2xl items-center gap-2",
+                        if active_idx > 0 {
+                            Button {
+                                variant: ButtonVariant::Secondary,
+                                on_click: move |_| active.set(active_idx - 1),
+                                "Back"
+                            }
+                        }
+                        div { class: "flex-1" }
+                        if let Some(next) = next_label {
+                            Button {
+                                on_click: move |_| active.set(active_idx + 1),
+                                "Next: {next}"
+                            }
+                        } else {
+                            Button {
+                                variant: ButtonVariant::Secondary,
+                                disabled: deducting(),
+                                on_click: move |_| mark_cooked(),
+                                UtensilsCrossed { size: 14 }
+                                "Done — cooked it"
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/// The gather-list quantity prefix, scaled by `factor`. Scales the
-/// numeric `qty` when present; otherwise keeps the original display
-/// form (ranges / fractions / text) unscaled — at `factor == 1` it
-/// reads exactly as written.
-fn scaled_qty(ing: &cookbook_proto::Ingredient, factor: f64) -> String {
-    match ing.qty {
-        Some(q) => {
-            let num = fmt_num(q * factor);
-            if ing.unit.is_empty() {
-                num
-            } else {
-                format!("{num} {}", ing.unit)
-            }
-        }
+/// The quantity prefix for an ingredient, scaled by `factor`.
+///
+/// Three things the parser tells us and this has to honour:
+///
+/// - **Pinned quantities don't move.** `@salt{=1%tsp}` seasons the pan,
+///   not each head, so cooklang marks it `scalable: false` and doubling
+///   the recipe must leave it alone.
+/// - **A range stays a range.** `1-2 tbsp` doubled is `2-4 tbsp`; both
+///   ends scale.
+/// - **Text quantities are untouchable.** There is no twice-a-pinch, so
+///   `qty: None` falls back to the written form.
+///
+/// At `factor == 1` the result reads exactly as written.
+pub(crate) fn scaled_qty(ing: &cookbook_proto::Ingredient, factor: f64) -> String {
+    let f = if ing.scalable { factor } else { 1.0 };
+    let num = match (ing.qty, ing.qty_max) {
+        (Some(lo), Some(hi)) => Some(format!("{}–{}", fmt_num(lo * f), fmt_num(hi * f))),
+        (Some(q), None) => Some(fmt_num(q * f)),
+        _ => None,
+    };
+    match num {
+        Some(n) if ing.unit.is_empty() => n,
+        Some(n) => format!("{n} {}", ing.unit),
         None => match (&ing.qty_display, ing.unit.as_str()) {
             (Some(q), "") => q.clone(),
             (Some(q), u) => format!("{q} {u}"),
@@ -549,7 +785,7 @@ fn skip_reason_label(reason: SkipReason) -> &'static str {
 
 /// Trim a scaled quantity to a tidy form — whole numbers lose the
 /// decimal, others keep up to two places without trailing zeros.
-fn fmt_num(v: f64) -> String {
+pub(crate) fn fmt_num(v: f64) -> String {
     if (v.fract()).abs() < 1e-9 {
         format!("{}", v.round() as i64)
     } else {

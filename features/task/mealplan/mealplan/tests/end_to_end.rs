@@ -180,6 +180,7 @@ Toss with @butter{20%g} and shaved @truffles{5%g}.
         source_url: None,
         date_modified: None,
         source: recipe_src.into(),
+        images: Default::default(),
     };
     draft = cookbook.create(draft).unwrap();
     assert_eq!(draft.servings, Some(2));
@@ -261,6 +262,8 @@ Toss with @butter{20%g} and shaved @truffles{5%g}.
             name: "Weekly Grocery Run".into(),
             store_location_id: None,
             entries: mealplan::shopping::ShoppingEntries::default(),
+            is_template: false,
+            from_template: None,
             date_created: None,
             date_modified: None,
             details: String::new(),

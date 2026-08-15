@@ -20,7 +20,7 @@ pub mod service;
 
 pub use model::{
     CookStep, CookSteps, Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeTimer,
-    StringList,
+    RecipeImage, RecipeImages, StepCookware, StepIngredient, StringList,
 };
 pub use service::{CookbookError, CookbookService, CookbookServiceRpc};
 

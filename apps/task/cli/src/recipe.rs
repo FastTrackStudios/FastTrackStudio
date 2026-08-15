@@ -51,6 +51,23 @@ pub(crate) enum RecipeCmd {
     /// Fulfillment check against the pantry: have / missing /
     /// substitution suggestions.
     CanCook(crate::mealprep::CanCookArgs),
+    /// Attach a picture to a recipe. Names it by the cooklang
+    /// convention — `<recipe>.jpg` is the dish, `<recipe>.<n>.jpg`
+    /// belongs to step `n` — so the cookbook stays portable to the
+    /// other tools that read it.
+    Image {
+        /// Recipe path, display name, or file stem.
+        recipe: String,
+        /// Local image file to upload.
+        file: std::path::PathBuf,
+        /// Attach to this step instead of the dish itself (0-based).
+        #[arg(long)]
+        step: Option<u32>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     Delete {
         path: String,
         #[arg(long, short = 'y')]
@@ -141,6 +158,40 @@ pub(crate) async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
         RecipeCmd::Update(a) => return crate::mealprep::recipe_update(a).await,
         RecipeCmd::Show(a) => return crate::mealprep::recipe_show(a).await,
         RecipeCmd::CanCook(a) => return crate::mealprep::recipe_can_cook(a).await,
+        RecipeCmd::Image {
+            recipe,
+            file,
+            step,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_cookbook_client(&u).await?;
+            let target = crate::mealprep::resolve_recipe(&client, &recipe)
+                .await?
+                .path;
+
+            let ext = file
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
+                .unwrap_or_else(|| "jpg".into());
+            let stem = target.trim_end_matches(".cook");
+            let dest = match step {
+                Some(n) => format!("{stem}.{n}.{ext}"),
+                None => format!("{stem}.{ext}"),
+            };
+
+            let bytes =
+                std::fs::read(&file).map_err(|e| eyre::eyre!("read {}: {e}", file.display()))?;
+            let len = bytes.len();
+            client
+                .put_image(dest.clone(), bytes)
+                .await
+                .map_err(|e| eyre::eyre!("put image: {e:?}"))?;
+            println!("attached {dest} ({len} bytes)");
+        }
         RecipeCmd::Delete {
             path,
             yes,

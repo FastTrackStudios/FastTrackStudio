@@ -10,5 +10,5 @@
 
 pub use cookbook_proto::model::{
     CookStep, CookSteps, Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeTimer,
-    StringList,
+    RecipeImage, RecipeImages, StepCookware, StepIngredient, StringList,
 };

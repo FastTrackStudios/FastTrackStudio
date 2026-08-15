@@ -56,4 +56,20 @@ pub trait CookbookService {
     /// caller saves it via [`CookbookService::create`]. Async: it does
     /// network I/O server-side, so the wasm client just awaits it.
     async fn import(&self, url: String) -> Result<Recipe, CookbookError>;
+
+    /// Raw bytes of one image belonging to the cookbook, addressed by
+    /// the wiki-relative path in [`Recipe::images`].
+    ///
+    /// Served over the existing per-org RPC rather than a new public
+    /// HTTP route: the images sit in the wiki beside the recipes, and
+    /// an unauthenticated path into that tree is a bigger thing to own
+    /// than a method behind the permit system already guarding recipes.
+    fn image(&self, path: &str) -> Result<Vec<u8>, CookbookError>;
+
+    /// Write one image into the cookbook, addressed the same way
+    /// [`CookbookService::image`] reads it. Overwrites.
+    ///
+    /// The counterpart to the reader, and it needs the same suspicion:
+    /// this puts caller-supplied bytes at a caller-supplied path.
+    fn put_image(&self, path: &str, bytes: Vec<u8>) -> Result<(), CookbookError>;
 }

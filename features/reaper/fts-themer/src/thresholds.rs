@@ -75,23 +75,134 @@ pub fn generated_lines() -> Vec<Threshold> {
 pub fn section_heights_agree(text: &str) -> Vec<String> {
     let bands = daw_theme_art::collapse::REAPER_BANDS;
     let mut wrong = Vec::new();
-    // Matched word-wise, not by prefix: the file aligns its columns with
-    // tabs, so `starts_with("set fx_sec ")` finds nothing and reports drift
-    // on a file that is perfectly correct.
     for (name, number, what) in [
         ("fx_sec", bands.fx, "fx section"),
         ("in_sec", bands.input_full, "input section"),
         ("bot_sec_h", bands.bottom, "bottom section"),
     ] {
-        let Some(line) = text.lines().find(|l| is_set_of(l, name)) else {
-            wrong.push(format!("{what}: `set {name}` is not in the layout file"));
-            continue;
-        };
         let wanted = format_value(number);
-        if !line.split_whitespace().any(|w| w.trim_end_matches("@h") == wanted) {
-            wrong.push(format!("{what}: the theme does not state {wanted} — `{}`", line.trim()));
+        match first_set_states(text, name, &wanted) {
+            None => wrong.push(format!("{what}: `set {name}` is not in the layout file")),
+            Some((line, false)) => wrong.push(format!(
+                "{what}: the theme does not state {wanted} — `{}`",
+                line.trim()
+            )),
+            Some((_, true)) => {}
         }
     }
+    wrong
+}
+
+/// Does the *first* `set name` line state `wanted` as a bare word?
+///
+/// Word-wise, not by prefix: the file aligns its columns with tabs, so
+/// `starts_with("set fx_sec ")` finds nothing and reports drift on a file
+/// that is perfectly correct. `@h`-suffixed words count — heights are
+/// written `33@h`. The first definition on purpose: later `set` lines are
+/// scale variants, and scanning all of them would accept a value that
+/// belongs to a different mode (narrowMode's 54 beside wide's 86).
+fn first_set_states<'t>(text: &'t str, name: &str, wanted: &str) -> Option<(&'t str, bool)> {
+    let line = text.lines().find(|l| is_set_of(l, name))?;
+    let states = line.split_whitespace().any(|w| w.trim_end_matches("@h") == wanted);
+    Some((line, states))
+}
+
+/// Do the theme's stated offsets still match the geometry constants?
+///
+/// #239: the strip lays out on `daw_theme_art::geometry::mcp`, whose
+/// numbers come off `rtconfig.txt`'s `[dx dy w h]` literals — the column
+/// chain, the record arm's cell, the input fields. Those literals sit
+/// inside expressions this tool must not rewrite, so like
+/// [`section_heights_agree`] they are checked rather than written: find the
+/// lines that define each name, and ask whether any of them still states
+/// the group the constant came from. Coarse on purpose — the question is
+/// only "has one of these numbers moved without the other".
+///
+/// A name may be `set` many times (scale variants, mode branches); the
+/// group only has to appear on one of them, because that is the line the
+/// constant was read from.
+pub fn offsets_agree(text: &str) -> Vec<String> {
+    use daw_theme_art::geometry::mcp as g;
+
+    let quad = |a: f32, b: f32, c: f32, d: f32| {
+        format!(
+            "[{} {} {} {}]",
+            format_value(a),
+            format_value(b),
+            format_value(c),
+            format_value(d)
+        )
+    };
+
+    // Each entry: the WALTER name, the literal the geometry constants
+    // were read from, and what it positions. Every number in a quad is a
+    // named constant — a literal that existed only inside this guard was
+    // a check nobody could act on when it fired.
+    let stated = [
+        ("mcp.recarm", quad(0.0, 0.0, g::ARM_CELL_W, g::ARM_CELL_H), "the record arm's cell"),
+        (
+            "mcp.recmon",
+            quad(g::RECMON_DX, g::RECMON_FROM_ARM, g::BUTTON_W, g::BUTTON_H),
+            "recmon's step off the arm",
+        ),
+        (
+            "mcp.mute",
+            quad(0.0, g::MUTE_FROM_RECMON, g::BUTTON_W, g::BUTTON_H),
+            "mute's step off recmon",
+        ),
+        (
+            "mcp.solo",
+            quad(0.0, g::SOLO_FROM_MUTE, g::BUTTON_W, g::BUTTON_H),
+            "solo's step off mute",
+        ),
+        (
+            "mcp.io",
+            quad(g::IO_DX, g::IO_FROM_SOLO, g::IO_W, g::IO_H),
+            "io's step off solo",
+        ),
+        (
+            "mcp.env",
+            quad(g::ENV_DX, -g::ENV_FROM_FLOOR, g::ENV_W, g::ENV_FROM_FLOOR),
+            "envelope's hang above the stretch floor",
+        ),
+        (
+            "mcp.phase",
+            quad(g::PHASE_DX, -g::PHASE_FROM_ENV, g::PHASE_W, g::PHASE_FROM_ENV),
+            "phase's step off envelope",
+        ),
+        (
+            "mcp.recinput",
+            quad(g::RECINPUT_X, 0.0, g::RECINPUT_W, g::INPUT_FIELD_H),
+            "the record-input field",
+        ),
+    ];
+
+    let mut wrong = Vec::new();
+    for (name, group, what) in stated {
+        let mut lines = text.lines().filter(|l| is_set_of(l, name)).peekable();
+        if lines.peek().is_none() {
+            wrong.push(format!("{what}: `set {name}` is not in the layout file"));
+            continue;
+        }
+        if !lines.any(|l| l.contains(&group)) {
+            wrong.push(format!("{what}: no `set {name}` line states {group}"));
+        }
+    }
+
+    // The strip's width is a bare value in the same kind of expression, so
+    // it gets exactly the section-heights treatment — the same predicate,
+    // first definition only, so narrowMode's 54 on a later line cannot
+    // stand in for wide's 86.
+    let wanted = format_value(g::STRIP_W);
+    match first_set_states(text, "mcp_w", &wanted) {
+        None => wrong.push("strip width: `set mcp_w` is not in the layout file".to_string()),
+        Some((line, false)) => wrong.push(format!(
+            "strip width: the theme does not state {wanted} — `{}`",
+            line.trim()
+        )),
+        Some((_, true)) => {}
+    }
+
     wrong
 }
 
@@ -314,5 +425,19 @@ mod tests {
     fn an_unknown_threshold_is_an_error_not_an_insertion() {
         let bogus = [Threshold { name: "hide_nothing", value: 1.0 }];
         assert!(splice(&sample(), &bogus).is_err());
+    }
+
+    /// The offsets guard is not vacuous: a line whose group has moved is
+    /// reported, by name. (The shipped file passing is the other half,
+    /// tested in `thresholds_match_the_theme`.)
+    #[test]
+    fn a_moved_offset_is_reported() {
+        // recmon's dy nudged from 20 to 21 — one number, one row of drift.
+        let text = "set mcp.recmon + + [0 padding] [mcp.recarm mcp.recarm] * scale [7 21 21 20]\n";
+        let wrong = offsets_agree(text);
+        assert!(
+            wrong.iter().any(|w| w.contains("mcp.recmon")),
+            "the moved recmon step went unreported: {wrong:#?}"
+        );
     }
 }

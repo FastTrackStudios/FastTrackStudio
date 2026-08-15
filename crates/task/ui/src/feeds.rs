@@ -18,7 +18,12 @@ use task_ui_core::feeds::{collect, fan_out, fan_out_tagged};
 
 /// Active projects across the selected orgs (concurrent fan-out).
 pub async fn fetch_projects(slugs: &[String]) -> Result<Vec<ProjectInfo>, String> {
-    fan_out(slugs, "list", |c: project_proto::ProjectServiceClient| async move { c.list().await }).await
+    fan_out(
+        slugs,
+        "list",
+        |c: project_proto::ProjectServiceClient| async move { c.list().await },
+    )
+    .await
 }
 
 /// Tasks across the selected orgs (concurrent fan-out).
@@ -34,9 +39,11 @@ pub async fn fetch_tasks(slugs: &[String]) -> Result<Vec<DbTask>, String> {
 /// org it came from — feeds the shared project store so mutations and
 /// the detail page can route back to the owning org.
 pub async fn fetch_projects_tagged(slugs: &[String]) -> Result<Vec<(String, ProjectInfo)>, String> {
-    fan_out_tagged(slugs, "list", |c: project_proto::ProjectServiceClient| async move {
-        c.list().await
-    })
+    fan_out_tagged(
+        slugs,
+        "list",
+        |c: project_proto::ProjectServiceClient| async move { c.list().await },
+    )
     .await
 }
 
@@ -44,14 +51,26 @@ pub async fn fetch_projects_tagged(slugs: &[String]) -> Result<Vec<(String, Proj
 /// it came from — so mutations can be routed back to the right org's
 /// `TaskService` when viewing "All".
 pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)>, String> {
-    fan_out_tagged(slugs, "list", |c: task_proto::TaskServiceClient| async move { c.list().await }).await
+    fan_out_tagged(
+        slugs,
+        "list",
+        |c: task_proto::TaskServiceClient| async move { c.list().await },
+    )
+    .await
 }
 
 /// Goals across the selected orgs, each paired with the slug of the
 /// org it came from — feeds the shared goal store (the `/goals` page
 /// renders the merged hierarchy; the slug tag keys the live fold).
-pub async fn fetch_goals_tagged(slugs: &[String]) -> Result<Vec<(String, goal_proto::Goal)>, String> {
-    fan_out_tagged(slugs, "list", |c: goal_proto::GoalServiceClient| async move { c.list().await }).await
+pub async fn fetch_goals_tagged(
+    slugs: &[String],
+) -> Result<Vec<(String, goal_proto::Goal)>, String> {
+    fan_out_tagged(
+        slugs,
+        "list",
+        |c: goal_proto::GoalServiceClient| async move { c.list().await },
+    )
+    .await
 }
 
 feeds! {
@@ -350,7 +369,11 @@ feeds! {
 /// Promote an inbox item into a Task — `title` is the headline, `details`
 /// the markdown body. Returns the created task (its `path` is the
 /// provenance back-link to store in `processed_into`).
-pub async fn create_task(slug: &str, title: &str, details: &str) -> Result<task_proto::TaskInfo, String> {
+pub async fn create_task(
+    slug: &str,
+    title: &str,
+    details: &str,
+) -> Result<task_proto::TaskInfo, String> {
     let client = crate::vox_clients::establish_for::<task_proto::TaskServiceClient>(slug).await?;
     let t = task_proto::TaskInfo {
         id: uuid::Uuid::nil(),
@@ -545,6 +568,13 @@ feeds! {
         import_recipe(url: String) -> cookbook_proto::Recipe
             = import(url) as "import recipe";
 
+        /// Raw bytes of one recipe image, addressed by the wiki-relative
+        /// path carried on `Recipe::images`. Served over the org's RPC
+        /// rather than a public HTTP route, so it inherits the same
+        /// permit gate as the recipes themselves.
+        fetch_recipe_image(path: String) -> Vec<u8>
+            = image(path) as "recipe image";
+
         /// Save edits to a recipe's `.cook` source. The server writes the
         /// source verbatim then re-parses, so the returned recipe carries fresh
         /// structured steps / ingredients / timers.
@@ -585,6 +615,64 @@ feeds! {
         /// backend lists them.
         fetch_meal_plans() -> Vec<mealplan_proto::Meal>
             = list() as "list meal plans";
+    }
+
+    mealplan_proto::ShoppingServiceClient {
+        /// Every shopping list in the org's vault — live runs and the
+        /// reusable templates alongside them (tell them apart by
+        /// `is_template`).
+        fetch_shopping_lists() -> Vec<mealplan_proto::ShoppingList>
+            = list() as "list shopping lists";
+
+        /// Create a list from a caller-built draft; the backend assigns
+        /// the vault `path` and stamps the dates.
+        create_shopping_list(list: mealplan_proto::ShoppingList) -> mealplan_proto::ShoppingList
+            = create(list) as "create shopping list";
+
+        /// Save edits (renames, hand-added rows) verbatim.
+        update_shopping_list(list: mealplan_proto::ShoppingList) -> mealplan_proto::ShoppingList
+            = update(list) as "update shopping list";
+
+        /// First pass: tick a row off because it's already in the
+        /// kitchen. Deliberately no pantry write — pass `have = false`
+        /// to put it back on the list.
+        mark_have(list_id: String, entry_id: String, have: bool) -> mealplan_proto::ShoppingList
+            = mark_have(list_id, entry_id, have) as "mark have";
+
+        /// Second pass: bought it. Restocks the pantry when the row is
+        /// linked to a pantry item and carries a quantity.
+        mark_purchased(list_id: String, entry_id: String) -> mealplan_proto::ShoppingList
+            = mark_purchased(list_id, entry_id) as "mark purchased";
+
+        /// Put every row back to `needed` — re-run the same list next
+        /// week without retyping it. Keeps the rows (unlike `clear`).
+        reset_shopping_list(id: String) -> mealplan_proto::ShoppingList
+            = reset(id) as "reset shopping list";
+
+        /// Start a fresh run from a template; the template is untouched.
+        start_from_template(template_id: String, name: String) -> mealplan_proto::ShoppingList
+            = start_from_template(template_id, name) as "start from template";
+
+        /// Keep this list's rows as a reusable template.
+        save_as_template(list_id: String, name: String) -> mealplan_proto::ShoppingList
+            = save_as_template(list_id, name) as "save as template";
+
+        /// Add everything a recipe needs that the pantry can't cover at
+        /// `servings` — the "what do I need to buy for this meal" button.
+        add_missing_for_recipe(list_id: String, recipe_path: String, servings: u32)
+            -> mealplan_proto::ShoppingList
+            = add_missing_for_recipe(list_id, recipe_path, servings) as "add missing for recipe";
+
+        /// Add everything a recipe calls for at `servings`, whatever the
+        /// pantry says — the gather checklist, where the kitchen pass is
+        /// an actual look at an actual shelf rather than a stock guess.
+        add_recipe_ingredients(list_id: String, recipe_path: String, servings: u32)
+            -> mealplan_proto::ShoppingList
+            = add_recipe_ingredients(list_id, recipe_path, servings) as "add recipe ingredients";
+
+        /// Add every pantry item at or below its reorder minimum.
+        add_low_stock(list_id: String) -> mealplan_proto::ShoppingList
+            = add_low_stock(list_id) as "add low stock";
     }
 }
 
@@ -1192,7 +1280,6 @@ pub async fn find_project(id: &str, slugs: &[String]) -> Result<(ProjectInfo, St
     Err(last_err.unwrap_or_else(|| "project not found in any hosted org".to_owned()))
 }
 
-
 // ── Fitness (native stubs) ──────────────────────────────────────────
 
 // ── Mealplan (native stubs) ─────────────────────────────────────────
@@ -1370,7 +1457,6 @@ feeds! {
     }
 }
 
-
 /// Everything blocking a human in the agent lane, for one project or
 /// the whole fleet.
 ///
@@ -1380,7 +1466,10 @@ feeds! {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AgentSurface {
     /// Unresolved questions, paired with the ticket each blocks.
-    pub questions: Vec<(agent_proto::question::QuestionRequest, Option<task_proto::TaskInfo>)>,
+    pub questions: Vec<(
+        agent_proto::question::QuestionRequest,
+        Option<task_proto::TaskInfo>,
+    )>,
     /// Runs executing right now, paired with their ticket.
     pub running: Vec<(agent_proto::run::Run, Option<task_proto::TaskInfo>)>,
     /// Tickets whose branch is green and waiting.
