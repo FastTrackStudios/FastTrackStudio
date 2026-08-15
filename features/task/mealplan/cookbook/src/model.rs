@@ -9,6 +9,6 @@
 //! paths keep working.
 
 pub use cookbook_proto::model::{
-    CookStep, CookSteps, Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeTimer,
-    RecipeImage, RecipeImages, StepCookware, StepIngredient, StringList,
+    CookStep, CookSteps, Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeImage,
+    RecipeImages, RecipeTimer, StepCookware, StepIngredient, StepLink, StringList,
 };

@@ -126,7 +126,12 @@ pub struct SlotGridProps {
     /// Minimum width before the grid scrolls sideways. Seven columns
     /// don't fit a phone, and squeezing them to fit destroys the one
     /// thing the view is for.
-    #[props(default = "46rem".to_string())]
+    ///
+    /// Sized so a full week clears a desktop content column *with* a
+    /// sidebar open: the whole point is seeing the week at once, and a
+    /// grid that pushes Sunday behind a scrollbar on a 1440px screen
+    /// has failed at its only job.
+    #[props(default = "39rem".to_string())]
     pub min_width: String,
 }
 
@@ -143,7 +148,7 @@ pub fn SlotGrid(props: SlotGridProps) -> Element {
     } = props;
 
     let cols = days.len().max(1);
-    let template = format!("grid-template-columns: 5rem repeat({cols}, minmax(6rem, 1fr));");
+    let template = format!("grid-template-columns: 4.5rem repeat({cols}, minmax(4.75rem, 1fr));");
 
     rsx! {
         div { class: "overflow-x-auto rounded-2xl border border-border bg-card/30",
@@ -232,7 +237,11 @@ pub fn SlotGrid(props: SlotGridProps) -> Element {
                                                                     h.call(id.clone());
                                                                 }
                                                             },
-                                                            div { class: "truncate font-medium", "{item.label}" }
+                                                            // Wrapped to two lines rather than truncated:
+                                                            // "Monday O…" and "Monday —…" are the same
+                                                            // chip as far as a reader is concerned, and a
+                                                            // week you can't read is not a week view.
+                                                            div { class: "line-clamp-2 font-medium", "{item.label}" }
                                                             if let Some(detail) = &item.detail {
                                                                 div { class: "truncate opacity-80", "{detail}" }
                                                             }

@@ -116,6 +116,19 @@ pub fn MealWeek(slug: Memo<Option<String>>) -> Element {
         days[6].format("%-d %b")
     );
 
+    // An empty week is ambiguous: nothing planned, or nothing planned
+    // *here*? Those want different responses, and only one of them is
+    // the view's fault. So when this week is bare but meals exist
+    // elsewhere, point at the closest one rather than leaving a dead
+    // grid and seven paging clicks between the reader and their food.
+    let nearest = (planned == 0)
+        .then(|| {
+            all.iter()
+                .map(|m| m.scheduled_for)
+                .min_by_key(|d| (*d - days[0]).num_days().abs())
+        })
+        .flatten();
+
     rsx! {
         section { class: "flex flex-col gap-3",
             div { class: "flex flex-wrap items-center justify-between gap-3",
@@ -161,10 +174,24 @@ pub fn MealWeek(slug: Memo<Option<String>>) -> Element {
             }
 
             if planned == 0 {
-                div { class: "flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-6",
+                div { class: "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-dashed border-border px-4 py-6",
                     UtensilsCrossed { size: 15 }
-                    Text { variant: TextVariant::Muted, class: "text-sm",
-                        "Nothing planned this week yet."
+                    match nearest {
+                        Some(d) => rsx! {
+                            Text { variant: TextVariant::Muted, class: "text-sm",
+                                "Nothing planned this week. The closest week with meals is {d.format(\"%-d %b\")}."
+                            }
+                            button {
+                                class: "rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground transition-colors hover:bg-muted",
+                                onclick: move |_| anchor.set(d),
+                                "Go to that week"
+                            }
+                        },
+                        None => rsx! {
+                            Text { variant: TextVariant::Muted, class: "text-sm",
+                                "Nothing planned this week yet."
+                            }
+                        },
                     }
                 }
             }

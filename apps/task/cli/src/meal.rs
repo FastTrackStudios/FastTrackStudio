@@ -86,6 +86,16 @@ pub(crate) enum MealCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Mark the meal as eaten out — planned, not cooked, eaten anyway.
+    /// Distinct from `skip`, which is a meal that didn't happen.
+    #[command(name = "eat-out")]
+    EatOut {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     /// Put the meal on its date's day plan as a `Meal` block
     /// (`task meal schedule <meal> 17:30-18:30`). Overlapping
     /// blocks are rejected unless `--force`.
@@ -307,6 +317,21 @@ pub(crate) async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
                 .await
                 .map_err(|e| eyre::eyre!("skip: {e:?}"))?;
             println!("skipped {}  ({})", skipped.name, skipped.path);
+        }
+        MealCmd::EatOut {
+            target,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            let out = client
+                .eat_out(m.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("eat-out: {e:?}"))?;
+            println!("ate out {}  ({})", out.name, out.path);
         }
         MealCmd::Schedule(a) => return crate::mealprep::meal_schedule(a).await,
         MealCmd::Rename {

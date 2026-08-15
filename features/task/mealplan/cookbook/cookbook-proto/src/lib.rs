@@ -19,8 +19,8 @@ pub mod model;
 pub mod service;
 
 pub use model::{
-    CookStep, CookSteps, Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeTimer,
-    RecipeImage, RecipeImages, StepCookware, StepIngredient, StringList,
+    CookStep, CookSteps, Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeImage,
+    RecipeImages, RecipeTimer, StepCookware, StepIngredient, StepLink, StringList,
 };
 pub use service::{CookbookError, CookbookService, CookbookServiceRpc};
 

@@ -225,6 +225,12 @@ impl MealplanService for Store {
         self.update(meal)
     }
 
+    fn eat_out(&self, id: &str) -> Result<Meal, MealplanError> {
+        let mut meal = self.get(id)?;
+        meal.status = crate::model::Status::EatingOut.as_str().to_string();
+        self.update(meal)
+    }
+
     fn cook_recipe(&self, recipe_path: &str, servings: u32) -> Result<CookReceipt, MealplanError> {
         let recipe = self
             .cookbook

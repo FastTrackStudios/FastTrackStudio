@@ -38,9 +38,9 @@
 //! into a sticky rail beside the spine, which is what makes the
 //! cross-highlighting worth having.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use cookbook_proto::{CookStep, Ingredient, Recipe, StepCookware, StepIngredient};
+use cookbook_proto::{CookStep, Ingredient, Recipe, StepCookware, StepIngredient, StepLink};
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     ChevronLeft, Clock, CookingPot, ExternalLink, Flame, Hourglass, Info, Lock, Pencil,
@@ -109,6 +109,9 @@ enum Seg<'a> {
     Text(&'a str),
     Ing(&'a StepIngredient),
     Cook(&'a StepCookware),
+    /// A wikilink. The span covers the markup, so rendering this as
+    /// `display` is what keeps `[[Sauce]]{}` off the screen.
+    Link(&'a StepLink),
 }
 
 /// Split a step's text on its ingredient spans. The parser records
@@ -125,9 +128,13 @@ fn segments<'a>(step: &'a CookStep, from: usize, to: usize) -> Vec<Seg<'a>> {
     for c in &step.cookware {
         marks.push(Seg::Cook(c));
     }
+    for l in &step.links {
+        marks.push(Seg::Link(l));
+    }
     marks.sort_by_key(|m| match m {
         Seg::Ing(r) => r.start,
         Seg::Cook(c) => c.start,
+        Seg::Link(l) => l.start,
         Seg::Text(_) => 0,
     });
 
@@ -137,6 +144,7 @@ fn segments<'a>(step: &'a CookStep, from: usize, to: usize) -> Vec<Seg<'a>> {
         let (start, len) = match &m {
             Seg::Ing(r) => (r.start as usize, r.len as usize),
             Seg::Cook(c) => (c.start as usize, c.len as usize),
+            Seg::Link(l) => (l.start as usize, l.len as usize),
             Seg::Text(_) => continue,
         };
         let end = start + len;
@@ -347,6 +355,37 @@ fn Reader(recipe: Recipe) -> Element {
             .into_iter()
             .next()
     });
+
+    // A `[[Taco Bell Sauce]]{}` names the dish the way a cook says it,
+    // not the way the filesystem spells it, so the cookbook is what
+    // turns one into the other. Matching on both display name and file
+    // stem mirrors how the server resolves a reference when it costs
+    // the shopping list — the two should never disagree about what a
+    // link points at.
+    let cookbook = use_resource(move || async move {
+        let s = slug()?;
+        crate::feeds::fetch_recipes(&s).await.ok()
+    });
+    let link_targets: HashMap<String, String> = cookbook
+        .read()
+        .clone()
+        .flatten()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|r| {
+            let stem = r
+                .path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&r.path)
+                .trim_end_matches(".cook")
+                .to_lowercase();
+            [
+                (r.name.trim().to_lowercase(), r.path.clone()),
+                (stem, r.path.clone()),
+            ]
+        })
+        .collect();
 
     // The dish's own picture, if one sits beside the recipe file.
     let title_image = use_recipe_image(
@@ -692,6 +731,7 @@ fn Reader(recipe: Recipe) -> Element {
                                                         .find(|im| im.step_index == Some(i as u32))
                                                         .map(|im| im.path.clone()),
                                                     slug,
+                                                    link_targets: link_targets.clone(),
                                                     ingredients: recipe.ingredients.iter().cloned().collect::<Vec<_>>(),
                                                     factor,
                                                     scaled,
@@ -728,6 +768,10 @@ fn StepRow(
     number: usize,
     image: Option<String>,
     slug: Memo<Option<String>>,
+    /// Lowercased recipe name / file stem → vault path, for resolving
+    /// the wikilinks in this step. Empty until the cookbook loads, which
+    /// only costs the link its tap target — never its text.
+    link_targets: HashMap<String, String>,
     ingredients: Vec<Ingredient>,
     factor: f64,
     scaled: bool,
@@ -739,6 +783,7 @@ fn StepRow(
     on_focus: EventHandler<Option<u32>>,
     on_toggle: EventHandler<()>,
 ) -> Element {
+    let nav = use_navigator();
     let acts = actions(&step.text);
     let lines = acts.items.clone();
     let step_image = use_recipe_image(slug, image);
@@ -789,6 +834,7 @@ fn StepRow(
                                 Seg::Text(t) => rsx! { span { key: "{k}", "{t}" } },
                                 Seg::Ing(r) => rsx! { span { key: "{k}", class: "font-medium text-foreground", "{r.name}" } },
                                 Seg::Cook(c) => rsx! { span { key: "{k}", "{c.name}" } },
+                                Seg::Link(l) => rsx! { span { key: "{k}", "{l.display}" } },
                             }
                         }
                     }
@@ -843,6 +889,34 @@ fn StepRow(
                                                 "{c.name}"
                                             }
                                         },
+                                        // A recipe you have to make first is
+                                        // the one mention worth leaving the
+                                        // page for, so it gets a solid
+                                        // underline where cookware gets a
+                                        // dotted one. An unresolved link still
+                                        // reads as words — a cook loses
+                                        // nothing but the tap.
+                                        Seg::Link(l) => {
+                                            let dest = link_targets.get(&l.target.trim().to_lowercase()).cloned();
+                                            match dest {
+                                                Some(path) => rsx! {
+                                                    span {
+                                                        key: "{k}",
+                                                        class: "cursor-pointer font-medium text-primary underline decoration-primary/40 underline-offset-[5px] transition-colors hover:decoration-primary",
+                                                        title: "Open {l.display}",
+                                                        onclick: move |_| {
+                                                            nav.push(crate::routes::Route::RecipeReadRoute {
+                                                                path: path.clone(),
+                                                            });
+                                                        },
+                                                        "{l.display}"
+                                                    }
+                                                },
+                                                None => rsx! {
+                                                    span { key: "{k}", class: "font-medium text-foreground", "{l.display}" }
+                                                },
+                                            }
+                                        }
                                     }
                                 }
                             }
