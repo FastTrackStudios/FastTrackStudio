@@ -110,3 +110,22 @@ impl Registry {
             .cloned()
     }
 }
+
+/// What a root's on-disk marker (`.fts-root.json`) records. The folder
+/// carries this with it, so it — not the registry's absolute path — is
+/// the durable statement of "this directory is root X".
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RootMarker {
+    pub id: Uuid,
+    pub name: String,
+}
+
+/// Read `dir`'s root marker, if it has a readable one.
+///
+/// Absent or unparsable both mean "not a root as far as we can tell":
+/// a half-written marker must not make the folder un-registrable
+/// forever, and the caller's next step is to write a fresh one.
+pub fn read_root_marker(dir: &Path) -> Option<RootMarker> {
+    let bytes = std::fs::read(dir.join(crate::consts::MARKER_FILE)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
