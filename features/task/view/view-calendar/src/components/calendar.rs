@@ -151,8 +151,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                         if !props.readonly {
                             // Create on the *visible* anchor date (not
                             // today) so the new event lands in view.
-                            let start = day_start_utc(*anchor.peek())
-                                + chrono::Duration::hours(9);
+                            let start = day_start_utc(*anchor.peek()) + chrono::Duration::hours(9);
                             let end = start + chrono::Duration::hours(1);
                             let event = CalendarEvent::new("New event", start, end);
                             let id = event.id;

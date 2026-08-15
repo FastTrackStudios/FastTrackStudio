@@ -296,7 +296,9 @@ mod claimant_tests {
         let parsed: task_proto::workflows_proto::AgentRef =
             serde_json::from_str(WEB_CLAIMANT).expect("fallback claimant must parse");
         match parsed {
-            task_proto::workflows_proto::AgentRef::Human { user_id, .. } => assert_eq!(user_id, "web"),
+            task_proto::workflows_proto::AgentRef::Human { user_id, .. } => {
+                assert_eq!(user_id, "web")
+            }
             other @ task_proto::workflows_proto::AgentRef::Agent { .. } => {
                 panic!("expected human ref, got {other:?}")
             }

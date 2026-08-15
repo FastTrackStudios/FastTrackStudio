@@ -216,7 +216,9 @@ pub fn AgentsView(session: String) -> Element {
                     Some((_, s)) if s.id == id
                 );
                 if touched_open {
-                    if let Ok(s) = crate::feeds::fetch_agent_sessions(std::slice::from_ref(&slug)).await {
+                    if let Ok(s) =
+                        crate::feeds::fetch_agent_sessions(std::slice::from_ref(&slug)).await
+                    {
                         match s.into_iter().find(|(_, s)| s.id == id) {
                             Some(row) => selected.set(Some(row)),
                             None => {
@@ -942,9 +944,7 @@ pub(crate) fn ChatPane(
                 } => {
                     let mut cur = streaming.write();
                     match cur.as_mut() {
-                        Some((id, text)) if *id == message_id => {
-                            text.push_str(&content_delta)
-                        }
+                        Some((id, text)) if *id == message_id => text.push_str(&content_delta),
                         _ => *cur = Some((message_id, content_delta)),
                     }
                 }
@@ -965,8 +965,7 @@ pub(crate) fn ChatPane(
                     );
                 }
                 AgentEvent::ToolFinished { tool_call } => {
-                    let ok =
-                        !matches!(tool_call.status, agent_proto::tool::ToolStatus::Error);
+                    let ok = !matches!(tool_call.status, agent_proto::tool::ToolStatus::Error);
                     settle_tool(
                         &mut live_lines.write(),
                         &tool_call.id,
@@ -1079,8 +1078,7 @@ pub(crate) fn ChatPane(
                 // rides its own task.
                 AgentEvent::Resync => {
                     spawn(async move {
-                        if let Ok(mut msgs) =
-                            crate::feeds::fetch_agent_messages(&slug, &sid).await
+                        if let Ok(mut msgs) = crate::feeds::fetch_agent_messages(&slug, &sid).await
                         {
                             msgs.reverse();
                             messages.set(msgs);

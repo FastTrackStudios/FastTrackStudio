@@ -190,19 +190,18 @@ fn actions(text: &str) -> Actions {
 /// Ranges delimited by literal `- ` / `• ` markers, with anything before
 /// the first one kept as the lead-in.
 fn bullet_ranges(text: &str) -> Option<Actions> {
+    // Walk characters, not bytes. Recipe prose is full of em-dashes and
+    // accents, and indexing a `str` at a byte that lands inside one is a
+    // panic, not a wrong answer.
     let mut marks: Vec<usize> = Vec::new();
-    let b = text.as_bytes();
-    let mut i = 0usize;
-    while i < b.len() {
-        let at_start = i == 0;
-        let after_space = i > 0 && b[i - 1].is_ascii_whitespace();
-        let is_marker = (b[i] == b'-' || text[i..].starts_with('•'))
-            && (at_start || after_space)
-            && text[i..].chars().nth(1).is_some_and(char::is_whitespace);
-        if is_marker {
+    let mut prev_ws = true; // start of string counts as a boundary
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let next_is_ws = chars.peek().is_some_and(|(_, n)| n.is_whitespace());
+        if (c == '-' || c == '•') && prev_ws && next_is_ws {
             marks.push(i);
         }
-        i += 1;
+        prev_ws = c.is_whitespace();
     }
     // One bullet isn't a list, it's a dash in a sentence.
     if marks.len() < 2 {
@@ -957,5 +956,83 @@ fn StepRow(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The string that took the page down in the browser. Recipe prose
+    /// is full of em-dashes; walking it byte-wise and indexing the `str`
+    /// mid-character is a panic, not a wrong answer, and it takes the
+    /// whole app with it rather than rendering one step oddly.
+    const EM_DASH: &str = "Brown lean ground beef on both sides in a pan at 7 out of 10 heat. \
+                           Stir in taco seasoning, then reduced sodium chicken broth — 90 g now, \
+                           to keep it juicy.";
+
+    #[test]
+    fn multibyte_prose_does_not_panic() {
+        let a = actions(EM_DASH);
+        for (from, to) in a.items.iter().copied() {
+            // Every range must be sliceable — that's the whole contract.
+            let _ = &EM_DASH[from..to];
+        }
+        if let Some((f, t)) = a.lead {
+            let _ = &EM_DASH[f..t];
+        }
+    }
+
+    #[test]
+    fn a_lone_dash_is_not_a_bullet_list() {
+        let a = actions(EM_DASH);
+        assert!(
+            a.lead.is_none(),
+            "one dash mid-sentence is punctuation, not a list"
+        );
+        assert_eq!(a.items.len(), 2, "two sentences, split on the full stop");
+    }
+
+    #[test]
+    fn author_bullets_become_items_with_a_lead() {
+        let s = "While the pasta cooks: - warm the oil - add the garlic - cook until blonde";
+        let a = actions(s);
+        let lead = a.lead.expect("text before the first bullet leads");
+        assert_eq!(&s[lead.0..lead.1], "While the pasta cooks");
+        let items: Vec<&str> = a.items.iter().map(|(f, t)| &s[*f..*t]).collect();
+        assert_eq!(
+            items,
+            vec!["warm the oil", "add the garlic", "cook until blonde"]
+        );
+    }
+
+    #[test]
+    fn bullets_survive_multibyte_neighbours() {
+        let s = "Prep — quickly: - dice the jalapeño - grate the parmesan — finely";
+        let a = actions(s);
+        let items: Vec<&str> = a.items.iter().map(|(f, t)| &s[*f..*t]).collect();
+        assert_eq!(items.len(), 2, "got {items:?}");
+        assert!(items[0].contains("jalapeño"));
+    }
+
+    #[test]
+    fn sentences_do_not_split_on_decimals_or_abbreviations() {
+        let s = "Add 0.25 tsp of salt. Cook for 2 min. Don't brown it.";
+        let a = actions(s);
+        let items: Vec<&str> = a.items.iter().map(|(f, t)| &s[*f..*t]).collect();
+        assert_eq!(
+            items,
+            vec![
+                "Add 0.25 tsp of salt.",
+                "Cook for 2 min.",
+                "Don't brown it."
+            ]
+        );
+    }
+
+    #[test]
+    fn a_single_sentence_stays_one_item() {
+        let s = "Fold in the parmesan and serve.";
+        assert_eq!(actions(s).items.len(), 1);
     }
 }

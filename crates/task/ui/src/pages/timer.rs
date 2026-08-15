@@ -36,8 +36,7 @@ use crate::orgs::{OrgMeta, OrgSelection};
 use crate::stores;
 
 /// Shared input styling for the manual-log form.
-const FIELD: &str =
-    "rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/40";
+const FIELD: &str = "rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/40";
 
 #[component]
 pub fn TimerView() -> Element {

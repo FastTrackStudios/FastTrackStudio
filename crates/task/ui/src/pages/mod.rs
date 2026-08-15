@@ -21,6 +21,7 @@ pub mod invoices;
 pub mod ledger;
 pub mod locations;
 pub mod mealplan;
+pub mod mealplan_week;
 pub mod members;
 pub mod milestones;
 pub mod note_header;
