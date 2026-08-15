@@ -1,13 +1,23 @@
-//! Large files are stored WHOLE — one blob, imported by path so the
-//! filesystem can bring it in with a reflink instead of a copy — while
-//! small ones keep chunking. See `ChunkStore::write_path`.
+//! Content on the same filesystem is stored WHOLE and *linked* in
+//! rather than copied — reflink where extents can be cloned, hardlink
+//! otherwise. See `ChunkStore::write_path`.
 //!
-//! The reflink itself is opportunistic (XFS `reflink=1`, btrfs; a plain
-//! copy elsewhere), so these tests assert the properties that must hold
-//! *regardless* of whether the clone happened: the same content address
-//! either way, honest round-trips, and — the one that silently ruins
-//! everything if it breaks — probe and write agreeing about which side
-//! of the threshold a file is on.
+//! Which rung of that ladder a given filesystem offers is not
+//! something a test can assume, so these assert the properties that
+//! hold either way:
+//!
+//! - **the content cannot be lost by deleting the original** — the
+//!   reason a link is acceptable instead of a copy at all;
+//! - **linking consumes no space**, at any size — what makes importing
+//!   a multi-terabyte archive possible;
+//! - probe and write agree on whole-vs-chunked, the invariant that
+//!   silently ruins everything if it breaks (every capture would
+//!   re-import every file, forever);
+//! - honest round-trips, including range reads over a blob that is an
+//!   entire file, and GC reclaiming the tier.
+//!
+//! These run with a small forced threshold so both paths are exercised;
+//! in production it is 0, meaning everything links.
 
 use std::path::Path;
 
