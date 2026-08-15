@@ -148,6 +148,27 @@ mod tests {
     }
 
     #[test]
+    fn a_captured_habit_survives_the_vault_round_trip() {
+        // The whole feature is worthless if the RRULE the parser
+        // produced doesn't reach disk and come back — the field is
+        // written by serializing TaskInfo wholesale, so this is the
+        // test that catches a serde rename or skip breaking it.
+        let mut t = task_proto::capture::capture("Mixing practice every 2 weeks");
+        t.path = "Task/mixing-practice.md".into();
+
+        let md = serialize_task(&t).expect("serialize");
+        assert!(
+            md.contains("recurrence"),
+            "recurrence missing from frontmatter:\n{md}"
+        );
+
+        let back = crate::parse::parse_str(&t.path, "mixing-practice", &md).expect("parse");
+        assert_eq!(back.recurrence.as_deref(), Some("FREQ=WEEKLY;INTERVAL=2"));
+        assert_eq!(back.recurrence_anchor.as_deref(), Some("completion"));
+        assert_eq!(back.title, "Mixing practice");
+    }
+
+    #[test]
     fn workflow_attrs_round_trip_through_yaml() {
         use crate::model::{
             AgentRefList, Estimate, Relation, RelationKind, RelationList, UuidList, WorkflowAttrs,

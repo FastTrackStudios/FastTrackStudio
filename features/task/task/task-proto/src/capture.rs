@@ -18,11 +18,15 @@
 //!   - `mon` / `tue` / … → next occurrence of that weekday
 //!   - `YYYY-MM-DD` → that date
 //!
+//! - Recurrence phrases (`daily`, `every week`, `every 2 weeks`,
+//!   `every other monday`, `every weekday`) → an RFC 5545 RRULE in
+//!   `recurrence`, plus the `recurrence_anchor` that decides what
+//!   "next" means. See [`consume_recurrence_phrase`].
+//!
 //! Whatever's left after extraction becomes the `title`. NLP
 //! expansion (priority words "asap"/"urgent", deadline phrases
-//! "by Friday", recurring "every Monday", duration "for 30m")
-//! lives in a later slice — port the rules from
-//! `tasknotes-nlp-core` when we need them.
+//! "by Friday", duration "for 30m") lives in a later slice — port
+//! the rules from `tasknotes-nlp-core` when we need them.
 
 use chrono::{Datelike, Duration, Local, NaiveDate, Weekday};
 
@@ -45,7 +49,12 @@ pub fn capture(input: &str) -> TaskInfo {
     // a single token. We scan the source once with a small state
     // machine so the link bracket can hold spaces.
     let tokens = tokenize(input);
-    // Multi-token date phrase pass first ("next monday" swallows
+    // Recurrence first: "every monday" must swallow `monday` before
+    // any date rule reads it as a due date. A repeating task that
+    // silently became a one-off due next Monday is exactly the bug
+    // this ordering prevents.
+    let (tokens, recur) = consume_recurrence_phrase(tokens, today);
+    // Multi-token date phrase pass next ("next monday" swallows
     // both tokens), so the single-token weekday rule below
     // doesn't grab "monday" before we see "next".
     let (tokens, phrase_due) = consume_date_phrase(tokens, today);
@@ -79,7 +88,11 @@ pub fn capture(input: &str) -> TaskInfo {
         }
         title_parts.push(tok);
     }
-    let due = due.or(phrase_due);
+    // An explicit date the user typed always wins over the start
+    // date a recurrence implies.
+    let due = due
+        .or(phrase_due)
+        .or_else(|| recur.as_ref().and_then(|r| r.first_due.clone()));
 
     // Ensure `task` is in tags for the discriminator.
     if !tags.iter().any(|t| t == "task") {
@@ -106,8 +119,8 @@ pub fn capture(input: &str) -> TaskInfo {
         milestone_id: None,
         time_estimate: None,
         time_entries: crate::model::TimeEntries::default(),
-        recurrence: None,
-        recurrence_anchor: None,
+        recurrence: recur.as_ref().map(|r| r.rrule.clone()),
+        recurrence_anchor: recur.as_ref().map(|r| r.anchor.to_string()),
         complete_instances: crate::model::StringList::default(),
         completed_date: None,
         agent_profile: String::new(),
@@ -200,6 +213,201 @@ fn consume_date_phrase(tokens: Vec<String>, today: NaiveDate) -> (Vec<String>, O
     (out, due)
 }
 
+/// A parsed recurrence phrase.
+struct Recurrence {
+    /// RFC 5545 RRULE body, e.g. `FREQ=WEEKLY;INTERVAL=2`.
+    rrule: String,
+    /// `"scheduled"` or `"completion"` — see
+    /// [`consume_recurrence_phrase`] for which is chosen when.
+    anchor: &'static str,
+    /// When the first instance lands, if the phrase implies one.
+    first_due: Option<String>,
+}
+
+/// RRULE two-letter day code.
+fn rrule_day(w: Weekday) -> &'static str {
+    match w {
+        Weekday::Mon => "MO",
+        Weekday::Tue => "TU",
+        Weekday::Wed => "WE",
+        Weekday::Thu => "TH",
+        Weekday::Fri => "FR",
+        Weekday::Sat => "SA",
+        Weekday::Sun => "SU",
+    }
+}
+
+/// The weekday a token names, if any. Shares its vocabulary with
+/// [`parse_date_token`] so `monday` means the same thing in
+/// `every monday` and `next monday`.
+fn weekday_token(tok: &str) -> Option<Weekday> {
+    match tok.to_ascii_lowercase().as_str() {
+        "mon" | "monday" => Some(Weekday::Mon),
+        "tue" | "tues" | "tuesday" => Some(Weekday::Tue),
+        "wed" | "weds" | "wednesday" => Some(Weekday::Wed),
+        "thu" | "thur" | "thurs" | "thursday" => Some(Weekday::Thu),
+        "fri" | "friday" => Some(Weekday::Fri),
+        "sat" | "saturday" => Some(Weekday::Sat),
+        "sun" | "sunday" => Some(Weekday::Sun),
+        _ => None,
+    }
+}
+
+/// The FREQ a unit word names, singular or plural.
+fn freq_token(tok: &str) -> Option<&'static str> {
+    match tok.to_ascii_lowercase().as_str() {
+        "day" | "days" => Some("DAILY"),
+        "week" | "weeks" => Some("WEEKLY"),
+        "month" | "months" => Some("MONTHLY"),
+        "year" | "years" => Some("YEARLY"),
+        _ => None,
+    }
+}
+
+/// Pull a recurrence phrase out of the token stream.
+///
+/// Recognized, case-insensitively:
+///
+/// - bare adverbs — `daily`, `weekly`, `monthly`, `yearly`/`annually`
+/// - `every <unit>` — `every week`
+/// - `every <n> <units>` — `every 3 days`
+/// - `every other <unit>` — `every other week` (INTERVAL=2)
+/// - `every <weekday>` — `every monday` (BYDAY=MO)
+/// - `every other <weekday>` — `every other friday`
+/// - `every weekday` — Mon–Fri
+///
+/// ## Which anchor, and why it matters
+///
+/// The anchor decides what "next" means after you finish one, and
+/// getting it wrong is the difference between a habit that works and
+/// one you start ignoring:
+///
+/// - **A phrase naming a weekday is `scheduled`.** `every monday`
+///   means the calendar decides — a standup happens Monday whether
+///   or not you made last Monday's.
+/// - **A bare interval is `completion`.** `every 2 weeks` means two
+///   weeks after you actually did it. This is the habit case, and
+///   anchoring it to the calendar instead would generate a pile of
+///   overdue copies the first week you miss — which is precisely how
+///   a habit list becomes something you stop opening.
+///
+/// Only the FIRST phrase is consumed; a second one is left in the
+/// title rather than silently overriding the first.
+fn consume_recurrence_phrase(
+    tokens: Vec<String>,
+    today: NaiveDate,
+) -> (Vec<String>, Option<Recurrence>) {
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut found: Option<Recurrence> = None;
+    let mut i = 0;
+
+    while i < tokens.len() {
+        if found.is_some() {
+            out.push(tokens[i].clone());
+            i += 1;
+            continue;
+        }
+
+        // Bare adverbs — a single token carries the whole phrase.
+        let bare = match tokens[i].to_ascii_lowercase().as_str() {
+            "daily" => Some("DAILY"),
+            "weekly" => Some("WEEKLY"),
+            "monthly" => Some("MONTHLY"),
+            "yearly" | "annually" => Some("YEARLY"),
+            _ => None,
+        };
+        if let Some(freq) = bare {
+            found = Some(Recurrence {
+                rrule: format!("FREQ={freq}"),
+                anchor: "completion",
+                first_due: Some(today.format("%Y-%m-%d").to_string()),
+            });
+            i += 1;
+            continue;
+        }
+
+        if !tokens[i].eq_ignore_ascii_case("every") {
+            out.push(tokens[i].clone());
+            i += 1;
+            continue;
+        }
+
+        // `every …` — look at what follows.
+        let mut j = i + 1;
+        if j >= tokens.len() {
+            out.push(tokens[i].clone());
+            i += 1;
+            continue;
+        }
+
+        // Optional interval: `other` (=2) or a number.
+        let mut interval: u32 = 1;
+        if tokens[j].eq_ignore_ascii_case("other") {
+            interval = 2;
+            j += 1;
+        } else if let Ok(n) = tokens[j].parse::<u32>() {
+            if n > 0 {
+                interval = n;
+                j += 1;
+            }
+        }
+        if j >= tokens.len() {
+            out.push(tokens[i].clone());
+            i += 1;
+            continue;
+        }
+
+        let unit = &tokens[j];
+        let parsed = if unit.eq_ignore_ascii_case("weekday") || unit.eq_ignore_ascii_case("weekdays")
+        {
+            Some((
+                "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR".to_owned(),
+                "scheduled",
+                Some(next_weekday_or_today(today)),
+            ))
+        } else if let Some(w) = weekday_token(unit) {
+            Some((
+                format!("FREQ=WEEKLY;BYDAY={}", rrule_day(w)),
+                "scheduled",
+                Some(next_weekday(today, w)),
+            ))
+        } else {
+            freq_token(unit).map(|freq| (format!("FREQ={freq}"), "completion", Some(today)))
+        };
+
+        let Some((base, anchor, start)) = parsed else {
+            // `every` followed by something we don't understand —
+            // leave it in the title rather than guessing.
+            out.push(tokens[i].clone());
+            i += 1;
+            continue;
+        };
+
+        let rrule = if interval > 1 {
+            format!("{base};INTERVAL={interval}")
+        } else {
+            base
+        };
+        found = Some(Recurrence {
+            rrule,
+            anchor,
+            first_due: start.map(|d| d.format("%Y-%m-%d").to_string()),
+        });
+        i = j + 1;
+    }
+
+    (out, found)
+}
+
+/// Today if it's a weekday, else the next Monday — the first
+/// instance of a Mon–Fri recurrence.
+fn next_weekday_or_today(today: NaiveDate) -> NaiveDate {
+    match today.weekday() {
+        Weekday::Sat | Weekday::Sun => next_weekday(today, Weekday::Mon),
+        _ => today,
+    }
+}
+
 fn next_weekday(today: NaiveDate, target: Weekday) -> NaiveDate {
     let today_num = i64::from(today.weekday().num_days_from_monday());
     let target_num = i64::from(target.num_days_from_monday());
@@ -260,6 +468,110 @@ mod tests {
     fn empty_input_gets_placeholder_title() {
         let t = capture("");
         assert_eq!(t.title, "Untitled task");
+    }
+
+    #[test]
+    fn bare_adverbs_recur() {
+        for (input, freq) in [
+            ("Mixing practice daily", "FREQ=DAILY"),
+            ("Mixing practice weekly", "FREQ=WEEKLY"),
+            ("Rent monthly", "FREQ=MONTHLY"),
+            ("Renew domain yearly", "FREQ=YEARLY"),
+        ] {
+            let t = capture(input);
+            assert_eq!(t.recurrence.as_deref(), Some(freq), "{input}");
+            assert!(!t.title.contains("daily"), "adverb left in title: {input}");
+        }
+    }
+
+    #[test]
+    fn every_unit_with_interval() {
+        let t = capture("Mixing practice every 2 weeks");
+        assert_eq!(t.recurrence.as_deref(), Some("FREQ=WEEKLY;INTERVAL=2"));
+        assert_eq!(t.title, "Mixing practice");
+
+        let t = capture("Deep clean every other month");
+        assert_eq!(t.recurrence.as_deref(), Some("FREQ=MONTHLY;INTERVAL=2"));
+        assert_eq!(t.title, "Deep clean");
+    }
+
+    #[test]
+    fn a_named_weekday_is_calendar_anchored() {
+        // "every monday" means Monday decides, not your last
+        // completion — a standup happens whether or not you made the
+        // previous one.
+        let t = capture("Standup every monday");
+        assert_eq!(t.recurrence.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO"));
+        assert_eq!(t.recurrence_anchor.as_deref(), Some("scheduled"));
+        assert_eq!(t.title, "Standup");
+    }
+
+    #[test]
+    fn a_bare_interval_is_completion_anchored() {
+        // The habit case: two weeks after you ACTUALLY did it.
+        // Calendar-anchoring this is what generates a pile of overdue
+        // copies the first week you miss.
+        let t = capture("Mixing practice every 2 weeks");
+        assert_eq!(t.recurrence_anchor.as_deref(), Some("completion"));
+    }
+
+    #[test]
+    fn every_weekday_is_mon_to_fri() {
+        let t = capture("Inbox zero every weekday");
+        assert_eq!(
+            t.recurrence.as_deref(),
+            Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+        );
+        assert_eq!(t.recurrence_anchor.as_deref(), Some("scheduled"));
+    }
+
+    #[test]
+    fn recurrence_wins_the_weekday_token() {
+        // The ordering bug this guards: without the recurrence pass
+        // running first, `monday` is read as a due date and the task
+        // silently becomes a one-off.
+        let t = capture("Standup every monday");
+        assert!(t.recurrence.is_some(), "should repeat");
+        assert!(!t.title.contains("monday"), "weekday left in title");
+    }
+
+    #[test]
+    fn an_explicit_date_beats_the_recurrence_start() {
+        let t = capture("Mixing practice weekly 2026-09-01");
+        assert_eq!(t.recurrence.as_deref(), Some("FREQ=WEEKLY"));
+        assert_eq!(t.due.as_deref(), Some("2026-09-01"));
+    }
+
+    #[test]
+    fn a_weekly_habit_starts_today_so_it_surfaces() {
+        // Without a start date a completion-anchored habit would sit
+        // dateless and never appear in a day view.
+        let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let t = capture("Mixing practice weekly");
+        assert_eq!(t.due.as_deref(), Some(today.as_str()));
+    }
+
+    #[test]
+    fn unrecognized_every_stays_in_the_title() {
+        // "every" is an ordinary English word; only consume it when
+        // what follows actually names a cadence.
+        let t = capture("Check every input gain");
+        assert!(t.recurrence.is_none());
+        assert_eq!(t.title, "Check every input gain");
+    }
+
+    #[test]
+    fn a_second_phrase_is_left_alone() {
+        let t = capture("Sync weekly and daily");
+        assert_eq!(t.recurrence.as_deref(), Some("FREQ=WEEKLY"));
+        assert!(t.title.contains("daily"), "got: {}", t.title);
+    }
+
+    #[test]
+    fn plain_tasks_gain_no_recurrence() {
+        let t = capture("Buy milk tomorrow #errands");
+        assert!(t.recurrence.is_none());
+        assert!(t.recurrence_anchor.is_none());
     }
 }
 

@@ -102,6 +102,27 @@ pub struct TimeSectionProps {
     /// Raw RRULE (`TaskInfo::recurrence`).
     #[props(default)]
     pub recurrence: Option<String>,
+    /// `"scheduled"` or `"completion"` (`TaskInfo::recurrence_anchor`).
+    #[props(default)]
+    pub recurrence_anchor: Option<String>,
+    /// `YYYY-MM-DD` per finished instance
+    /// (`TaskInfo::complete_instances`).
+    #[props(default)]
+    pub complete_instances: Vec<String>,
+}
+
+/// How the anchor reads to a person.
+///
+/// The distinction is the whole difference between a habit that
+/// survives a missed week and one that buries you: a completion
+/// anchor counts from when you actually did it, a scheduled one from
+/// the calendar regardless.
+fn anchor_label(anchor: Option<&str>) -> Option<&'static str> {
+    match anchor?.trim().to_ascii_lowercase().as_str() {
+        "completion" => Some("from completion"),
+        "scheduled" => Some("on schedule"),
+        _ => None,
+    }
 }
 
 #[component]
@@ -148,6 +169,29 @@ pub fn TimeSection(props: TimeSectionProps) -> Element {
                     div { class: "flex items-center gap-2 text-xs text-muted-foreground",
                         Repeat { size: 12 }
                         span { "{recurrence_summary(rule)}" }
+                        if let Some(anchor) = anchor_label(props.recurrence_anchor.as_deref()) {
+                            span { class: "rounded-full bg-muted/50 px-1.5 py-0 text-[10px]",
+                                "{anchor}"
+                            }
+                        }
+                    }
+                    // Completion history. A recurring task never
+                    // closes — it accumulates instances — so the count
+                    // is the only evidence the habit is actually
+                    // happening, and a bare "Weekly" tells you nothing.
+                    if !props.complete_instances.is_empty() {
+                        {
+                            let done = props.complete_instances.len();
+                            let last = props.complete_instances.iter().max().cloned();
+                            rsx! {
+                                div { class: "flex items-center gap-2 pl-5 text-xs text-muted-foreground",
+                                    span { "{done} completed" }
+                                    if let Some(last) = last {
+                                        span { class: "text-[10px]", "· last {last}" }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -159,6 +203,16 @@ pub fn TimeSection(props: TimeSectionProps) -> Element {
 mod tests {
     use super::*;
     use chrono::{Duration, Utc};
+
+    #[test]
+    fn anchor_reads_as_english_or_not_at_all() {
+        assert_eq!(anchor_label(Some("completion")), Some("from completion"));
+        assert_eq!(anchor_label(Some("Scheduled")), Some("on schedule"));
+        // Absent or unrecognized renders nothing rather than leaking a
+        // raw field value into the UI.
+        assert_eq!(anchor_label(None), None);
+        assert_eq!(anchor_label(Some("weird")), None);
+    }
 
     fn entry(mins: i64) -> DbTimeEntry {
         let start = Utc::now() - Duration::minutes(mins + 1000);

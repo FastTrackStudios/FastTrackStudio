@@ -237,6 +237,8 @@ pub fn TaskDetailFull(props: TaskDetailFullProps) -> Element {
                     time_estimate: t.time_estimate,
                     entries: t.time_entries.0.clone(),
                     recurrence: t.recurrence.clone(),
+                    recurrence_anchor: t.recurrence_anchor.clone(),
+                    complete_instances: t.complete_instances.0.clone(),
                 }
             }
 
