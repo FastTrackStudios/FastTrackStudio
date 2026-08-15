@@ -24,6 +24,9 @@ pub struct AutoSampleConfig {
     pub loops: bool,
     /// How those loops are shaped.
     pub loop_policy: crate::loops::LoopPolicy,
+    /// Seam-search settings the note-length probe judges against, so the hold
+    /// it picks is one the later loop search will actually accept.
+    pub probe_search: Option<crate::reloop::SearchRange>,
 
     /// Directory that receives the WAVs and `library.styx`.
     pub out_dir: PathBuf,
@@ -89,6 +92,20 @@ pub struct Timing {
     /// Silence between cells, so one note's tail never bleeds into the next
     /// capture. Also lets the instrument's voice allocator settle.
     pub settle_ms: u32,
+
+    /// Measure `note_length_ms` from the instrument instead of using the
+    /// configured value.
+    ///
+    /// A few notes are held for `probe_max_ms` and analysed for the shortest
+    /// hold that still yields a loop above the seam threshold. A piano settles
+    /// on a short hold; a slowly evolving pad asks for several seconds. Both
+    /// are correct, and neither is guessable in advance.
+    pub probe_note_length: bool,
+    /// Longest hold the probe may settle on.
+    pub probe_max_ms: u32,
+    /// Notes to probe. Several, because a split patch can be percussive in one
+    /// range and sustained in another.
+    pub probe_notes: Vec<u8>,
 }
 
 impl Default for Timing {
@@ -99,6 +116,9 @@ impl Default for Timing {
             silence_hold_ms: 150,
             silence_db: -60.0,
             settle_ms: 250,
+            probe_note_length: false,
+            probe_max_ms: 12_000,
+            probe_notes: vec![48, 72],
         }
     }
 }

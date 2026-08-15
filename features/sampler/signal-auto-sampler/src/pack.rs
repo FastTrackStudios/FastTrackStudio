@@ -220,6 +220,7 @@ mod tests {
             audio: AudioRoute::default(),
             loops: true,
             loop_policy: crate::loops::LoopPolicy::default(),
+            probe_search: None,
             out_dir: PathBuf::from("/tmp/x"),
             pack_path: None,
         }

@@ -33,8 +33,8 @@
 pub struct Found {
     /// Loop length in frames.
     pub len: usize,
-    /// Normalized cross-correlation of the two seam windows, -1..=1. Above
-    /// ~0.95 is an inaudible join; below ~0.7 usually still ticks.
+    /// Seam quality, -1..=1: waveform shape (cross-correlation) multiplied by
+    /// level continuity. Above ~0.95 is an inaudible join; below ~0.7 ticks.
     pub score: f32,
 }
 
@@ -83,6 +83,69 @@ fn ncc(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
+/// How closely two windows match in *level*, 1.0 = identical, 0.0 = one silent.
+///
+/// [`ncc`] is scale-invariant by design — it scores waveform shape, so a
+/// decaying note is not penalised for being quieter later. But that makes it
+/// blind to exactly the artefact that ruins a loop on modulated material: if
+/// the loop is not a whole number of tremolo or LFO cycles, the two sides sit
+/// at different points in the modulation and the wrap *thumps*, even though the
+/// waveform shape matches perfectly within a short window.
+///
+/// Scoring level alongside shape restores that sensitivity without giving up
+/// the decay tolerance, because both sides are measured over the same span.
+/// Level differences at or above this ratio (≈1 dB) are treated as a perfect
+/// match.
+///
+/// A tolerance is essential, not a fudge. Every sustained note decays a little
+/// across a loop, so a strict ratio would penalise *all* looped material and
+/// reject the gentle, inaudible level drift that scale-invariance exists to
+/// tolerate. Measured: without this band a decaying piano dropped from 188
+/// acceptable loops to 36, having previously sounded correct.
+///
+/// The artefact worth catching is a modulation jump, which is far larger — a
+/// tremolo cut mid-cycle lands nearer 0.5.
+const LEVEL_TOLERANCE: f32 = 0.9;
+
+fn level_match(a: &[f32], b: &[f32]) -> f32 {
+    let rms = |w: &[f32]| -> f64 {
+        if w.is_empty() {
+            return 0.0;
+        }
+        (w.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>() / w.len() as f64).sqrt()
+    };
+    let (ra, rb) = (rms(a), rms(b));
+    let hi = ra.max(rb);
+    if hi <= f64::EPSILON {
+        return 0.0;
+    }
+    let ratio = (ra.min(rb) / hi) as f32;
+    (ratio / LEVEL_TOLERANCE).min(1.0)
+}
+
+/// Seam score: waveform shape, optionally weighted by level continuity.
+///
+/// `level_weight` 0 scores shape alone; 1 multiplies in [`level_match`].
+///
+/// These answer different questions and the default differs by caller:
+///
+/// - **Loop search** uses 0. Shape alone is what a listener judges a seam by,
+///   and it was validated by ear on a real pack. Adding a level term rejected
+///   two thirds of loops that sounded correct, because a sustained note always
+///   decays a little across a loop.
+/// - **The note-length probe** uses 1. It is asking whether the patch has
+///   settled into something that *repeats*, and a tremolo cut mid-cycle is
+///   exactly what it must not mistake for a steady tone — which shape alone,
+///   being scale-invariant, cannot see.
+fn seam_score(a: &[f32], b: &[f32], level_weight: f32) -> f32 {
+    let shape = ncc(a, b);
+    if shape <= 0.0 || level_weight <= 0.0 {
+        return shape;
+    }
+    let lvl = level_match(a, b);
+    shape * (1.0 - level_weight + level_weight * lvl)
+}
+
 /// Search for the loop length that joins most seamlessly.
 ///
 /// `end` is the fixed loop end; the search varies the start. Lengths are
@@ -95,6 +158,18 @@ pub fn best_loop(
     min_len: usize,
     max_len: usize,
     window: usize,
+) -> Option<Found> {
+    best_loop_weighted(mono, end, min_len, max_len, window, 0.0)
+}
+
+/// [`best_loop`] with an explicit level weighting — see [`seam_score`].
+pub fn best_loop_weighted(
+    mono: &[f32],
+    end: usize,
+    min_len: usize,
+    max_len: usize,
+    window: usize,
+    level_weight: f32,
 ) -> Option<Found> {
     let end = end.min(mono.len());
     // Every candidate needs `len + window` frames of history before `end`.
@@ -123,7 +198,7 @@ pub fn best_loop(
         let Some(b_lo) = b_hi.checked_sub(d_window) else {
             continue;
         };
-        let s = ncc(a, &d[b_lo..b_hi]);
+        let s = seam_score(a, &d[b_lo..b_hi], level_weight);
         if s > best_score {
             best_score = s;
             best_lag = lag;
@@ -151,7 +226,7 @@ pub fn best_loop(
         let Some(b_lo) = b_hi.checked_sub(window) else {
             continue;
         };
-        let s = ncc(a, &mono[b_lo..b_hi]);
+        let s = seam_score(a, &mono[b_lo..b_hi], level_weight);
         if s > best {
             best = s;
             found = Found { len, score: s };
@@ -182,6 +257,45 @@ mod tests {
             (ncc(&a, &b) - 1.0).abs() < 1e-5,
             "quieter copy must still score 1 — shape, not level"
         );
+    }
+
+    #[test]
+    fn level_mismatch_is_penalised_even_when_the_shape_matches() {
+        // Same waveform, half the level: NCC alone calls this perfect, which is
+        // how a loop that cuts a tremolo mid-cycle used to score 1.0.
+        let a = tone(440.0, 2000);
+        let quiet: Vec<f32> = a.iter().map(|v| v * 0.5).collect();
+        assert!((ncc(&a, &quiet) - 1.0).abs() < 1e-5, "shape still matches");
+        // 0.5 ratio / 0.9 tolerance = 0.556 — well penalised.
+        assert!(
+            (level_match(&a, &quiet) - 0.5 / 0.9).abs() < 1e-3,
+            "level should score ~0.56, got {}",
+            level_match(&a, &quiet)
+        );
+        assert!(
+            seam_score(&a, &quiet, 1.0) < 0.6,
+            "combined score must reflect the level jump: {}",
+            seam_score(&a, &quiet, 1.0)
+        );
+    }
+
+    #[test]
+    fn gentle_decay_across_a_loop_is_not_penalised() {
+        // A sustained note quietly decaying is the normal case; a strict ratio
+        // would reject every loop on such material.
+        let a = tone(440.0, 2000);
+        let slightly_quieter: Vec<f32> = a.iter().map(|v| v * 0.95).collect();
+        assert!(
+            (level_match(&a, &slightly_quieter) - 1.0).abs() < 1e-6,
+            "5% decay must score a clean 1.0"
+        );
+        assert!(seam_score(&a, &slightly_quieter, 1.0) > 0.99);
+    }
+
+    #[test]
+    fn an_identical_seam_still_scores_one() {
+        let a = tone(440.0, 2000);
+        assert!((seam_score(&a, &a, 1.0) - 1.0).abs() < 1e-5);
     }
 
     #[test]

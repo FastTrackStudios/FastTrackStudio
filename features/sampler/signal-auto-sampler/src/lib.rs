@@ -30,6 +30,7 @@ pub mod loops;
 pub mod midi;
 pub mod pack;
 pub mod play;
+pub mod probe;
 pub mod reloop;
 pub mod session;
 pub mod wav;

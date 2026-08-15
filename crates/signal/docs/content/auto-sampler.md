@@ -116,6 +116,44 @@ of noise in two independent samplers.
 Blending two near-identical copies is not free — any residual phase offset
 combs. Leave it off unless a specific loop needs it.
 
+### Note length is measured per patch (`--probe`)
+
+`note_length` is the one setting that cannot adapt while recording. The adaptive
+tail handles the *end* of a note; the hold must be decided before the note is
+struck, and it fixes how much sustained material exists to loop.
+
+3 s suits a piano and starves a pad. After the 500 ms attack skip and 150 ms
+guard it leaves ~2.35 s to loop in — less than one modulation cycle on a slow
+pad, so nothing repeats, no loop clears the threshold, and held notes stop dead.
+Measured on this set list: 11 of 37 patches ended up under 20% looped, and the
+worst (Watching the Virus Grow, Kaleidoscopic) got 1 zone out of 528.
+
+`--probe` measures it instead. A few notes are held for `--probe-max`, then the
+recording is asked the question that matters: what is the *shortest* hold whose
+sustained portion still contains a loop above the seam bar? Several notes are
+probed and the longest requirement wins, because a split patch can be percussive
+low down and sustained up top.
+
+Probing runs before sampling, not during it: the analysis needs finished audio,
+and reading the capture buffer mid-note would contend with the audio callback's
+`try_lock`, which counts a miss as an overrun and discards otherwise good takes.
+
+**The probe scores seams differently from the loop search, deliberately.** It
+weights level continuity alongside waveform shape, because it is asking whether
+the patch has settled into something that *repeats* — and a tremolo caught
+mid-cycle is exactly what it must not mistake for a steady tone. Cross-
+correlation alone is scale-invariant and cannot see that.
+
+The loop search keeps shape-only scoring. Adding the level term there rejected
+two thirds of loops that had been approved by ear (188 → 65 on a piano), because
+a sustained note always decays a little across a loop. Two questions, two
+scorings:
+
+| | Question | Level-weighted |
+|---|---|---|
+| Loop search | Will this seam be audible? | no |
+| Probe | Has this patch settled into a repeat? | yes |
+
 ### Seam threshold (`--min-seam`)
 
 Not every sound loops. A decaying, inharmonic note has no steady region that

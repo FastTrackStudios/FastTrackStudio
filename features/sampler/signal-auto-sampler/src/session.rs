@@ -110,6 +110,33 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
     // at a pitch unrelated to that sample's note.
     wait_until_quiet(&capture, config.timing.settle_ms, QUIET_TIMEOUT_MS);
 
+    // 2b. Ask the instrument how long it needs to be held to be loopable.
+    //     Done here, after calibration, because the probe needs the latency
+    //     trim to line its analysis up with what a real cell would record.
+    let mut timing = config.timing.clone();
+    if timing.probe_note_length {
+        let search = config.probe_search.unwrap_or_default();
+        let result = crate::probe::probe(
+            &mut instrument,
+            &capture,
+            &timing.probe_notes,
+            127,
+            &timing,
+            &latency,
+            &config.loop_policy,
+            &search,
+            timing.note_length_ms,
+            timing.probe_max_ms,
+        )?;
+        tracing::info!(
+            note_length_ms = result.note_length_ms,
+            score = result.score.map(|s| format!("{s:.4}")),
+            gave_up = result.gave_up,
+            "probed hold"
+        );
+        timing.note_length_ms = result.note_length_ms;
+    }
+
     // 3. Walk the grid.
     let cells = cells(&config.grid);
     let mut recorded = Vec::with_capacity(cells.len());
@@ -143,7 +170,7 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
         let (note_peak, held_ms) = wait_for_silence(
             &capture,
             &config.timing,
-            config.timing.note_length_ms,
+            timing.note_length_ms,
             latency.threshold,
             0.0,
         );
@@ -153,7 +180,7 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
         // Release — however long this patch's tail actually takes, capped.
         wait_for_silence(
             &capture,
-            &config.timing,
+            &timing,
             config.timing.max_tail_ms,
             latency.threshold,
             note_peak,
@@ -315,7 +342,7 @@ fn wait_for_silence(
 /// know. An effect tail that outlasts the guess is still sounding when the next
 /// capture arms, and gets recorded into the head of a sample whose pitch it
 /// does not belong to.
-fn wait_until_quiet(capture: &Capture, settle_ms: u32, limit_ms: u32) -> u32 {
+pub(crate) fn wait_until_quiet(capture: &Capture, settle_ms: u32, limit_ms: u32) -> u32 {
     let poll = Duration::from_millis(POLL_MS as u64);
     // Arm so the level monitor is fed; the audio is discarded.
     capture.arm();

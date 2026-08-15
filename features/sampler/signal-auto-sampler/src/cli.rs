@@ -195,6 +195,14 @@ struct BatchArgs {
     /// Silence between notes, in milliseconds.
     #[arg(long, default_value_t = 250)]
     settle: u32,
+    /// Measure each patch's hold from the instrument rather than using
+    /// --note-length for all of them. A piano settles on a short hold; a
+    /// slowly evolving pad asks for several seconds. Costs ~30 s per patch.
+    #[arg(long)]
+    probe: bool,
+    /// Longest hold the probe may settle on, in milliseconds.
+    #[arg(long, default_value_t = 12_000)]
+    probe_max: u32,
     /// Don't give zones a sustain loop.
     #[arg(long)]
     no_loop: bool,
@@ -376,6 +384,15 @@ struct RunArgs {
     #[arg(long, default_value_t = 250)]
     settle: u32,
 
+    /// Measure the hold from the instrument instead of using --note-length.
+    /// A few notes are held for --probe-max and analysed for the shortest hold
+    /// that still yields a loop above --min-seam.
+    #[arg(long)]
+    probe: bool,
+    /// Longest hold the probe may settle on, in milliseconds.
+    #[arg(long, default_value_t = 12_000)]
+    probe_max: u32,
+
     /// Directory to write WAVs and library.styx into.
     #[arg(long)]
     out: PathBuf,
@@ -535,6 +552,9 @@ fn batch(args: BatchArgs) -> Result<()> {
             silence_hold_ms: 150,
             silence_db: -60.0,
             settle_ms: args.settle,
+            probe_note_length: args.probe,
+            probe_max_ms: args.probe_max,
+            ..Default::default()
         },
         midi: MidiRoute {
             port: args.midi_port,
@@ -552,6 +572,14 @@ fn batch(args: BatchArgs) -> Result<()> {
             xfade_ms: args.loop_xfade,
             ..Default::default()
         },
+        // The probe must judge against the same seam bar the loop search will
+        // later apply, or it would settle on a hold the search then rejects.
+        probe_search: Some(crate::reloop::SearchRange {
+            min_len_ms: args.search_min,
+            max_len_ms: args.search_max,
+            min_score: args.min_seam,
+            ..Default::default()
+        }),
         out_dir: PathBuf::new(),
         pack_path: None,
     };
@@ -860,6 +888,9 @@ fn run(args: RunArgs) -> Result<()> {
             silence_hold_ms: args.silence_hold,
             silence_db: args.silence_db,
             settle_ms: args.settle,
+            probe_note_length: args.probe,
+            probe_max_ms: args.probe_max,
+            ..Default::default()
         },
         midi: MidiRoute {
             port: args.midi_port,
@@ -877,6 +908,7 @@ fn run(args: RunArgs) -> Result<()> {
             xfade_ms: args.loop_xfade,
             ..Default::default()
         },
+        probe_search: None,
         out_dir: args.out,
         pack_path,
     };
