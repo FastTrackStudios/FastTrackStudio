@@ -178,13 +178,20 @@ async fn rewriting_an_unchanged_large_file_is_idempotent() {
 }
 
 /// Free blocks on the filesystem holding `path`, in bytes — taken after
-/// a `sync`, because a filesystem with delayed allocation (btrfs, ext4)
-/// does not charge a write against free space until it commits. Without
-/// it, an unmeasured full 256 MiB copy reads back as costing nothing and
-/// the assertion below passes for entirely the wrong reason (confirmed:
-/// it did, until this line existed).
+/// syncing it, because a filesystem with delayed allocation (btrfs,
+/// ext4) does not charge a write against free space until it commits.
+/// Without that, an unmeasured full copy reads back as costing nothing
+/// and the assertion below passes for entirely the wrong reason
+/// (confirmed: it did, until this existed).
+///
+/// `--file-system` matters: a bare `sync` flushes EVERY mounted
+/// filesystem, which on a busy build machine took long enough to blow
+/// nextest's 30 s slow-timeout. Only the one under test needs flushing.
 fn free_bytes(path: &Path) -> u64 {
-    let _ = std::process::Command::new("sync").status();
+    let _ = std::process::Command::new("sync")
+        .arg("--file-system")
+        .arg(path)
+        .status();
     let out = std::process::Command::new("stat")
         .args(["-f", "-c", "%f %S"])
         .arg(path)
