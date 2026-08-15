@@ -48,6 +48,13 @@ pub trait MealplanService {
     /// Mark a meal as `skipped` without touching the pantry.
     fn skip(&self, id: &str) -> Result<Meal, MealplanError>;
 
+    /// Mark a meal as `eating-out` — planned, not cooked, and eaten
+    /// anyway. Like [`MealplanService::skip`] it leaves the pantry
+    /// alone, and the distinction is the point: a skipped meal is one
+    /// that didn't happen, and looking back at a week, "we ate out on
+    /// Tuesday" and "Tuesday fell through" are different facts.
+    fn eat_out(&self, id: &str) -> Result<Meal, MealplanError>;
+
     /// "Can I make this recipe right now from what's in the
     /// pantry?" Pulls the recipe + current pantry snapshot
     /// and runs the native fulfillment check. Returns the

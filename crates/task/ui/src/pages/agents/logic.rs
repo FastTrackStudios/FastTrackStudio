@@ -344,8 +344,7 @@ pub fn referenced_paths(text: &str) -> Vec<String> {
         // Markdown and prose cling to paths: `foo.md`, "foo.md",
         // (foo.md), foo.md. — strip the decoration, keep the path.
         let candidate = raw.trim_matches(|c: char| matches!(c, '`' | '\'' | '[' | ']' | '*' | '_'));
-        let candidate =
-            candidate.trim_end_matches(['.', ',', ';', ':', '!', '?']);
+        let candidate = candidate.trim_end_matches(['.', ',', ';', ':', '!', '?']);
         if !candidate.ends_with(".md") || candidate.len() <= 3 {
             continue;
         }

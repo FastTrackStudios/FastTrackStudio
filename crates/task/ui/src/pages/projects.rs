@@ -249,7 +249,9 @@ fn shape_projects(rows: &[ProjectInfo], relevant_only: bool) -> ProjectsData {
         .count();
     let stale = live
         .iter()
-        .filter(|p| project_proto::Status::from_str(&p.status) == Some(project_proto::Status::Stale))
+        .filter(|p| {
+            project_proto::Status::from_str(&p.status) == Some(project_proto::Status::Stale)
+        })
         .count();
     let tracked: Vec<i16> = live
         .iter()

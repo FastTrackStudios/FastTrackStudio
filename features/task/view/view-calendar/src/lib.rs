@@ -33,6 +33,6 @@ pub mod store;
 pub mod time;
 pub mod types;
 
-pub use components::{Calendar, CalendarProps};
+pub use components::{Calendar, CalendarProps, SlotGrid, SlotGridProps, SlotItem, SlotRow};
 pub use store::{CalendarMutation, CalendarState, apply};
 pub use types::{BlockEdit, CalendarEvent, ColorTag, EventId, TemplateBlock, ViewMode};

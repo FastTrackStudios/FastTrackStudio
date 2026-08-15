@@ -18,9 +18,7 @@
 
 use crate::format::status_variant;
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{
-    ArrowRight, CalendarDays, CircleCheck, NotebookPen, Search, Zap,
-};
+use fts_ui::lucide_dioxus::{ArrowRight, CalendarDays, CircleCheck, NotebookPen, Search, Zap};
 use fts_ui::prelude::*;
 use project_proto::ProjectInfo;
 use task_proto::TaskInfo as DbTask;

@@ -38,9 +38,9 @@
 //! into a sticky rail beside the spine, which is what makes the
 //! cross-highlighting worth having.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use cookbook_proto::{CookStep, Ingredient, Recipe, StepCookware, StepIngredient};
+use cookbook_proto::{CookStep, Ingredient, Recipe, StepCookware, StepIngredient, StepLink};
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     ChevronLeft, Clock, CookingPot, ExternalLink, Flame, Hourglass, Info, Lock, Pencil,
@@ -109,6 +109,9 @@ enum Seg<'a> {
     Text(&'a str),
     Ing(&'a StepIngredient),
     Cook(&'a StepCookware),
+    /// A wikilink. The span covers the markup, so rendering this as
+    /// `display` is what keeps `[[Sauce]]{}` off the screen.
+    Link(&'a StepLink),
 }
 
 /// Split a step's text on its ingredient spans. The parser records
@@ -125,9 +128,13 @@ fn segments<'a>(step: &'a CookStep, from: usize, to: usize) -> Vec<Seg<'a>> {
     for c in &step.cookware {
         marks.push(Seg::Cook(c));
     }
+    for l in &step.links {
+        marks.push(Seg::Link(l));
+    }
     marks.sort_by_key(|m| match m {
         Seg::Ing(r) => r.start,
         Seg::Cook(c) => c.start,
+        Seg::Link(l) => l.start,
         Seg::Text(_) => 0,
     });
 
@@ -137,6 +144,7 @@ fn segments<'a>(step: &'a CookStep, from: usize, to: usize) -> Vec<Seg<'a>> {
         let (start, len) = match &m {
             Seg::Ing(r) => (r.start as usize, r.len as usize),
             Seg::Cook(c) => (c.start as usize, c.len as usize),
+            Seg::Link(l) => (l.start as usize, l.len as usize),
             Seg::Text(_) => continue,
         };
         let end = start + len;
@@ -190,19 +198,18 @@ fn actions(text: &str) -> Actions {
 /// Ranges delimited by literal `- ` / `• ` markers, with anything before
 /// the first one kept as the lead-in.
 fn bullet_ranges(text: &str) -> Option<Actions> {
+    // Walk characters, not bytes. Recipe prose is full of em-dashes and
+    // accents, and indexing a `str` at a byte that lands inside one is a
+    // panic, not a wrong answer.
     let mut marks: Vec<usize> = Vec::new();
-    let b = text.as_bytes();
-    let mut i = 0usize;
-    while i < b.len() {
-        let at_start = i == 0;
-        let after_space = i > 0 && b[i - 1].is_ascii_whitespace();
-        let is_marker = (b[i] == b'-' || text[i..].starts_with('•'))
-            && (at_start || after_space)
-            && text[i..].chars().nth(1).is_some_and(char::is_whitespace);
-        if is_marker {
+    let mut prev_ws = true; // start of string counts as a boundary
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let next_is_ws = chars.peek().is_some_and(|(_, n)| n.is_whitespace());
+        if (c == '-' || c == '•') && prev_ws && next_is_ws {
             marks.push(i);
         }
-        i += 1;
+        prev_ws = c.is_whitespace();
     }
     // One bullet isn't a list, it's a dash in a sentence.
     if marks.len() < 2 {
@@ -348,6 +355,37 @@ fn Reader(recipe: Recipe) -> Element {
             .into_iter()
             .next()
     });
+
+    // A `[[Taco Bell Sauce]]{}` names the dish the way a cook says it,
+    // not the way the filesystem spells it, so the cookbook is what
+    // turns one into the other. Matching on both display name and file
+    // stem mirrors how the server resolves a reference when it costs
+    // the shopping list — the two should never disagree about what a
+    // link points at.
+    let cookbook = use_resource(move || async move {
+        let s = slug()?;
+        crate::feeds::fetch_recipes(&s).await.ok()
+    });
+    let link_targets: HashMap<String, String> = cookbook
+        .read()
+        .clone()
+        .flatten()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|r| {
+            let stem = r
+                .path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&r.path)
+                .trim_end_matches(".cook")
+                .to_lowercase();
+            [
+                (r.name.trim().to_lowercase(), r.path.clone()),
+                (stem, r.path.clone()),
+            ]
+        })
+        .collect();
 
     // The dish's own picture, if one sits beside the recipe file.
     let title_image = use_recipe_image(
@@ -693,6 +731,7 @@ fn Reader(recipe: Recipe) -> Element {
                                                         .find(|im| im.step_index == Some(i as u32))
                                                         .map(|im| im.path.clone()),
                                                     slug,
+                                                    link_targets: link_targets.clone(),
                                                     ingredients: recipe.ingredients.iter().cloned().collect::<Vec<_>>(),
                                                     factor,
                                                     scaled,
@@ -729,6 +768,10 @@ fn StepRow(
     number: usize,
     image: Option<String>,
     slug: Memo<Option<String>>,
+    /// Lowercased recipe name / file stem → vault path, for resolving
+    /// the wikilinks in this step. Empty until the cookbook loads, which
+    /// only costs the link its tap target — never its text.
+    link_targets: HashMap<String, String>,
     ingredients: Vec<Ingredient>,
     factor: f64,
     scaled: bool,
@@ -740,6 +783,7 @@ fn StepRow(
     on_focus: EventHandler<Option<u32>>,
     on_toggle: EventHandler<()>,
 ) -> Element {
+    let nav = use_navigator();
     let acts = actions(&step.text);
     let lines = acts.items.clone();
     let step_image = use_recipe_image(slug, image);
@@ -790,6 +834,7 @@ fn StepRow(
                                 Seg::Text(t) => rsx! { span { key: "{k}", "{t}" } },
                                 Seg::Ing(r) => rsx! { span { key: "{k}", class: "font-medium text-foreground", "{r.name}" } },
                                 Seg::Cook(c) => rsx! { span { key: "{k}", "{c.name}" } },
+                                Seg::Link(l) => rsx! { span { key: "{k}", "{l.display}" } },
                             }
                         }
                     }
@@ -844,6 +889,34 @@ fn StepRow(
                                                 "{c.name}"
                                             }
                                         },
+                                        // A recipe you have to make first is
+                                        // the one mention worth leaving the
+                                        // page for, so it gets a solid
+                                        // underline where cookware gets a
+                                        // dotted one. An unresolved link still
+                                        // reads as words — a cook loses
+                                        // nothing but the tap.
+                                        Seg::Link(l) => {
+                                            let dest = link_targets.get(&l.target.trim().to_lowercase()).cloned();
+                                            match dest {
+                                                Some(path) => rsx! {
+                                                    span {
+                                                        key: "{k}",
+                                                        class: "cursor-pointer font-medium text-primary underline decoration-primary/40 underline-offset-[5px] transition-colors hover:decoration-primary",
+                                                        title: "Open {l.display}",
+                                                        onclick: move |_| {
+                                                            nav.push(crate::routes::Route::RecipeReadRoute {
+                                                                path: path.clone(),
+                                                            });
+                                                        },
+                                                        "{l.display}"
+                                                    }
+                                                },
+                                                None => rsx! {
+                                                    span { key: "{k}", class: "font-medium text-foreground", "{l.display}" }
+                                                },
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -957,5 +1030,83 @@ fn StepRow(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The string that took the page down in the browser. Recipe prose
+    /// is full of em-dashes; walking it byte-wise and indexing the `str`
+    /// mid-character is a panic, not a wrong answer, and it takes the
+    /// whole app with it rather than rendering one step oddly.
+    const EM_DASH: &str = "Brown lean ground beef on both sides in a pan at 7 out of 10 heat. \
+                           Stir in taco seasoning, then reduced sodium chicken broth — 90 g now, \
+                           to keep it juicy.";
+
+    #[test]
+    fn multibyte_prose_does_not_panic() {
+        let a = actions(EM_DASH);
+        for (from, to) in a.items.iter().copied() {
+            // Every range must be sliceable — that's the whole contract.
+            let _ = &EM_DASH[from..to];
+        }
+        if let Some((f, t)) = a.lead {
+            let _ = &EM_DASH[f..t];
+        }
+    }
+
+    #[test]
+    fn a_lone_dash_is_not_a_bullet_list() {
+        let a = actions(EM_DASH);
+        assert!(
+            a.lead.is_none(),
+            "one dash mid-sentence is punctuation, not a list"
+        );
+        assert_eq!(a.items.len(), 2, "two sentences, split on the full stop");
+    }
+
+    #[test]
+    fn author_bullets_become_items_with_a_lead() {
+        let s = "While the pasta cooks: - warm the oil - add the garlic - cook until blonde";
+        let a = actions(s);
+        let lead = a.lead.expect("text before the first bullet leads");
+        assert_eq!(&s[lead.0..lead.1], "While the pasta cooks");
+        let items: Vec<&str> = a.items.iter().map(|(f, t)| &s[*f..*t]).collect();
+        assert_eq!(
+            items,
+            vec!["warm the oil", "add the garlic", "cook until blonde"]
+        );
+    }
+
+    #[test]
+    fn bullets_survive_multibyte_neighbours() {
+        let s = "Prep — quickly: - dice the jalapeño - grate the parmesan — finely";
+        let a = actions(s);
+        let items: Vec<&str> = a.items.iter().map(|(f, t)| &s[*f..*t]).collect();
+        assert_eq!(items.len(), 2, "got {items:?}");
+        assert!(items[0].contains("jalapeño"));
+    }
+
+    #[test]
+    fn sentences_do_not_split_on_decimals_or_abbreviations() {
+        let s = "Add 0.25 tsp of salt. Cook for 2 min. Don't brown it.";
+        let a = actions(s);
+        let items: Vec<&str> = a.items.iter().map(|(f, t)| &s[*f..*t]).collect();
+        assert_eq!(
+            items,
+            vec![
+                "Add 0.25 tsp of salt.",
+                "Cook for 2 min.",
+                "Don't brown it."
+            ]
+        );
+    }
+
+    #[test]
+    fn a_single_sentence_stays_one_item() {
+        let s = "Fold in the parmesan and serve.";
+        assert_eq!(actions(s).items.len(), 1);
     }
 }

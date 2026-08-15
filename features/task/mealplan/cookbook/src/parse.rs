@@ -11,7 +11,8 @@ use cooklang::{Converter, CooklangParser, Extensions, Value};
 use thiserror::Error;
 
 use crate::model::{
-    CookStep, CookSteps, Ingredient, Recipe, RecipeTimer, StepCookware, StepIngredient, StringList,
+    CookStep, CookSteps, Ingredient, Recipe, RecipeTimer, StepCookware, StepIngredient, StepLink,
+    StringList,
 };
 
 #[derive(Debug, Error)]
@@ -322,6 +323,20 @@ fn project_step(
     ingredients.retain(|si| (si.start + si.len) as usize <= text.len());
     cookware.retain(|cw| (cw.start + cw.len) as usize <= text.len());
 
+    // Scanned against the finished text so the spans need no shifting:
+    // cooklang emits `[[…]]` verbatim, so whatever is here is what the
+    // reader will be asked to draw over.
+    let links = crate::wiki::scan_links(&text)
+        .into_iter()
+        .map(|l| StepLink {
+            target: l.target,
+            display: l.display,
+            is_recipe: l.is_recipe,
+            start: l.start as u32,
+            len: l.len as u32,
+        })
+        .collect();
+
     CookStep {
         text,
         timers,
@@ -330,6 +345,7 @@ fn project_step(
         notes: Vec::new(),
         cookware,
         ingredients,
+        links,
     }
 }
 

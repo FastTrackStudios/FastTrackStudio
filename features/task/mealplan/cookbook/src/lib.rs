@@ -34,8 +34,8 @@ pub mod wiki;
 pub mod write;
 
 pub use model::{
-    Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeImages, StepCookware,
-    StepIngredient, StringList,
+    Course, Ingredient, Ingredients, Nutrition, Recipe, RecipeImages, StepCookware, StepIngredient,
+    StepLink, StringList,
 };
 pub use parse::{ParseError, parse_cook, parse_cook_at};
 pub use scan::{COOKBOOK_DIR, RecipeImage, image_paths_for, scan_cookbook, scan_cookbook_at};

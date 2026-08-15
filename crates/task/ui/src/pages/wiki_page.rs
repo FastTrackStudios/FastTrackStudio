@@ -19,9 +19,7 @@ use crate::orgs::{OrgMeta, OrgSelection, selected_slugs};
 
 const WIKI_ID: &str = "default";
 
-async fn pages_client(
-    slug: &str,
-) -> Result<wiki_proto::service::pages::PagesClient, String> {
+async fn pages_client(slug: &str) -> Result<wiki_proto::service::pages::PagesClient, String> {
     crate::vox_clients::establish_for::<wiki_proto::service::pages::PagesClient>(slug).await
 }
 
@@ -77,9 +75,7 @@ fn split_frontmatter(raw: &str) -> (Vec<(String, String)>, &str) {
 }
 
 fn fm_get<'a>(kv: &'a [(String, String)], key: &str) -> Option<&'a str> {
-    kv.iter()
-        .find(|(k, _)| k == key)
-        .map(|(_, v)| v.as_str())
+    kv.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
 }
 
 #[component]
@@ -187,8 +183,8 @@ pub fn WikiPageView(path: String) -> Element {
             // Provenance: `ai_generated: true` marks machine-produced
             // content (the wiki's whole point — non-user-authored
             // knowledge); `generated_by:` names the model/agent.
-            let ai_generated = fm_get(&fm, "ai_generated")
-                .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+            let ai_generated =
+                fm_get(&fm, "ai_generated").is_some_and(|v| v.eq_ignore_ascii_case("true"));
             let generated_by = fm_get(&fm, "generated_by").unwrap_or_default().to_string();
             let doc_markdown = doc.markdown.clone();
             let doc_sha = doc.sha256.clone();

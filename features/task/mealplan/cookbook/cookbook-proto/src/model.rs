@@ -161,6 +161,18 @@ pub struct CookStep {
     /// reading view can put the amount right where the eye already is.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub ingredients: Vec<StepIngredient>,
+
+    /// Wikilinks written in this step, with the span of markup each one
+    /// occupies. Cooklang treats `[[…]]` as ordinary text, so without
+    /// this the brackets render verbatim.
+    ///
+    /// `#[facet(default)]` because the web client ships ahead of the
+    /// server: without it a new client decoding an old server's recipe
+    /// fails the whole decode plan, and the cookbook goes blank rather
+    /// than merely un-linked.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[facet(default)]
+    pub links: Vec<StepLink>,
 }
 
 /// `Vec<RecipeImage>` newtype — JSON column.
@@ -211,6 +223,33 @@ pub struct RecipeImage {
     /// `None` for the dish's own image; `Some(n)` for step `n`.
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "stepIndex")]
     pub step_index: Option<u32>,
+}
+
+/// A wikilink as it appears inside one step's text.
+///
+/// The span covers the whole `[[Target|alias]]{2}` run, markup and all,
+/// so a reader can draw the display text over it. Without this the
+/// brackets reach the screen — and a cook following a recipe should
+/// never be shown link syntax.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct StepLink {
+    /// The page this points at.
+    pub target: String,
+    /// What to render in place of the markup.
+    pub display: String,
+    /// True for the braced form, which pulls in another recipe. False
+    /// for a bare `[[concept]]`, which is just a reference.
+    #[serde(
+        skip_serializing_if = "std::ops::Not::not",
+        default,
+        rename = "isRecipe"
+    )]
+    pub is_recipe: bool,
+    /// Byte offset of the opening `[` within [`CookStep::text`].
+    pub start: u32,
+    /// Byte length of the whole run, markup included.
+    pub len: u32,
 }
 
 /// A piece of cookware as it appears inside one step's text.

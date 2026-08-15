@@ -12,9 +12,11 @@ mod event_chip;
 mod event_editor;
 mod month_view;
 mod now_line;
+mod slot_grid;
 mod style;
 mod time_grid;
 mod toolbar;
 mod week_view;
 
 pub use calendar::{Calendar, CalendarProps};
+pub use slot_grid::{SlotGrid, SlotGridProps, SlotItem, SlotRow};

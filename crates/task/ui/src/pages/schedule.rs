@@ -162,6 +162,12 @@ pub fn ScheduleView() -> Element {
         .unwrap_or_default();
     let plans_err = plans_result.error().cloned();
     let template_blocks = build_blocks(&plan_rows, &meal_lookup);
+    let nav = use_navigator();
+
+    // The same meals, on the block axis. The time grid can only show a
+    // meal where a day-plan block happens to sit; this shows every
+    // planned meal, including the ones with no time attached at all.
+    let (slot_rows, slot_items) = build_meal_slots(meals().as_deref().unwrap_or(&[]));
 
     // The block currently under edit, resolved to its values.
     let editor = editing().and_then(|(date, id)| {
@@ -275,6 +281,13 @@ pub fn ScheduleView() -> Element {
                 template_blocks,
                 initial_view: Some(ViewMode::Week),
                 summary,
+                slot_rows,
+                slot_items,
+                on_slot_item: move |id: String| {
+                    if id.ends_with(".cook") {
+                        nav.push(crate::routes::Route::RecipeReadRoute { path: id });
+                    }
+                },
                 on_range: move |(s, e)| range.set(Some((s, e))),
                 on_block_click: move |(date, id)| editing.set(Some((date, id))),
                 on_block_edit: move |(orig, target, id, s, e): BlockEdit| {
@@ -480,6 +493,72 @@ fn to_assignment((kind, title, ref_id): Assign) -> BlockAssignment {
 
 /// `(date, slot)` → planned meal titles for the schedule's meal
 /// preview. Only `planned`/`cooked` meals; skipped ones don't show.
+/// Planned meals as block-axis rows and items.
+///
+/// Breakfast / lunch / dinner always, then any other slot in use. Kept
+/// beside [`build_meal_lookup`] rather than sharing it: that one exists
+/// to annotate a day-plan block that already has a time, and drops
+/// skipped meals because a time block for something you didn't eat is
+/// noise. The block axis has no such constraint — "we ate out on
+/// Tuesday" is exactly the sort of thing a week view should say.
+fn build_meal_slots(
+    meals: &[mealplan_proto::Meal],
+) -> (Vec<view_calendar::SlotRow>, Vec<view_calendar::SlotItem>) {
+    use mealplan_proto::{Slot, Status};
+    use std::collections::BTreeSet;
+    use view_calendar::{ColorTag, SlotItem, SlotRow};
+
+    let core = ["breakfast", "lunch", "dinner"];
+    let key = |m: &mealplan_proto::Meal| {
+        Slot::from_str(&m.slot)
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_else(|| m.slot.trim().to_lowercase())
+    };
+
+    let mut extra: BTreeSet<String> = BTreeSet::new();
+    for m in meals {
+        let k = key(m);
+        if !core.contains(&k.as_str()) {
+            extra.insert(k);
+        }
+    }
+    let rows = core
+        .iter()
+        .map(|k| (*k).to_string())
+        .chain(extra)
+        .map(|k| {
+            let mut c = k.chars();
+            let label = match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => k.clone(),
+            };
+            SlotRow::new(k, label)
+        })
+        .collect();
+
+    let items = meals
+        .iter()
+        .map(|m| {
+            let (color, muted) = match Status::from_str(&m.status) {
+                Some(Status::Cooked) => (ColorTag::Success, false),
+                Some(Status::Skipped) => (ColorTag::Neutral, true),
+                Some(Status::EatingOut) => (ColorTag::Warning, false),
+                _ => (ColorTag::Primary, false),
+            };
+            let id = m
+                .recipe_paths
+                .first()
+                .cloned()
+                .unwrap_or_else(|| m.id.to_string());
+            SlotItem::new(id, m.scheduled_for, key(m), m.name.clone())
+                .color(color)
+                .muted(muted)
+        })
+        .collect();
+
+    (rows, items)
+}
+
 fn build_meal_lookup(meals: &[mealplan_proto::Meal]) -> HashMap<(NaiveDate, String), Vec<String>> {
     let mut out: HashMap<(NaiveDate, String), Vec<String>> = HashMap::new();
     for m in meals {
