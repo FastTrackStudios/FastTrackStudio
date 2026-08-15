@@ -25,6 +25,10 @@ pub struct ToolbarProps {
     pub summary: Option<String>,
     #[props(default = false)]
     pub readonly: bool,
+    /// Which modes to offer. A calendar with no slot rows shouldn't
+    /// advertise a block view that would render empty.
+    #[props(default = vec![ViewMode::Day, ViewMode::Week, ViewMode::Month])]
+    pub modes: Vec<ViewMode>,
 }
 
 #[component]
@@ -90,6 +94,7 @@ pub fn Toolbar(props: ToolbarProps) -> Element {
                 ViewSwitch {
                     view: props.view,
                     on_change: props.on_view_change,
+                    modes: props.modes.clone(),
                 }
                 if !props.readonly {
                     Button {
@@ -109,11 +114,12 @@ pub fn Toolbar(props: ToolbarProps) -> Element {
 struct ViewSwitchProps {
     view: ViewMode,
     on_change: EventHandler<ViewMode>,
+    modes: Vec<ViewMode>,
 }
 
 #[component]
 fn ViewSwitch(props: ViewSwitchProps) -> Element {
-    let opts = [ViewMode::Day, ViewMode::Week, ViewMode::Month];
+    let opts = props.modes.clone();
     rsx! {
         // Full-width segmented control on mobile (each segment a fat tap
         // target); shrinks to its content at `sm:` and up.
@@ -206,5 +212,7 @@ fn range_label(anchor: NaiveDate, view: ViewMode) -> String {
             }
         }
         ViewMode::Day => anchor.format("%a, %b %-d, %Y").to_string(),
+        // Blocks spans the same week as `Week`, so it reads the same.
+        ViewMode::Blocks => range_label(anchor, ViewMode::Week),
     }
 }

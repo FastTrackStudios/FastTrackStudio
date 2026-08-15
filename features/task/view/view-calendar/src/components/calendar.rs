@@ -14,6 +14,7 @@ use super::day_view::DayView;
 use super::drag::DragContext;
 use super::event_editor::EventEditor;
 use super::month_view::MonthView;
+use super::slot_grid::{SlotGrid, SlotItem, SlotRow};
 use super::toolbar::Toolbar;
 use super::week_view::WeekView;
 
@@ -46,6 +47,24 @@ pub struct CalendarProps {
     /// Optional muted context line for the toolbar (wide screens).
     #[props(default)]
     pub summary: Option<String>,
+
+    // ── Block axis ──────────────────────────────────────────────
+    // Supplying rows is what turns the Blocks mode on: a calendar with
+    // no categories to show shouldn't offer a view that renders empty.
+    /// Rows for [`ViewMode::Blocks`], in display order.
+    #[props(default)]
+    pub slot_rows: Vec<SlotRow>,
+    /// What sits in the block grid. Kept separate from `events` because
+    /// the two axes answer different questions — an item with no clock
+    /// value has nothing to show on the time grid, and vice versa.
+    #[props(default)]
+    pub slot_items: Vec<SlotItem>,
+    /// A block item was clicked, by [`SlotItem::id`].
+    #[props(default)]
+    pub on_slot_item: Option<EventHandler<String>>,
+    /// An empty part of a block cell was clicked — `(date, row key)`.
+    #[props(default)]
+    pub on_slot_cell: Option<EventHandler<(NaiveDate, String)>>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -267,6 +286,18 @@ pub fn Calendar(props: CalendarProps) -> Element {
         }
     };
 
+    // Offer the block axis only when there are rows to put on it.
+    let block_modes: Vec<ViewMode> = if props.slot_rows.is_empty() {
+        vec![ViewMode::Day, ViewMode::Week, ViewMode::Month]
+    } else {
+        vec![
+            ViewMode::Day,
+            ViewMode::Week,
+            ViewMode::Month,
+            ViewMode::Blocks,
+        ]
+    };
+
     rsx! {
         div {
             class: "flex flex-col h-full w-full outline-none",
@@ -283,6 +314,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                 on_prev: move |()| anchor.with_mut(|d| *d = step(*d, *view.read(), -1)),
                 on_next: move |()| anchor.with_mut(|d| *d = step(*d, *view.read(), 1)),
                 on_today: move |()| anchor.set(today),
+                modes: block_modes.clone(),
                 on_view_change: move |v: ViewMode| view.set(v),
                 on_create: move |()| {
                     // Anchor date, not today — "+ New event" while
@@ -322,6 +354,24 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),
+                        }
+                    },
+                    ViewMode::Blocks => rsx! {
+                        SlotGrid {
+                            days: week_days(*anchor.read()).to_vec(),
+                            rows: props.slot_rows.clone(),
+                            items: props.slot_items.clone(),
+                            today: Some(chrono::Local::now().date_naive()),
+                            on_item: move |id: String| {
+                                if let Some(h) = &props.on_slot_item {
+                                    h.call(id);
+                                }
+                            },
+                            on_cell: move |cell: (NaiveDate, String)| {
+                                if let Some(h) = &props.on_slot_cell {
+                                    h.call(cell);
+                                }
+                            },
                         }
                     },
                     ViewMode::Day => rsx! {
@@ -366,6 +416,11 @@ fn visible_dates(anchor: NaiveDate, view: ViewMode) -> (NaiveDate, NaiveDate) {
             (days[0], days[6])
         }
         ViewMode::Day => (anchor, anchor),
+        // Same span as the week it mirrors.
+        ViewMode::Blocks => {
+            let days = week_days(anchor);
+            (days[0], days[6])
+        }
     }
 }
 
@@ -378,7 +433,7 @@ fn visible_range(
             let grid = month_grid(anchor);
             (grid[0][0], grid[5][6] + Days::new(1))
         }
-        ViewMode::Week => {
+        ViewMode::Week | ViewMode::Blocks => {
             let days = week_days(anchor);
             (days[0], days[6] + Days::new(1))
         }
@@ -405,7 +460,8 @@ fn step(anchor: NaiveDate, view: ViewMode, dir: i64) -> NaiveDate {
                     .unwrap_or(anchor)
             }
         }
-        ViewMode::Week => {
+        // Blocks spans a week, so it pages by one.
+        ViewMode::Week | ViewMode::Blocks => {
             let base = week_start(anchor);
             if dir < 0 {
                 base.checked_sub_days(Days::new((-dir * 7) as u64))
