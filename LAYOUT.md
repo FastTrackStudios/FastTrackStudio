@@ -42,7 +42,7 @@ consumed as `x.workspace = true`.
 | new | from |
 |---|---|
 | libs/architect/* | subtree import of FastTrackStudios/architect ({architect,macros/*,atom,form,auth/*,crdt/*}; examples/xtask dropped) |
-| libs/fts-ui/* | fts-ui/crates/{fts-ui,fts-ui-audio,showcase} |
+| libs/fts-ui/* | architect-ui/crates/{architect-ui,fts-ui-audio,showcase} |
 | libs/fts-story/* | fts-story/crates/* |
 | libs/dock/* | dock-dioxus/crates/{dock-dioxus,dock-proto} |
 | libs/nice-plug/* | FTS-Plugins/forks/fts-plug/crates/* |
@@ -66,7 +66,7 @@ consumed as `x.workspace = true`.
 | apps/installer | FastTrackStudio/apps/installer — rebuilt as `fts-installer`, a thin clap CLI that downloads/installs codeberg releases (old Dioxus wizard in git history) |
 | apps/site | fasttrackstudio-site repo (subtree import; package renamed fts-site) — fasttrackstudio.app |
 | apps/docs-site | unified docs site (dodeca + kf docs; NOT a cargo member) — docs.fasttrackstudio.app; keyflow docs content moved here from crates/keyflow/docs |
-| (park/delete) | signal/apps/{desktop,mobile,native,tui,cli,amp}, session/apps/*, fts-ui/apps/*, daw/apps/{daw/native,example-*}, FastTrackStudio/apps/keyflow-playground — audit per-app: keep only what runs |
+| (park/delete) | signal/apps/{desktop,mobile,native,tui,cli,amp}, session/apps/*, architect-ui/apps/*, daw/apps/{daw/native,example-*}, FastTrackStudio/apps/keyflow-playground — audit per-app: keep only what runs |
 
 ## Root workspace rules
 

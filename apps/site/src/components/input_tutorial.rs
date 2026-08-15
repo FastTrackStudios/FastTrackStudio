@@ -13,7 +13,7 @@
 //! embedded snapshot — the rendering stays identical.
 
 use dioxus::prelude::*;
-use fts_ui::prelude::*;
+use architect_ui::prelude::*;
 use input_config_proto::{
     KeybindContext, KeybindDef, ProfileConfig, SectionConfig, WheelBindDef, kebab_to_title,
 };

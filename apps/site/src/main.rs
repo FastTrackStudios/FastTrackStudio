@@ -13,8 +13,8 @@ mod renderer;
 mod vault;
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{FileCode, Github, Music};
-use fts_ui::prelude::*;
+use architect_ui::lucide_dioxus::{FileCode, Github, Music};
+use architect_ui::prelude::*;
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -387,7 +387,7 @@ fn Home() -> Element {
                                 number: "02",
                                 title: "Cross-Platform",
                                 body: "Designed for Linux, macOS, Windows, and embedded use cases. The fracture of available software is degrading quality everywhere.",
-                                icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-5 h-5" } },
+                                icon: rsx! { architect_ui::lucide_dioxus::Monitor { class: "w-5 h-5" } },
                                 accent: "#38bdf8",
                                 delay_ms: 180
                             }

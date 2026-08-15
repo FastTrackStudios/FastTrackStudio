@@ -268,21 +268,21 @@ Helper `render_squiggle_overlay(source, &[Diagnostic])` is HTML-escape-safe
 and merges overlapping ranges. Three unit tests in
 `components/highlighted_editor.rs::tests`.
 
-## UI: fts-ui adoption
+## UI: architect-ui adoption
 
 `keyflow-ui` now depends on the FastTrack Studio shared design system
 (`../fts-ui/crates/fts-ui`). The chart **renderer** (Vello scene mounts
 in `chart_graphics.rs` / `chart_renderer.rs`) stays raw; every other
-piece of chrome should compose `fts-ui` primitives. Wiring landed:
+piece of chrome should compose `architect-ui` primitives. Wiring landed:
 
-- New workspace dep `fts-ui` in `keyflow/Cargo.toml`.
-- `keyflow-ui` adds `fts-ui = { workspace = true }` and re-exports
-  `fts_ui::prelude::*` + the `cn!` macro through `keyflow_ui::prelude`,
+- New workspace dep `architect-ui` in `keyflow/Cargo.toml`.
+- `keyflow-ui` adds `architect-ui = { workspace = true }` and re-exports
+  `architect_ui::prelude::*` + the `cn!` macro through `keyflow_ui::prelude`,
   so existing `use crate::prelude::*` callers pick up `Button`, `Card`,
   `Tabs`, `Text`, `Toast`, theme tokens, etc. with no churn.
 - `[patch."https://github.com/FastTrackStudios/fts-ui.git"]` redirects
-  the transitive fts-ui pulled in by `session-ui` to the same local
-  checkout so the workspace ships a single fts-ui version.
+  the transitive architect-ui pulled in by `session-ui` to the same local
+  checkout so the workspace ships a single architect-ui version.
 - Migrated:
   - `components/highlighted_editor.rs` — status footer → `Text` + `TextVariant`.
   - `panels/preview_panel.rs` — "Reset View" overlay → `Button` + `lucide_dioxus` icon.
@@ -302,7 +302,7 @@ piece of chrome should compose `fts-ui` primitives. Wiring landed:
 ### Round 2 follow-up — dropdowns, theme tokens, providers
 
 - **Examples dropdown** in `layouts/chart_editor.rs` switched from an
-  ad-hoc `relative div` + manual open-state to fts-ui's
+  ad-hoc `relative div` + manual open-state to architect-ui's
   `Dropdown` / `DropdownTrigger` / `DropdownContent` / `DropdownItem`
   (carries its own keyboard nav, focus management, and click-outside).
 - **Color classes → theme tokens.** `text-green-400` / `text-yellow-400`
