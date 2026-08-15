@@ -11,12 +11,14 @@
 //! same [`DragProvider`](fts_audio_ui::drag::DragProvider) as every other FTS
 //! control, so a hardware face behaves like the rest of the editor.
 
-use dioxus::prelude::*;
 use crate::drag::{begin_drag, DragState};
 use crate::prelude::*;
+use dioxus::prelude::*;
 
 use crate::hardware::knob_kit::{Edge, Index, KnobSpec, Paint, Turns};
-use crate::hardware::knob_svg::{knob_angle, pointer_polygon, ring_arc_path, ring_point, ScaleMark};
+use crate::hardware::knob_svg::{
+    knob_angle, pointer_polygon, ring_arc_path, ring_point, ScaleMark,
+};
 
 /// Design-space radii inside the knob's own `-55 -55 110 110` viewBox.
 const BODY_R: f64 = 30.0;
@@ -25,8 +27,6 @@ const BODY_R: f64 = 30.0;
 /// [`Ring::geometry`](crate::hardware::rack::Ring::geometry).
 const RING_R: f64 = 41.0;
 const LABEL_R: f64 = 50.0;
-
-
 
 /// How far a Marconi wing overhangs the skirt it is mounted on, as a multiple
 /// of the skirt's radius, and how far its tail runs the other way.

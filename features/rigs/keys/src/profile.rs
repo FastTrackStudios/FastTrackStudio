@@ -50,12 +50,22 @@ pub struct SceneSlot {
 
 impl SceneSlot {
     pub fn new(layer: impl Into<String>, patch: impl Into<String>, gain_db: f32) -> Self {
-        Self { layer: layer.into(), patch: patch.into(), gain_db, muted: false }
+        Self {
+            layer: layer.into(),
+            patch: patch.into(),
+            gain_db,
+            muted: false,
+        }
     }
 
     /// A slot that silences its layer in this scene.
     pub fn off(layer: impl Into<String>) -> Self {
-        Self { layer: layer.into(), patch: String::new(), gain_db: 0.0, muted: true }
+        Self {
+            layer: layer.into(),
+            patch: String::new(),
+            gain_db: 0.0,
+            muted: true,
+        }
     }
 }
 
@@ -218,12 +228,20 @@ impl KeysProfile {
         if let Ok(p) = std::env::var("FTS_KEYS_PROFILE") {
             return Some(std::path::PathBuf::from(p));
         }
-        let base = std::env::var("XDG_CONFIG_HOME").map(std::path::PathBuf::from).ok().or_else(
-            || std::env::var("HOME").ok().map(|h| std::path::PathBuf::from(h).join(".config")),
-        )?;
+        let base = std::env::var("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .ok()
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .map(|h| std::path::PathBuf::from(h).join(".config"))
+            })?;
         let file = name.trim();
         let file = if file.is_empty() { "Worship" } else { file };
-        Some(base.join("signal/keys/profiles").join(format!("{file}.styx")))
+        Some(
+            base.join("signal/keys/profiles")
+                .join(format!("{file}.styx")),
+        )
     }
 
     /// Write the profile back to disk — the edits a player makes to their
@@ -233,7 +251,9 @@ impl KeysProfile {
     /// Best-effort: a rig that cannot write its config still plays, and losing
     /// a reorder is not worth failing a service for.
     pub fn save(&self) {
-        let Some(path) = Self::config_path(&self.name) else { return };
+        let Some(path) = Self::config_path(&self.name) else {
+            return;
+        };
         if let Some(dir) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(dir) {
                 tracing::warn!(?path, "keys profile not saved: {e}");
@@ -259,7 +279,10 @@ impl KeysProfile {
                 Some(p)
             }
             Err(e) => {
-                tracing::error!(?path, "saved keys profile is unreadable ({e}); using the built-in");
+                tracing::error!(
+                    ?path,
+                    "saved keys profile is unreadable ({e}); using the built-in"
+                );
                 None
             }
         }
@@ -280,7 +303,9 @@ impl KeysProfile {
     /// unresolvable render as silent lanes, so a profile is playable before
     /// every pack is downloaded.
     pub fn build_tree(&self, resolve: impl Fn(&str) -> Option<String>) -> Container {
-        self.build_tree_with(resolve, |_, _| signal_synth::engine::ModuleSettings::default())
+        self.build_tree_with(resolve, |_, _| {
+            signal_synth::engine::ModuleSettings::default()
+        })
     }
 
     /// As [`build_tree`](Self::build_tree), with the live macro values for
@@ -301,8 +326,7 @@ impl KeysProfile {
             for layer in &engine.layers {
                 // The authored fader rides in as the tree default (the live
                 // mixer's cells overwrite it once running).
-                let lane =
-                    Self::lane_container(layer, &resolve, &module_set).volume(layer.gain_db);
+                let lane = Self::lane_container(layer, &resolve, &module_set).volume(layer.gain_db);
                 voices = voices.add(lane);
             }
             engines = engines.add(eng.add(voices));
@@ -449,10 +473,7 @@ pub fn worship_profile() -> KeysProfile {
             EngineDef {
                 name: "Organ".into(),
                 gain_db: 0.0,
-                layers: vec![
-                    LayerDef::new("Organ A", ""),
-                    LayerDef::new("Organ B", ""),
-                ],
+                layers: vec![LayerDef::new("Organ A", ""), LayerDef::new("Organ B", "")],
             },
             EngineDef {
                 name: "Aux".into(),
@@ -611,8 +632,7 @@ mod tests {
     fn tree_has_a_fader_per_lane() {
         let p = worship_profile();
         let tree = p.build_tree(|_| None);
-        let (_, cells) =
-            signal_sampler::node_render::RenderNode::compile_with_cells(&tree, 48_000);
+        let (_, cells) = signal_sampler::node_render::RenderNode::compile_with_cells(&tree, 48_000);
         use signal_sampler::rig_node::Role;
         use std::sync::Arc;
         for name in p.layer_names() {
@@ -630,7 +650,11 @@ mod tests {
         }
         // A one-lane engine named after its lane ("Pad" holding "Pad") must
         // still be two cells — see the render tree's like-named test.
-        for engine in p.engines.iter().filter(|e| e.layers.iter().any(|l| l.name == e.name)) {
+        for engine in p
+            .engines
+            .iter()
+            .filter(|e| e.layers.iter().any(|l| l.name == e.name))
+        {
             assert!(
                 !Arc::ptr_eq(
                     cells.get(Role::Engine, &engine.name).expect("engine cell"),
@@ -661,7 +685,10 @@ mod order_tests {
     fn order_round_trips_and_tolerates_new_engines() {
         let mut p = worship_profile();
         p.apply_order(&["SFX".into(), "Drone".into()]);
-        assert_eq!(&p.engine_order()[..2], &["SFX".to_string(), "Drone".to_string()]);
+        assert_eq!(
+            &p.engine_order()[..2],
+            &["SFX".to_string(), "Drone".to_string()]
+        );
 
         let text = p.to_styx_string().expect("serialize");
         let back = KeysProfile::from_styx_str(&text).expect("parse");
@@ -677,7 +704,10 @@ mod order_tests {
             layers: vec![LayerDef::new("Brass A", "")],
         });
         fresh.apply_order(&saved_order);
-        assert_eq!(&fresh.engine_order()[..2], &["SFX".to_string(), "Drone".to_string()]);
+        assert_eq!(
+            &fresh.engine_order()[..2],
+            &["SFX".to_string(), "Drone".to_string()]
+        );
         assert!(fresh.engine("Brass").is_some());
     }
 }

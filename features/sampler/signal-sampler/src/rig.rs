@@ -36,24 +36,24 @@
 //! (post-input-trim, pre-amp) into a shared atomic.
 
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 
 use signal_proto::block::{BlockCategory, BlockType};
 
 use facet::Facet;
 
 use daw::service::{FxChainContext, FxChains, FxParams, ProjectContext, TrackRef, Tracks};
+use daw::standalone::metering::{linear_to_db, Meters};
 use daw::standalone::Standalone;
-use daw::standalone::metering::{Meters, linear_to_db};
 use daw_audio_io::duplex::EngineStats;
 // The shared daw-backed host: project seeding, track/FX-slot reservation, the
 // realtime engine (native duplex `pw_filter` on Linux with the `pipewire`
 // feature, cpal fallback elsewhere), meters, transport.
-use signal_rig_host::{DuplexRigHost, RigProject};
 use signal_plugin_host::{
     PluginDescriptor, PluginError, PluginEvents, PluginFormat, PluginInstance, PluginParamInfo,
 };
+use signal_rig_host::{DuplexRigHost, RigProject};
 
 use crate::convolver::Convolver;
 use crate::mixer::FX_PREPARE_BLOCK;
@@ -346,7 +346,10 @@ impl RigBlock {
 
     /// A build-time parameter's raw string value, if present.
     pub fn param_str(&self, name: &str) -> Option<String> {
-        self.params.iter().find(|p| p.name == name).map(|p| p.value.clone())
+        self.params
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.value.clone())
     }
 
     /// A build-time parameter as `f32`, if present and numeric.
@@ -619,7 +622,9 @@ impl InputMeterShared {
 /// (`SIGNAL_FAKE_DI=/path/to.wav`) — screenshots and demos with the meters
 /// alive, no instrument plugged in.
 fn load_fake_di() -> Option<Vec<f32>> {
-    let path = std::env::var("SIGNAL_FAKE_DI").ok().filter(|p| !p.is_empty())?;
+    let path = std::env::var("SIGNAL_FAKE_DI")
+        .ok()
+        .filter(|p| !p.is_empty())?;
     let mut reader = hound::WavReader::open(&path)
         .map_err(|e| tracing::warn!("fake DI: {path}: {e}"))
         .ok()?;
@@ -628,13 +633,23 @@ fn load_fake_di() -> Option<Vec<f32>> {
         hound::SampleFormat::Float => reader.samples::<f32>().filter_map(Result::ok).collect(),
         hound::SampleFormat::Int => {
             let scale = 1.0 / (1i64 << (spec.bits_per_sample - 1)) as f32;
-            reader.samples::<i32>().filter_map(Result::ok).map(|s| s as f32 * scale).collect()
+            reader
+                .samples::<i32>()
+                .filter_map(Result::ok)
+                .map(|s| s as f32 * scale)
+                .collect()
         }
     };
     let ch = spec.channels.max(1) as usize;
-    let mono: Vec<f32> = samples.chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32).collect();
+    let mono: Vec<f32> = samples
+        .chunks(ch)
+        .map(|f| f.iter().sum::<f32>() / ch as f32)
+        .collect();
     (!mono.is_empty()).then(|| {
-        tracing::info!("fake DI active: {path} ({:.1}s loop)", mono.len() as f32 / 48_000.0);
+        tracing::info!(
+            "fake DI active: {path} ({:.1}s loop)",
+            mono.len() as f32 / 48_000.0
+        );
         mono
     })
 }

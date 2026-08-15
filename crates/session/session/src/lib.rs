@@ -474,4 +474,3 @@ actions_proto::define_actions! {
         // ── Take ranking (Record mode workflow) ──────────────────────
     }
 }
-

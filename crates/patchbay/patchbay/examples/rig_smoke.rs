@@ -38,15 +38,18 @@ async fn main() {
             d.tx.len(),
             d.rx.len(),
             d.subscriptions.len(),
-            if d.unreachable { " [ARC unreachable]" } else { "" }
+            if d.unreachable {
+                " [ARC unreachable]"
+            } else {
+                ""
+            }
         );
         for s in d.subscriptions.iter().take(6) {
-            let rx_name = d
-                .rx
-                .iter()
-                .find(|c| c.number == s.rx_channel)
-                .map(|c| c.name.as_str())
-                .unwrap_or("?");
+            let rx_name =
+                d.rx.iter()
+                    .find(|c| c.number == s.rx_channel)
+                    .map(|c| c.name.as_str())
+                    .unwrap_or("?");
             println!(
                 "     rx {} ({}) <- {}@{} [status {}]",
                 s.rx_channel, rx_name, s.tx_channel, s.tx_device, s.status

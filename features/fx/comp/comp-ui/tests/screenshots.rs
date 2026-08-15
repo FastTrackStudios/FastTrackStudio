@@ -35,8 +35,7 @@ fn shots_dir() -> PathBuf {
     let dir = std::env::var("FTS_SHOTS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../../target/gui-shots/comp")
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../target/gui-shots/comp")
         });
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
     dir
@@ -139,7 +138,8 @@ async fn shot_character_dropdown() {
 async fn shot_la2a_face() {
     let mut fx = mount_face("la2a").await;
     // Some peak reduction on the meter, and gain brought back up.
-    fx.ui.gain_reduction_db
+    fx.ui
+        .gain_reduction_db
         .store(7.5, std::sync::atomic::Ordering::Relaxed);
     turn(&mut fx, "hw-knob-peak-reduction", -35.0).await;
     turn(&mut fx, "hw-knob-gain", -25.0).await;
@@ -149,7 +149,8 @@ async fn shot_la2a_face() {
 #[tokio::test]
 async fn shot_ssl_bus_face() {
     let mut fx = mount_face("ssl_bus").await;
-    fx.ui.gain_reduction_db
+    fx.ui
+        .gain_reduction_db
         .store(4.0, std::sync::atomic::Ordering::Relaxed);
     turn(&mut fx, "hw-knob-threshold", -30.0).await;
     shot(&fx, "ssl-bus");
@@ -158,7 +159,8 @@ async fn shot_ssl_bus_face() {
 #[tokio::test]
 async fn shot_1176_face() {
     let mut fx = mount_face("urei_1176").await;
-    fx.ui.gain_reduction_db
+    fx.ui
+        .gain_reduction_db
         .store(11.0, std::sync::atomic::Ordering::Relaxed);
     turn(&mut fx, "hw-knob-input", -30.0).await;
     turn(&mut fx, "hw-knob-attack", -40.0).await;
@@ -179,9 +181,11 @@ async fn shot_every_other_unit() {
         "urei_1176_ln",
     ] {
         let mut fx = mount_face(id).await;
-        fx.ui.gain_reduction_db
+        fx.ui
+            .gain_reduction_db
             .store(6.0, std::sync::atomic::Ordering::Relaxed);
-        fx.ui.output_peak_db
+        fx.ui
+            .output_peak_db
             .store(-14.0, std::sync::atomic::Ordering::Relaxed);
         fx.settle().await;
         shot(&fx, &id.replace('_', "-"));
@@ -211,7 +215,8 @@ async fn shot_every_editor_form() {
 async fn shot_la2a_face_large() {
     let mut fx = mount_sized(1500, 520);
     select_profile(&mut fx, "la2a").await;
-    fx.ui.gain_reduction_db
+    fx.ui
+        .gain_reduction_db
         .store(5.0, std::sync::atomic::Ordering::Relaxed);
     shot(&fx, "la2a-large");
 }

@@ -24,7 +24,11 @@ fn dump(backend: &signal_keys::KeysRigBackend) {
                 "    {:<9} {:+5.1} dB  {:<22} {}{}{}",
                 l.name,
                 l.gain_db,
-                if l.patch.is_empty() { "—".into() } else { l.patch.clone() },
+                if l.patch.is_empty() {
+                    "—".into()
+                } else {
+                    l.patch.clone()
+                },
                 if l.live { "live" } else { "empty" },
                 if l.muted { " MUTE" } else { "" },
                 if l.soloed { " SOLO" } else { "" },
@@ -60,7 +64,11 @@ fn main() {
     KeysRigSvc::set_layer_mute(&backend, "Keys B".into(), true);
     KeysRigSvc::set_engine_gain(&backend, "Pad".into(), -3.0);
     let m = KeysRigSvc::mixer(&backend);
-    let keys = m.engines.iter().find(|e| e.name == "Keys").expect("Keys engine");
+    let keys = m
+        .engines
+        .iter()
+        .find(|e| e.name == "Keys")
+        .expect("Keys engine");
     assert_eq!(keys.layers[0].gain_db, -6.0, "fader did not stick");
     assert!(keys.layers[1].muted, "mute did not stick");
     println!("\nfaders ride ✓");

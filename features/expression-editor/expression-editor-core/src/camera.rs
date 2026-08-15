@@ -323,7 +323,8 @@ impl Camera {
         );
 
         self.vertical.px_per_row = self
-            .vertical.px_per_row
+            .vertical
+            .px_per_row
             .clamp(bounds.min_px_per_semitone, bounds.max_px_per_semitone);
         self.vertical.center = self.vertical.center.clamp(0.0, 127.0);
     }
@@ -508,7 +509,10 @@ pub fn pitch_focus(
     if let Some(p) = local_pitch {
         out.push(Influence {
             camera: Camera {
-                vertical: VerticalCamera { center: p, ..base.vertical },
+                vertical: VerticalCamera {
+                    center: p,
+                    ..base.vertical
+                },
                 ..base
             },
             weight: local_weight,
@@ -516,7 +520,10 @@ pub fn pitch_focus(
     }
     out.push(Influence {
         camera: Camera {
-            vertical: VerticalCamera { center: mouse_pitch, ..base.vertical },
+            vertical: VerticalCamera {
+                center: mouse_pitch,
+                ..base.vertical
+            },
             ..base
         },
         weight: mouse_weight,

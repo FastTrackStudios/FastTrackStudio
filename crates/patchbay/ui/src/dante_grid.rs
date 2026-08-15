@@ -32,9 +32,7 @@ fn is_expanded(axis: &str, dev: &DanteDevice, channel_count: usize) -> bool {
 }
 
 fn toggle_expanded(axis: &str, dev: &str, now: bool) {
-    GRID_EXPANDED
-        .write()
-        .insert(format!("{axis}/{dev}"), !now);
+    GRID_EXPANDED.write().insert(format!("{axis}/{dev}"), !now);
 }
 
 /// Subscription of `rx_dev`'s channel `rx_ch` if any: (tx_device,
@@ -121,7 +119,10 @@ pub fn DanteGrid() -> Element {
                 let mut failed = false;
                 for (rx_channel, tx_channel) in ops {
                     let res = if is_sub {
-                        handle.0.dante_unsubscribe(rx_device.clone(), rx_channel).await
+                        handle
+                            .0
+                            .dante_unsubscribe(rx_device.clone(), rx_channel)
+                            .await
                     } else {
                         handle
                             .0
@@ -201,8 +202,11 @@ pub fn DanteGrid() -> Element {
         .cloned()
         .chain(phantoms)
         .collect();
-    let mut rx_devices: Vec<DanteDevice> =
-        devices.iter().filter(|d| !d.rx.is_empty()).cloned().collect();
+    let mut rx_devices: Vec<DanteDevice> = devices
+        .iter()
+        .filter(|d| !d.rx.is_empty())
+        .cloned()
+        .collect();
     if !filter.is_empty() {
         for d in &mut tx_devices {
             d.tx.retain(|c| keep(&c.name));

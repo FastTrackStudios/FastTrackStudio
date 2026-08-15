@@ -93,7 +93,11 @@ pub fn rail_items(profile_index: usize) -> Vec<ShellItem> {
                 .filter_map(|id| comp_profiles::profile_by_id(id).map(|p| p.name()))
                 .collect();
             let label = if names.len() > 1 {
-                format!("{} — {} (click again to cycle)", category.label, names.join(" · "))
+                format!(
+                    "{} — {} (click again to cycle)",
+                    category.label,
+                    names.join(" · ")
+                )
             } else {
                 format!("{} — {}", category.label, names.join(""))
             };
@@ -101,7 +105,9 @@ pub fn rail_items(profile_index: usize) -> Vec<ShellItem> {
             // which one is showing. Clicking cycles them, and until now
             // nothing on the rail admitted that a family of three existed.
             let at = if is_active {
-                comp_profiles::category_of(active_id).map(|(_, v)| v).unwrap_or(0)
+                comp_profiles::category_of(active_id)
+                    .map(|(_, v)| v)
+                    .unwrap_or(0)
             } else {
                 0
             };
@@ -222,12 +228,7 @@ impl FaceContext {
             self.ui.params.clone(),
             self.ctx.clone(),
         )
-        .unwrap_or_else(|| {
-            panic!(
-                "{} has no drivable control {control_id}",
-                self.profile.id()
-            )
-        })
+        .unwrap_or_else(|| panic!("{} has no drivable control {control_id}", self.profile.id()))
     }
 }
 
@@ -245,9 +246,7 @@ pub fn use_face_context(profile: &'static (dyn Profile + Sync)) -> FaceContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control_view::{
-        EDITOR_H, EDITOR_W,
-    };
+    use crate::control_view::{EDITOR_H, EDITOR_W};
 
     #[test]
     fn every_face_asks_for_the_same_window() {

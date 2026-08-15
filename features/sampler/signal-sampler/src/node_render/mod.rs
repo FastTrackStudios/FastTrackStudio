@@ -23,12 +23,12 @@
 //! delivered to every node; sources consume note on/off, effects ignore them.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
-use crate::rig::{RigBlock, build_block, build_sample_source};
-use crate::soundsource::{Soundsource, SoundsourceKind, SoundsourceLeaf};
+use crate::rig::{build_block, build_sample_source, RigBlock};
 use crate::rig_node::{Combine, Container, RigNode, Role, Zone};
+use crate::soundsource::{Soundsource, SoundsourceKind, SoundsourceLeaf};
 use signal_plugin_host::{PluginEvents, PluginInstance, PluginMidiEvent, PluginParamInfo};
 
 /// A compiled leaf's audio backend: **source slots hold their generator
@@ -146,7 +146,7 @@ pub fn build_node_backend(block: &RigBlock, sample_rate: u32) -> Option<Box<dyn 
 mod modmatrix;
 
 pub use modmatrix::ModEngine;
-use modmatrix::{ModCompiler, build_arp};
+use modmatrix::{build_arp, ModCompiler};
 
 /// A compiled, renderable node mirroring the container tree.
 pub enum RenderNode {
@@ -271,7 +271,11 @@ impl GainCells {
         self.peaks
             .iter()
             .map(|((role, name), cell)| {
-                (*role, name.clone(), f32::from_bits(cell.load(Ordering::Relaxed)))
+                (
+                    *role,
+                    name.clone(),
+                    f32::from_bits(cell.load(Ordering::Relaxed)),
+                )
             })
             .collect()
     }
@@ -287,10 +291,7 @@ impl RenderNode {
 
     /// As [`compile`](Self::compile), also returning the [`GainCells`] for the
     /// tree's Engine/Layer containers — the mixer's live fader handles.
-    pub fn compile_with_cells(
-        container: &Container,
-        sample_rate: u32,
-    ) -> (RenderNode, GainCells) {
+    pub fn compile_with_cells(container: &Container, sample_rate: u32) -> (RenderNode, GainCells) {
         let mut mc = ModCompiler::new(sample_rate);
         mc.collect_buses(container);
         let mut cells = GainCells::default();
@@ -520,16 +521,16 @@ impl RenderNode {
         leaf: &str,
         f: impl FnOnce(&mut crate::SamplerInstrument),
     ) -> bool {
-        let Some(id) = self
-            .root_engine()
-            .and_then(|e| e.find_leaf(module, leaf))
-        else {
+        let Some(id) = self.root_engine().and_then(|e| e.find_leaf(module, leaf)) else {
             return false;
         };
         let Some(LeafBackend::Source(source)) = self.leaf_backend_mut(id) else {
             return false;
         };
-        match source.as_any_mut().and_then(|a| a.downcast_mut::<crate::SamplerInstrument>()) {
+        match source
+            .as_any_mut()
+            .and_then(|a| a.downcast_mut::<crate::SamplerInstrument>())
+        {
             Some(sampler) => {
                 f(sampler);
                 true
@@ -971,7 +972,8 @@ mod tests {
     #[test]
     fn engine_and_layer_containers_meter_their_output() {
         let tree = Container::engine("Keys").add(
-            Container::layer("Keys A").add(Container::module("Osc").block(BlockType::Oscillator, "Osc")),
+            Container::layer("Keys A")
+                .add(Container::module("Osc").block(BlockType::Oscillator, "Osc")),
         );
         let (mut rn, cells) = RenderNode::compile_with_cells(&tree, 48_000);
         rn.prepare(48_000.0, 256);
@@ -1011,7 +1013,11 @@ mod tests {
         // Pull the engine's fader to silence: the meter is post-fader, so it
         // falls back on its own rather than sticking at the last hit.
         cells.set(Role::Engine, "Keys", 0.0);
-        let held = PluginEvents { params: &[], midi: &[], note_expressions: &[] };
+        let held = PluginEvents {
+            params: &[],
+            midi: &[],
+            note_expressions: &[],
+        };
         for _ in 0..200 {
             rn.render(&mut l, &mut r, &held);
         }
@@ -1032,7 +1038,8 @@ mod tests {
     #[test]
     fn an_engine_and_its_like_named_lane_do_not_share_a_cell() {
         let tree = Container::engine("Pad").add(
-            Container::layer("Pad").add(Container::module("Osc").block(BlockType::Oscillator, "Osc")),
+            Container::layer("Pad")
+                .add(Container::module("Osc").block(BlockType::Oscillator, "Osc")),
         );
         let (mut rn, cells) = RenderNode::compile_with_cells(&tree, 48_000);
         rn.prepare(48_000.0, 256);
@@ -1701,8 +1708,14 @@ zones (
 
         // Close ONE module's filter live — module-scoped addressing.
         assert!(rn.set_leaf_param("L A", "Filter 1", "cutoff", 0.0));
-        assert!(!rn.set_leaf_param("L C", "Filter 1", "cutoff", 0.0), "unknown module");
-        assert!(!rn.set_leaf_param("L A", "Filter 9", "cutoff", 0.0), "unknown leaf");
+        assert!(
+            !rn.set_leaf_param("L C", "Filter 1", "cutoff", 0.0),
+            "unknown module"
+        );
+        assert!(
+            !rn.set_leaf_param("L A", "Filter 9", "cutoff", 0.0),
+            "unknown leaf"
+        );
         let one_closed = sustain(&mut rn);
         assert!(
             one_closed < open * 0.75 && one_closed > open * 0.25,
@@ -1721,7 +1734,12 @@ zones (
         assert!(rn.set_env(
             "L A",
             "Filter Env",
-            crate::native::AdsrParams { attack_s: 0.5, decay_s: 0.1, sustain: 1.0, release_s: 0.1 },
+            crate::native::AdsrParams {
+                attack_s: 0.5,
+                decay_s: 0.1,
+                sustain: 1.0,
+                release_s: 0.1
+            },
         ));
         assert!(!rn.set_env("L C", "Filter Env", crate::native::AdsrParams::default()));
         assert!(rn.set_route_depth("L B", "Filter Env", "Filter 1", "cutoff", 0.9));
@@ -1741,7 +1759,11 @@ zones (
         let mut rn = RenderNode::compile(&tree, 48_000);
         // The engine is always present (live-edit address book); the broken
         // routes just resolve to nothing.
-        assert_eq!(rn.mod_engine().map(|e| e.route_count()), Some(0), "no routes resolved");
+        assert_eq!(
+            rn.mod_engine().map(|e| e.route_count()),
+            Some(0),
+            "no routes resolved"
+        );
         rn.prepare(48_000.0, 256);
         assert!(render_note(&mut rn, 60, 100) > 1e-3, "still renders");
     }

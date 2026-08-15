@@ -164,7 +164,10 @@ async fn install_reaper(
             .map(|v| v.trim() == version)
             .unwrap_or(false)
     {
-        println!("REAPER {version} already installed at {}", reaper_root.display());
+        println!(
+            "REAPER {version} already installed at {}",
+            reaper_root.display()
+        );
         return Ok(exe);
     }
 
@@ -189,7 +192,11 @@ async fn install_reaper(
         copy_dir_recursive(&app, &reaper_root.join("REAPER.app"))?;
         drop(mount);
     } else {
-        let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
         let url = format!("https://www.reaper.fm/files/{major}.x/reaper{slug}_linux_{arch}.tar.xz");
         let tarball = work.join(format!("reaper{slug}.tar.xz"));
         fetch::download(client, &url, &tarball, &format!("REAPER {version}")).await?;
@@ -222,10 +229,13 @@ async fn download_sws(
         let dmg = work.join("sws.dmg");
         fetch::download(client, &url, &dmg, "SWS extension").await?;
         let mount = MountedDmg::attach(&dmg)?;
-        let so = find_file_matching(mount.path(), |n| n.starts_with("reaper_sws") && n.ends_with(".dylib"))
-            .ok_or_else(|| eyre!("reaper_sws .dylib not found in SWS dmg"))?;
-        let scripts_found =
-            find_files_matching(mount.path(), |n| n.starts_with("sws_python") && n.ends_with(".py"));
+        let so = find_file_matching(mount.path(), |n| {
+            n.starts_with("reaper_sws") && n.ends_with(".dylib")
+        })
+        .ok_or_else(|| eyre!("reaper_sws .dylib not found in SWS dmg"))?;
+        let scripts_found = find_files_matching(mount.path(), |n| {
+            n.starts_with("sws_python") && n.ends_with(".py")
+        });
         // Copy out of the mount before it's detached — the paths above
         // become invalid once the disk image is gone.
         let stage = work.join("sws-staged");
@@ -241,7 +251,11 @@ async fn download_sws(
         drop(mount);
         Ok((so_dest, scripts))
     } else {
-        let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
         let url = format!(
             "https://www.sws-extension.org/download/pre-release/sws-{SWS_VERSION}-Linux-{arch}-{SWS_COMMIT}.tar.xz"
         );
@@ -251,18 +265,29 @@ async fn download_sws(
         let stage = work.join("sws-extracted");
         extract_tar_xz(&tarball, &stage)?;
 
-        let so = find_file_matching(&stage, |n| n.starts_with("reaper_sws") && n.ends_with(".so"))
-            .ok_or_else(|| eyre!("reaper_sws .so not found in SWS archive"))?;
-        let scripts =
-            find_files_matching(&stage, |n| n.starts_with("sws_python") && n.ends_with(".py"));
+        let so = find_file_matching(&stage, |n| {
+            n.starts_with("reaper_sws") && n.ends_with(".so")
+        })
+        .ok_or_else(|| eyre!("reaper_sws .so not found in SWS archive"))?;
+        let scripts = find_files_matching(&stage, |n| {
+            n.starts_with("sws_python") && n.ends_with(".py")
+        });
         Ok((so, scripts))
     }
 }
 
 /// Download the ReaPack .so/.dylib into `work` and return its path.
 async fn download_reapack(client: &reqwest::Client, work: &Path) -> eyre::Result<PathBuf> {
-    let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
-    let ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
+    let ext = if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    };
     let filename = format!("reaper_reapack-{arch}.{ext}");
     let url = format!(
         "https://github.com/cfillion/reapack/releases/download/v{REAPACK_VERSION}/{filename}"
@@ -323,7 +348,10 @@ fn write_launch_jsons(prefix: &Path, reaper_exe: &Path) -> eyre::Result<()> {
     std::fs::write(&main_path, serde_json::to_string_pretty(&main)?)?;
     println!("  launch.json → {}", main_path.display());
 
-    let dev = RIGS.iter().find(|r| r.id == "fts-dev").expect("fts-dev rig");
+    let dev = RIGS
+        .iter()
+        .find(|r| r.id == "fts-dev")
+        .expect("fts-dev rig");
     let dev_path = prefix.join("fts-dev/launch.json");
     std::fs::write(&dev_path, serde_json::to_string_pretty(&entry(dev))?)?;
     println!("  launch.json → {}", dev_path.display());
@@ -388,8 +416,11 @@ struct MountedDmg {
 
 impl MountedDmg {
     fn attach(dmg: &Path) -> eyre::Result<Self> {
-        let mount_point =
-            std::env::temp_dir().join(format!("fts-installer-dmg-{}-{}", std::process::id(), fastrand_suffix()));
+        let mount_point = std::env::temp_dir().join(format!(
+            "fts-installer-dmg-{}-{}",
+            std::process::id(),
+            fastrand_suffix()
+        ));
         std::fs::create_dir_all(&mount_point)
             .wrap_err_with(|| format!("creating mount point {}", mount_point.display()))?;
         let status = std::process::Command::new("hdiutil")
@@ -429,8 +460,8 @@ fn fastrand_suffix() -> u128 {
 /// Extract a .tar.xz to `dest` (pure Rust: xz2 stream + tar).
 fn extract_tar_xz(tarball: &Path, dest: &Path) -> eyre::Result<()> {
     std::fs::create_dir_all(dest)?;
-    let file = std::fs::File::open(tarball)
-        .wrap_err_with(|| format!("opening {}", tarball.display()))?;
+    let file =
+        std::fs::File::open(tarball).wrap_err_with(|| format!("opening {}", tarball.display()))?;
     let mut decompressed = Vec::new();
     xz2::read::XzDecoder::new(file)
         .read_to_end(&mut decompressed)
@@ -449,11 +480,8 @@ fn find_dir_named(root: &Path, name: &str) -> Option<PathBuf> {
 
 fn find_file_matching(root: &Path, pred: impl Fn(&str) -> bool + Copy) -> Option<PathBuf> {
     walk(root, &mut |p| {
-        (p.is_file()
-            && p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(pred))
-        .then(|| p.to_path_buf())
+        (p.is_file() && p.file_name().and_then(|n| n.to_str()).is_some_and(pred))
+            .then(|| p.to_path_buf())
     })
 }
 
@@ -477,9 +505,10 @@ fn walk<T>(dir: &Path, f: &mut impl FnMut(&Path) -> Option<T>) -> Option<T> {
             return Some(hit);
         }
         if path.is_dir()
-            && let Some(hit) = walk(&path, f) {
-                return Some(hit);
-            }
+            && let Some(hit) = walk(&path, f)
+        {
+            return Some(hit);
+        }
     }
     None
 }

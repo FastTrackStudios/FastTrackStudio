@@ -27,11 +27,11 @@ pub mod control_view;
 #[cfg(feature = "native")]
 pub mod eq_graph;
 #[cfg(feature = "native")]
-pub mod faces;
-#[cfg(feature = "native")]
 pub mod eq_graph_painter;
 #[cfg(feature = "native")]
 pub mod eq_graph_popup;
+#[cfg(feature = "native")]
+pub mod faces;
 #[cfg(feature = "native")]
 pub mod param_adapter;
 #[cfg(feature = "native")]

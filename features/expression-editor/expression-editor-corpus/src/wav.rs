@@ -115,7 +115,11 @@ fn parse_fmt(fmt: &[u8], path: &Path) -> io::Result<WavHeader> {
     if fmt.len() < 16 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("{}: fmt chunk is {} bytes, want 16", path.display(), fmt.len()),
+            format!(
+                "{}: fmt chunk is {} bytes, want 16",
+                path.display(),
+                fmt.len()
+            ),
         ));
     }
     let tag = u16::from_le_bytes([fmt[0], fmt[1]]);
@@ -165,7 +169,10 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
         let path = entry?.path();
         if path.is_dir() {
             collect(&path, out)?;
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+        {
             out.push(path);
         }
     }

@@ -23,16 +23,16 @@
 //! theme + layout primitives from [`architect_ui`]; the section wrappers from
 //! [`crate::sections`].
 
+use architect_ui::prelude::{default_theme_preset, ThemeMode, ThemeProvider, ThemeState};
 use audiocore_core::prelude::*;
+use fts_audio_ui::prelude::*;
 use nice_plug::editor::dpi::LogicalSize;
 use nice_plug::editor::ResizeHint;
-use architect_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
-use fts_audio_ui::prelude::*;
 
 use crate::faces::{profile_id_for_index, Face};
 use crate::param_adapter::param_handle;
 use crate::params::{CompUiState, PROFILE_LABELS};
-use crate::profile_view::{ProfileSkin, profile_skin};
+use crate::profile_view::{profile_skin, ProfileSkin};
 
 /// Width the shell rail takes out of the window, in CSS px.
 ///
@@ -199,7 +199,8 @@ fn AppShell() -> Element {
         }
         // Absent when the editor is embedded without a nice-plug window
         // (headless tests): nothing to resize, so nothing to do.
-        if let Some(state) = try_consume_context::<std::sync::Arc<nice_plug_dioxus::DioxusState>>() {
+        if let Some(state) = try_consume_context::<std::sync::Arc<nice_plug_dioxus::DioxusState>>()
+        {
             let (w, h) = crate::faces::editor_size_for(profile_idx, form);
             if state.size() != (w, h) {
                 state.request_resize(w, h);

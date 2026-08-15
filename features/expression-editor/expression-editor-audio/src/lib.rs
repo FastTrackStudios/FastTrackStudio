@@ -34,7 +34,7 @@
 //! [`to_doc`] and [`apply_to`] are pure functions over snapshots, so
 //! the whole path is testable with no audio, no DSP and no UI.
 
-use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{Dimension, ExpressionDoc, Note, NoteId, TimeBase};
 use tune_dsp::model::{NoteBlob, PitchDoc, WarpMarker};
 
 pub mod align;
@@ -291,7 +291,8 @@ pub fn apply_to(doc: &ExpressionDoc, pitch: &mut PitchDoc) -> usize {
             FORMANT_RANGE,
         );
         blob.gain_db = from_lane(
-            note.pressure.sample(mid, Dimension::Pressure.default_value()),
+            note.pressure
+                .sample(mid, Dimension::Pressure.default_value()),
             GAIN_RANGE_DB,
         );
         applied += 1;

@@ -99,7 +99,13 @@ pub async fn install(
                 codeberg::resolve_with_prefix(&client, version.as_deref(), "fts-plugins-").await?
             };
             let tarball_path = stage.path().join(&release.tarball.name);
-            fetch::download(&client, &release.tarball.url, &tarball_path, &release.tarball.name).await?;
+            fetch::download(
+                &client,
+                &release.tarball.url,
+                &tarball_path,
+                &release.tarball.name,
+            )
+            .await?;
             if let Some(sums) = &release.sums {
                 let sums_text = fetch::fetch_text(&client, &sums.url).await?;
                 fetch::verify_sha256(&tarball_path, &release.tarball.name, &sums_text)?;
@@ -147,7 +153,10 @@ pub async fn install(
                 Some(("vst3", n)) => dirs.vst3.join(n),
                 _ => continue,
             };
-            let _ = std::process::Command::new("xattr").args(["-dr", "com.apple.quarantine"]).arg(&path).status();
+            let _ = std::process::Command::new("xattr")
+                .args(["-dr", "com.apple.quarantine"])
+                .arg(&path)
+                .status();
         }
     }
 
@@ -245,10 +254,7 @@ struct StageDir(PathBuf);
 
 impl StageDir {
     fn new() -> eyre::Result<Self> {
-        let path = std::env::temp_dir().join(format!(
-            "fts-plugins-install-{}",
-            std::process::id()
-        ));
+        let path = std::env::temp_dir().join(format!("fts-plugins-install-{}", std::process::id()));
         if path.exists() {
             fs::remove_dir_all(&path).ok();
         }

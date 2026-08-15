@@ -121,9 +121,7 @@ impl WindowHandler for HostHandler {
 fn main() -> eyre::Result<()> {
     let mut args = std::env::args().skip(1);
     let Some(bundle_arg) = args.next() else {
-        eprintln!(
-            "usage: fts-clap-host <bundle.clap | plugin name> [--index N] [--note-names]"
-        );
+        eprintln!("usage: fts-clap-host <bundle.clap | plugin name> [--index N] [--note-names]");
         std::process::exit(2);
     };
     let mut plugin_index = 0usize;
@@ -131,10 +129,7 @@ fn main() -> eyre::Result<()> {
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--index" => {
-                plugin_index = args
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or_default();
+                plugin_index = args.next().and_then(|v| v.parse().ok()).unwrap_or_default();
             }
             "--note-names" => note_names = true,
             _ => {}
@@ -155,18 +150,20 @@ fn main() -> eyre::Result<()> {
     if note_names {
         let mut plugin = ClapHost::default().load(&bundle, plugin_index)?;
         let names = plugin.note_names();
-        println!(
-            "{} ({})",
-            plugin.descriptor().name,
-            plugin.descriptor().id
-        );
+        println!("{} ({})", plugin.descriptor().name, plugin.descriptor().id);
         if names.is_empty() {
             println!("  no note names (plugin does not implement clap.note-name)");
             return Ok(());
         }
         println!("  {} note names:", names.len());
         for n in names {
-            let wildcard = |v: i32| if v < 0 { "*".to_string() } else { v.to_string() };
+            let wildcard = |v: i32| {
+                if v < 0 {
+                    "*".to_string()
+                } else {
+                    v.to_string()
+                }
+            };
             println!(
                 "    key {:>3}  ch {:>3}  port {:>3}   {}",
                 wildcard(n.key),
@@ -184,40 +181,34 @@ fn main() -> eyre::Result<()> {
     options.title = title;
     options.size = baseview::dpi::LogicalSize::new(800.0, 500.0).into();
     options.scale = baseview::WindowScalePolicy::SystemScaleFactor;
-    Window::open_blocking(
-        options,
-        move |ctx| {
-            let mut plugin = ClapHost::default()
-                .load(&bundle, plugin_index)
-                .unwrap_or_else(|e| panic!("loading {}: {e:?}", bundle.display()));
-            eprintln!(
-                "hosting {} ({}) — embedded GUI",
-                plugin.descriptor().name,
-                plugin.descriptor().id
-            );
+    Window::open_blocking(options, move |ctx| {
+        let mut plugin = ClapHost::default()
+            .load(&bundle, plugin_index)
+            .unwrap_or_else(|e| panic!("loading {}: {e:?}", bundle.display()));
+        eprintln!(
+            "hosting {} ({}) — embedded GUI",
+            plugin.descriptor().name,
+            plugin.descriptor().id
+        );
 
-            let raw = ctx
-                .window_handle()
-                .expect("host window handle")
-                .as_raw();
-            // Size the window before the editor is parented into it, the way a
-            // DAW does — so the editor's first frame is at its real size and
-            // no resize follows to paper over a missing first paint.
-            match plugin.open_gui_embedded(raw, |w, h| {
-                ctx.resize(baseview::dpi::PhysicalSize::new(w, h));
-            }) {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("error: plugin GUI failed to embed: {e:?}");
-                    ctx.request_close();
-                }
+        let raw = ctx.window_handle().expect("host window handle").as_raw();
+        // Size the window before the editor is parented into it, the way a
+        // DAW does — so the editor's first frame is at its real size and
+        // no resize follows to paper over a missing first paint.
+        match plugin.open_gui_embedded(raw, |w, h| {
+            ctx.resize(baseview::dpi::PhysicalSize::new(w, h));
+        }) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("error: plugin GUI failed to embed: {e:?}");
+                ctx.request_close();
             }
+        }
 
-            HostHandler {
-                plugin: RefCell::new(Some(plugin)),
-                window: ctx.clone(),
-            }
-        },
-    );
+        HostHandler {
+            plugin: RefCell::new(Some(plugin)),
+            window: ctx.clone(),
+        }
+    });
     Ok(())
 }

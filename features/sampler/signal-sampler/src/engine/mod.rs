@@ -29,18 +29,18 @@
 
 pub mod budget;
 pub mod cache;
-pub mod flac_index;
-pub mod stream;
-pub mod stream_cache;
-pub mod filter;
-pub mod pitch_shift;
-pub mod rr;
-pub mod trace;
-pub mod voice;
-mod midi;
 mod dispatch;
+pub mod filter;
+pub mod flac_index;
 mod helpers;
 mod legato;
+mod midi;
+pub mod pitch_shift;
+pub mod rr;
+pub mod stream;
+pub mod stream_cache;
+pub mod trace;
+pub mod voice;
 
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;

@@ -84,10 +84,7 @@ impl EngineHandle {
 /// dies the graph mirror is cleared (`GraphEvent::Reset`) and the
 /// thread retries every few seconds — restart PipeWire from the
 /// services panel and the graph re-mirrors by itself.
-pub(crate) fn spawn(
-    store: Arc<RwLock<GraphStore>>,
-    events: Sender<GraphEvent>,
-) -> EngineHandle {
+pub(crate) fn spawn(store: Arc<RwLock<GraphStore>>, events: Sender<GraphEvent>) -> EngineHandle {
     #[cfg(target_os = "linux")]
     {
         let cmd_slot: CmdSlot = Arc::new(parking_lot::Mutex::new(None));
@@ -236,28 +233,24 @@ mod linux {
                         },
                     );
                     if let Err(e) = res {
-                        tracing::warn!(
-                            output_port,
-                            input_port,
-                            "link-factory create failed: {e}"
-                        );
+                        tracing::warn!(output_port, input_port, "link-factory create failed: {e}");
                     }
                 }
                 Command::DestroyLink { id } | Command::DestroyNode { id } => {
-                    registry.destroy_global(id).into_result().map(|_| ()).unwrap_or_else(|e| {
-                        tracing::warn!(id, "destroy_global failed: {e}");
-                    });
+                    registry
+                        .destroy_global(id)
+                        .into_result()
+                        .map(|_| ())
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(id, "destroy_global failed: {e}");
+                        });
                 }
                 Command::CreateVirtualSink {
                     node_name,
                     description,
                     channels,
                 } => {
-                    let already_live = store_cmd
-                        .read()
-                        .nodes
-                        .values()
-                        .any(|n| n.name == node_name);
+                    let already_live = store_cmd.read().nodes.values().any(|n| n.name == node_name);
                     if already_live || !pending_cmd.borrow_mut().insert(node_name.clone()) {
                         tracing::debug!(node_name, "virtual sink already exists; skipping");
                         return;
@@ -266,8 +259,7 @@ mod linux {
                         1 => "[ MONO ]".to_string(),
                         2 => "[ FL FR ]".to_string(),
                         n => {
-                            let auxes: Vec<String> =
-                                (0..n).map(|i| format!("AUX{i}")).collect();
+                            let auxes: Vec<String> = (0..n).map(|i| format!("AUX{i}")).collect();
                             format!("[ {} ]", auxes.join(" "))
                         }
                     };
@@ -381,7 +373,10 @@ mod linux {
             label,
             media_kind: media_kind(&media_class),
             media_class,
-            app_name: props.get("application.name").unwrap_or_default().to_string(),
+            app_name: props
+                .get("application.name")
+                .unwrap_or_default()
+                .to_string(),
             latency: props.get("node.latency").unwrap_or_default().to_string(),
             icon_name: props
                 .get("application.icon-name")

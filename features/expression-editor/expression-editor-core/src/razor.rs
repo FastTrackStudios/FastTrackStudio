@@ -13,7 +13,7 @@
 //! usable for comping and for rhythmic rearrangement, and it is why the
 //! area — not the note — is the unit of operation.
 
-use crate::doc::{ExpressionDoc, Dimension, Note, NoteId};
+use crate::doc::{Dimension, ExpressionDoc, Note, NoteId};
 
 /// A rectangular selection over time and rows.
 ///

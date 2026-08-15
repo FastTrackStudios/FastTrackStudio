@@ -74,7 +74,10 @@ fn a_plan_is_previewable_before_anything_is_written() {
     let (plan, view) = preview(&late_hits(), &panel(1.0), 400.0, (0.0, 5.0));
     assert_eq!(plan.moves.len(), 4);
     assert_eq!(view.lines.len(), 4);
-    assert!(view.lines.iter().all(|l| l.moves()), "every line shows a move");
+    assert!(
+        view.lines.iter().all(|l| l.moves()),
+        "every line shows a move"
+    );
 }
 
 #[test]
@@ -122,7 +125,10 @@ fn lines_are_ordered_left_to_right() {
     ];
     let (_, view) = preview(&hits, &panel(1.0), 400.0, (0.0, 4.0));
     for w in view.lines.windows(2) {
-        assert!(w[0].x <= w[1].x, "a preview that jumps around is unreadable");
+        assert!(
+            w[0].x <= w[1].x,
+            "a preview that jumps around is unreadable"
+        );
     }
 }
 
@@ -164,10 +170,22 @@ fn geometry_stays_inside_the_panel() {
 #[test]
 fn the_histogram_shows_where_the_hits_actually_sit() {
     let hits = vec![
-        Hit { at: 0.0, weight: 0.05 },
-        Hit { at: 1.0, weight: 0.09 },
-        Hit { at: 2.0, weight: 0.90 },
-        Hit { at: 3.0, weight: 0.95 },
+        Hit {
+            at: 0.0,
+            weight: 0.05,
+        },
+        Hit {
+            at: 1.0,
+            weight: 0.09,
+        },
+        Hit {
+            at: 2.0,
+            weight: 0.90,
+        },
+        Hit {
+            at: 3.0,
+            weight: 0.95,
+        },
     ];
     let bins = histogram(&hits, 10);
     assert_eq!(bins.len(), 10);
@@ -201,9 +219,18 @@ fn the_threshold_is_placed_on_the_same_scale_as_the_bins() {
 #[test]
 fn the_panel_can_say_how_much_it_is_excluding() {
     let hits = vec![
-        Hit { at: 0.0, weight: 0.1 },
-        Hit { at: 1.0, weight: 0.2 },
-        Hit { at: 2.0, weight: 0.9 },
+        Hit {
+            at: 0.0,
+            weight: 0.1,
+        },
+        Hit {
+            at: 1.0,
+            weight: 0.2,
+        },
+        Hit {
+            at: 2.0,
+            weight: 0.9,
+        },
     ];
     let cfg = QuantizeConfig {
         min_strength: 0.5,

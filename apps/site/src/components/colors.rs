@@ -60,9 +60,24 @@ mod tests {
     #[test]
     fn known_categories_are_distinct() {
         let ids = [
-            "transport", "tracks", "navigation", "editing", "zoom", "views",
-            "markers", "midi", "midi-modes", "mouse", "scrolling", "visibility",
-            "lanes-takes", "automation", "fx", "grid", "options", "utility",
+            "transport",
+            "tracks",
+            "navigation",
+            "editing",
+            "zoom",
+            "views",
+            "markers",
+            "midi",
+            "midi-modes",
+            "mouse",
+            "scrolling",
+            "visibility",
+            "lanes-takes",
+            "automation",
+            "fx",
+            "grid",
+            "options",
+            "utility",
             "modes",
         ];
         let mut seen = std::collections::HashSet::new();

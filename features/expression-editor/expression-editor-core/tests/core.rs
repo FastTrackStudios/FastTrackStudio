@@ -6,7 +6,7 @@
 use expression_editor_core::blob;
 use expression_editor_core::camera::{self, Bounds, Camera, Content, VerticalCamera, Viewport};
 use expression_editor_core::doc::{
-    Curve, ExpressionDoc, Dimension, Note, NoteId, Point, Target, TimeBase,
+    Curve, Dimension, ExpressionDoc, Note, NoteId, Point, Target, TimeBase,
 };
 use expression_editor_core::edit::{Edit, History};
 use expression_editor_core::modulation::{CurveTarget, Row, Stack, Wave};
@@ -61,23 +61,35 @@ fn curve_holds_its_endpoints_outside_the_authored_range() {
 #[test]
 fn splice_preserves_points_outside_the_interval() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0, ..Point::default() },
+        Point {
+            t: 0.0,
+            value: 0.0,
+            ..Point::default()
+        },
         Point {
             t: 100.0,
-            value: 1.0, ..Point::default() },
+            value: 1.0,
+            ..Point::default()
+        },
         Point {
             t: 200.0,
-            value: 2.0, ..Point::default() },
+            value: 2.0,
+            ..Point::default()
+        },
         Point {
             t: 300.0,
-            value: 3.0, ..Point::default() },
+            value: 3.0,
+            ..Point::default()
+        },
     ]);
     c.splice(
         100.0,
         200.0,
         &[Point {
             t: 150.0,
-            value: 9.0, ..Point::default() }],
+            value: 9.0,
+            ..Point::default()
+        }],
     );
     let pts: Vec<(f64, f64)> = c.points().iter().map(|p| (p.t, p.value)).collect();
     assert_eq!(pts, vec![(0.0, 0.0), (150.0, 9.0), (300.0, 3.0)]);
@@ -99,10 +111,16 @@ fn reshape_preserves_endpoints_exactly() {
 #[test]
 fn scale_about_below_zero_inverts_the_gesture() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0, ..Point::default() },
+        Point {
+            t: 0.0,
+            value: 0.0,
+            ..Point::default()
+        },
         Point {
             t: 100.0,
-            value: 2.0, ..Point::default() },
+            value: 2.0,
+            ..Point::default()
+        },
     ]);
     c.scale_about(0.0, 100.0, 1.0, -1.0);
     assert_eq!(c.sample(0.0, 0.0), 2.0);
@@ -112,10 +130,16 @@ fn scale_about_below_zero_inverts_the_gesture() {
 #[test]
 fn remap_time_stretches_owned_expression_onto_new_bounds() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0, ..Point::default() },
+        Point {
+            t: 0.0,
+            value: 0.0,
+            ..Point::default()
+        },
         Point {
             t: 100.0,
-            value: 1.0, ..Point::default() },
+            value: 1.0,
+            ..Point::default()
+        },
     ]);
     c.remap_time(0.0, 100.0, 0.0, 400.0);
     assert_eq!(c.points().last().unwrap().t, 400.0);
@@ -207,10 +231,14 @@ fn drawing_extends_to_the_note_edges_so_no_gap_is_left() {
         points: vec![
             Point {
                 t: 500.0,
-                value: 1.0, ..Point::default() },
+                value: 1.0,
+                ..Point::default()
+            },
             Point {
                 t: 1000.0,
-                value: 2.0, ..Point::default() },
+                value: 2.0,
+                ..Point::default()
+            },
         ],
     };
     assert!(edit.apply(&mut doc));
@@ -229,10 +257,16 @@ fn erasing_one_lane_leaves_the_others_untouched() {
             t0: 0.0,
             t1: 1000.0,
             points: vec![
-                Point { t: 0.0, value: 0.5, ..Point::default() },
+                Point {
+                    t: 0.0,
+                    value: 0.5,
+                    ..Point::default()
+                },
                 Point {
                     t: 1000.0,
-                    value: 0.5, ..Point::default() },
+                    value: 0.5,
+                    ..Point::default()
+                },
             ],
         }
         .apply(&mut doc);
@@ -689,7 +723,10 @@ fn a_full_weight_influence_fully_replaces_the_base() {
         fold: Default::default(),
         t0: 1234.0,
         units_per_px: 2.0,
-        vertical: VerticalCamera { center: 70.0, px_per_row: 20.0 },
+        vertical: VerticalCamera {
+            center: 70.0,
+            px_per_row: 20.0,
+        },
     };
     let out = camera::blend(
         base,
@@ -708,7 +745,10 @@ fn scales_blend_geometrically_so_zoom_stays_even() {
         fold: Default::default(),
         t0: 0.0,
         units_per_px: 1.0,
-        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
+        vertical: VerticalCamera {
+            center: 60.0,
+            px_per_row: 10.0,
+        },
     };
     let target = Camera {
         fold: Default::default(),
@@ -755,7 +795,10 @@ fn the_reset_tail_stays_out_until_the_final_stretch() {
     let deep = Camera {
         fold: Default::default(),
         units_per_px: reset.units_per_px / 50.0,
-        vertical: VerticalCamera { px_per_row: reset.vertical.px_per_row * 50.0, ..reset.vertical },
+        vertical: VerticalCamera {
+            px_per_row: reset.vertical.px_per_row * 50.0,
+            ..reset.vertical
+        },
         ..reset
     };
     assert!(
@@ -783,7 +826,10 @@ fn constrain_never_shows_more_than_the_cushioned_item() {
         fold: Default::default(),
         t0: -99999.0,
         units_per_px: 1000.0,
-        vertical: VerticalCamera { center: 200.0, px_per_row: 0.001 },
+        vertical: VerticalCamera {
+            center: 200.0,
+            px_per_row: 0.001,
+        },
     };
     cam.constrain(bounds, vp);
     let (t0, t1) = cam.time_span(vp);
@@ -1806,7 +1852,10 @@ fn vertical_fit_respects_the_row_floor_and_ceiling() {
         fold: Default::default(),
         t0: 0.0,
         units_per_px: 10.0,
-        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
+        vertical: VerticalCamera {
+            center: 60.0,
+            px_per_row: 10.0,
+        },
     };
     // One note: without a floor this would fill the screen with a
     // single row.
@@ -1835,7 +1884,10 @@ fn notes_in_view_ignores_notes_outside_the_horizontal_span() {
         fold: Default::default(),
         t0: 0.0,
         units_per_px: 1.0,
-        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
+        vertical: VerticalCamera {
+            center: 60.0,
+            px_per_row: 10.0,
+        },
     };
     let mut spans = spans_at(&[0.0], 240.0, 60);
     spans.extend(spans_at(&[50_000.0], 240.0, 100)); // far away, high
@@ -2257,12 +2309,7 @@ fn a_string_roll_reports_sounding_pitches_not_string_numbers() {
     doc.row_space = RowSpace::Strings(tuning.clone());
     // An open C major shape on the top three strings: G B E.
     for (i, (string, fret)) in [(3usize, 0i32), (4, 1), (5, 0)].iter().enumerate() {
-        let mut n = Note::new(
-            NoteId(i as u64 + 1),
-            0.0,
-            PPQ,
-            tuning.open(*string) + fret,
-        );
+        let mut n = Note::new(NoteId(i as u64 + 1), 0.0, PPQ, tuning.open(*string) + fret);
         n.string = Some(*string as u8);
         doc.push(n);
     }
@@ -2330,10 +2377,16 @@ fn cc_edits_are_document_level_not_per_note() {
             t0: 0.0,
             t1: PPQ * 4.0,
             points: vec![
-                Point { t: 0.0, value: 0.2, ..Point::default() },
+                Point {
+                    t: 0.0,
+                    value: 0.2,
+                    ..Point::default()
+                },
                 Point {
                     t: PPQ * 4.0,
-                    value: 1.0, ..Point::default() },
+                    value: 1.0,
+                    ..Point::default()
+                },
             ],
         }
         .apply(&mut doc)
@@ -2343,7 +2396,11 @@ fn cc_edits_are_document_level_not_per_note() {
     // The swell exists independently of where notes start and end.
     assert_eq!(dimension.value(0.0), 25);
     assert_eq!(dimension.value(PPQ * 4.0), 127);
-    assert_eq!(dimension.value(PPQ * 2.0), 76, "linear between authored points");
+    assert_eq!(
+        dimension.value(PPQ * 2.0),
+        76,
+        "linear between authored points"
+    );
 }
 
 #[test]
@@ -2354,10 +2411,16 @@ fn scaling_a_controller_cannot_push_it_past_the_wire_range() {
         t0: 0.0,
         t1: PPQ * 4.0,
         points: vec![
-            Point { t: 0.0, value: 0.9, ..Point::default() },
+            Point {
+                t: 0.0,
+                value: 0.9,
+                ..Point::default()
+            },
             Point {
                 t: PPQ * 4.0,
-                value: 0.1, ..Point::default() },
+                value: 0.1,
+                ..Point::default()
+            },
         ],
     }
     .apply(&mut doc);
@@ -2390,7 +2453,11 @@ fn erasing_a_controller_leaves_the_notes_alone() {
         number: 11,
         t0: 0.0,
         t1: PPQ * 4.0,
-        points: vec![Point { t: PPQ, value: 0.5, ..Point::default() }],
+        points: vec![Point {
+            t: PPQ,
+            value: 0.5,
+            ..Point::default()
+        }],
     }
     .apply(&mut doc);
     let before = doc.notes.len();
@@ -2455,10 +2522,16 @@ fn erasing_part_of_a_controller_reads_as_cleared() {
         t0: 0.0,
         t1: PPQ * 4.0,
         points: vec![
-            Point { t: 0.0, value: 0.0, ..Point::default() },
+            Point {
+                t: 0.0,
+                value: 0.0,
+                ..Point::default()
+            },
             Point {
                 t: PPQ * 4.0,
-                value: 1.0, ..Point::default() },
+                value: 1.0,
+                ..Point::default()
+            },
         ],
     }
     .apply(&mut doc);
@@ -4151,7 +4224,10 @@ fn a_point_is_linear_unless_told_otherwise() {
 fn a_linear_segment_interpolates_exactly_as_before() {
     let c = two(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
     for t in [0.0, 2.5, 5.0, 7.5, 10.0] {
-        assert!((c.sample(t, 0.0) - t).abs() < 1e-9, "linear is unchanged at {t}");
+        assert!(
+            (c.sample(t, 0.0) - t).abs() < 1e-9,
+            "linear is unchanged at {t}"
+        );
     }
 }
 
@@ -4187,20 +4263,25 @@ fn every_shape_starts_and_ends_where_the_points_say() {
 
 #[test]
 fn the_eases_bend_the_way_their_names_say() {
-    let mid = |shape| {
-        two(Point::shaped(0.0, 0.0, shape), Point::new(10.0, 1.0)).sample(5.0, 0.0)
-    };
+    let mid = |shape| two(Point::shaped(0.0, 0.0, shape), Point::new(10.0, 1.0)).sample(5.0, 0.0);
     let linear = mid(CurveShape::Linear);
     assert!((linear - 0.5).abs() < 1e-9);
     // S-curve is symmetric, so it also passes through the middle.
     assert!((mid(CurveShape::SlowStartEnd) - 0.5).abs() < 1e-9);
-    assert!(mid(CurveShape::FastStart) > linear, "fast start is ahead by halfway");
-    assert!(mid(CurveShape::FastEnd) < linear, "fast end is behind by halfway");
+    assert!(
+        mid(CurveShape::FastStart) > linear,
+        "fast start is ahead by halfway"
+    );
+    assert!(
+        mid(CurveShape::FastEnd) < linear,
+        "fast end is behind by halfway"
+    );
 }
 
 #[test]
 fn bezier_tension_zero_is_linear_and_the_sign_picks_a_direction() {
-    let at = |tension| two(Point::bezier(0.0, 0.0, tension), Point::new(10.0, 1.0)).sample(5.0, 0.0);
+    let at =
+        |tension| two(Point::bezier(0.0, 0.0, tension), Point::new(10.0, 1.0)).sample(5.0, 0.0);
     assert!((at(0.0) - 0.5).abs() < 1e-9, "no tension, no bend");
     assert!(at(1.0) > 0.5, "positive tension runs ahead");
     assert!(at(-1.0) < 0.5, "negative tension holds back");
@@ -4217,7 +4298,10 @@ fn the_left_point_owns_the_segment() {
     // A point describes how the curve *leaves* it, which is how the DAW
     // stores it. Setting the shape on the right-hand point must not
     // change the segment before it.
-    let c = two(Point::new(0.0, 0.0), Point::shaped(10.0, 1.0, CurveShape::Square));
+    let c = two(
+        Point::new(0.0, 0.0),
+        Point::shaped(10.0, 1.0, CurveShape::Square),
+    );
     assert!(
         (c.sample(5.0, 0.0) - 0.5).abs() < 1e-9,
         "the trailing point's shape is not read"
@@ -4247,7 +4331,10 @@ fn opening_the_lyric_field_does_not_write_anything() {
     doc.push(Note::new(NoteId(1), 0.0, PPQ, 60));
     let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
 
-    assert!(ed.run_command(&expression_editor_core::menu::Command::EditLyric(NoteId(1)), None));
+    assert!(ed.run_command(
+        &expression_editor_core::menu::Command::EditLyric(NoteId(1)),
+        None
+    ));
     assert_eq!(ed.editing_lyric, Some(NoteId(1)));
     assert_eq!(ed.doc.note(NoteId(1)).unwrap().text, None);
 

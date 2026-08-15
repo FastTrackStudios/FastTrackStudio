@@ -34,14 +34,14 @@ use std::sync::{Arc, Mutex};
 
 use daw::service::handle::DawHandle as _;
 use daw::service::ProjectInfo;
-use daw::standalone::Standalone;
 use daw::standalone::audio_engine::AudioEngine;
 #[cfg(target_os = "linux")]
 use daw::standalone::audio_engine::DuplexAudioEngine;
 use daw::standalone::metering::Meters;
 use daw::standalone::transport_engine::{PlayStateRepr, TransportShared};
-use daw_audio_io::AudioIoPrefs;
+use daw::standalone::Standalone;
 use daw_audio_io::duplex::EngineStats;
+use daw_audio_io::AudioIoPrefs;
 
 pub mod gestures;
 pub mod lock;
@@ -190,7 +190,12 @@ impl RigProject {
             48_000
         };
         let shared = Arc::new(TransportShared::new(req_rate, 120.0));
-        let engine = E::open(self.daw.clone(), self.project_guid.clone(), shared.clone(), io)?;
+        let engine = E::open(
+            self.daw.clone(),
+            self.project_guid.clone(),
+            shared.clone(),
+            io,
+        )?;
         let sample_rate = engine.sample_rate();
         Ok(RigHost {
             daw: self.daw,
@@ -241,7 +246,10 @@ impl<E: HostedEngine> RigHost<E> {
     pub fn install_meters(&self, cells: usize) -> Arc<Meters> {
         let meters = Meters::new(cells);
         self.daw.set_meters(meters.clone());
-        *self.meters.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = meters.clone();
+        *self
+            .meters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = meters.clone();
         meters
     }
 

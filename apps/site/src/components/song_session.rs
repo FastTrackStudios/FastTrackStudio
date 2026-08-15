@@ -261,15 +261,17 @@ mod imp {
         let mut stems = Vec::with_capacity(manifest.stems.len());
         for spec in &manifest.stems {
             let url = format!("/media/songs/{slug}/{}", spec.file);
-            let el =
-                HtmlAudioElement::new_with_src(&url).map_err(|e| format!("audio element: {e:?}"))?;
+            let el = HtmlAudioElement::new_with_src(&url)
+                .map_err(|e| format!("audio element: {e:?}"))?;
             el.set_preload("auto");
             el.set_loop(false);
 
             let node = ctx
                 .create_media_element_source(&el)
                 .map_err(|e| format!("media element source: {e:?}"))?;
-            let gain = ctx.create_gain().map_err(|e| format!("create_gain: {e:?}"))?;
+            let gain = ctx
+                .create_gain()
+                .map_err(|e| format!("create_gain: {e:?}"))?;
             // Deref coercion: &MediaElementAudioSourceNode / &GainNode → &AudioNode.
             let _ = node.connect_with_audio_node(&gain);
             let _ = gain.connect_with_audio_node(&dest);
@@ -327,7 +329,8 @@ mod imp {
     /// Build the one-song `Setlist` that drives session-ui from the manifest.
     fn build_setlist(slug: &str, manifest: &Manifest, chart_text: Option<String>) -> Setlist {
         let (ts_num, ts_denom) = parse_time_sig(manifest.time_signature.as_ref());
-        let sections: Vec<SessionSection> = manifest.sections.iter().map(to_session_section).collect();
+        let sections: Vec<SessionSection> =
+            manifest.sections.iter().map(to_session_section).collect();
         let song = SessionSong {
             id: SongId::new(),
             name: manifest.title.clone().unwrap_or_default(),
@@ -383,7 +386,9 @@ mod imp {
         let measure = (beats_total / num).floor();
         let beat_in_measure = beats_total - measure * num;
         let beat = beat_in_measure.floor();
-        let subdivision = ((beat_in_measure - beat) * 1000.0).round().clamp(0.0, 999.0);
+        let subdivision = ((beat_in_measure - beat) * 1000.0)
+            .round()
+            .clamp(0.0, 999.0);
         MusicalPosition::new(measure as i32, beat as i32, subdivision as i32)
     }
 
@@ -463,7 +468,8 @@ mod imp {
         let loaded = use_resource(use_reactive!(|song_r| {
             let slug = song_r.clone();
             async move {
-                let manifest = fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
+                let manifest =
+                    fetch_manifest(&format!("/media/songs/{slug}/manifest.json")).await?;
                 let eng = build_engine(&slug, &manifest)?;
                 Ok::<(Manifest, Engine), String>((manifest, eng))
             }
@@ -757,7 +763,10 @@ mod imp {
 
         let musical = musical_at(count_in + pos, bpm, ts_num);
         let transport = TransportState {
-            position: Position::from_time_and_musical(PositionInSeconds::from_seconds(pos), musical),
+            position: Position::from_time_and_musical(
+                PositionInSeconds::from_seconds(pos),
+                musical,
+            ),
             bpm,
             time_sig_num: ts_num as i32,
             time_sig_denom: ts_denom as i32,

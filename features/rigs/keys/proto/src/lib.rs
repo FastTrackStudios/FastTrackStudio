@@ -347,8 +347,8 @@ pub mod keys {
     use facet::Facet;
 
     use super::{
-        KeysEngineDetail, KeysLayerDetail, KeysMacro, KeysMixer, KeysNode, KeysPerform,
-        KeysPreset, KeysStatus,
+        KeysEngineDetail, KeysLayerDetail, KeysMacro, KeysMixer, KeysNode, KeysPerform, KeysPreset,
+        KeysStatus,
     };
     // `KeysModule` rides inside `KeysLayerDetail`.
 

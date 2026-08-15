@@ -146,7 +146,11 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     // Every member's notes, primary last so the track you are editing
     // draws on top of the guide rather than under it.
     let mut notes: Vec<LaneNote> = Vec::new();
-    for &i in members.iter().filter(|&&i| i != track_index).chain([&track_index]) {
+    for &i in members
+        .iter()
+        .filter(|&&i| i != track_index)
+        .chain([&track_index])
+    {
         let Some(member) = ed.tracks.track(i) else {
             continue;
         };
@@ -183,7 +187,11 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     // two hands to offer.
     let (two_handed_row, split) = match &doc.row_space {
         RowSpace::Drums(m) => {
-            let row = doc.notes.first().map(|n| n.row.max(0) as usize).unwrap_or(0);
+            let row = doc
+                .notes
+                .first()
+                .map(|n| n.row.max(0) as usize)
+                .unwrap_or(0);
             if m.is_two_handed(row) {
                 (Some(row), ed.split_pieces.contains(&row))
             } else {

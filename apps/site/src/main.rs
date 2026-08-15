@@ -12,9 +12,9 @@ mod components;
 mod renderer;
 mod vault;
 
-use dioxus::prelude::*;
 use architect_ui::lucide_dioxus::{FileCode, Github, Music};
 use architect_ui::prelude::*;
+use dioxus::prelude::*;
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -84,9 +84,8 @@ fn main() {
         use tracing_subscriber::EnvFilter;
         tracing_subscriber::fmt()
             .with_env_filter(
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                    EnvFilter::new("warn,fts_site=debug,keyflow=info")
-                }),
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| EnvFilter::new("warn,fts_site=debug,keyflow=info")),
             )
             .init();
     }

@@ -52,7 +52,9 @@ pub mod zoom;
 pub use camera::{Bounds, Camera, Content, VerticalCamera, Viewport};
 pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
-pub use doc::{Curve, CurveShape, ExpressionDoc, Dimension, Marker, Note, NoteId, Point, Target, TimeBase};
+pub use doc::{
+    Curve, CurveShape, Dimension, ExpressionDoc, Marker, Note, NoteId, Point, Target, TimeBase,
+};
 pub use draft::PitchDraft;
 pub use edit::{Edit, History};
 pub use handles::{Handle, Scope};
@@ -211,7 +213,8 @@ pub struct Editor {
 impl Editor {
     pub fn new(doc: ExpressionDoc, viewport: Viewport) -> Self {
         let content = content_of(&doc);
-        let camera = camera::reset_view(content, viewport, CUSHION, PAD, camera::RowFold::default());
+        let camera =
+            camera::reset_view(content, viewport, CUSHION, PAD, camera::RowFold::default());
         let tracks = Workspace::single("Track 1", doc.clone());
         let mut editor = Self {
             doc,
@@ -898,7 +901,9 @@ impl Editor {
                 // A level, so it reads off the captured value at the
                 // scope's midpoint rather than restoring and shifting.
                 let mid = (t0 + t1) * 0.5;
-                let base = drag.base_of(dimension).sample(mid, dimension.default_value());
+                let base = drag
+                    .base_of(dimension)
+                    .sample(mid, dimension.default_value());
 
                 // Sibilant scope: the amplitude handle addresses only
                 // the unvoiced spans inside the scope. Each is written
@@ -938,7 +943,9 @@ impl Editor {
                         });
                         for (g0, g1) in [(a - eps * 2.0, a - eps), (b + eps, b + eps * 2.0)] {
                             if g0 > t0 && g1 < t1 {
-                                let held = drag.base_of(dimension).sample(g0, dimension.default_value());
+                                let held = drag
+                                    .base_of(dimension)
+                                    .sample(g0, dimension.default_value());
                                 self.apply_live(&Edit::SetDimensionLevel {
                                     note: id,
                                     dimension,
@@ -1056,7 +1063,13 @@ impl Editor {
 
     /// The Reset View camera for the current content.
     pub fn reset_camera(&self) -> Camera {
-        camera::reset_view(self.content(), self.viewport, CUSHION, PAD, self.camera.fold)
+        camera::reset_view(
+            self.content(),
+            self.viewport,
+            CUSHION,
+            PAD,
+            self.camera.fold,
+        )
     }
 
     /// `V` — snap directly to Reset View, no interpolation, no magnets.

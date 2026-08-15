@@ -58,7 +58,10 @@ async fn select_profile(fx: &mut Fixture, profile_id: &str) -> dioxus_test::Resu
         if fx.params.profile.value() == target {
             return Ok(());
         }
-        let item = fx.tester.query(by_testid(&format!("rail-item-{rail_id}"))).immediately()?;
+        let item = fx
+            .tester
+            .query(by_testid(&format!("rail-item-{rail_id}")))
+            .immediately()?;
         let (ox, oy) = item.document_origin();
         let (w, h) = item.size();
         let (x, y) = (ox + w as f64 / 2.0, oy + h as f64 / 2.0);
@@ -94,7 +97,10 @@ async fn editor_mounts_headless_with_knobs_and_readouts() -> dioxus_test::Result
     let fx = mount();
 
     let html = fx.tester.query(":root").immediately()?.inner_html();
-    assert!(html.contains("FTS Comp"), "plugin identity missing from the rail");
+    assert!(
+        html.contains("FTS Comp"),
+        "plugin identity missing from the rail"
+    );
     for name in [
         "Threshold",
         "Ratio",
@@ -156,9 +162,16 @@ async fn clicking_a_knob_without_dragging_changes_nothing() -> dioxus_test::Resu
     fx.tester.pointer_up(x, y);
     let _ = fx.tester.pump().await;
 
-    assert_eq!(fx.params.ratio.value(), before, "click alone moved the ratio");
+    assert_eq!(
+        fx.params.ratio.value(),
+        before,
+        "click alone moved the ratio"
+    );
     let log = fx.log.lock().unwrap();
-    let sets = log.iter().filter(|g| matches!(g, Gesture::Set(k, _) if *k == key)).count();
+    let sets = log
+        .iter()
+        .filter(|g| matches!(g, Gesture::Set(k, _) if *k == key))
+        .count();
     assert_eq!(sets, 0, "click without drag recorded value sets: {log:?}");
     Ok(())
 }
@@ -174,7 +187,10 @@ async fn dragging_threshold_knob_up_raises_threshold() -> dioxus_test::Result<()
     let key = ptr_key(tp.as_ptr());
 
     let before = tp.value();
-    assert!((before - (-20.0)).abs() < 1e-4, "default threshold: {before}");
+    assert!(
+        (before - (-20.0)).abs() < 1e-4,
+        "default threshold: {before}"
+    );
 
     let (sx, sy) = fx.knob_center("knob-threshold");
     let dy = -30.0; // up
@@ -204,8 +220,14 @@ async fn dragging_threshold_knob_up_raises_threshold() -> dioxus_test::Result<()
     // The host saw a real automation gesture: begin, one set per drag step
     // (monotonically nondecreasing — every step moved up), then end.
     let log = fx.log.lock().unwrap();
-    let begins = log.iter().filter(|g| matches!(g, Gesture::Begin(k) if *k == key)).count();
-    let ends = log.iter().filter(|g| matches!(g, Gesture::End(k) if *k == key)).count();
+    let begins = log
+        .iter()
+        .filter(|g| matches!(g, Gesture::Begin(k) if *k == key))
+        .count();
+    let ends = log
+        .iter()
+        .filter(|g| matches!(g, Gesture::End(k) if *k == key))
+        .count();
     let sets: Vec<f32> = log
         .iter()
         .filter_map(|g| match g {
@@ -215,7 +237,11 @@ async fn dragging_threshold_knob_up_raises_threshold() -> dioxus_test::Result<()
         .collect();
     assert!(begins >= 1, "no begin gesture for threshold: {log:?}");
     assert!(ends >= 1, "no end gesture for threshold: {log:?}");
-    assert!(sets.len() >= 3, "expected ≥3 set gestures, got {}", sets.len());
+    assert!(
+        sets.len() >= 3,
+        "expected ≥3 set gestures, got {}",
+        sets.len()
+    );
     assert!(
         sets.windows(2).all(|w| w[1] >= w[0]),
         "threshold sets not monotonic: {sets:?}"
@@ -252,7 +278,10 @@ async fn graph_renders_transfer_curve() -> dioxus_test::Result<()> {
     // The threshold line + readouts rendered too.
     let html = el.inner_html();
     assert!(html.contains("GR"), "GR readout missing from graph");
-    assert!(html.contains("Thr · Ratio · Knee"), "param readout missing from graph");
+    assert!(
+        html.contains("Thr · Ratio · Knee"),
+        "param readout missing from graph"
+    );
     Ok(())
 }
 
@@ -266,7 +295,10 @@ async fn dragging_threshold_line_on_graph_lowers_threshold() -> dioxus_test::Res
     let tp = &fx.params.threshold_db;
     let key = ptr_key(tp.as_ptr());
     let before = tp.value();
-    assert!((before - (-20.0)).abs() < 1e-4, "default threshold: {before}");
+    assert!(
+        (before - (-20.0)).abs() < 1e-4,
+        "default threshold: {before}"
+    );
 
     let d_before = fx.transfer_curve_d();
 
@@ -286,7 +318,10 @@ async fn dragging_threshold_line_on_graph_lowers_threshold() -> dioxus_test::Res
 
     // 45 px down on the 60 dB / graph-height scale.
     let after = tp.value();
-    assert!(after < before, "drag down did not lower threshold: {before} → {after}");
+    assert!(
+        after < before,
+        "drag down did not lower threshold: {before} → {after}"
+    );
     let expected = -(((ty + 45.0) / graph_h) * 60.0) as f32;
     assert!(
         (after - expected).abs() < 0.5,
@@ -297,8 +332,14 @@ async fn dragging_threshold_line_on_graph_lowers_threshold() -> dioxus_test::Res
     // every step moved down), end.
     {
         let log = fx.log.lock().unwrap();
-        let begins = log.iter().filter(|g| matches!(g, Gesture::Begin(k) if *k == key)).count();
-        let ends = log.iter().filter(|g| matches!(g, Gesture::End(k) if *k == key)).count();
+        let begins = log
+            .iter()
+            .filter(|g| matches!(g, Gesture::Begin(k) if *k == key))
+            .count();
+        let ends = log
+            .iter()
+            .filter(|g| matches!(g, Gesture::End(k) if *k == key))
+            .count();
         let sets: Vec<f32> = log
             .iter()
             .filter_map(|g| match g {
@@ -308,7 +349,11 @@ async fn dragging_threshold_line_on_graph_lowers_threshold() -> dioxus_test::Res
             .collect();
         assert!(begins >= 1, "no begin gesture for threshold: {log:?}");
         assert!(ends >= 1, "no end gesture for threshold: {log:?}");
-        assert!(sets.len() >= 3, "expected ≥3 set gestures, got {}", sets.len());
+        assert!(
+            sets.len() >= 3,
+            "expected ≥3 set gestures, got {}",
+            sets.len()
+        );
         assert!(
             sets.windows(2).all(|w| w[1] <= w[0]),
             "threshold sets not monotonically falling: {sets:?}"
@@ -317,7 +362,10 @@ async fn dragging_threshold_line_on_graph_lowers_threshold() -> dioxus_test::Res
 
     // The rendered curve tracked the param change.
     let d_after = fx.transfer_curve_d();
-    assert_ne!(d_before, d_after, "transfer-curve path did not move with the threshold");
+    assert_ne!(
+        d_before, d_after,
+        "transfer-curve path did not move with the threshold"
+    );
     Ok(())
 }
 
@@ -335,8 +383,8 @@ async fn dragging_above_knee_on_graph_raises_ratio() -> dioxus_test::Result<()> 
 
     let (gx, gy) = fx.graph_origin();
     let ty = db_to_y(-20.0, fx.graph_h()); // the threshold line
-    // 60 px above the line — outside the ±16 px threshold grab zone, inside
-    // the compressed region.
+                                           // 60 px above the line — outside the ±16 px threshold grab zone, inside
+                                           // the compressed region.
     let (sx, sy) = (gx + 180.0, gy + ty - 60.0);
 
     fx.tester.pointer_down(sx, sy);
@@ -351,15 +399,24 @@ async fn dragging_above_knee_on_graph_raises_ratio() -> dioxus_test::Result<()> 
     // 60 px at 60 px-per-doubling = ratio × 2 (through the skewed range's
     // normalized round-trip).
     let after = rp.value();
-    assert!(after > before, "drag down did not raise ratio: {before} → {after}");
+    assert!(
+        after > before,
+        "drag down did not raise ratio: {before} → {after}"
+    );
     assert!(
         (after - 8.0).abs() < 1.0,
         "ratio landed at {after}:1, expected ~8:1"
     );
 
     let log = fx.log.lock().unwrap();
-    let begins = log.iter().filter(|g| matches!(g, Gesture::Begin(k) if *k == key)).count();
-    let ends = log.iter().filter(|g| matches!(g, Gesture::End(k) if *k == key)).count();
+    let begins = log
+        .iter()
+        .filter(|g| matches!(g, Gesture::Begin(k) if *k == key))
+        .count();
+    let ends = log
+        .iter()
+        .filter(|g| matches!(g, Gesture::End(k) if *k == key))
+        .count();
     let sets: Vec<f32> = log
         .iter()
         .filter_map(|g| match g {
@@ -369,14 +426,19 @@ async fn dragging_above_knee_on_graph_raises_ratio() -> dioxus_test::Result<()> 
         .collect();
     assert!(begins >= 1, "no begin gesture for ratio: {log:?}");
     assert!(ends >= 1, "no end gesture for ratio: {log:?}");
-    assert!(sets.len() >= 3, "expected ≥3 set gestures, got {}", sets.len());
+    assert!(
+        sets.len() >= 3,
+        "expected ≥3 set gestures, got {}",
+        sets.len()
+    );
     assert!(
         sets.windows(2).all(|w| w[1] >= w[0]),
         "ratio sets not monotonically rising: {sets:?}"
     );
     // A ratio drag must not touch the threshold.
     assert!(
-        !log.iter().any(|g| matches!(g, Gesture::Set(k, _) if *k == thr_key)),
+        !log.iter()
+            .any(|g| matches!(g, Gesture::Set(k, _) if *k == thr_key)),
         "ratio drag leaked threshold sets: {log:?}"
     );
     Ok(())
@@ -393,7 +455,12 @@ async fn dragging_above_knee_on_graph_raises_ratio() -> dioxus_test::Result<()> 
 async fn basic_mode_shows_core_sections_only() -> dioxus_test::Result<()> {
     let fx = mount();
 
-    for id in ["section-dynamics", "section-detector", "section-character", "section-output"] {
+    for id in [
+        "section-dynamics",
+        "section-detector",
+        "section-character",
+        "section-output",
+    ] {
         let el = fx.tester.query(by_testid(id)).immediately()?;
         let (w, h) = el.size();
         assert!(w > 40.0 && h > 30.0, "section {id} collapsed to {w}x{h}px");
@@ -423,12 +490,17 @@ async fn basic_mode_shows_core_sections_only() -> dioxus_test::Result<()> {
 async fn advanced_toggle_reveals_extended_sections() -> dioxus_test::Result<()> {
     let mut fx = mount();
 
-    let el = fx.tester.query(by_testid("advanced-toggle")).immediately()?;
+    let el = fx
+        .tester
+        .query(by_testid("advanced-toggle"))
+        .immediately()?;
     let (ox, oy) = el.document_origin();
     let (w, h) = el.size();
-    fx.tester.pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+    fx.tester
+        .pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
     let _ = fx.tester.pump().await;
-    fx.tester.pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+    fx.tester
+        .pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
     fx.settle().await;
 
     for id in ["section-sidechain", "section-expander", "section-upward"] {
@@ -438,14 +510,29 @@ async fn advanced_toggle_reveals_extended_sections() -> dioxus_test::Result<()> 
             .immediately()
             .unwrap_or_else(|e| panic!("advanced section {id} still missing: {e:?}"));
         let (w, h) = el.size();
-        assert!(w > 40.0 && h > 30.0, "advanced section {id} collapsed to {w}x{h}px");
+        assert!(
+            w > 40.0 && h > 30.0,
+            "advanced section {id} collapsed to {w}x{h}px"
+        );
     }
 
     // The advanced-only knobs of every stage are now hit-testable.
     for id in [
-        "knob-schp", "knob-sclp", "knob-expthresh", "knob-expratio", "knob-upthresh",
-        "knob-upratio", "knob-ingain", "knob-ceiling", "knob-rmsmix", "knob-feedback",
-        "knob-lookahead", "knob-inertia", "knob-inertiadecay", "knob-hold", "knob-range",
+        "knob-schp",
+        "knob-sclp",
+        "knob-expthresh",
+        "knob-expratio",
+        "knob-upthresh",
+        "knob-upratio",
+        "knob-ingain",
+        "knob-ceiling",
+        "knob-rmsmix",
+        "knob-feedback",
+        "knob-lookahead",
+        "knob-inertia",
+        "knob-inertiadecay",
+        "knob-hold",
+        "knob-range",
     ] {
         let el = fx
             .tester
@@ -453,7 +540,10 @@ async fn advanced_toggle_reveals_extended_sections() -> dioxus_test::Result<()> 
             .immediately()
             .unwrap_or_else(|e| panic!("advanced knob {id} missing: {e:?}"));
         let (w, h) = el.size();
-        assert!(w > 20.0 && h > 20.0, "advanced knob {id} collapsed to {w}x{h}px");
+        assert!(
+            w > 20.0 && h > 20.0,
+            "advanced knob {id} collapsed to {w}x{h}px"
+        );
     }
 
     // Advanced *replaces* the page — the Basic-only sections are gone, which
@@ -478,12 +568,17 @@ async fn advanced_toggle_reveals_extended_sections() -> dioxus_test::Result<()> 
 async fn dragging_an_advanced_knob_drives_its_param() -> dioxus_test::Result<()> {
     let mut fx = mount();
 
-    let el = fx.tester.query(by_testid("advanced-toggle")).immediately()?;
+    let el = fx
+        .tester
+        .query(by_testid("advanced-toggle"))
+        .immediately()?;
     let (ox, oy) = el.document_origin();
     let (w, h) = el.size();
-    fx.tester.pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+    fx.tester
+        .pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
     let _ = fx.tester.pump().await;
-    fx.tester.pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+    fx.tester
+        .pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
     fx.settle().await;
 
     let dp = &fx.params.ceiling;
@@ -510,11 +605,13 @@ async fn dragging_an_advanced_knob_drives_its_param() -> dioxus_test::Result<()>
 
     let log = fx.log.lock().unwrap();
     assert!(
-        log.iter().any(|g| matches!(g, Gesture::Begin(k) if *k == key)),
+        log.iter()
+            .any(|g| matches!(g, Gesture::Begin(k) if *k == key)),
         "no begin gesture for ceiling: {log:?}"
     );
     assert!(
-        log.iter().any(|g| matches!(g, Gesture::End(k) if *k == key)),
+        log.iter()
+            .any(|g| matches!(g, Gesture::End(k) if *k == key)),
         "no end gesture for ceiling: {log:?}"
     );
     Ok(())
@@ -528,7 +625,9 @@ async fn choosing_a_profile_swaps_in_its_faceplate() -> dioxus_test::Result<()> 
     let mut fx = mount();
 
     // The FTS surface is what we start on.
-    fx.tester.query(by_testid("section-dynamics")).immediately()?;
+    fx.tester
+        .query(by_testid("section-dynamics"))
+        .immediately()?;
     fx.tester.query(by_testid("comp-graph")).immediately()?;
 
     select_profile(&mut fx, "la2a").await?;
@@ -566,7 +665,10 @@ async fn choosing_a_profile_swaps_in_its_faceplate() -> dioxus_test::Result<()> 
     // The Basic/Advanced toggle belongs to the FTS surface — a unit has the
     // controls it has.
     assert!(
-        fx.tester.query(by_testid("advanced-toggle")).immediately().is_err(),
+        fx.tester
+            .query(by_testid("advanced-toggle"))
+            .immediately()
+            .is_err(),
         "the Advanced toggle followed us onto a hardware face"
     );
     Ok(())
@@ -599,9 +701,14 @@ async fn every_profile_renders_its_own_face() -> dioxus_test::Result<()> {
 
     // …and back to the FTS surface.
     select_profile(&mut fx, "control").await?;
-    fx.tester.query(by_testid("section-dynamics")).immediately()?;
+    fx.tester
+        .query(by_testid("section-dynamics"))
+        .immediately()?;
     assert!(
-        fx.tester.query(by_testid("hardware-panel")).immediately().is_err(),
+        fx.tester
+            .query(by_testid("hardware-panel"))
+            .immediately()
+            .is_err(),
         "a faceplate survived the return to the Control surface"
     );
     Ok(())
@@ -645,7 +752,8 @@ async fn dragging_peak_reduction_drives_every_param_behind_it() -> dioxus_test::
     fx.tester.pointer_down(sx, sy);
     let _ = fx.tester.pump().await;
     for step in 1..=3 {
-        fx.tester.pointer_move(sx, sy + dy * step as f64 / 3.0, true);
+        fx.tester
+            .pointer_move(sx, sy + dy * step as f64 / 3.0, true);
         let _ = fx.tester.pump().await;
     }
     fx.tester.pointer_up(sx, sy + dy);
@@ -660,7 +768,10 @@ async fn dragging_peak_reduction_drives_every_param_behind_it() -> dioxus_test::
         fx.params.macro1.value(),
     );
 
-    assert!(after.5 < before.5, "the macro slot did not store the new position");
+    assert!(
+        after.5 < before.5,
+        "the macro slot did not store the new position"
+    );
     // Every curve in the LA-2A's compound mapping rises with peak reduction,
     // so turning it down has to raise the threshold and lower the rest.
     assert!(after.0 > before.0, "threshold: {} → {}", before.0, after.0);
@@ -679,11 +790,13 @@ async fn dragging_peak_reduction_drives_every_param_behind_it() -> dioxus_test::
         ("macro1", ptr_key(fx.params.macro1.as_ptr())),
     ] {
         assert!(
-            log.iter().any(|g| matches!(g, Gesture::Begin(k) if *k == key)),
+            log.iter()
+                .any(|g| matches!(g, Gesture::Begin(k) if *k == key)),
             "no begin gesture for {name}"
         );
         assert!(
-            log.iter().any(|g| matches!(g, Gesture::End(k) if *k == key)),
+            log.iter()
+                .any(|g| matches!(g, Gesture::End(k) if *k == key)),
             "no end gesture for {name}"
         );
     }
@@ -698,7 +811,10 @@ async fn pressing_a_ratio_button_sets_that_ratio() -> dioxus_test::Result<()> {
     select_profile(&mut fx, "urei_1176").await?;
 
     // Button 3 of 4:8:12:20:All.
-    let el = fx.tester.query(by_testid("hw-button-ratio-3")).immediately()?;
+    let el = fx
+        .tester
+        .query(by_testid("hw-button-ratio-3"))
+        .immediately()?;
     let (ox, oy) = el.document_origin();
     let (w, h) = el.size();
     let (x, y) = (ox + w as f64 / 2.0, oy + h as f64 / 2.0);
@@ -713,7 +829,10 @@ async fn pressing_a_ratio_button_sets_that_ratio() -> dioxus_test::Result<()> {
         fx.params.ratio.value()
     );
     // …and the button stays in, read back off the ratio the engine now holds.
-    let group = fx.tester.query(by_testid("hw-buttons-ratio")).immediately()?;
+    let group = fx
+        .tester
+        .query(by_testid("hw-buttons-ratio"))
+        .immediately()?;
     assert_eq!(
         group.attribute("data-index").as_deref(),
         Some("3"),
@@ -757,9 +876,11 @@ async fn the_size_button_cycles_the_forms_and_each_asks_for_its_own_box() -> dio
         let el = fx.tester.query(by_testid("form-cycle")).immediately()?;
         let (ox, oy) = el.document_origin();
         let (w, h) = el.size();
-        fx.tester.pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+        fx.tester
+            .pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
         let _ = fx.tester.pump().await;
-        fx.tester.pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+        fx.tester
+            .pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
         fx.settle().await;
     }
 
@@ -789,7 +910,10 @@ async fn the_size_button_cycles_the_forms_and_each_asks_for_its_own_box() -> dio
 /// larger rather than reflowing it, and a smaller one draws it smaller.
 #[tokio::test]
 async fn the_faceplate_scales_with_the_editor() -> dioxus_test::Result<()> {
-    let mut small = mount_sized(comp_ui::control_view::EDITOR_W, comp_ui::control_view::EDITOR_H);
+    let mut small = mount_sized(
+        comp_ui::control_view::EDITOR_W,
+        comp_ui::control_view::EDITOR_H,
+    );
     select_profile(&mut small, "la2a").await?;
     let (sw, sh) = panel_size(&small);
 
@@ -797,7 +921,10 @@ async fn the_faceplate_scales_with_the_editor() -> dioxus_test::Result<()> {
     select_profile(&mut large, "la2a").await?;
     let (lw, lh) = panel_size(&large);
 
-    assert!(lw > sw && lh > sh, "panel did not grow: {sw}x{sh} → {lw}x{lh}");
+    assert!(
+        lw > sw && lh > sh,
+        "panel did not grow: {sw}x{sh} → {lw}x{lh}"
+    );
     // Uniform scale — the panel must not stretch on one axis.
     let (small_ar, large_ar) = (sw / sh, lw / lh);
     assert!(
@@ -812,11 +939,22 @@ async fn the_faceplate_scales_with_the_editor() -> dioxus_test::Result<()> {
 /// pointer-y stops mapping onto dB — so this checks the rendered container.
 #[tokio::test]
 async fn the_graph_grows_with_a_taller_editor() -> dioxus_test::Result<()> {
-    let short = mount_sized(comp_ui::control_view::EDITOR_W, comp_ui::control_view::EDITOR_H);
+    let short = mount_sized(
+        comp_ui::control_view::EDITOR_W,
+        comp_ui::control_view::EDITOR_H,
+    );
     let tall = mount_sized(comp_ui::control_view::EDITOR_W, 1000);
 
-    let (_, short_h) = short.tester.query(by_testid("comp-graph")).immediately()?.size();
-    let (_, tall_h) = tall.tester.query(by_testid("comp-graph")).immediately()?.size();
+    let (_, short_h) = short
+        .tester
+        .query(by_testid("comp-graph"))
+        .immediately()?
+        .size();
+    let (_, tall_h) = tall
+        .tester
+        .query(by_testid("comp-graph"))
+        .immediately()?
+        .size();
 
     assert!(
         tall_h > short_h,
@@ -825,7 +963,6 @@ async fn the_graph_grows_with_a_taller_editor() -> dioxus_test::Result<()> {
     Ok(())
 }
 
-
 /// The Advanced page must fit the editor size the plugin shell requests from
 /// the host (`DioxusState::new(|| (EDITOR_W, EDITOR_H))` in `comp-plugin`).
 /// Blitz will not overflow-scroll a height-constrained container, so anything
@@ -833,18 +970,29 @@ async fn the_graph_grows_with_a_taller_editor() -> dioxus_test::Result<()> {
 /// unreachable. This is the regression guard for that.
 #[tokio::test]
 async fn advanced_page_fits_the_plugin_editor_size() -> dioxus_test::Result<()> {
-    let mut fx = mount_sized(comp_ui::control_view::EDITOR_W, comp_ui::control_view::EDITOR_H);
+    let mut fx = mount_sized(
+        comp_ui::control_view::EDITOR_W,
+        comp_ui::control_view::EDITOR_H,
+    );
 
-    let el = fx.tester.query(by_testid("advanced-toggle")).immediately()?;
+    let el = fx
+        .tester
+        .query(by_testid("advanced-toggle"))
+        .immediately()?;
     let (ox, oy) = el.document_origin();
     let (w, h) = el.size();
-    fx.tester.pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+    fx.tester
+        .pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
     let _ = fx.tester.pump().await;
-    fx.tester.pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+    fx.tester
+        .pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
     fx.settle().await;
 
     for id in [
-        "section-detector", "section-sidechain", "section-expander", "section-upward",
+        "section-detector",
+        "section-sidechain",
+        "section-expander",
+        "section-upward",
         "section-character",
     ] {
         let el = fx
@@ -862,9 +1010,18 @@ async fn advanced_page_fits_the_plugin_editor_size() -> dioxus_test::Result<()> 
     }
 
     // Every advanced knob stays hit-testable at that size.
-    for id in ["knob-schp", "knob-expratio", "knob-upratio", "knob-ceiling", "knob-inertia"] {
+    for id in [
+        "knob-schp",
+        "knob-expratio",
+        "knob-upratio",
+        "knob-ceiling",
+        "knob-inertia",
+    ] {
         let (w, h) = fx.tester.query(by_testid(id)).immediately()?.size();
-        assert!(w > 20.0 && h > 20.0, "{id} collapsed to {w}x{h}px at editor size");
+        assert!(
+            w > 20.0 && h > 20.0,
+            "{id} collapsed to {w}x{h}px at editor size"
+        );
     }
     Ok(())
 }
@@ -887,16 +1044,24 @@ async fn advanced_page_survives_the_size_the_editor_opens_at() -> dioxus_test::R
         comp_ui::control_view::EDITOR_H,
     );
 
-    let el = fx.tester.query(by_testid("advanced-toggle")).immediately()?;
+    let el = fx
+        .tester
+        .query(by_testid("advanced-toggle"))
+        .immediately()?;
     let (ox, oy) = el.document_origin();
     let (w, h) = el.size();
-    fx.tester.pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+    fx.tester
+        .pointer_down(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
     let _ = fx.tester.pump().await;
-    fx.tester.pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
+    fx.tester
+        .pointer_up(ox + w as f64 / 2.0, oy + h as f64 / 2.0);
     fx.settle().await;
 
     for id in [
-        "section-detector", "section-sidechain", "section-expander", "section-upward",
+        "section-detector",
+        "section-sidechain",
+        "section-expander",
+        "section-upward",
         "section-character",
     ] {
         let el = fx
@@ -917,7 +1082,10 @@ async fn advanced_page_survives_the_size_the_editor_opens_at() -> dioxus_test::R
     // And the knobs inside them stay hit-testable.
     for id in ["knob-schp", "knob-expratio", "knob-upratio", "knob-ceiling"] {
         let (w, h) = fx.tester.query(by_testid(id)).immediately()?.size();
-        assert!(w > 20.0 && h > 20.0, "{id} collapsed to {w}x{h}px at the minimum size");
+        assert!(
+            w > 20.0 && h > 20.0,
+            "{id} collapsed to {w}x{h}px at the minimum size"
+        );
     }
     Ok(())
 }

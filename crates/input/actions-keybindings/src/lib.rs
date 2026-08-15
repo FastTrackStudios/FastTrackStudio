@@ -30,9 +30,9 @@ pub use parse::ParseError;
 
 use std::collections::HashMap;
 
-use actions_proto::ActionDefinition;
 use actions_proto::ids::StaticActionId;
 use actions_proto::when::{ActionContext, WhenExpr};
+use actions_proto::ActionDefinition;
 
 // ============================================================================
 // Key Types

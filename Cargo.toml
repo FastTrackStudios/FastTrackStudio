@@ -20,8 +20,6 @@ members = [
     "libs/dock/dock-dioxus",
     "libs/dock/dock-proto",
     "libs/utils",
-    "libs/monarchy/monarchy",
-    "libs/monarchy/monarchy-derive",
     "libs/installer-core",
     "libs/engine-launcher",
     # ── crates/ — domain cores ────────────────────────────────────────
@@ -138,10 +136,8 @@ members = [
     "features/dynamic-template/dynamic-template",
     "features/dynamic-template/dynamic-template-proto",
     "features/dynamic-template/dynamic-template-extension",
-    "features/dynamic-template/music-catalog",
     "features/chord-tool/chord-tool",
     "features/chord-tool/chord-tool-daw",
-    "features/dynamic-template/color-palette",
     "features/dynamic-template/tests",
     # ── crates/signal — signal domain core (wave 4) ───────────────────
     # `signal` is the facade — the only public API surface for the signal
@@ -693,14 +689,24 @@ dynamic-template-proto = { path = "features/dynamic-template/dynamic-template-pr
 # Canonical music-production taxonomy (instrument groups + the REAPER
 # 128-slot group partition). Single source of truth shared with
 # dynamic-template.
-music-catalog = { path = "features/dynamic-template/music-catalog" }
+# ── the music-convention repo ─────────────────────────────────────────
+# The DAW-free convention half of dynamic-template — track schema, naming
+# rules, equipment, icons, layouts, Pro Tools mapping — plus the crates it
+# is built on. `dynamic-template` here is the REAPER implementation that
+# consumes it.
+#
+# All five MUST come from the same source. `dynamic_template::colors`
+# hands out `color_palette::Color` values that session/ui store in
+# `color_palette::Color`-typed maps, so a second copy of color-palette is
+# a type error, not merely a duplicate build.
+music-convention = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+music-catalog = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+color-palette = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+monarchy = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+monarchy_derive = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+
 chord-tool = { path = "features/chord-tool/chord-tool" }
 chord-tool-daw = { path = "features/chord-tool/chord-tool-daw" }
-color-palette = { path = "features/dynamic-template/color-palette" }
-# Monarchy hierarchy framework (dynamic-template's engine) — subtree-
-# imported at libs/monarchy so the whole graph shares one facet line.
-monarchy = { path = "libs/monarchy/monarchy" }
-monarchy_derive = { path = "libs/monarchy/monarchy-derive" }
 
 # ── MusicXML parsing (keyflow) ─────────────────────────────────────────
 musicxml = "1.1"

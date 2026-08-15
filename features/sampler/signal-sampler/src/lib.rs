@@ -93,15 +93,14 @@ pub mod nam;
 pub mod nam_calibrate;
 pub mod native;
 pub mod native_osc;
-pub mod soundsource;
 pub mod node_render;
 pub mod nord;
 pub mod pack_cli;
 pub mod pack_rewrite;
-pub mod ref_match;
-pub mod report;
 pub mod preset_registry;
 pub mod preset_spec;
+pub mod ref_match;
+pub mod report;
 pub mod retag;
 pub mod rig;
 pub mod rig_library;
@@ -112,16 +111,19 @@ pub mod rig_profile;
 pub mod runtime;
 pub mod sample_map;
 pub mod sampler_rig;
+pub mod soundsource;
 pub mod spec;
 pub mod stats;
 pub mod styx_edit;
 
+pub use audio_soundsource::AudioSoundsource;
 pub use bank::{PreloadProfile, SamplerBank};
 pub use block::{BlockParams, BlockSpec, SamplerBlock};
 pub use convolver::Convolver;
 pub use document::{
-    DocCc, DocEvent, DocNote, DocumentBusRenderResult, DocumentRenderOptions, DocumentRenderResult,
-    Schedule, ScheduledEvent, TempoPoint, TrackDocument, annotate, line_for_chan,
+    annotate, line_for_chan, DocCc, DocEvent, DocNote, DocumentBusRenderResult,
+    DocumentRenderOptions, DocumentRenderResult, Schedule, ScheduledEvent, TempoPoint,
+    TrackDocument,
 };
 pub use document_rt::{BlockTransport, RealtimeScheduler};
 pub use engine::cache::SignalPcmPack;
@@ -130,16 +132,15 @@ pub use engine::{ArticClass, EmittedMarker, LegatoFireEvent, LineId, PlayMode, S
 pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
 pub use instrument::SamplerInstrument;
 pub use keys_rig::{KeysInstrument, KeysRig};
+pub use midicore::MidiMonitor;
 pub use mixer::{
     Bus, BusStrip, ChannelStrip, DirectChannel, DrumMixer, EngineStrip, FxBackend, FxSlotStrip,
     FxTarget, MixerLayout, MixerMeters, Send as MixerSend, SendStrip,
 };
 pub use module_spec::{ModulePort, ModuleSpec};
 pub use nam::NamProcessor;
-pub use audio_soundsource::AudioSoundsource;
 pub use native_osc::{NativeOscillator, OscWave};
-pub use soundsource::{Soundsource, SoundsourceKind, SoundsourceLeaf};
-pub use node_render::{LeafBackend, RenderNode, build_node_backend};
+pub use node_render::{build_node_backend, LeafBackend, RenderNode};
 pub use preset_registry::{PresetRegistry, PresetSource, RegisteredPreset};
 pub use preset_spec::{
     MacroDef, MacroTarget, MasterFxSlot, NoteRoute, PresetEngineRef, PresetModuleRef, PresetSpec,
@@ -156,15 +157,15 @@ pub use runtime::{
     ResolvedEdge,
 };
 pub use sample_map::{SampleKey, SampleMap, SampleQuery};
-pub use midicore::MidiMonitor;
 pub use sampler_rig::{BusTrack, InstrumentTrack, SamplerRig};
+pub use soundsource::{Soundsource, SoundsourceKind, SoundsourceLeaf};
 // Hardware MIDI input primitives live in `midicore` (the `midir` OS backend);
 // re-export the selector + handle + event types so rig consumers (e.g. the
 // strings TUI) don't need a direct midicore dependency.
 pub use midicore;
+pub use midicore::midir::MidiInput as MidiInputHandle;
 pub use midicore::MidiEvent;
 pub use midicore::PortSelector as MidiSelection;
-pub use midicore::midir::MidiInput as MidiInputHandle;
 pub use spec::LibrarySpec;
 pub use stats::AudioStatsSnapshot;
 
@@ -213,7 +214,7 @@ pub mod pack {
     }
 }
 
-pub use pack::{PackHeader, read_pack_header};
+pub use pack::{read_pack_header, PackHeader};
 
 /// Identifier for a loaded instrument within the bank.
 pub type InstrumentId = String;
@@ -589,7 +590,10 @@ impl PlayerPatch {
         let mut by_note: BTreeMap<i32, Vec<std::path::PathBuf>> = BTreeMap::new();
         if self.is_zoned() {
             for (z, p) in self.spec.zones.iter().zip(self.zone_paths.iter()) {
-                by_note.entry(z.root_key as i32).or_default().push(p.clone());
+                by_note
+                    .entry(z.root_key as i32)
+                    .or_default()
+                    .push(p.clone());
             }
         } else {
             for (k, p) in self.map.iter() {

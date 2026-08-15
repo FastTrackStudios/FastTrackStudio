@@ -20,7 +20,7 @@ use daw_ui::panels::{
     TrackView,
 };
 use daw_ui::theming::reaper_import::ReaperTheme;
-use daw_ui::theming::{theme_from_reaper, ThemeContext, ThemeProvider};
+use daw_ui::theming::{ThemeContext, ThemeProvider, theme_from_reaper};
 
 /// The stock REAPER 7 theme, embedded (no filesystem on wasm). Loading it
 /// exercises the whole importer: `.ReaperTheme` palette → tokens, `rtconfig`
@@ -153,16 +153,54 @@ fn App() -> Element {
     };
 
     let markers = vec![
-        MarkerView { time: 0.0, name: "Intro".into(), color: None, idx: 1 },
-        MarkerView { time: 8.0, name: "Verse".into(), color: None, idx: 2 },
-        MarkerView { time: 14.0, name: "Chorus".into(), color: None, idx: 3 },
+        MarkerView {
+            time: 0.0,
+            name: "Intro".into(),
+            color: None,
+            idx: 1,
+        },
+        MarkerView {
+            time: 8.0,
+            name: "Verse".into(),
+            color: None,
+            idx: 2,
+        },
+        MarkerView {
+            time: 14.0,
+            name: "Chorus".into(),
+            color: None,
+            idx: 3,
+        },
     ];
     let regions = vec![
-        RegionView { start: 0.0, end: 8.0, name: "A".into(), color: Some("#3a5a8a".into()), idx: 1 },
-        RegionView { start: 8.0, end: 14.0, name: "B".into(), color: Some("#8a3a5a".into()), idx: 2 },
-        RegionView { start: 14.0, end: 26.0, name: "C".into(), color: Some("#3a8a5a".into()), idx: 3 },
+        RegionView {
+            start: 0.0,
+            end: 8.0,
+            name: "A".into(),
+            color: Some("#3a5a8a".into()),
+            idx: 1,
+        },
+        RegionView {
+            start: 8.0,
+            end: 14.0,
+            name: "B".into(),
+            color: Some("#8a3a5a".into()),
+            idx: 2,
+        },
+        RegionView {
+            start: 14.0,
+            end: 26.0,
+            name: "C".into(),
+            color: Some("#3a8a5a".into()),
+            idx: 3,
+        },
     ];
-    let tempo_markers = vec![TempoMarkerView { time: 0.0, bpm: 72.0, num: 4, den: 4 }];
+    let tempo_markers = vec![TempoMarkerView {
+        time: 0.0,
+        bpm: 72.0,
+        num: 4,
+        den: 4,
+    }];
 
     rsx! {
         // Full-viewport dark shell so the panels fill the browser window.

@@ -43,7 +43,12 @@ fn each_track_keeps_its_own_mode() {
     let modes: Vec<Mode> = ed.tracks.tracks().iter().map(|t| t.mode).collect();
     assert_eq!(
         modes,
-        vec![Mode::PitchedAudio, Mode::Midi, Mode::Guitar, Mode::UnpitchedAudio]
+        vec![
+            Mode::PitchedAudio,
+            Mode::Midi,
+            Mode::Guitar,
+            Mode::UnpitchedAudio
+        ]
     );
 }
 
@@ -177,7 +182,10 @@ fn a_floor_that_does_not_fit_overflows_and_scrolls() {
             .push(Track::in_mode(format!("T{i}"), doc(), Mode::Midi));
     }
     let rows = ed.tracks.stack(600.0, 1.0, 40.0);
-    assert!(rows.iter().all(|r| r.height >= 40.0 - 1e-3), "floor honoured");
+    assert!(
+        rows.iter().all(|r| r.height >= 40.0 - 1e-3),
+        "floor honoured"
+    );
     let total = rows.last().unwrap().y + rows.last().unwrap().height;
     assert!(total > 600.0, "and the stack is taller than the viewport");
 }
@@ -292,7 +300,10 @@ fn a_host_supplied_guid_is_kept_verbatim() {
     let ws = Workspace::single("x", doc());
     let mut ws = ws;
     ws.push(Track::with_guid(host, "Lead Vox", doc()));
-    assert_eq!(ws.track_by_guid(host).map(|t| t.name.as_str()), Some("Lead Vox"));
+    assert_eq!(
+        ws.track_by_guid(host).map(|t| t.name.as_str()),
+        Some("Lead Vox")
+    );
 }
 
 #[test]
@@ -335,7 +346,11 @@ fn ws_with(names: &[&str]) -> Workspace {
 #[test]
 fn a_new_track_arrives_in_a_lane_of_its_own() {
     let ws = ws_with(&["Lead Vox", "Ref MIDI", "Kit"]);
-    assert_eq!(ws.layout().len(), 3, "one lane each until something pairs them");
+    assert_eq!(
+        ws.layout().len(),
+        3,
+        "one lane each until something pairs them"
+    );
     for i in 0..3 {
         assert_eq!(ws.lane_tracks(i).len(), 1);
     }
@@ -591,10 +606,7 @@ fn pairing_places_the_lane_by_first_appearance() {
     ws.auto_pair();
 
     assert_eq!(ws.lane_tracks(0).len(), 2, "Zebra's lane came first");
-    assert_eq!(
-        ws.track(ws.lane_tracks(1)[0]).unwrap().name,
-        "Apple"
-    );
+    assert_eq!(ws.track(ws.lane_tracks(1)[0]).unwrap().name, "Apple");
 }
 
 // ── Per-lane vertical cameras ────────────────────────────────────────

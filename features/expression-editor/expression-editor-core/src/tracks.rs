@@ -126,11 +126,7 @@ impl Track {
     /// A track carrying the host's identity. This is the constructor the
     /// DAW adapter uses, so that persisted data keyed on a guid means
     /// the same track when the project is reopened.
-    pub fn with_guid(
-        guid: impl Into<String>,
-        name: impl Into<String>,
-        doc: ExpressionDoc,
-    ) -> Self {
+    pub fn with_guid(guid: impl Into<String>, name: impl Into<String>, doc: ExpressionDoc) -> Self {
         Self {
             guid: guid.into(),
             name: name.into(),
@@ -467,10 +463,7 @@ impl Workspace {
                 Some(i) => lanes[i].tracks.push(track.guid.clone()),
                 None => {
                     keys.push(key);
-                    lanes.push(Lane::single(
-                        track.guid.clone(),
-                        track.mode.stack_weight(),
-                    ));
+                    lanes.push(Lane::single(track.guid.clone(), track.mode.stack_weight()));
                 }
             }
         }
@@ -506,9 +499,9 @@ impl Workspace {
             .flat_map(|lane| lane.tracks.iter())
             .find(|g| {
                 *g != guid
-                    && self.track_by_guid(g).is_some_and(|t| {
-                        (t.folder.clone(), normalize_track_name(&t.name)) == key
-                    })
+                    && self
+                        .track_by_guid(g)
+                        .is_some_and(|t| (t.folder.clone(), normalize_track_name(&t.name)) == key)
             })
             .cloned();
 

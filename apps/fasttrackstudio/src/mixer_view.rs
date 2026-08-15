@@ -112,7 +112,11 @@ fn TrackSync(guid: String, tv: TrackView) -> Element {
             let muted = *mute.read();
             let guid = guid.clone();
             spawn(with_track(guid, move |h| async move {
-                if muted { h.mute().await } else { h.unmute().await }
+                if muted {
+                    h.mute().await
+                } else {
+                    h.unmute().await
+                }
             }));
         });
     }
@@ -122,7 +126,11 @@ fn TrackSync(guid: String, tv: TrackView) -> Element {
             let soloed = *solo.read();
             let guid = guid.clone();
             spawn(with_track(guid, move |h| async move {
-                if soloed { h.solo().await } else { h.unsolo().await }
+                if soloed {
+                    h.solo().await
+                } else {
+                    h.unsolo().await
+                }
             }));
         });
     }
@@ -131,7 +139,10 @@ fn TrackSync(guid: String, tv: TrackView) -> Element {
         use_effect(move || {
             let vol = *fader.read() as f64;
             let guid = guid.clone();
-            spawn(with_track(guid, move |h| async move { h.set_volume(vol).await }));
+            spawn(with_track(
+                guid,
+                move |h| async move { h.set_volume(vol).await },
+            ));
         });
     }
     {
@@ -139,7 +150,9 @@ fn TrackSync(guid: String, tv: TrackView) -> Element {
         use_effect(move || {
             let pan_val = (*pan.read() as f64) * 2.0 - 1.0; // 0..1 (0.5=centre) → −1..1
             let guid = guid.clone();
-            spawn(with_track(guid, move |h| async move { h.set_pan(pan_val).await }));
+            spawn(with_track(guid, move |h| async move {
+                h.set_pan(pan_val).await
+            }));
         });
     }
 
@@ -175,7 +188,12 @@ pub fn MixerWorkspace() -> Element {
                 for t in list {
                     let (mut s, mut r) = (false, false);
                     if let Ok(Some(h)) = project.tracks().by_guid(&t.guid).await {
-                        s = h.sends().all().await.map(|v| !v.is_empty()).unwrap_or(false);
+                        s = h
+                            .sends()
+                            .all()
+                            .await
+                            .map(|v| !v.is_empty())
+                            .unwrap_or(false);
                         r = h
                             .receives()
                             .all()

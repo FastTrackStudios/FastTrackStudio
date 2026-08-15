@@ -119,7 +119,10 @@ mod tests {
         assert_eq!(back.default().unwrap().name, "Default");
         assert_eq!(back.default().unwrap().key.to_string(), "Bb Major");
         assert_eq!(
-            back.arrangement(song.arrangements[1].id).unwrap().key.to_string(),
+            back.arrangement(song.arrangements[1].id)
+                .unwrap()
+                .key
+                .to_string(),
             "G Minor"
         );
     }

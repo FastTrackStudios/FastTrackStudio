@@ -3109,6 +3109,7 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
  "facet",
  "thiserror 2.0.18",
@@ -3117,7 +3118,7 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
+source = "git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0#e77c65ed13fd3b130d5778b74b332b655bc1aaf8"
 dependencies = [
  "facet",
  "thiserror 2.0.18",
@@ -4302,7 +4303,7 @@ dependencies = [
  "daw",
  "daw-reaper",
  "eyre",
- "music-catalog 0.1.0",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
  "tokio",
  "tracing",
 ]
@@ -6163,20 +6164,16 @@ checksum = "e1d926b4d407d372f141f93bb444696142c29d32962ccbd3531117cf3aa0bfa9"
 name = "dynamic-template"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
- "color-palette 0.1.0",
  "daw",
  "daw-proto 0.1.0",
  "daw-reaper",
  "dynamic-template-proto",
  "eyre",
- "facet",
  "monarchy",
- "music-catalog 0.1.0",
- "serde",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
+ "music-convention",
  "serde_json",
- "thiserror 2.0.18",
  "tracing",
  "vox",
 ]
@@ -6205,7 +6202,7 @@ dependencies = [
 name = "dynamic-template-tests"
 version = "0.1.0"
 dependencies = [
- "color-palette 0.1.0",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
  "daw-proto 0.1.0",
  "dynamic-template",
  "insta",
@@ -11055,13 +11052,13 @@ name = "keyflow-proto"
 version = "0.1.0"
 dependencies = [
  "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
- "color-palette 0.1.0",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
  "daw-proto 0.1.0",
  "facet",
  "helgoboss-midi",
  "keyflow-syntax 0.1.0",
  "keyflow-text 0.1.0",
- "music-catalog 0.1.0",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
  "serde",
  "thiserror 2.0.18",
  "tracing",
@@ -12708,6 +12705,7 @@ dependencies = [
 [[package]]
 name = "monarchy"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0#e77c65ed13fd3b130d5778b74b332b655bc1aaf8"
 dependencies = [
  "facet",
  "monarchy_derive",
@@ -12720,9 +12718,9 @@ dependencies = [
 [[package]]
 name = "monarchy_derive"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0#e77c65ed13fd3b130d5778b74b332b655bc1aaf8"
 dependencies = [
  "convert_case 0.6.0",
- "monarchy",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -12801,16 +12799,30 @@ version = "0.1.0"
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
- "color-palette 0.1.0",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
 ]
 
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
+source = "git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0#e77c65ed13fd3b130d5778b74b332b655bc1aaf8"
 dependencies = [
- "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
+]
+
+[[package]]
+name = "music-convention"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0#e77c65ed13fd3b130d5778b74b332b655bc1aaf8"
+dependencies = [
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
+ "facet",
+ "monarchy",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -14645,7 +14657,7 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "gloo-timers",
- "music-catalog 0.1.0",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
  "patchbay",
  "patchbay-proto",
  "tokio",
@@ -17893,7 +17905,7 @@ dependencies = [
  "actions-proto 0.1.0",
  "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "chrono",
- "color-palette 0.1.0",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
  "daw",
  "daw-actions",
  "daw-proto 0.1.0",
@@ -17907,7 +17919,7 @@ dependencies = [
  "keyflow",
  "keyflow-daw-analysis",
  "monarchy",
- "music-catalog 0.1.0",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
  "reaper-high",
  "reaper-low",
  "reaper-medium",

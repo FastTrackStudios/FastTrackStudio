@@ -11,7 +11,7 @@
 
 use dioxus::prelude::*;
 use expression_editor_core::doc::Dimension;
-use expression_editor_core::{chord, Editor, ModeFamily, Shape, StripLane, Tool};
+use expression_editor_core::{Editor, ModeFamily, Shape, StripLane, Tool, chord};
 
 use crate::drawer::ModDrawer;
 use crate::interaction::{self, Drag};

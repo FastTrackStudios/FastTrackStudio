@@ -10,7 +10,9 @@ async fn main() {
     let url = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "ws://127.0.0.1:4046/vox".to_string());
-    let link = vox_websocket::WsLink::connect(&url).await.expect("ws connect");
+    let link = vox_websocket::WsLink::connect(&url)
+        .await
+        .expect("ws connect");
     let client: PatchbayServiceClient = vox_core::initiator_on(link)
         .establish()
         .await
@@ -26,7 +28,10 @@ async fn main() {
         match snap.nodes.iter().find(|n| n.name == name) {
             Some(n) => {
                 let ports = snap.ports.iter().filter(|p| p.node_id == n.id).count();
-                println!("  {name}: id={} class={:?} ports={ports}", n.id, n.media_class);
+                println!(
+                    "  {name}: id={} class={:?} ports={ports}",
+                    n.id, n.media_class
+                );
             }
             None => println!("  {name}: MISSING from app mirror"),
         }

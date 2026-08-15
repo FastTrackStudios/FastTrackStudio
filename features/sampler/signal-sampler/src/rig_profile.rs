@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 
 use facet::Facet;
 
-use crate::SamplerError;
 use crate::rig::{GuitarRig, ModelId, RigBlock};
+use crate::SamplerError;
 
 /// One patch in a rig profile: a named tone whose chain is either inlined or
 /// **referenced** from a [`RigPreset`](crate::rig_library::RigPreset) scene.

@@ -6,8 +6,8 @@
 
 use atomic_float::AtomicF32;
 use audiocore_core::prelude::*;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Samples kept in each waveform history ring (one per processed block —
 /// ~2.7 s at 512-sample blocks / 48 kHz).
@@ -91,9 +91,7 @@ pub const STYLE_LABELS: &[&str] = &["Clean", "FET", "VCA", "Opto"];
 /// Character (drive) waveshaper, mirroring `ProC3Compressor::drive_transfer`'s
 /// `character_mode` dispatch: 0 tanh, 1 atan, 2 x/(1+|x|), 3 HF-only,
 /// 4 cubic, 5 hard clip, 6 asymmetric tanh.
-pub const CHARACTER_LABELS: &[&str] = &[
-    "Tape", "Tube", "Trans", "Bright", "Cubic", "Clip", "Asym",
-];
+pub const CHARACTER_LABELS: &[&str] = &["Tape", "Tube", "Trans", "Bright", "Cubic", "Clip", "Asym"];
 
 /// Profile names in `comp_profiles::all_profiles()` order — the order the
 /// `profile` parameter's values are in, so **append only**.
@@ -148,7 +146,6 @@ pub struct CompParams {
     pub stereo_link: FloatParam,
 
     // ── Extended surface (appended — never reorder the eight above) ──────
-
     /// Detector/ballistics model — see [`STYLE_LABELS`].
     #[id = "style"]
     pub style: IntParam,
@@ -306,7 +303,10 @@ impl Default for CompParams {
             threshold_db: FloatParam::new(
                 "Threshold",
                 -20.0,
-                FloatRange::Linear { min: -60.0, max: 0.0 },
+                FloatRange::Linear {
+                    min: -60.0,
+                    max: 0.0,
+                },
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
@@ -346,14 +346,20 @@ impl Default for CompParams {
             knee_db: FloatParam::new(
                 "Knee",
                 6.0,
-                FloatRange::Linear { min: 0.0, max: 24.0 },
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 24.0,
+                },
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
             makeup_db: FloatParam::new(
                 "Makeup",
                 0.0,
-                FloatRange::Linear { min: -24.0, max: 24.0 },
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
@@ -379,7 +385,10 @@ impl Default for CompParams {
             input_gain_db: FloatParam::new(
                 "Input",
                 0.0,
-                FloatRange::Linear { min: -24.0, max: 24.0 },
+                FloatRange::Linear {
+                    min: -24.0,
+                    max: 24.0,
+                },
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
@@ -391,13 +400,9 @@ impl Default for CompParams {
             )
             .with_unit("%")
             .with_value_to_string(formatters::v2s_f32_percentage(0)),
-            feedback: FloatParam::new(
-                "Feedback",
-                0.0,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_unit("%")
-            .with_value_to_string(formatters::v2s_f32_percentage(0)),
+            feedback: FloatParam::new("Feedback", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit("%")
+                .with_value_to_string(formatters::v2s_f32_percentage(0)),
             hold_ms: FloatParam::new(
                 "Hold",
                 0.0,
@@ -426,7 +431,10 @@ impl Default for CompParams {
             inertia_decay: FloatParam::new(
                 "Inertia Decay",
                 0.0,
-                FloatRange::Linear { min: 0.0, max: 0.999 },
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 0.999,
+                },
             )
             .with_unit("%")
             .with_value_to_string(formatters::v2s_f32_percentage(0)),
@@ -454,13 +462,23 @@ impl Default for CompParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
-            range_db: FloatParam::new("Range", 60.0, FloatRange::Linear { min: 0.0, max: 60.0 })
-                .with_unit(" dB")
-                .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            range_db: FloatParam::new(
+                "Range",
+                60.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 60.0,
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
             expander_threshold_db: FloatParam::new(
                 "Exp Threshold",
                 -80.0,
-                FloatRange::Linear { min: -80.0, max: 0.0 },
+                FloatRange::Linear {
+                    min: -80.0,
+                    max: 0.0,
+                },
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
@@ -478,7 +496,10 @@ impl Default for CompParams {
             upward_threshold_db: FloatParam::new(
                 "Up Threshold",
                 -60.0,
-                FloatRange::Linear { min: -60.0, max: 0.0 },
+                FloatRange::Linear {
+                    min: -60.0,
+                    max: 0.0,
+                },
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),

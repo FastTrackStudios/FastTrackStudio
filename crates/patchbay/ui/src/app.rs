@@ -26,8 +26,7 @@ pub fn PatchbayApp() -> Element {
         let handle = prescan.clone();
         async move {
             crate::state::sleep_secs(1).await;
-            if crate::state::DANTE_DEVICES.peek().is_empty()
-                && !*crate::state::DANTE_LOADING.peek()
+            if crate::state::DANTE_DEVICES.peek().is_empty() && !*crate::state::DANTE_LOADING.peek()
             {
                 crate::state::refresh_dante(&handle).await;
             }

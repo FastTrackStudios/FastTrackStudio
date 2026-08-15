@@ -98,8 +98,10 @@ jobs:
           PATCHBAY = {"patchbay", "patchbay-proto", "patchbay-ui", "fts-patchbay"}
           # Crates the audio/signal steps build or test; rail already
           # folded reverse deps into `crates`.
-          SIGNAL = {"signal-guitar", "daw-standalone", "neural-amp-modeler",
-                    "architect", "pitch-dsp", "fasttrackstudio"}
+          # neural-amp-modeler and architect are external repos since the
+          # August 2026 split, so they can never appear in a plan here.
+          SIGNAL = {"signal-guitar", "daw-standalone",
+                    "pitch-dsp", "fasttrackstudio"}
 
           gates = {
               "workspace": bool(crates - PATCHBAY),
@@ -207,12 +209,10 @@ jobs:
       - name: test daw-standalone (audio)
         if: needs.plan.outputs.signal == 'true'
         run: ${NIX_DEV} cargo nextest run -p daw-standalone --features audio
-      - name: test neural-amp-modeler (incl. NAM parity)
-        if: needs.plan.outputs.signal == 'true'
-        run: ${NIX_DEV} cargo nextest run -p neural-amp-modeler
-      - name: test architect (iroh)
-        if: needs.plan.outputs.signal == 'true'
-        run: ${NIX_DEV} cargo nextest run -p architect --features iroh
+      # neural-amp-modeler and architect left this repo in the August 2026
+      # split. `-p` only selects workspace MEMBERS, so testing them from
+      # here fails with "cannot specify features for packages outside of
+      # workspace". Each repo's own CI tests them.
       - name: test pitch-dsp
         if: needs.plan.outputs.signal == 'true'
         run: ${NIX_DEV} cargo nextest run -p pitch-dsp

@@ -4,8 +4,8 @@ use dioxus::prelude::*;
 use patchbay_proto::MediaKind;
 
 use crate::state::{
-    self, ALIASES, CLOCK, DANTE, GRAPH, HIDE_UNCONNECTED, LAST_REPORT, MEDIA_TAB, PRESETS,
-    SEARCH, SELECTED_NODE,
+    self, ALIASES, CLOCK, DANTE, GRAPH, HIDE_UNCONNECTED, LAST_REPORT, MEDIA_TAB, PRESETS, SEARCH,
+    SELECTED_NODE,
 };
 
 #[component]
@@ -736,7 +736,12 @@ fn Inspector() -> Element {
         .collect();
     drop(graph);
     ports.sort_by_key(|p| {
-        let digits = p.name.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+        let digits = p
+            .name
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .count();
         if digits == 0 || digits == p.name.len() {
             (p.name.clone(), 0u64)
         } else {
@@ -896,11 +901,7 @@ fn BulkNames(node_name: String) -> Element {
         let handle = handle.clone();
         let node_name = node_name.clone();
         move |_| {
-            let names: Vec<String> = text
-                .peek()
-                .lines()
-                .map(|l| l.trim().to_string())
-                .collect();
+            let names: Vec<String> = text.peek().lines().map(|l| l.trim().to_string()).collect();
             if names.iter().all(|l| l.is_empty()) {
                 result.set("paste channel names first (one per line)".into());
                 return;
@@ -916,8 +917,12 @@ fn BulkNames(node_name: String) -> Element {
                 .filter(|p| p.node_id == node.id && p.direction == direction)
                 .filter(|p| !crate::layout::is_monitor(&p.name))
                 .filter_map(|p| {
-                    let digits =
-                        p.name.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+                    let digits = p
+                        .name
+                        .chars()
+                        .rev()
+                        .take_while(|c| c.is_ascii_digit())
+                        .count();
                     if digits == 0 || digits == p.name.len() {
                         return None;
                     }
@@ -1034,9 +1039,10 @@ fn BulkRouting(node_name: String) -> Element {
         .iter()
         .filter(|n| n.name != node_name)
         .filter(|n| {
-            graph.ports.iter().any(|p| {
-                p.node_id == n.id && p.direction == patchbay_proto::PortDirection::Input
-            })
+            graph
+                .ports
+                .iter()
+                .any(|p| p.node_id == n.id && p.direction == patchbay_proto::PortDirection::Input)
         })
         .map(|n| (n.name.clone(), state::node_label(&n.name, &n.label)))
         .collect();

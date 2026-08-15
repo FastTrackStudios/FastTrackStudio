@@ -32,7 +32,9 @@ pub(crate) fn poll_node_states(store: &Arc<RwLock<GraphStore>>, events: &Sender<
     let Ok(dump) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
         return;
     };
-    let Some(objects) = dump.as_array() else { return };
+    let Some(objects) = dump.as_array() else {
+        return;
+    };
 
     let mut changes = Vec::new();
     {
@@ -76,7 +78,9 @@ pub(crate) fn enrich_nodes(store: &Arc<RwLock<GraphStore>>, events: &Sender<Grap
     let Ok(dump) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
         return;
     };
-    let Some(objects) = dump.as_array() else { return };
+    let Some(objects) = dump.as_array() else {
+        return;
+    };
 
     let mut updates = Vec::new();
     for obj in objects {
@@ -89,7 +93,13 @@ pub(crate) fn enrich_nodes(store: &Arc<RwLock<GraphStore>>, events: &Sender<Grap
         let Some(props) = obj.pointer("/info/props") else {
             continue;
         };
-        let get = |k: &str| props.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let get = |k: &str| {
+            props
+                .get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
 
         let mut store_w = store.write();
         let Some(node) = store_w.nodes.get_mut(&id) else {

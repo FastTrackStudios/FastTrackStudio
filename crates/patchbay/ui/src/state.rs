@@ -442,7 +442,11 @@ pub fn port_color(node_name: &str, node_label: &str, port_name: &str) -> String 
     }
     // Channel-number prefix stripped so "28 - Guitar 1" categorizes.
     let display = port_label(node_name, port_name);
-    let digits = port_name.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+    let digits = port_name
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .count();
     let chan = if digits > 0 && digits < port_name.len() {
         port_name[port_name.len() - digits..].parse::<u64>().ok()
     } else {
@@ -528,7 +532,9 @@ pub fn connect_armed(handle: PatchbayHandle, inputs: &[u32]) {
 /// whichever side the drag started from); node-drags are handled by
 /// the header's own mouseup.
 pub fn complete_drag_on_ports(handle: PatchbayHandle, dir: PortDirection, ports: &[u32]) {
-    let Some(drag) = DRAG.peek().clone() else { return };
+    let Some(drag) = DRAG.peek().clone() else {
+        return;
+    };
     let DragSource::Ports(from_dir, from_ports) = drag.source else {
         return;
     };
@@ -536,12 +542,16 @@ pub fn complete_drag_on_ports(handle: PatchbayHandle, dir: PortDirection, ports:
         return;
     }
     let pairs: Vec<(u32, u32)> = match from_dir {
-        PortDirection::Output => {
-            from_ports.iter().copied().zip(ports.iter().copied()).collect()
-        }
-        PortDirection::Input => {
-            ports.iter().copied().zip(from_ports.iter().copied()).collect()
-        }
+        PortDirection::Output => from_ports
+            .iter()
+            .copied()
+            .zip(ports.iter().copied())
+            .collect(),
+        PortDirection::Input => ports
+            .iter()
+            .copied()
+            .zip(from_ports.iter().copied())
+            .collect(),
     };
     apply_link_toggles(handle, pairs);
 }

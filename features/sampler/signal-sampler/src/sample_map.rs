@@ -25,9 +25,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    SamplerError,
     midi::{nearest_grid_note, note_name_to_midi},
     spec::LibrarySpec,
+    SamplerError,
 };
 
 // ── Sample key ────────────────────────────────────────────────────────────────
@@ -765,7 +765,10 @@ fn underscore_note(stem: &str) -> Option<u8> {
                 j += 1;
             }
             // digits, then '-', then at least one digit → a `<note>-<vel>` group
-            if j > i + 1 && j < b.len() && b[j] == b'-' && b.get(j + 1).is_some_and(u8::is_ascii_digit)
+            if j > i + 1
+                && j < b.len()
+                && b[j] == b'-'
+                && b.get(j + 1).is_some_and(u8::is_ascii_digit)
             {
                 if let Ok(n) = stem[i + 1..j].parse::<u16>() {
                     if n <= 127 {
@@ -1130,6 +1133,9 @@ mod tests {
                 },
             )
             .expect("resolve dyn 84 rr2");
-        assert_eq!(path.file_name().unwrap().to_string_lossy(), "RR03 lacrm 60 84.flac");
+        assert_eq!(
+            path.file_name().unwrap().to_string_lossy(),
+            "RR03 lacrm 60 84.flac"
+        );
     }
 }

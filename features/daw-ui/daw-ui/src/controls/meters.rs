@@ -39,7 +39,9 @@ pub struct Meters {
 impl Meters {
     /// Must be called inside a component scope — it owns a Signal.
     pub fn new() -> Self {
-        Self { levels: Signal::new(HashMap::new()) }
+        Self {
+            levels: Signal::new(HashMap::new()),
+        }
     }
 
     /// This track's levels, or silence if no frame has mentioned it.
@@ -188,7 +190,11 @@ fn marks_for(height: u32) -> Vec<String> {
     while db >= FLOOR {
         // The hyphens are REAPER's: the marks are printed as `-18-`, a
         // tick either side of the number.
-        marks.push(if db == 0 { "-0-".to_string() } else { format!("{}-", db) });
+        marks.push(if db == 0 {
+            "-0-".to_string()
+        } else {
+            format!("{}-", db)
+        });
         db -= step;
     }
     marks
@@ -204,10 +210,16 @@ mod mark_tests {
     fn the_ladder_thins_when_there_is_no_room() {
         let tall = marks_for(400);
         let short = marks_for(120);
-        assert!(tall.len() > short.len(), "the ladder did not thin: {short:?}");
+        assert!(
+            tall.len() > short.len(),
+            "the ladder did not thin: {short:?}"
+        );
         for marks in [&tall, &short] {
             assert_eq!(marks[0], "-inf", "no readout at the top");
-            assert!(marks.last().unwrap().starts_with("-60"), "the floor is missing: {marks:?}");
+            assert!(
+                marks.last().unwrap().starts_with("-60"),
+                "the floor is missing: {marks:?}"
+            );
         }
     }
 
@@ -216,10 +228,7 @@ mod mark_tests {
     fn the_marks_never_crowd() {
         for h in (60..=800).step_by(10) {
             let n = marks_for(h).len() as f32;
-            assert!(
-                h as f32 / n >= 8.0,
-                "{n} marks in {h} rows is unreadable",
-            );
+            assert!(h as f32 / n >= 8.0, "{n} marks in {h} rows is unreadable",);
         }
     }
 }

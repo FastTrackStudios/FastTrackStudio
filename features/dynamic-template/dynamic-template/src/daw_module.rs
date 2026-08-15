@@ -11,12 +11,10 @@ use daw_reaper::track::{
 };
 
 use crate::{
-    ItemMetadata, OrganizeIntoTracks, Structure, default_config, monarchy_sort,
-    track_schema,
+    default_config, monarchy_sort, track_schema, ItemMetadata, OrganizeIntoTracks, Structure,
 };
 use dynamic_template_proto::{
-    actions::dynamic_template_actions,
-    visibility_manager::actions::visibility_manager_actions,
+    actions::dynamic_template_actions, visibility_manager::actions::visibility_manager_actions,
 };
 
 struct State {

@@ -295,9 +295,10 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
     let context = context_at(ed, x, y);
     let action = ed.mouse.resolve(context, gesture, mods);
     if action != Action::None
-        && let Some(drag) = run_action(ed, action, context, x, y, mods) {
-            return drag;
-        }
+        && let Some(drag) = run_action(ed, action, context, x, y, mods)
+    {
+        return drag;
+    }
     legacy_pointer_down(ed, x, y, mods, button)
 }
 
@@ -814,7 +815,9 @@ fn cc_draw(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
             let f = i as f64 / steps as f64;
             Point {
                 t: lo + (hi - lo) * f,
-                value: v_lo + (v_hi - v_lo) * f, ..Point::default() }
+                value: v_lo + (v_hi - v_lo) * f,
+                ..Point::default()
+            }
         })
         .collect();
     ed.apply_live(&Edit::DrawCc {
@@ -889,16 +892,17 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
     }
 
     if let Hit::NoteEdge { id, start_edge } = hit
-        && (ed.tool == Tool::NoteDraw || ed.tool == Tool::Select) {
-            let n = ed.doc.note(id).expect("hit test returned a live note");
-            let original = (n.start, n.end);
-            ed.begin_gesture();
-            return Drag::Resize {
-                note: id,
-                start_edge,
-                original,
-            };
-        }
+        && (ed.tool == Tool::NoteDraw || ed.tool == Tool::Select)
+    {
+        let n = ed.doc.note(id).expect("hit test returned a live note");
+        let original = (n.start, n.end);
+        ed.begin_gesture();
+        return Drag::Resize {
+            note: id,
+            start_edge,
+            original,
+        };
+    }
 
     let under = match hit {
         Hit::Note { id, zone } => {
@@ -1236,9 +1240,10 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                             .abs()
                             .partial_cmp(&(*b - to).abs())
                             .unwrap_or(std::cmp::Ordering::Equal)
-                    }) {
-                        *from = s;
-                    }
+                    })
+                {
+                    *from = s;
+                }
             }
         }
         Drag::NoteErase => {
@@ -1376,7 +1381,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                         (p + (pt.value - p) * factor).clamp(0.0, 1.0)
                     } else {
                         pt.value
-                    }, ..Point::default() })
+                    },
+                    ..Point::default()
+                })
                 .collect();
             ed.apply_live(&Edit::DrawCc {
                 number: *number,
@@ -1509,7 +1516,9 @@ fn write_pen(
                 };
                 Point {
                     t,
-                    value: dimension.clamp(value), ..Point::default() }
+                    value: dimension.clamp(value),
+                    ..Point::default()
+                }
             })
             .collect();
 
@@ -1585,11 +1594,7 @@ fn gesture_bounds(points: &[Point]) -> (f64, f64) {
         lo = lo.min(p.t);
         hi = hi.max(p.t);
     }
-    if lo > hi {
-        (0.0, 0.0)
-    } else {
-        (lo, hi)
-    }
+    if lo > hi { (0.0, 0.0) } else { (lo, hi) }
 }
 
 /// Restyle the most recent Curve gesture if there is one; otherwise the

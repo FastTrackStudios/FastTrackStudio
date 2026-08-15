@@ -63,9 +63,7 @@ fn main() {
             "--apply" => apply = true,
             "--verify" => verify = true,
             "-h" | "--help" => {
-                eprintln!(
-                    "usage: migrate_flat_songs <songs-root> [--apply] [slug ...]"
-                );
+                eprintln!("usage: migrate_flat_songs <songs-root> [--apply] [slug ...]");
                 return;
             }
             _ if root.is_none() => root = Some(PathBuf::from(a)),
@@ -90,7 +88,11 @@ fn main() {
             .collect();
         dirs.sort();
         for dir in dirs {
-            let slug = dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let slug = dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             if !only.is_empty() && !only.contains(&slug) {
                 continue;
             }
@@ -141,7 +143,11 @@ fn main() {
     dirs.sort();
 
     for dir in dirs {
-        let slug = dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let slug = dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         if !only.is_empty() && !only.contains(&slug) {
             continue;
         }

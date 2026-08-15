@@ -1,45 +1,50 @@
+//! DAW binding for the [`music_convention`] classifier.
+//!
+//! The naming-convention half — instrument groups, item metadata, tempo/song
+//! name/Pro Tools/equipment parsing, colors, icons, layouts, track schema and
+//! visibility rules — lives in the DAW-free `music-convention` crate and is
+//! re-exported here unchanged. What this crate adds is everything that knows
+//! about a DAW: turning a [`monarchy::Structure`] into a `daw_proto`
+//! [`TrackHierarchy`], the golden session template, and the REAPER module.
+
 use daw_proto::{FolderDepthChange, TrackHierarchy, TrackNode};
 use monarchy::*;
 
 // region: --- Modules
 
-pub mod colors;
 pub mod daw_module;
-pub mod equipment;
-mod error;
 pub mod golden;
-mod groups;
-pub mod icons;
-mod item_metadata;
-pub mod layouts;
-mod metadata_patterns;
-pub mod protools;
-pub mod song_name;
-mod tempo;
-pub mod track_schema;
-pub mod visibility_rules;
 
-pub use error::{Error, Result};
 pub use golden::golden_template;
-pub use groups::{
-    Bass, Choir, Drums, Guide, Guitars, Harmonica, Horns, Keys, Orchestra, Percussion, Reference,
-    SFX, StemSplit, Strings, Synths, Tracks, Vocals,
+
+// -- Re-exports from music-convention, so `use dynamic_template::*` keeps
+//    resolving everything it used to.
+pub use music_convention::{
+    colors, equipment, error, groups, icons, item_metadata, layouts, metadata_patterns, protools,
+    song_name, tempo, track_schema, visibility_rules,
 };
-pub use item_metadata::ItemMetadata;
+
+pub use music_convention::default_config;
+pub use music_convention::is_stem_split_set;
+pub use music_convention::ItemMetadata;
+pub use music_convention::{
+    detect_song_names, detect_song_names_with_config, strip_song_names, SongNameConfig,
+};
+pub use music_convention::{extract_protools_metadata, strip_protools_markers, ProToolsMetadata};
+pub use music_convention::{extract_tempo, strip_tempo};
+pub use music_convention::{
+    Bass, Choir, Drums, Guide, Guitars, Harmonica, Horns, Keys, Orchestra, Percussion, Reference,
+    StemSplit, Strings, Synths, Tracks, Vocals, SFX,
+};
+pub use music_convention::{Error, Result};
 
 // Re-export monarchy types needed for direct classification
-pub use groups::stem_split::is_stem_split_set;
-pub use monarchy::{Structure, monarchy_sort};
-pub use protools::{ProToolsMetadata, extract_protools_metadata, strip_protools_markers};
-pub use song_name::{
-    SongNameConfig, detect_song_names, detect_song_names_with_config, strip_song_names,
-};
-pub use tempo::{extract_tempo, strip_tempo};
+pub use monarchy::{monarchy_sort, Structure};
 
 // endregion: --- Modules
 
 /// Type alias for our standard Config with ItemMetadata
-pub type DynamicTemplateConfig = Config<ItemMetadata>;
+pub type DynamicTemplateConfig = music_convention::MusicConventionConfig;
 
 /// Dynamic template system for organizing DAW items
 #[derive(Default)]
@@ -49,39 +54,6 @@ impl DynamicTemplate {
     pub fn new() -> Self {
         Self
     }
-}
-
-/// Creates a default configuration for the dynamic template system
-pub fn default_config() -> DynamicTemplateConfig {
-    Config::builder()
-        // Add metadata field patterns first (metadata-only group)
-        .group(metadata_patterns::default_metadata_field_patterns())
-        // Then add regular groups
-        .group(Drums)
-        .group(Percussion)
-        .group(Bass)
-        .group(Guitars)
-        .group(Keys)
-        .group(Synths)
-        .group(Horns)
-        .group(Harmonica)
-        .group(Strings)
-        .group(Vocals)
-        // Top-level Choir catches standalone voice-part choir sessions
-        // (soprano/alto/tenor, "chorus", ensembles). Literal "choir"/"chorale"
-        // stems are handled by Vocals' Choir subgroup instead (routed to the
-        // vocal bus) — the top-level group deliberately does NOT match those two
-        // bare words, so a "Choir" stem lands under Vocals with no duplication.
-        .group(Choir)
-        .group(Orchestra)
-        .group(SFX)
-        // Backing/playback tracks (loops, sequences) — a live-rig top-level group.
-        .group(Tracks)
-        // Utility tracks at the bottom
-        .group(Guide)
-        .group(Reference)
-        .group(StemSplit)
-        .build()
 }
 
 /// Options for organizing items into tracks
@@ -209,23 +181,13 @@ where
     }
 }
 
-/// Implement Target trait for TrackHierarchy so monarchy can work with existing tracks
-impl Target<ItemMetadata> for TrackHierarchy {
-    fn existing_items(&self) -> Vec<monarchy::Item<ItemMetadata>> {
-        // Extract items from existing tracks and convert to monarchy Items
-        self.tracks
-            .iter()
-            .flat_map(|track| {
-                track.items.iter().map(|item_name| monarchy::Item {
-                    id: item_name.clone(),
-                    original: item_name.clone(),
-                    metadata: ItemMetadata::default(),
-                    matched_groups: Vec::new(),
-                })
-            })
-            .collect()
-    }
-}
+// `impl monarchy::Target<ItemMetadata> for daw_proto::TrackHierarchy` used to
+// live here. It is gone: with `ItemMetadata` now owned by `music-convention`,
+// the trait, the metadata type and `TrackHierarchy` are all foreign to this
+// crate and the impl is an orphan-rule violation. Nothing in the tree called
+// `Target::existing_items` — `organize_into_tracks` reads existing tracks
+// directly via `merge_hierarchies`. If a caller ever needs it, wrap
+// `TrackHierarchy` in a local newtype here and implement `Target` on that.
 
 /// Merge new hierarchy with existing hierarchy, matching by name and adding items to existing tracks
 fn merge_hierarchies(existing: &TrackHierarchy, new: TrackHierarchy) -> TrackHierarchy {
@@ -444,128 +406,3 @@ fn strip_equipment_from_structure(structure: &mut Structure<ItemMetadata>) {
         strip_equipment_from_structure(child);
     }
 }
-
-// region: --- Tests
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
-
-    #[test]
-    fn test_acc_guitar_structure() -> Result<()> {
-        // -- Setup & Fixtures
-        let inputs = vec!["Acc Guitar"];
-        let config = default_config();
-
-        // -- Exec
-        let result = monarchy_sort(inputs, &config)?;
-
-        // -- Check
-        // Guitars is not transparent, so it keeps its name even with a single item
-        // The structure should be: Guitars: [item]
-        println!("\nAcc Guitar result:");
-        result.print_tree();
-
-        let guitars = result
-            .find_child("Guitars")
-            .expect("Should have Guitars folder");
-        assert_eq!(guitars.items.len(), 1, "Guitars should have 1 item");
-        assert_eq!(guitars.items[0].original, "Acc Guitar");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_kick_and_drumkit() -> Result<()> {
-        // -- Setup & Fixtures
-        let inputs = vec!["kick_in.wav", "kick_out.wav", "snare.wav"];
-        let config = default_config();
-
-        // -- Exec
-        let result = monarchy_sort(inputs, &config)?;
-
-        // -- Check
-        // The structure should be:
-        // Drums
-        //   Kick (folder with In/Out children)
-        //     In: [kick_in.wav]
-        //     Out: [kick_out.wav]
-        //   Snare: [snare.wav]
-        result.print_tree();
-        result
-            .assert()
-            .has_total_items(3)
-            .has_groups(1)
-            .group("Drums")
-            .has_groups(2) // Kick folder and Snare track
-            .group("Kick")
-            .has_groups(2) // In and Out sub-groups
-            .done()
-            .group("Drums")
-            .group("Snare")
-            .contains_exactly(&["snare.wav"])
-            .done();
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_bass_types() -> Result<()> {
-        // -- Setup & Fixtures
-        // Note: "808_bass" will match Electronic Kit's "808" pattern before Bass Synth,
-        // so we use "sub_bass" instead to properly test synth bass categorization
-        let inputs = vec![
-            "bass_guitar_di.wav",
-            "synth_bass_sub.wav",
-            "upright_pizz.wav",
-            "electric_bass_amp.wav",
-            "sub_bass.wav", // Changed from "808_bass.wav" to avoid matching Electronic Kit
-            "acoustic_bass.wav",
-        ];
-        let config = default_config();
-
-        // -- Exec
-        let result = monarchy_sort(inputs, &config)?;
-
-        // -- Check
-        // Structure should be:
-        // Bass
-        //   Guitar
-        //     DI:  [bass_guitar_di.wav]      ← bass guitar now splits into
-        //     Amp: [electric_bass_amp.wav]     its DI / Amp multi-mic captures
-        //   Synth: [synth_bass_sub.wav, sub_bass.wav]
-        //   Upright Bass: [upright_pizz.wav, acoustic_bass.wav]
-        // Note: Group names are "Guitar", "Synth", "Upright Bass" (not prefixed with "Bass")
-        result.print_tree();
-        result
-            .assert()
-            .has_total_items(6)
-            .has_groups(1)
-            .group("Bass")
-            .has_groups(3)
-            .group("Guitar") // The group name is "Guitar", display name is "Bass Guitar"
-            .has_groups(2)
-            .group("DI")
-            .contains_exactly(&["bass_guitar_di.wav"])
-            .done()
-            .group("Bass")
-            .group("Guitar")
-            .group("Amp")
-            .contains_exactly(&["electric_bass_amp.wav"])
-            .done()
-            .group("Bass")
-            .group("Synth") // The group name is "Synth", display name is "Bass Synth"
-            .contains_exactly(&["synth_bass_sub.wav", "sub_bass.wav"])
-            .done()
-            .group("Bass")
-            .group("Upright Bass")
-            .contains_exactly(&["upright_pizz.wav", "acoustic_bass.wav"])
-            .done();
-
-        Ok(())
-    }
-}
-
-// endregion: --- Tests

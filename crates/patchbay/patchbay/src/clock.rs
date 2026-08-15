@@ -15,7 +15,13 @@ fn quiet(program: &str) -> Command {
 /// Force the graph quantum (frames, live); `0` clears the force.
 pub fn force_quantum(frames: u32) {
     let _ = quiet("pw-metadata")
-        .args(["-n", "settings", "0", "clock.force-quantum", &frames.to_string()])
+        .args([
+            "-n",
+            "settings",
+            "0",
+            "clock.force-quantum",
+            &frames.to_string(),
+        ])
         .status();
 }
 

@@ -15,8 +15,8 @@
 //! Override with `FTS_PRELOAD_BUDGET_MB` (0 = unlimited, for offline renders
 //! and bounce jobs that genuinely want the whole library resident).
 
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 static USED: AtomicU64 = AtomicU64::new(0);
 static WARNED: AtomicBool = AtomicBool::new(false);
@@ -55,9 +55,7 @@ pub fn limit_bytes() -> u64 {
         let mb = MOBILE_BUDGET_MB;
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         let mb = match machine_ram_mb() {
-            Some(total) => {
-                ((total as f64 * MAX_SHARE) as u64).clamp(MIN_BUDGET_MB, MAX_BUDGET_MB)
-            }
+            Some(total) => ((total as f64 * MAX_SHARE) as u64).clamp(MIN_BUDGET_MB, MAX_BUDGET_MB),
             None => DEFAULT_BUDGET_MB,
         };
         tracing::info!(budget_mb = mb, "sampler: preload budget");
@@ -77,7 +75,10 @@ fn machine_ram_mb() -> Option<u64> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let out = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+        let out = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
         let bytes: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
         Some(bytes / (1024 * 1024))
     }

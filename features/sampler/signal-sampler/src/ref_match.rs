@@ -71,8 +71,8 @@
 //! sample-exactly, gains 0.800/0.397/0.243 against a truth of 0.8/0.4/0.267,
 //! and both onsets of an overlapping pair found to the sample.
 
-use realfft::RealFftPlanner;
 use realfft::num_complex::Complex32;
+use realfft::RealFftPlanner;
 
 /// A fitted explanation of one reference window by one candidate group.
 #[derive(Debug, Clone)]
@@ -185,7 +185,11 @@ fn solve(mut g: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
     for col in 0..n {
         let (piv, mag) = (col..n).fold((col, 0.0), |acc, r| {
             let m = g[r][col].abs();
-            if m > acc.1 { (r, m) } else { acc }
+            if m > acc.1 {
+                (r, m)
+            } else {
+                acc
+            }
         });
         if mag < 1e-12 {
             return None;
@@ -197,8 +201,15 @@ fn solve(mut g: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
             if f == 0.0 {
                 continue;
             }
-            for c in col..n {
-                g[r][c] -= f * g[col][c];
+            // Two rows at once: `r > col` always (this loop starts at
+            // col + 1), so split_at_mut(r) puts the pivot row in `lo` and
+            // the row being eliminated at `hi[0]` — which is what lets the
+            // inner pass be a zip rather than a double index.
+            let (lo, hi) = g.split_at_mut(r);
+            let pivot = &lo[col];
+            let target = &mut hi[0];
+            for (t, p) in target[col..].iter_mut().zip(&pivot[col..]) {
+                *t -= f * p;
             }
             b[r] -= f * b[col];
         }
@@ -235,11 +246,7 @@ const RIDGE: f64 = 1e-3;
 ///
 /// Returns the mean gain of each member (energy-weighted across blocks) and
 /// the fraction of the window's energy explained.
-fn fit_at(
-    window: &[f32],
-    members: &[&[f32]],
-    offset: usize,
-) -> Option<(Vec<f32>, f32, Vec<f32>)> {
+fn fit_at(window: &[f32], members: &[&[f32]], offset: usize) -> Option<(Vec<f32>, f32, Vec<f32>)> {
     let w = window.len();
     if members.iter().any(|m| offset + w > m.len()) {
         return None;

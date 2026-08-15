@@ -149,7 +149,12 @@ impl Pcm {
             Self::F32(v) => v.get(index).copied().unwrap_or(0.0),
             Self::I16(v) => v.get(index).map(|s| *s as f32 * I16_SCALE).unwrap_or(0.0),
             Self::Streamed(s) => s.sample(index),
-            Self::Mapped { map, offset, samples, fmt } => {
+            Self::Mapped {
+                map,
+                offset,
+                samples,
+                fmt,
+            } => {
                 if index >= *samples {
                     return 0.0;
                 }
@@ -157,18 +162,24 @@ impl Pcm {
                 let bytes = map.as_ref();
                 match fmt {
                     PcmFmt::I16 => {
-                        let Some(b) = bytes.get(at..at + 2) else { return 0.0 };
+                        let Some(b) = bytes.get(at..at + 2) else {
+                            return 0.0;
+                        };
                         i16::from_le_bytes([b[0], b[1]]) as f32 * I16_SCALE
                     }
                     PcmFmt::I24 => {
-                        let Some(b) = bytes.get(at..at + 3) else { return 0.0 };
+                        let Some(b) = bytes.get(at..at + 3) else {
+                            return 0.0;
+                        };
                         // Sign-extend 24 → 32 by landing the bytes in the top
                         // three octets and shifting back down.
                         let v = i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8;
                         v as f32 * I24_SCALE
                     }
                     PcmFmt::F32 => {
-                        let Some(b) = bytes.get(at..at + 4) else { return 0.0 };
+                        let Some(b) = bytes.get(at..at + 4) else {
+                            return 0.0;
+                        };
                         f32::from_le_bytes([b[0], b[1], b[2], b[3]])
                     }
                 }
@@ -230,7 +241,12 @@ pub struct SampleData {
 impl SampleData {
     /// Decoded float PCM — the classic path.
     pub fn from_f32(frames: Vec<f32>, channels: u16, sample_rate: u32, num_frames: usize) -> Self {
-        Self { pcm: Pcm::F32(Arc::new(frames)), channels, sample_rate, num_frames }
+        Self {
+            pcm: Pcm::F32(Arc::new(frames)),
+            channels,
+            sample_rate,
+            num_frames,
+        }
     }
 
     /// A window into a memory-mapped pack — nothing decoded, nothing
@@ -244,14 +260,29 @@ impl SampleData {
         sample_rate: u32,
         num_frames: usize,
     ) -> Self {
-        Self { pcm: Pcm::Mapped { map, offset, samples, fmt }, channels, sample_rate, num_frames }
+        Self {
+            pcm: Pcm::Mapped {
+                map,
+                offset,
+                samples,
+                fmt,
+            },
+            channels,
+            sample_rate,
+            num_frames,
+        }
     }
 
     /// A sample that stays compressed in its pack and streams as it plays.
     pub fn streamed(sample: Arc<super::stream::StreamedSample>) -> Self {
         let (channels, sample_rate, num_frames) =
             (sample.channels, sample.sample_rate, sample.num_frames);
-        Self { pcm: Pcm::Streamed(sample), channels, sample_rate, num_frames }
+        Self {
+            pcm: Pcm::Streamed(sample),
+            channels,
+            sample_rate,
+            num_frames,
+        }
     }
 
     /// Anonymous bytes this sample costs; see [`Pcm::resident_bytes`].
@@ -267,11 +298,7 @@ impl SampleData {
 
     /// Keep `from..to` resident while the returned pin lives. `None` unless
     /// the sample is streamed — a resident sample is already all there.
-    pub fn pin_region(
-        &self,
-        from_frame: usize,
-        to_frame: usize,
-    ) -> Option<super::stream::LoopPin> {
+    pub fn pin_region(&self, from_frame: usize, to_frame: usize) -> Option<super::stream::LoopPin> {
         match &self.pcm {
             Pcm::Streamed(s) => Some(s.pin(from_frame, to_frame)),
             _ => None,
@@ -300,7 +327,6 @@ impl SampleData {
         self.pcm.to_f32()
     }
 
-
     /// Fault in the sample's pages so the audio thread never takes a disk
     /// read inside the callback.
     ///
@@ -311,7 +337,15 @@ impl SampleData {
     /// ahead in the background. The pages stay file-backed and evictable, so
     /// this costs the process nothing it can be blamed for.
     pub fn warm(&self, head_frames: usize) {
-        let Pcm::Mapped { map, offset, samples, fmt } = &self.pcm else { return };
+        let Pcm::Mapped {
+            map,
+            offset,
+            samples,
+            fmt,
+        } = &self.pcm
+        else {
+            return;
+        };
         let len = samples * fmt.width();
         // Read-ahead for the whole sample, asynchronously.
         let _ = map.advise_range(memmap2::Advice::WillNeed, *offset, len);
@@ -525,9 +559,10 @@ impl PackCodec {
     pub fn from_name(name: &str) -> Option<Self> {
         let name = name.trim().to_ascii_lowercase();
         match name.split_once(':') {
-            Some(("ogg" | "vorbis", q)) => {
-                q.parse().ok().map(|quality| PackCodec::OggVorbis { quality })
-            }
+            Some(("ogg" | "vorbis", q)) => q
+                .parse()
+                .ok()
+                .map(|quality| PackCodec::OggVorbis { quality }),
             _ => match name.as_str() {
                 "flac" | "flac-i24" => Some(PackCodec::FlacI24),
                 "ogg" | "vorbis" => Some(PackCodec::OGG_VORBIS_Q8),
@@ -1017,11 +1052,19 @@ fn estimated_decoded_bytes(
     // Raw-PCM entries are mapped, not decoded: they cost no anonymous memory,
     // so they never spend budget and never stop a preload.
     if let Some((_, entry)) = packed {
-        return if entry.mapped_fmt().is_some() { 0 } else { entry.samples() * F32 };
+        return if entry.mapped_fmt().is_some() {
+            0
+        } else {
+            entry.samples() * F32
+        };
     }
     if let Some(pack) = inner.pcm_pack.as_ref() {
         if let Some(entry) = pack.entry_for_path(path) {
-            return if entry.mapped_fmt().is_some() { 0 } else { entry.samples() * F32 };
+            return if entry.mapped_fmt().is_some() {
+                0
+            } else {
+                entry.samples() * F32
+            };
         }
     }
     if let Some(entry) = inner.prepared.get(path) {
@@ -1252,7 +1295,12 @@ fn load_aiff(path: &Path) -> Result<SampleData, SamplerError> {
     } else {
         frames.len() / channels as usize
     };
-    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
+    Ok(SampleData::from_f32(
+        frames,
+        channels,
+        sample_rate,
+        num_frames,
+    ))
 }
 
 fn parse_extended80(b: &[u8]) -> f64 {
@@ -1264,15 +1312,16 @@ fn parse_extended80(b: &[u8]) -> f64 {
     }
     let unbiased = exp as i32 - 16383;
     let f = (mant as f64) * 2f64.powi(unbiased - 63);
-    if sign { -f } else { f }
+    if sign {
+        -f
+    } else {
+        f
+    }
 }
 
 fn load_wav(path: &Path) -> Result<SampleData, SamplerError> {
-    let mut reader = hound::WavReader::open(path).map_err(|e| {
-        SamplerError::Io(std::io::Error::other(
-            e.to_string(),
-        ))
-    })?;
+    let mut reader = hound::WavReader::open(path)
+        .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))?;
 
     let spec = reader.spec();
     let channels = spec.channels;
@@ -1281,31 +1330,27 @@ fn load_wav(path: &Path) -> Result<SampleData, SamplerError> {
     let frames: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Float => reader
             .samples::<f32>()
-            .map(|s| {
-                s.map_err(|e| {
-                    SamplerError::Io(std::io::Error::other(
-                        e.to_string(),
-                    ))
-                })
-            })
+            .map(|s| s.map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string()))))
             .collect::<Result<_, _>>()?,
         hound::SampleFormat::Int => {
             let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
             reader
                 .samples::<i32>()
                 .map(|s| {
-                    s.map(|v| v as f32 / max).map_err(|e| {
-                        SamplerError::Io(std::io::Error::other(
-                            e.to_string(),
-                        ))
-                    })
+                    s.map(|v| v as f32 / max)
+                        .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))
                 })
                 .collect::<Result<_, _>>()?
         }
     };
 
     let num_frames = frames.len() / channels as usize;
-    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
+    Ok(SampleData::from_f32(
+        frames,
+        channels,
+        sample_rate,
+        num_frames,
+    ))
 }
 
 fn load_prepared_sample(
@@ -1324,7 +1369,12 @@ fn load_prepared_sample(
         frames.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
     }
 
-    Ok(SampleData::from_f32(frames, entry.channels, entry.sample_rate, entry.num_frames))
+    Ok(SampleData::from_f32(
+        frames,
+        entry.channels,
+        entry.sample_rate,
+        entry.num_frames,
+    ))
 }
 
 impl SignalPcmPack {
@@ -1519,11 +1569,12 @@ fn path_suffixes(path: &Path) -> Vec<PathBuf> {
     suffixes
 }
 
-
-
 /// The queue's two halves: work still to do, and the set of paths
 /// already queued so a held chord doesn't enqueue one sample twice.
-type WarmPending = (Vec<(SampleCache, PathBuf)>, std::collections::HashSet<PathBuf>);
+type WarmPending = (
+    Vec<(SampleCache, PathBuf)>,
+    std::collections::HashSet<PathBuf>,
+);
 
 /// Background loader for cache misses. One thread, deduplicated, so a held
 /// chord of unloaded notes queues each sample once.
@@ -1870,12 +1921,9 @@ pub fn transcode_signal_pack(
             let row = (|| {
                 let data = load_pack_sample(&pack.mmap, entry)?;
                 let payload = match codec {
-                    PackCodec::OggVorbis { quality } => encode_ogg_vorbis(
-                        &data.to_f32(),
-                        data.channels,
-                        data.sample_rate,
-                        quality,
-                    )?,
+                    PackCodec::OggVorbis { quality } => {
+                        encode_ogg_vorbis(&data.to_f32(), data.channels, data.sample_rate, quality)?
+                    }
                     PackCodec::FlacI24 => {
                         let samples = data
                             .to_f32()
@@ -2240,24 +2288,17 @@ fn write_wav_f32(
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
-    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| {
-        SamplerError::Io(std::io::Error::other(
-            e.to_string(),
-        ))
-    })?;
+    let mut writer = hound::WavWriter::create(path, spec)
+        .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))?;
 
     for sample in samples {
-        writer.write_sample(*sample).map_err(|e| {
-            SamplerError::Io(std::io::Error::other(
-                e.to_string(),
-            ))
-        })?;
+        writer
+            .write_sample(*sample)
+            .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))?;
     }
-    writer.finalize().map_err(|e| {
-        SamplerError::Io(std::io::Error::other(
-            e.to_string(),
-        ))
-    })?;
+    writer
+        .finalize()
+        .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))?;
     Ok(())
 }
 
@@ -2500,7 +2541,12 @@ fn decode_flac_symphonia(bytes: &[u8]) -> Result<SampleData, SamplerError> {
     }
     let channels = channels.max(1);
     let num_frames = frames.len() / channels as usize;
-    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
+    Ok(SampleData::from_f32(
+        frames,
+        channels,
+        sample_rate,
+        num_frames,
+    ))
 }
 
 /// Decode an in-pack Ogg Vorbis sample (lossy proxy packs) to interleaved
@@ -2574,7 +2620,12 @@ fn load_ogg_vorbis_bytes(bytes: &[u8]) -> Result<SampleData, SamplerError> {
     }
     let channels = channels.max(1);
     let num_frames = frames.len() / channels as usize;
-    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
+    Ok(SampleData::from_f32(
+        frames,
+        channels,
+        sample_rate,
+        num_frames,
+    ))
 }
 
 /// Encode interleaved f32 PCM to an Ogg Vorbis stream (builder-side only —
@@ -2586,18 +2637,19 @@ fn encode_ogg_vorbis(
     sample_rate: u32,
     quality: f32,
 ) -> Result<Vec<u8>, SamplerError> {
-    use std::num::{NonZeroU8, NonZeroU32};
+    use std::num::{NonZeroU32, NonZeroU8};
     use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoderBuilder};
 
-    let vorb =
-        |e: vorbis_rs::VorbisError| invalid_data(format!("vorbis encode failed: {e}"));
+    let vorb = |e: vorbis_rs::VorbisError| invalid_data(format!("vorbis encode failed: {e}"));
 
-    let channels_nz = NonZeroU8::new(channels.try_into().map_err(|_| {
-        invalid_data(format!("vorbis: unsupported channel count {channels}"))
-    })?)
+    let channels_nz = NonZeroU8::new(
+        channels
+            .try_into()
+            .map_err(|_| invalid_data(format!("vorbis: unsupported channel count {channels}")))?,
+    )
     .ok_or_else(|| invalid_data("vorbis: zero channels"))?;
-    let rate_nz = NonZeroU32::new(sample_rate)
-        .ok_or_else(|| invalid_data("vorbis: zero sample rate"))?;
+    let rate_nz =
+        NonZeroU32::new(sample_rate).ok_or_else(|| invalid_data("vorbis: zero sample rate"))?;
 
     // De-interleave to planar, as libvorbis wants.
     let ch = channels as usize;
@@ -2652,11 +2704,8 @@ fn invalid_data(message: impl Into<String>) -> SamplerError {
 }
 
 fn load_flac(path: &Path) -> Result<SampleData, SamplerError> {
-    let mut reader = claxon::FlacReader::open(path).map_err(|e| {
-        SamplerError::Io(std::io::Error::other(
-            e.to_string(),
-        ))
-    })?;
+    let mut reader = claxon::FlacReader::open(path)
+        .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))?;
     load_flac_reader(&mut reader)
 }
 
@@ -2671,16 +2720,18 @@ fn load_flac_reader<R: Read>(
     let frames = reader
         .samples()
         .map(|s| {
-            s.map(|v| v as f32 / max).map_err(|e| {
-                SamplerError::Io(std::io::Error::other(
-                    e.to_string(),
-                ))
-            })
+            s.map(|v| v as f32 / max)
+                .map_err(|e| SamplerError::Io(std::io::Error::other(e.to_string())))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     let num_frames = frames.len() / channels as usize;
-    Ok(SampleData::from_f32(frames, channels, sample_rate, num_frames))
+    Ok(SampleData::from_f32(
+        frames,
+        channels,
+        sample_rate,
+        num_frames,
+    ))
 }
 
 #[cfg(test)]
@@ -2743,8 +2794,15 @@ mod tests {
             assert_eq!(entry.mapped_fmt(), Some(fmt));
 
             let data = load_pack_sample(&pack.mmap, &entry).expect("read");
-            assert!(matches!(data.pcm, Pcm::Mapped { .. }), "must be mapped, not decoded");
-            assert_eq!(data.decoded_bytes(), 0, "mapped PCM costs no anonymous memory");
+            assert!(
+                matches!(data.pcm, Pcm::Mapped { .. }),
+                "must be mapped, not decoded"
+            );
+            assert_eq!(
+                data.decoded_bytes(),
+                0,
+                "mapped PCM costs no anonymous memory"
+            );
             assert_eq!(data.channels, 2);
             assert_eq!(data.sample_rate, sr);
             assert_eq!(data.num_frames, n_frames);
@@ -2848,7 +2906,10 @@ mod tests {
         let norm_a: f64 = coerced_pcm.iter().map(|a| (*a as f64).powi(2)).sum();
         let norm_b: f64 = frames.iter().map(|b| (*b as f64).powi(2)).sum();
         let corr = dot / (norm_a.sqrt() * norm_b.sqrt()).max(f64::EPSILON);
-        assert!(corr > 0.98, "decoded audio should correlate with source, got {corr}");
+        assert!(
+            corr > 0.98,
+            "decoded audio should correlate with source, got {corr}"
+        );
     }
 
     #[test]

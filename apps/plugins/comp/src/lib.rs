@@ -17,8 +17,8 @@
 //! without a circular dep.
 
 use audiocore_core::prelude::*;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use comp::CompChain;
 use comp_ui::params::{CompParams, CompUiState};
@@ -191,7 +191,9 @@ impl Plugin for FtsComp {
 
         // ── UI metering (lock-free atomics; ~0.3 dB/block decay) ────────
         let gr_db = self.chain.comp.gain_reduction_db() as f32;
-        self.ui_state.gain_reduction_db.store(gr_db, Ordering::Relaxed);
+        self.ui_state
+            .gain_reduction_db
+            .store(gr_db, Ordering::Relaxed);
 
         // Graph history rings: one input peak + one GR value per block —
         // lock-free stores, no allocation on the audio thread.
@@ -205,7 +207,11 @@ impl Plugin for FtsComp {
             -100.0
         };
         self.ui_state.input_peak_db.store(
-            if in_db > prev_in { in_db } else { prev_in - 0.3 },
+            if in_db > prev_in {
+                in_db
+            } else {
+                prev_in - 0.3
+            },
             Ordering::Relaxed,
         );
 
@@ -216,7 +222,11 @@ impl Plugin for FtsComp {
             -100.0
         };
         self.ui_state.output_peak_db.store(
-            if out_db > prev_out { out_db } else { prev_out - 0.3 },
+            if out_db > prev_out {
+                out_db
+            } else {
+                prev_out - 0.3
+            },
             Ordering::Relaxed,
         );
 

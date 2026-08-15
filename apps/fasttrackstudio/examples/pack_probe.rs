@@ -13,19 +13,20 @@
 
 use std::io::Write as _;
 
-use signal_packs_proto::packs::PackLibraryClient;
 use signal_packs_proto::PackChunk;
+use signal_packs_proto::packs::PackLibraryClient;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "warn".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
         )
         .init();
     let mut args = std::env::args().skip(1);
-    let url = args.next().unwrap_or_else(|| "ws://127.0.0.1:4040/vox".into());
+    let url = args
+        .next()
+        .unwrap_or_else(|| "ws://127.0.0.1:4040/vox".into());
     let want = args.next();
     let dest = args.next().map(std::path::PathBuf::from);
 
@@ -44,7 +45,10 @@ async fn main() -> eyre::Result<()> {
             .map_err(|e| eyre::eyre!("vox handshake: {e:?}"))?
     } else {
         use architect::iroh_link::iroh;
-        let id: iroh::EndpointId = url.trim().parse().map_err(|e| eyre::eyre!("bad iroh id: {e:?}"))?;
+        let id: iroh::EndpointId = url
+            .trim()
+            .parse()
+            .map_err(|e| eyre::eyre!("bad iroh id: {e:?}"))?;
         let ep = architect::iroh_link::bind_endpoint(iroh::SecretKey::generate())
             .await
             .map_err(|e| eyre::eyre!("iroh bind: {e:?}"))?;
@@ -58,7 +62,10 @@ async fn main() -> eyre::Result<()> {
             .map_err(|e| eyre::eyre!("vox handshake (iroh): {e:?}"))?
     };
 
-    let packs = client.packs().await.map_err(|e| eyre::eyre!("packs: {e:?}"))?;
+    let packs = client
+        .packs()
+        .await
+        .map_err(|e| eyre::eyre!("packs: {e:?}"))?;
     println!("{} packs on {url}:", packs.len());
     for p in &packs {
         println!(
@@ -67,7 +74,11 @@ async fn main() -> eyre::Result<()> {
             p.category,
             p.name,
             p.size_bytes as f64 / 1e9,
-            if p.sha256.is_empty() { "<pending>" } else { &p.sha256[..16] },
+            if p.sha256.is_empty() {
+                "<pending>"
+            } else {
+                &p.sha256[..16]
+            },
         );
     }
 
@@ -82,8 +93,14 @@ async fn main() -> eyre::Result<()> {
     let part = dest.join(format!("{}.signalpack.part", info.name));
     let final_path = dest.join(format!("{}.signalpack", info.name));
     let start = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
-    println!("downloading [{}] {} from byte {start}…", info.variant, info.name);
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&part)?;
+    println!(
+        "downloading [{}] {} from byte {start}…",
+        info.variant, info.name
+    );
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&part)?;
 
     let (tx, mut rx) = vox::channel::<PackChunk>();
     let read_call = client.read(info.name.clone(), info.variant.clone(), start, tx);
@@ -126,7 +143,11 @@ async fn main() -> eyre::Result<()> {
             hasher.update(&buf[..n]);
         }
         let hex = format!("{:x}", hasher.finalize());
-        eyre::ensure!(hex == info.sha256, "sha256 mismatch: {hex} != {}", info.sha256);
+        eyre::ensure!(
+            hex == info.sha256,
+            "sha256 mismatch: {hex} != {}",
+            info.sha256
+        );
         println!("sha256 verified ✓");
     }
     std::fs::rename(&part, &final_path)?;

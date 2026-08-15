@@ -118,10 +118,10 @@ impl Args {
                 "--track" => target.track = Some(value("--track")?),
                 "--item" => {
                     let v = value("--item")?;
-                    target.item = Some(
-                        v.parse()
-                            .map_err(|_| ArgsError::Bad(format!("--item {v:?} is not a number")))?,
-                    );
+                    target.item =
+                        Some(v.parse().map_err(|_| {
+                            ArgsError::Bad(format!("--item {v:?} is not a number"))
+                        })?);
                 }
                 "--mode" => {
                     let v = value("--mode")?;

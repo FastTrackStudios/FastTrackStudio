@@ -6,7 +6,7 @@
 //! this asserts the view actually reaches the screen.
 
 use dioxus::prelude::*;
-use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{Dimension, ExpressionDoc, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 use expression_editor_ui::ExpressionEditor;
 

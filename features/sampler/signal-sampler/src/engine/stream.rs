@@ -159,8 +159,7 @@ impl StreamedSample {
     pub fn pin(self: &Arc<Self>, from_frame: usize, to_frame: usize) -> LoopPin {
         let first = (from_frame as u32) / CHUNK_FRAMES;
         let last = (to_frame.max(from_frame) as u32) / CHUNK_FRAMES;
-        let chunks: Vec<u32> =
-            (first..=last).take(MAX_PINNED_CHUNKS).collect();
+        let chunks: Vec<u32> = (first..=last).take(MAX_PINNED_CHUNKS).collect();
         if let Ok(mut pins) = self.pins.lock() {
             for chunk in &chunks {
                 *pins.entry(*chunk).or_insert(0) += 1;
@@ -170,7 +169,10 @@ impl StreamedSample {
         for chunk in &chunks {
             self.request(*chunk);
         }
-        LoopPin { sample: Arc::clone(self), chunks }
+        LoopPin {
+            sample: Arc::clone(self),
+            chunks,
+        }
     }
 
     /// Ask for the chunk at `frame` and the one after it, without pinning.
@@ -345,7 +347,11 @@ impl StreamedSample {
             return;
         }
         let Some(stream) = self.map.get(self.offset..self.offset + self.bytes) else {
-            tracing::warn!(offset = self.offset, bytes = self.bytes, "stream: entry out of range");
+            tracing::warn!(
+                offset = self.offset,
+                bytes = self.bytes,
+                "stream: entry out of range"
+            );
             return;
         };
         let mut next = HashMap::clone(&self.chunks.load());
@@ -355,8 +361,7 @@ impl StreamedSample {
                 continue;
             }
             let from = chunk_no * CHUNK_FRAMES;
-            let Some(pcm) =
-                decode_chunk(stream, &self.index, from, CHUNK_FRAMES, self.channels)
+            let Some(pcm) = decode_chunk(stream, &self.index, from, CHUNK_FRAMES, self.channels)
             else {
                 tracing::warn!(chunk_no, from, "stream: chunk decode failed");
                 continue;
@@ -488,9 +493,13 @@ impl Streamer {
     /// forget samples that have been freed.
     fn sweep(&self) {
         let now = SWEEP_TICK.fetch_add(1, Ordering::Relaxed) + 1;
-        let Ok(mut registry) = self.registry.lock() else { return };
+        let Ok(mut registry) = self.registry.lock() else {
+            return;
+        };
         registry.retain(|weak| {
-            let Some(sample) = weak.upgrade() else { return false };
+            let Some(sample) = weak.upgrade() else {
+                return false;
+            };
             let idle = now.saturating_sub(sample.last_touch.load(Ordering::Relaxed)) >= 2;
             // A pinned sample is being played right now, however quiet its
             // request traffic is.
@@ -511,7 +520,9 @@ impl Streamer {
     fn run(&self) -> ! {
         loop {
             let batch = {
-                let Ok(mut q) = self.queue.lock() else { continue };
+                let Ok(mut q) = self.queue.lock() else {
+                    continue;
+                };
                 while q.is_empty() {
                     let Ok((next, timeout)) = self.wake.wait_timeout(q, SWEEP) else {
                         return_never()
@@ -588,8 +599,8 @@ mod tests {
         std::fs::write(&tmp, &flac).expect("write");
         let file = std::fs::File::open(&tmp).expect("open");
         let map = Arc::new(unsafe { memmap2::Mmap::map(&file) }.expect("map"));
-        let s = StreamedSample::open(Arc::clone(&map), 0, flac.len(), ch, sr, n)
-            .expect("index + head");
+        let s =
+            StreamedSample::open(Arc::clone(&map), 0, flac.len(), ch, sr, n).expect("index + head");
 
         // Nothing beyond the head has been fetched, which is exactly the
         // state that used to yield silence.
@@ -636,8 +647,10 @@ mod tests {
                 [v, -v]
             })
             .collect();
-        let ints: Vec<i32> =
-            pcm.iter().map(|s| (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32).collect();
+        let ints: Vec<i32> = pcm
+            .iter()
+            .map(|s| (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32)
+            .collect();
         let Ok(flac) = super::super::cache::encode_flac_i24_for_test(&ints, ch, sr) else {
             return;
         };
@@ -647,15 +660,19 @@ mod tests {
         let file = std::fs::File::open(&tmp).expect("open");
         let map = Arc::new(unsafe { memmap2::Mmap::map(&file) }.expect("map"));
 
-        let s = StreamedSample::open(Arc::clone(&map), 0, flac.len(), ch, sr, n)
-            .expect("index + head");
+        let s =
+            StreamedSample::open(Arc::clone(&map), 0, flac.len(), ch, sr, n).expect("index + head");
         // Only the head is resident to begin with.
         assert!(s.resident_bytes() <= (HEAD_FRAMES as usize * ch as usize * 2) + 64);
 
         // Reading inside the head works immediately.
         for i in [0usize, 100, 1_000] {
             let got = s.sample(i);
-            assert!((got - pcm[i]).abs() < 0.01, "head sample {i}: {got} vs {}", pcm[i]);
+            assert!(
+                (got - pcm[i]).abs() < 0.01,
+                "head sample {i}: {got} vs {}",
+                pcm[i]
+            );
         }
 
         // Past the head: the first read misses, the streamer fills, the
@@ -722,8 +739,8 @@ mod tests {
     #[test]
     fn a_looping_voice_keeps_sounding_over_a_streamed_sample() {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        use crate::engine::voice::{Voice, VoiceKind};
         use crate::engine::cache::SampleData;
+        use crate::engine::voice::{Voice, VoiceKind};
 
         let (sr, ch) = (48_000u32, 2u16);
         let n = (sr as f64 * 6.0) as usize; // 6 s, well past head + chunks
@@ -734,8 +751,10 @@ mod tests {
                 [v, -v]
             })
             .collect();
-        let ints: Vec<i32> =
-            pcm.iter().map(|s| (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32).collect();
+        let ints: Vec<i32> = pcm
+            .iter()
+            .map(|s| (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32)
+            .collect();
         let Ok(flac) = crate::engine::cache::encode_flac_i24_for_test(&ints, ch, sr) else {
             return;
         };
@@ -743,8 +762,7 @@ mod tests {
         std::fs::write(&tmp, &flac).expect("write");
         let file = std::fs::File::open(&tmp).expect("open");
         let map = Arc::new(unsafe { memmap2::Mmap::map(&file) }.expect("map"));
-        let streamed =
-            StreamedSample::open(map, 0, flac.len(), ch, sr, n).expect("stream");
+        let streamed = StreamedSample::open(map, 0, flac.len(), ch, sr, n).expect("stream");
         let data = Arc::new(SampleData::streamed(streamed));
 
         // Loop the 3rd..5th second — entirely past the head, and longer than

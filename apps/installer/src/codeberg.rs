@@ -74,7 +74,10 @@ pub async fn resolve_with_prefix_ext(
 /// predict, so this matches on prefix/suffix only. No `SHA256SUMS` covers
 /// it; the notarization signature is the integrity/authenticity check
 /// instead.
-pub async fn resolve_macos_dmg(client: &reqwest::Client, tag: Option<&str>) -> eyre::Result<Release> {
+pub async fn resolve_macos_dmg(
+    client: &reqwest::Client,
+    tag: Option<&str>,
+) -> eyre::Result<Release> {
     resolve_matching(
         client,
         tag,
@@ -88,7 +91,10 @@ pub async fn resolve_macos_dmg(client: &reqwest::Client, tag: Option<&str>) -> e
 /// (`fts-plugins-v<ver>-macos.zip`) — a single universal (lipo'd) build
 /// covering both Mac architectures (nice-plug-xtask's `bundle-universal`),
 /// unlike the app dmg. No arch token, so no `platform_suffix()` involved.
-pub async fn resolve_macos_plugins_zip(client: &reqwest::Client, tag: Option<&str>) -> eyre::Result<Release> {
+pub async fn resolve_macos_plugins_zip(
+    client: &reqwest::Client,
+    tag: Option<&str>,
+) -> eyre::Result<Release> {
     resolve_matching(
         client,
         tag,
@@ -113,11 +119,15 @@ async fn resolve_matching(
 
     let mut req = client.get(&url).header("Accept", "application/json");
     if let Ok(token) = std::env::var("CODEBERG_TOKEN")
-        && !token.is_empty() {
-            req = req.header("Authorization", format!("token {token}"));
-        }
+        && !token.is_empty()
+    {
+        req = req.header("Authorization", format!("token {token}"));
+    }
 
-    let resp = req.send().await.wrap_err_with(|| format!("requesting {url}"))?;
+    let resp = req
+        .send()
+        .await
+        .wrap_err_with(|| format!("requesting {url}"))?;
     let status = resp.status();
     let body = resp.bytes().await.wrap_err("reading release response")?;
     if !status.is_success() {
@@ -158,12 +168,19 @@ async fn resolve_matching(
     let tarball = assets
         .iter()
         .find(|a| matches(&a.name))
-        .map(|a| Asset { name: a.name.clone(), url: a.url.clone() })
+        .map(|a| Asset {
+            name: a.name.clone(),
+            url: a.url.clone(),
+        })
         .ok_or_else(|| {
             let names: Vec<&str> = assets.iter().map(|a| a.name.as_str()).collect();
             eyre!(
                 "release {tag} has no {asset_desc} asset (assets: {})",
-                if names.is_empty() { "none".to_string() } else { names.join(", ") }
+                if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names.join(", ")
+                }
             )
         })?;
 
@@ -182,10 +199,14 @@ async fn resolve_newest_any(
     let url = format!("{API_BASE}/releases?limit=1");
     let mut req = client.get(&url).header("Accept", "application/json");
     if let Ok(token) = std::env::var("CODEBERG_TOKEN")
-        && !token.is_empty() {
-            req = req.header("Authorization", format!("token {token}"));
-        }
-    let resp = req.send().await.wrap_err_with(|| format!("requesting {url}"))?;
+        && !token.is_empty()
+    {
+        req = req.header("Authorization", format!("token {token}"));
+    }
+    let resp = req
+        .send()
+        .await
+        .wrap_err_with(|| format!("requesting {url}"))?;
     let status = resp.status();
     let body = resp.bytes().await.wrap_err("reading releases response")?;
     if !status.is_success() {

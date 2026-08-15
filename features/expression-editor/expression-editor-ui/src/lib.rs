@@ -16,17 +16,16 @@
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
 use expression_editor_core::tools::Mods;
-use expression_editor_core::{Editor, Dimension, Viewport};
+use expression_editor_core::{Dimension, Editor, Viewport};
 use keyboard_types::Modifiers;
 
-pub mod canvas;
-pub mod demo;
-pub mod drawer;
 pub mod arp_panel;
+pub mod canvas;
 pub mod curve_editor;
+pub mod demo;
 pub mod drag;
+pub mod drawer;
 pub mod envelopes;
-pub mod velocity_panel;
 pub mod guitar;
 pub mod inspector;
 pub mod interaction;
@@ -37,11 +36,12 @@ pub mod stack;
 pub mod switcher;
 pub mod theme;
 pub mod toolbar;
+pub mod velocity_panel;
 pub mod widgets;
 
 pub use drawer::ModDrawer;
-pub use guitar::BendFlow;
 pub use expression_editor_core as core;
+pub use guitar::BendFlow;
 pub use interaction::Drag;
 pub use menu_ui::ContextMenu;
 pub use multitool_ui::MultiTool;
@@ -332,7 +332,10 @@ fn Canvas(
         Default::default()
     };
     let joins = guitar::joins(&ed);
-    let bend_lane = flow_mode.draws_in_lane().then(|| guitar::bend_lane(&ed)).flatten();
+    let bend_lane = flow_mode
+        .draws_in_lane()
+        .then(|| guitar::bend_lane(&ed))
+        .flatten();
     let midi_ref = canvas::midi_reference_rects(&ed);
     let midi_ref_front = ed.reference_to_front;
     // `R` brings references forward, the way `M` does for the MIDI

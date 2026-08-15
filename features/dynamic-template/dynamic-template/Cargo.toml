@@ -20,14 +20,10 @@ daw-proto = { workspace = true }
 daw-reaper = { workspace = true, default-features = true }
 eyre = { workspace = true }
 monarchy = { workspace = true }
-color-palette = { workspace = true }
+music-convention = { workspace = true }
 music-catalog = { workspace = true }
-facet = { workspace = true }
 vox = { workspace = true }
-serde = { workspace = true }
 serde_json = "1.0"
-thiserror = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
 
 [features]

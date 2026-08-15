@@ -111,8 +111,9 @@ impl Source {
             // guessed length would analyse minutes of silence and open
             // on a document that is mostly empty. Put the file in a
             // project and point at that.
-            Some("wav") | Some("flac") | Some("aif") | Some("aiff") | Some("ogg")
-            | Some("mp3") => Err(LoadError::BareAudio(path)),
+            Some("wav") | Some("flac") | Some("aif") | Some("aiff") | Some("ogg") | Some("mp3") => {
+                Err(LoadError::BareAudio(path))
+            }
             _ => Err(LoadError::Unrecognised(arg.to_string())),
         }
     }
@@ -161,7 +162,10 @@ pub enum LoadError {
     Read(PathBuf, String),
     Rpp(String),
     /// The project loaded but held nothing this editor can open.
-    NoEditableItem { project: String, items: usize },
+    NoEditableItem {
+        project: String,
+        items: usize,
+    },
     /// A track or item was asked for by name or index and is not there.
     NoSuchTarget(String),
     /// A `.mid` the facade's reader declined.
@@ -356,11 +360,21 @@ impl Runner {
             ItemRef::Index(0),
             TakeRef::Active,
         );
-        let session =
-            Session::from_file(&daw, &path.to_string_lossy(), 0, location, DEFAULT_BEND_RANGE, viewport)
-                .ok_or_else(|| LoadError::MidiFile(path.to_path_buf()))?;
+        let session = Session::from_file(
+            &daw,
+            &path.to_string_lossy(),
+            0,
+            location,
+            DEFAULT_BEND_RANGE,
+            viewport,
+        )
+        .ok_or_else(|| LoadError::MidiFile(path.to_path_buf()))?;
         Ok(Runner {
-            label: format!("{} — {} notes", file_label(path), session.editor.doc.notes.len()),
+            label: format!(
+                "{} — {} notes",
+                file_label(path),
+                session.editor.doc.notes.len()
+            ),
             daw: Some(daw),
             loaded: Loaded::Midi(Box::new(session)),
         })
@@ -376,8 +390,8 @@ impl Runner {
         daw.media_bay()
             .set_file_resolver(Box::new(daw::standalone::media_bay::FsFileResolver));
         let name = file_label(path);
-        let summary = load_rpp_text(&daw, &name, &path.to_string_lossy(), &text)
-            .map_err(LoadError::Rpp)?;
+        let summary =
+            load_rpp_text(&daw, &name, &path.to_string_lossy(), &text).map_err(LoadError::Rpp)?;
         let ctx = ProjectContext::Project(summary.project_guid.clone());
 
         let candidates = candidate_items(&daw, &ctx, target)?;
@@ -519,7 +533,11 @@ fn candidate_items(
 
     let mut out = Vec::new();
     for track in &tracks {
-        for item in Items::get_items(daw, ctx.clone(), daw::service::TrackRef::Guid(track.guid.clone())) {
+        for item in Items::get_items(
+            daw,
+            ctx.clone(),
+            daw::service::TrackRef::Guid(track.guid.clone()),
+        ) {
             let take = Takes::get_active_take(daw, ctx.clone(), ItemRef::Guid(item.guid.clone()));
             let (kind, take_name) = match &take {
                 Some(t) => {

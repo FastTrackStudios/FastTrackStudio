@@ -34,7 +34,9 @@ impl MacApp {
     pub fn new(prefix: Option<PathBuf>) -> eyre::Result<Self> {
         let prefix = match prefix {
             Some(p) => p,
-            None => std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| eyre!("$HOME is not set"))?,
+            None => std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .ok_or_else(|| eyre!("$HOME is not set"))?,
         };
         Ok(Self { prefix })
     }
@@ -85,12 +87,15 @@ impl MacApp {
             .to_owned();
 
         let apps_dir = self.applications_dir();
-        fs::create_dir_all(&apps_dir).wrap_err_with(|| format!("creating {}", apps_dir.display()))?;
+        fs::create_dir_all(&apps_dir)
+            .wrap_err_with(|| format!("creating {}", apps_dir.display()))?;
         let dest = apps_dir.join(&app_name);
         if dest.exists() {
-            fs::remove_dir_all(&dest).wrap_err_with(|| format!("removing old {}", dest.display()))?;
+            fs::remove_dir_all(&dest)
+                .wrap_err_with(|| format!("removing old {}", dest.display()))?;
         }
-        copy_tree(&app, &dest).wrap_err_with(|| format!("copying {} to {}", app.display(), dest.display()))?;
+        copy_tree(&app, &dest)
+            .wrap_err_with(|| format!("copying {} to {}", app.display(), dest.display()))?;
         drop(mount);
 
         // Clear the quarantine attribute macOS stamped on the downloaded
@@ -113,13 +118,13 @@ impl MacApp {
         let state = self.state_dir();
         fs::create_dir_all(&state).wrap_err_with(|| format!("creating {}", state.display()))?;
         fs::write(self.version_file(), format!("{tag}\n"))?;
-        fs::write(self.app_name_file(), format!("{}\n", app_name.to_string_lossy()))?;
+        fs::write(
+            self.app_name_file(),
+            format!("{}\n", app_name.to_string_lossy()),
+        )?;
 
         println!("  {} -> {}", app_name.to_string_lossy(), dest.display());
-        println!(
-            "  symlink -> {}",
-            bin_dir.join(link_name).display()
-        );
+        println!("  symlink -> {}", bin_dir.join(link_name).display());
         Ok(())
     }
 
@@ -133,7 +138,8 @@ impl MacApp {
         if let Some(app_path) = self.installed_app_path()
             && app_path.exists()
         {
-            fs::remove_dir_all(&app_path).wrap_err_with(|| format!("removing {}", app_path.display()))?;
+            fs::remove_dir_all(&app_path)
+                .wrap_err_with(|| format!("removing {}", app_path.display()))?;
         }
         let _ = fs::remove_file(self.version_file());
         let _ = fs::remove_file(self.app_name_file());
@@ -148,7 +154,11 @@ impl MacApp {
 /// Resolve + download the macOS app .dmg, then install it. `url` bypasses
 /// the release feed entirely (a direct dmg URL), mirroring `install_tarball`
 /// on Linux.
-pub async fn install(prefix: Option<PathBuf>, version: Option<String>, url: Option<String>) -> eyre::Result<()> {
+pub async fn install(
+    prefix: Option<PathBuf>,
+    version: Option<String>,
+    url: Option<String>,
+) -> eyre::Result<()> {
     let app = MacApp::new(prefix)?;
     let client = fetch::http_client()?;
     let work = tempfile_dir()?;
@@ -194,12 +204,21 @@ pub async fn update(prefix: Option<PathBuf>) -> eyre::Result<()> {
             return Ok(());
         }
         Some(installed) => println!("updating {installed} -> {} ...", release.tag),
-        None => println!("no installed version found — installing {} ...", release.tag),
+        None => println!(
+            "no installed version found — installing {} ...",
+            release.tag
+        ),
     }
 
     let work = tempfile_dir()?;
     let dmg_path = work.join(&release.tarball.name);
-    fetch::download(&client, &release.tarball.url, &dmg_path, &release.tarball.name).await?;
+    fetch::download(
+        &client,
+        &release.tarball.url,
+        &dmg_path,
+        &release.tarball.name,
+    )
+    .await?;
     app.install(&dmg_path, &release.tag)?;
     let _ = fs::remove_dir_all(&work);
     println!("installed FastTrackStudio {}", release.tag);
@@ -223,8 +242,10 @@ struct MountedVolume {
 
 impl MountedVolume {
     fn attach(dmg: &Path) -> eyre::Result<Self> {
-        let mount_point = std::env::temp_dir().join(format!("fts-installer-app-dmg-{}", std::process::id()));
-        fs::create_dir_all(&mount_point).wrap_err_with(|| format!("creating {}", mount_point.display()))?;
+        let mount_point =
+            std::env::temp_dir().join(format!("fts-installer-app-dmg-{}", std::process::id()));
+        fs::create_dir_all(&mount_point)
+            .wrap_err_with(|| format!("creating {}", mount_point.display()))?;
         let status = std::process::Command::new("hdiutil")
             .args(["attach", "-nobrowse", "-quiet", "-mountpoint"])
             .arg(&mount_point)
@@ -252,15 +273,21 @@ impl Drop for MountedVolume {
 }
 
 fn find_app_bundle(dir: &Path) -> Option<PathBuf> {
-    fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
-        p.is_dir() && p.extension().and_then(|e| e.to_str()) == Some("app")
-    })
+    fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_dir() && p.extension().and_then(|e| e.to_str()) == Some("app"))
 }
 
 /// The single executable dx puts at `<app>/Contents/MacOS/<name>`.
 fn find_executable(app: &Path) -> Option<PathBuf> {
     let macos_dir = app.join("Contents/MacOS");
-    fs::read_dir(macos_dir).ok()?.flatten().map(|e| e.path()).find(|p| p.is_file())
+    fs::read_dir(macos_dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_file())
 }
 
 fn force_symlink(target: &Path, link: &Path) -> eyre::Result<()> {
