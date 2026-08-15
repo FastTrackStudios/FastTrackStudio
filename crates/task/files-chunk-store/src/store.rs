@@ -48,6 +48,12 @@ use crate::manifest::{ChunkRef, FileId, Manifest};
 pub struct ChunkStore {
     blobs: iroh_blobs::store::fs::FsStore,
     manifests_dir: PathBuf,
+    /// The **whole-file tier**: content stored as one file per blob,
+    /// named by its blake3 hash, placed by *linking* rather than
+    /// copying — see [`ChunkStore::write_path`]. Sits beside `blobs/`
+    /// rather than inside it because iroh-blobs owns that directory's
+    /// layout and offers no link-based import.
+    whole_dir: PathBuf,
     chunker_config: ChunkerConfig,
     /// Set only for a store opened via [`ChunkStore::open_with_gc`] — the
     /// gate [`ChunkStore::gc`] checks before doing anything, since a store
@@ -118,8 +124,10 @@ impl ChunkStore {
         let root = root.as_ref();
         let blobs_dir = root.join("blobs");
         let manifests_dir = root.join("manifests");
+        let whole_dir = root.join("whole");
         tokio::fs::create_dir_all(&blobs_dir).await?;
         tokio::fs::create_dir_all(&manifests_dir).await?;
+        tokio::fs::create_dir_all(&whole_dir).await?;
 
         let chunk_gc_enabled = gc.is_some();
         let write_lock: Arc<RwLock<()>> = Arc::new(RwLock::new(()));
@@ -190,6 +198,7 @@ impl ChunkStore {
         Ok(Self {
             blobs,
             manifests_dir,
+            whole_dir,
             chunker_config,
             chunk_gc_enabled,
             write_lock,
@@ -225,7 +234,73 @@ impl ChunkStore {
             }
         }
 
+        // The whole tier has no background collector of its own —
+        // iroh-blobs sweeps only what it stores — so its blobs are
+        // reclaimed here, synchronously, from the same authority:
+        // whatever the surviving manifests still name is live.
+        //
+        // Only meaningful when something was actually swept, and
+        // ordered after the removals so the scan cannot see a manifest
+        // that is about to disappear.
+        if manifests_swept > 0 {
+            self.sweep_whole().await?;
+        }
+
         Ok(GcStats { manifests_swept })
+    }
+
+    /// Delete whole-tier blobs no surviving manifest references.
+    ///
+    /// Reads the live set first and deletes second: a blob written
+    /// between the two is missed by this pass and collected by the
+    /// next, which is the safe direction to be wrong in.
+    ///
+    /// A manifest that cannot be read aborts the sweep — deleting
+    /// nothing, returning `Ok(0)` — rather than failing. Both halves
+    /// matter. Not deleting, because a transient read error and a
+    /// genuinely unreferenced blob are indistinguishable from here and
+    /// a deletion cannot be undone by the next pass reading correctly
+    /// (the same conservatism the chunk protect callback applies). Not
+    /// failing, because `gc()` deliberately does not decode the
+    /// manifests it keeps: one corrupt file used to wedge every other
+    /// manifest's removal, permanently, since its mtime never changes
+    /// (`a_corrupt_kept_manifest_does_not_wedge_gc`).
+    async fn sweep_whole(&self) -> Result<usize> {
+        let mut live: HashSet<blake3::Hash> = HashSet::new();
+        for (file_id, _) in self.manifests_with_mtime().await? {
+            let Ok(manifest) = self.read_manifest(file_id).await else {
+                return Ok(0);
+            };
+            live.extend(manifest.chunks.iter().map(|c| c.hash));
+        }
+
+        let mut removed = 0usize;
+        let mut shards = tokio::fs::read_dir(&self.whole_dir).await?;
+        while let Some(shard) = shards.next_entry().await? {
+            if !shard.file_type().await?.is_dir() {
+                continue;
+            }
+            let mut inner = tokio::fs::read_dir(shard.path()).await?;
+            while let Some(sub) = inner.next_entry().await? {
+                if !sub.file_type().await?.is_dir() {
+                    continue;
+                }
+                let mut blobs = tokio::fs::read_dir(sub.path()).await?;
+                while let Some(blob) = blobs.next_entry().await? {
+                    let name = blob.file_name();
+                    let Some(name) = name.to_str() else { continue };
+                    // Skip in-flight temp names (`<hash>.tmp.<pid>.<n>`).
+                    let Ok(hash) = blake3::Hash::from_hex(name) else {
+                        continue;
+                    };
+                    if !live.contains(&hash) {
+                        tokio::fs::remove_file(blob.path()).await?;
+                        removed += 1;
+                    }
+                }
+            }
+        }
+        Ok(removed)
     }
 
     /// Every manifest currently on disk, with its last-modified time (the
@@ -336,83 +411,80 @@ impl ChunkStore {
     }
 
     /// Store the file at `path`, returning its content address — the
-    /// entry point for content that is already a file on disk, as opposed
-    /// to [`ChunkStore::write_stream`]'s arbitrary reader.
+    /// entry point for content that is already a file on disk, as
+    /// opposed to [`ChunkStore::write_stream`]'s arbitrary reader.
     ///
-    /// Below `chunker_config.whole_file_threshold` this is exactly
-    /// `write_stream` on the opened file. At or above it the file is
-    /// stored **whole**, as a single blob imported by path, which lets
-    /// iroh-blobs bring the content in with a **reflink** (`FICLONE`)
-    /// where source and store share a reflink-capable filesystem — XFS
-    /// with `reflink=1`, btrfs. The bytes are then shared, not copied:
-    /// versioning a 250 GB camera original costs its hash and its
-    /// metadata, not 250 GB.
+    /// **The bytes are linked, not copied.** When the file and this
+    /// store are on the same filesystem, the content enters the store
+    /// as a second directory entry for the *same data*: a reflink
+    /// (`FICLONE`) where the filesystem can clone extents, otherwise a
+    /// plain hardlink. Either way the store gains a full, independent
+    /// reference to the content for **zero additional space**.
     ///
-    /// This is what makes a media root's *first* checkpoint affordable.
-    /// Without it, capturing a root writes a second copy of every byte in
-    /// it — for the trees this is built for, terabytes that do not exist.
+    /// This is what makes importing an existing archive possible at
+    /// all. Copying is bounded by free space — a 5 TB tree needs 5 TB
+    /// to version — while linking is bounded by nothing: the bytes are
+    /// already on the disk.
     ///
-    /// The trade, taken deliberately: a whole-stored file shares no
-    /// chunks with its own later versions, so an edit re-stores it in
-    /// full. For files this size that is nearly free to give up — they
-    /// are media, and a re-encode or a re-bounce changes every byte, so
-    /// content-defined chunking finds almost nothing to share anyway —
-    /// while the case it buys, snapshotting an *unchanged* tree, is the
-    /// dominant one by orders of magnitude.
+    /// It also delivers the property that matters most here: **the
+    /// content cannot be lost by deleting the original.** A hardlink
+    /// keeps the inode alive, so removing the live file (by hand, by
+    /// accident, or by an app) frees nothing and the stored version
+    /// still reads back byte-for-byte. Measured on the production
+    /// array: 300 MB linked costs 0 MB, and deleting the source frees
+    /// 0 MB while the store returns the identical hash.
     ///
-    /// Reflink is an optimization, never a requirement: on a filesystem
-    /// that cannot clone (ext4, or a store on a different filesystem than
-    /// the source) iroh-blobs falls back to a real copy and this still
-    /// produces the same, correct content address — slowly.
+    /// What a hardlink does NOT protect against is a program rewriting
+    /// the file **in place** — one inode, so both change together.
+    /// A reflink does protect against that (separate inodes sharing
+    /// extents, copy-on-write), which is why it is tried first, but it
+    /// is an optimization: the deployment is not required to provide a
+    /// cloning filesystem.
     ///
-    /// Divergence is the filesystem's problem, and it solves it
-    /// correctly: a clone is copy-on-write, so a later edit to the live
-    /// file copies only the extents it touches and the stored version
-    /// keeps the originals. History stays real. This is why the import
-    /// uses `Copy` (clone-then-own) rather than `TryReference`, which
-    /// would point the store at the live file itself and let a later edit
-    /// or delete destroy the version that was supposed to survive it.
+    /// Chunking still exists for the case linking cannot serve — a
+    /// source on a *different* filesystem, where the content must be
+    /// copied and content-defined chunks at least earn cross-version
+    /// dedup for the copy. That choice is made by comparing device
+    /// ids, which is deterministic and cheap, so
+    /// [`ChunkStore::probe_path`] can predict it exactly (see its doc
+    /// for why that matters).
     pub async fn write_path(&self, path: impl AsRef<Path>) -> Result<FileId> {
         let path = path.as_ref();
-        let len = tokio::fs::metadata(path).await?.len();
-        if len < self.chunker_config.whole_file_threshold {
+        let meta = tokio::fs::metadata(path).await?;
+        let len = meta.len();
+        if !self.wants_whole(path, len).await {
             let file = tokio::fs::File::open(path).await?;
             return self.write_stream(file).await;
         }
 
-        // Same GC discipline as `write_stream` — see `write_lock`'s doc:
-        // the blob is unreferenced by any manifest until the write below
-        // lands, so a sweep must not be able to observe this call
-        // partway through.
-        let _write_guard = self.write_lock.read().await;
-        let batch = self
-            .blobs
-            .batch()
-            .await
-            .map_err(|e| Error::Store(format!("opening a gc-protection batch: {e}")))?;
-        let tag = batch
-            .add_path_with_opts(iroh_blobs::api::blobs::AddPathOptions {
-                path: path.to_path_buf(),
-                format: iroh_blobs::BlobFormat::Raw,
-                // `Copy` is the reflinking mode (iroh-blobs' import path
-                // tries `FICLONE` first and falls back to a copy). See
-                // this method's doc for why not `TryReference`.
-                mode: iroh_blobs::api::blobs::ImportMode::Copy,
-            })
-            .await
-            .map_err(|e| Error::Store(format!("importing {}: {e}", path.display())))?;
+        // Hash first: the destination is named by content, so it has to
+        // be known before the link is made. One read pass, bounded
+        // memory — the same pass `probe_path` performs.
+        let hash = Self::hash_file(path).await?;
+        let dest = self.whole_path(&hash);
 
-        // A `Raw` blob's iroh hash IS the blake3 of its content, so the
-        // manifest stays exactly what it always was — a list of
-        // (hash, len) — with one entry covering the whole file. No format
-        // change, and nothing else in this crate (read, range read, GC
-        // liveness) needs to know which path stored it.
-        let hash = blake3::Hash::from_bytes(*tag.hash().as_bytes());
+        // No GC interaction to guard: the whole tier is swept from the
+        // same manifest-derived liveness as chunks (see `gc`), and the
+        // manifest below is written before this call returns, exactly
+        // like `write_stream`'s.
+        // Already stored (and the right length — a short file at a
+        // content address is damage from a crashed write, repaired by
+        // placing again rather than trusted).
+        let stored = tokio::fs::metadata(&dest)
+            .await
+            .map(|m| m.len() == len)
+            .unwrap_or(false);
+        if !stored {
+            let src = path.to_path_buf();
+            let dst = dest.clone();
+            tokio::task::spawn_blocking(move || place_whole(&src, &dst))
+                .await
+                .map_err(|e| Error::Io(std::io::Error::other(e)))??;
+        }
+
         let manifest = Manifest::new(vec![ChunkRef { hash, len }]);
         let file_id = manifest.file_id();
         self.write_manifest(file_id, &manifest).await?;
-        drop(tag);
-        drop(batch);
         Ok(file_id)
     }
 
@@ -420,37 +492,64 @@ impl ChunkStore {
     /// store, writing nothing — [`ChunkStore::write_path`]'s pure twin,
     /// exactly as [`ChunkStore::probe_stream`] is `write_stream`'s.
     ///
-    /// It must make the **same size decision** `write_path` would: a
-    /// whole-stored file and a chunked one have different ids for the
-    /// same bytes, so a probe that chunked what the write would clone
-    /// (or vice versa) would report "changed" on every capture of an
-    /// untouched file — turning the skip-what-is-unchanged fast path
-    /// into a guaranteed re-import of the whole tree, forever.
+    /// It must make the **same whole-vs-chunked decision** `write_path`
+    /// would: the two produce different ids for identical bytes, so a
+    /// probe that chunked what the write would link (or the reverse)
+    /// would report "changed" on every capture of an untouched file —
+    /// turning the skip-what-is-unchanged fast path into a guaranteed
+    /// re-import of the whole tree, forever. That is why the decision
+    /// is a pure function of (device id, size) and never of whether a
+    /// link call happens to succeed.
     pub async fn probe_path(&self, path: impl AsRef<Path>) -> Result<FileId> {
         let path = path.as_ref();
         let len = tokio::fs::metadata(path).await?.len();
-        let file = tokio::fs::File::open(path).await?;
-        if len < self.chunker_config.whole_file_threshold {
+        if !self.wants_whole(path, len).await {
+            let file = tokio::fs::File::open(path).await?;
             return self.probe_stream(file).await;
         }
-        // Whole-file: one entry, hashed in bounded memory rather than by
-        // reading the file in (blake3 of the content is the same hash
-        // iroh-blobs derives for a `Raw` blob).
-        let mut hasher = blake3::Hasher::new();
+        let hash = Self::hash_file(path).await?;
+        Ok(Manifest::new(vec![ChunkRef { hash, len }]).file_id())
+    }
+
+    /// Whole-file placement applies when the source can actually be
+    /// linked into the store — same filesystem — and the file is at
+    /// least `whole_file_threshold` bytes (0 by default: everything,
+    /// since a link costs nothing regardless of size).
+    ///
+    /// Deliberately decided from metadata alone. See `probe_path`.
+    async fn wants_whole(&self, path: &Path, len: u64) -> bool {
+        if len < self.chunker_config.whole_file_threshold {
+            return false;
+        }
+        same_filesystem(path, &self.whole_dir).await
+    }
+
+    /// blake3 of a file's contents, read in bounded memory.
+    async fn hash_file(path: &Path) -> Result<blake3::Hash> {
+        use tokio::io::AsyncReadExt as _;
+        let file = tokio::fs::File::open(path).await?;
         let mut reader = tokio::io::BufReader::new(file);
+        let mut hasher = blake3::Hasher::new();
         let mut buf = vec![0u8; 1024 * 1024];
         loop {
-            let n = tokio::io::AsyncReadExt::read(&mut reader, &mut buf).await?;
+            let n = reader.read(&mut buf).await?;
             if n == 0 {
                 break;
             }
             hasher.update(&buf[..n]);
         }
-        let manifest = Manifest::new(vec![ChunkRef {
-            hash: hasher.finalize(),
-            len,
-        }]);
-        Ok(manifest.file_id())
+        Ok(hasher.finalize())
+    }
+
+    /// Where a whole-stored blob lives. Sharded two levels: one flat
+    /// directory would hold an entry per file in every root, and a
+    /// media archive has hundreds of thousands.
+    fn whole_path(&self, hash: &blake3::Hash) -> PathBuf {
+        let hex = hash.to_hex();
+        self.whole_dir
+            .join(&hex[0..2])
+            .join(&hex[2..4])
+            .join(hex.as_str())
     }
 
     /// Derive the [`FileId`] `source` *would* have in this store,
@@ -492,6 +591,15 @@ impl ChunkStore {
     {
         let manifest = self.read_manifest(file_id).await?;
         for chunk in &manifest.chunks {
+            // The whole tier first: a linked blob lives as a plain file
+            // under `whole/`, not in iroh-blobs (see `write_path`).
+            if let Some(mut file) = self.open_whole(&chunk.hash).await? {
+                let copied = tokio::io::copy(&mut file, dest).await.map_err(Error::Io)?;
+                if copied != chunk.len {
+                    return Err(Error::MissingChunk(chunk.hash.to_hex().to_string()));
+                }
+                continue;
+            }
             let hash_bytes = *chunk.hash.as_bytes();
             let mut reader = self.blobs.reader(hash_bytes);
             let copied = match tokio::io::copy(&mut reader, dest).await {
@@ -571,15 +679,27 @@ impl ChunkStore {
             let to = end.min(chunk_end) - chunk_start;
 
             // Seek within the blob rather than reading it whole: with a
-            // whole-file blob (see `write_path`) one "chunk" can be the
+            // whole-file blob (see `write_path`) one "chunk" IS the
             // entire multi-hundred-GB file, and buffering it to serve a
-            // 1 MB video seek would take the server down. `BlobReader` is
-            // `AsyncSeek`, so only the window is ever read.
+            // 1 MB video seek would take the server down. Both tiers
+            // are seekable, so only the window is ever read.
+            let want = to - from;
+            if let Some(mut file) = self.open_whole(&chunk.hash).await? {
+                tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(from))
+                    .await
+                    .map_err(Error::Io)?;
+                let copied = tokio::io::copy(&mut file.take(want), dest)
+                    .await
+                    .map_err(Error::Io)?;
+                if copied != want {
+                    return Err(Error::MissingChunk(chunk.hash.to_hex().to_string()));
+                }
+                continue;
+            }
             let mut reader = self.blobs.reader(*chunk.hash.as_bytes());
             tokio::io::AsyncSeekExt::seek(&mut reader, std::io::SeekFrom::Start(from))
                 .await
                 .map_err(Error::Io)?;
-            let want = to - from;
             let copied = tokio::io::copy(&mut reader.take(want), dest)
                 .await
                 .map_err(Error::Io)?;
@@ -603,15 +723,35 @@ impl ChunkStore {
     /// "resumable at chunk level" means asking this per chunk and
     /// fetching only the misses.
     pub async fn has_chunk(&self, hash: blake3::Hash) -> Result<bool> {
+        if tokio::fs::metadata(self.whole_path(&hash)).await.is_ok() {
+            return Ok(true);
+        }
         self.blobs
             .has(*hash.as_bytes())
             .await
             .map_err(|e| Error::Store(format!("checking chunk {hash}: {e}")))
     }
 
+    /// Open a whole-tier blob, or `None` when this hash is not stored
+    /// that way (the ordinary chunked case).
+    async fn open_whole(&self, hash: &blake3::Hash) -> Result<Option<tokio::fs::File>> {
+        match tokio::fs::File::open(self.whole_path(hash)).await {
+            Ok(file) => Ok(Some(file)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(Error::Io(e)),
+        }
+    }
+
     /// Read one chunk's bytes. Chunks are bounded by the chunker's max
     /// size, so a whole-chunk `Vec` is bounded memory by construction.
     pub async fn read_chunk(&self, hash: blake3::Hash) -> Result<Vec<u8>> {
+        if let Some(mut file) = self.open_whole(&hash).await? {
+            let mut buf = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut file, &mut buf)
+                .await
+                .map_err(Error::Io)?;
+            return Ok(buf);
+        }
         let hash_bytes = *hash.as_bytes();
         let mut reader = self.blobs.reader(hash_bytes);
         let mut buf = Vec::new();
@@ -802,6 +942,95 @@ impl ChunkStore {
 
 fn manifest_path_in(dir: &Path, file_id: FileId) -> PathBuf {
     dir.join(format!("{}.manifest", file_id.to_hex()))
+}
+
+/// Are `a` and `b` on the same filesystem? Decides whether the store
+/// can link a source in rather than copy it. `b`'s directory is used
+/// when `b` itself does not exist yet.
+///
+/// A device-id comparison rather than a trial link, because the answer
+/// has to be identical for `probe_path` and `write_path` — see
+/// `probe_path`'s doc. On anything that cannot report a device, the
+/// answer is "no": copying is always correct, just slower.
+async fn same_filesystem(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let Ok(am) = tokio::fs::metadata(a).await else {
+            return false;
+        };
+        let Ok(bm) = tokio::fs::metadata(b).await else {
+            return false;
+        };
+        am.dev() == bm.dev()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (a, b);
+        false
+    }
+}
+
+/// How a whole-file blob's bytes got into the store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// Extents shared, separate inodes — free, and an in-place rewrite
+    /// of the source copies-on-write rather than touching the stored
+    /// version.
+    Reflinked,
+    /// Same inode, second directory entry — free, and the content
+    /// survives deletion of the original. An in-place rewrite of the
+    /// source is visible through both.
+    Hardlinked,
+    /// A real copy. Correct everywhere, and the only option when the
+    /// filesystem refuses both links despite reporting the same device
+    /// (a bind mount of a different subvolume, a full disk, an
+    /// exhausted link count).
+    Copied,
+}
+
+/// Place `src`'s content at `dst` as cheaply as the filesystem allows:
+/// reflink, else hardlink, else copy. Blocking; call from
+/// `spawn_blocking`.
+///
+/// Writes through a unique temp name and renames, so a crash midway
+/// cannot leave a short file sitting at a content address — the same
+/// discipline `write_manifest` uses. (A reflink or hardlink is atomic
+/// in itself, but the rename costs nothing and keeps one path for all
+/// three cases.)
+fn place_whole(src: &Path, dst: &Path) -> Result<Placement> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let parent = dst
+        .parent()
+        .ok_or_else(|| Error::Store(format!("whole-file path {} has no parent", dst.display())))?;
+    std::fs::create_dir_all(parent)?;
+
+    let unique = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp = parent.join(format!(
+        "{}.tmp.{}.{unique}",
+        dst.file_name().and_then(|n| n.to_str()).unwrap_or("blob"),
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&tmp);
+
+    let placement = if reflink_copy::reflink(src, &tmp).is_ok() {
+        Placement::Reflinked
+    } else if std::fs::hard_link(src, &tmp).is_ok() {
+        Placement::Hardlinked
+    } else {
+        std::fs::copy(src, &tmp)?;
+        Placement::Copied
+    };
+
+    match std::fs::rename(&tmp, dst) {
+        Ok(()) => Ok(placement),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(Error::Io(e))
+        }
+    }
 }
 
 /// Free-function twin of `ChunkStore::manifests_with_mtime`, taking the

@@ -65,7 +65,7 @@ use crate::error::Error;
 use crate::git_root;
 use crate::hydration;
 use crate::ignore;
-use crate::registry::Registry;
+use crate::registry::{Registry, RootMarker, read_root_marker};
 use crate::repo_open;
 use crate::scan;
 use crate::stub;
@@ -691,6 +691,47 @@ impl FilesBackend {
     /// matches, because "outside `<org>/files`" is the answer that makes
     /// sense on the overwhelming majority of deployments, which have no
     /// locations at all.
+    /// Re-register a folder that carries a marker this registry has
+    /// never seen — restored from a backup, or carried over from
+    /// another deployment. Its id and name come from the marker, not
+    /// from the caller, so everything that already references the root
+    /// (Named Versions, reviews, placements) keeps resolving.
+    ///
+    /// The store inside the folder is opened, never re-initialised: the
+    /// history came with it.
+    fn adopt_marked_root(
+        &self,
+        canonical: &Path,
+        canonical_str: String,
+        marker: RootMarker,
+        flavor: RootFlavor,
+    ) -> Result<FileRootInfo, Error> {
+        let repo = repo_open::open_or_init_repo(canonical, flavor)?;
+        let head = Self::head_of(&repo, flavor)?;
+        let root = FileRootInfo {
+            id: marker.id,
+            name: marker.name,
+            path: canonical_str,
+            flavor,
+            created_at: Utc::now(),
+            project_version: None,
+        };
+        self.registry.insert(root.clone())?;
+        self.set_heads(root.id, repo, head, None);
+        self.ignore_of(&root)?;
+        if self
+            .watch_new_roots
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            if let Err(err) = self.watch_root(root.id) {
+                tracing::warn!(root_id = %root.id, ?err, "files: adopted root not watched");
+            }
+        }
+        tracing::info!(root = %root.id, path = %root.path, "files: adopted a marked root");
+        self.publish(FilesEvent::RootCreated(root.clone()));
+        Ok(root)
+    }
+
     fn confine(&self, requested: &Path) -> Result<PathBuf, Error> {
         let own = task_files_util::confine(requested, &self.confine_root);
         if own.is_ok() {
@@ -974,8 +1015,57 @@ impl FilesBackend {
             .ok_or_else(|| Error::BadRequest(format!("{path}: not valid UTF-8")))?
             .to_string();
 
-        if canonical.join(MARKER_FILE).exists() {
-            return Err(Error::AlreadyExists(canonical_str));
+        // A marker means this folder was already a root. That is not
+        // automatically a conflict — it is how a MOVED or RENAMED root
+        // announces itself, and moving folders around is the normal way
+        // this material gets organised.
+        //
+        // A root records the absolute path it was created at, while its
+        // marker and its whole version store live inside the folder and
+        // travel with it. So when the marker names a root whose
+        // registered path is no longer where the folder is, the right
+        // answer is to re-point the registry, not to refuse: refusing
+        // strands the root permanently — the old path is dead and the
+        // real folder can never be re-added.
+        //
+        // Only an exact re-registration of a root already living here is
+        // a genuine duplicate.
+        if let Some(existing) = read_root_marker(&canonical) {
+            return match self.registry.get(existing.id) {
+                Some(known) if Path::new(&known.path) == canonical => {
+                    Err(Error::AlreadyExists(canonical_str))
+                }
+                // Known root, different path: the folder MOVED. The
+                // right answer is to re-point the registry and carry on
+                // — the marker and the whole version store travelled
+                // with the folder, so nothing is actually lost — but
+                // that cannot be done safely yet, and a wrong attempt
+                // is worse than a clear refusal:
+                //
+                // - updating only the registry leaves the open repo
+                //   addressing the OLD directory, and reads fail with
+                //   "commit not found";
+                // - re-opening at the new path HANGS, because the
+                //   store's redb lock is held by a handle that dropping
+                //   the cached `Arc` does not release — iroh-blobs runs
+                //   its own runtime and needs an explicit shutdown.
+                //
+                // So this needs a close-the-root's-store seam first
+                // (see plans/media-roots-at-scale.md). Until then, say
+                // exactly what happened and where the folder was
+                // registered, which is at least actionable.
+                Some(known) => Err(Error::BadRequest(format!(
+                    "{canonical_str} is root {} ({}), which was registered at {} — \
+                     moving or renaming a registered root is not supported yet; \
+                     move it back, or restart the server to pick it up at its new path",
+                    known.id, known.name, known.path
+                ))),
+                // Marker for a root this registry has never seen: a
+                // folder restored from a backup, or carried in from
+                // another deployment. Adopt it under its own id so its
+                // existing history stays reachable.
+                None => self.adopt_marked_root(&canonical, canonical_str, existing, flavor),
+            };
         }
         // Ancestor/descendant containment, not just exact-path — roots
         // never overlap on disk (glossary "File Root"); an outer root

@@ -100,6 +100,21 @@ const MEDIA_SEED: &str = "\
 *~
 .DS_Store
 Thumbs.db
+# macOS AppleDouble sidecars. A Mac writing to a non-HFS volume — a NAS
+# share, an exFAT drive, exactly how this material arrives — splits every
+# file in two and leaves a `._name` beside `name` holding the resource
+# fork and Finder metadata. Without this a browse shows every file twice,
+# and a capture versions the metadata alongside the content. Regenerable
+# and disposable: the audio, video and session data are all in the real
+# file.
+._*
+.AppleDouble/
+.AppleDB/
+.AppleDesktop/
+.Spotlight-V100/
+.TemporaryItems/
+.Trashes/
+.fseventsd/
 ";
 
 /// Filename globs whose write counts as a **project-file save** — the
@@ -270,6 +285,23 @@ mod tests {
         seed(flavor)
             .unwrap()
             .matches_dir(&jj_lib::repo_path::RepoPathBuf::from_internal_string(path).unwrap())
+    }
+
+    /// Real listing from the production archive: a Mac wrote this
+    /// material to a NAS share, so every file has a `._name` twin
+    /// holding its resource fork. Browsing a root showed each file
+    /// twice before these rules existed.
+    #[test]
+    fn the_media_seed_hides_macos_appledouble_sidecars() {
+        assert!(matches(RootFlavor::Media, "._12 UNITY 1.4 SommaPrep.ptx"));
+        assert!(matches(RootFlavor::Media, "Audio Files/._Unity.wav"));
+        assert!(matches(RootFlavor::Media, "._.DS_Store"));
+        assert!(matches_dir(RootFlavor::Media, ".Spotlight-V100"));
+
+        // The real files must survive: the sidecar is a prefix, never a
+        // reason to drop the content beside it.
+        assert!(!matches(RootFlavor::Media, "12 UNITY 1.4 SommaPrep.ptx"));
+        assert!(!matches(RootFlavor::Media, "Audio Files/Unity.wav"));
     }
 
     #[test]

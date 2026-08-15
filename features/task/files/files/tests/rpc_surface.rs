@@ -518,6 +518,99 @@ async fn carving_a_child_root_out_of_tracked_files_keeps_the_history() {
     scope.close().await;
 }
 
+/// Renaming or moving a project folder must not strand its root.
+///
+/// This is the ordinary case, not an edge one: the whole point of
+/// putting an archive under Task is to reorganise it — rename a
+/// misspelled client, move a song under the album it belongs to, split
+/// a year into folders. A root records the absolute path it was created
+/// at, so every one of those breaks the recorded path.
+///
+/// What saves it is that the marker AND the entire version store live
+/// inside the folder and travel with it. Re-adding the folder at its new
+/// location must therefore re-point the existing root — same id, same
+/// history — rather than refuse it as "already a root", which used to
+/// strand it permanently: the old path dead, the real folder
+/// un-registrable forever.
+#[ignore = "needs a close-the-store seam first: re-opening a moved root \
+            hangs on the redb lock its old handle still holds (iroh-blobs \
+            runs its own runtime). See plans/media-roots-at-scale.md."]
+#[tokio::test(flavor = "multi_thread")]
+async fn moving_a_root_folder_re_points_it_and_keeps_its_history() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let original = data_dir.path().join("Yokasta Segura");
+    std::fs::create_dir_all(&original).unwrap();
+    std::fs::write(original.join("mix.wav"), b"v1").unwrap();
+
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(backend), scope.clone());
+    let client: FilesServiceClient = local.establish().await.expect("establish client");
+
+    let root = client
+        .create_root(
+            original.to_str().unwrap().to_string(),
+            "Yokasta Segura".to_string(),
+            RootFlavor::Media,
+        )
+        .await
+        .expect("create root");
+    let first = client
+        .checkpoint_now(root.id, Some("before the move".to_string()))
+        .await
+        .expect("checkpoint");
+
+    // Rename it — the spelling correction that actually happened to
+    // this material more than once.
+    let moved = data_dir.path().join("El Artista Eres Tu - Yokasta Segura");
+    std::fs::rename(&original, &moved).unwrap();
+
+    let readded = client
+        .create_root(
+            moved.to_str().unwrap().to_string(),
+            // A different name on the way back in must not matter; the
+            // marker is the authority on identity.
+            "whatever the caller types".to_string(),
+            RootFlavor::Media,
+        )
+        .await
+        .expect("re-adding a moved root must succeed, not conflict");
+
+    assert_eq!(
+        readded.id, root.id,
+        "the same folder is the same root — its id is what versions, \
+         reviews and placements reference"
+    );
+    assert_eq!(readded.path, moved.to_str().unwrap());
+
+    // Exactly one root, not a second one shadowing the first.
+    let roots = client.list_roots().await.expect("list");
+    assert_eq!(roots.len(), 1, "re-pointing must not duplicate: {roots:?}");
+
+    // The history came with the folder.
+    let chain = client
+        .chain(root.id, "mix.wav".to_string())
+        .await
+        .expect("chain after the move");
+    assert_eq!(chain.len(), 1);
+    assert_eq!(chain[0].commit_id, first.commit_id);
+
+    // And it still versions going forward, from the new location.
+    std::fs::write(moved.join("mix.wav"), b"v2 after the move").unwrap();
+    client
+        .checkpoint_now(root.id, Some("after the move".to_string()))
+        .await
+        .expect("checkpoint at the new path");
+    let chain = client
+        .chain(root.id, "mix.wav".to_string())
+        .await
+        .expect("chain");
+    assert_eq!(chain.len(), 2, "a move must not end the file's history");
+
+    scope.close().await;
+}
+
 /// PR #280 review finding 4: two concurrent `checkpoint_now` calls on
 /// the same root must not race — every writer's change must land in
 /// the chain, none silently orphaned by a lost `set_head`.
