@@ -113,6 +113,29 @@ are already needed:
   to Goodness of God *and* Yokasta, which is why it is currently parked
   in an inbox rather than filed
 
+## Registration order, once deployed
+
+The tree is now `Projects/<org>/<project>`, six orgs, 37 projects. Four
+of them are genuine containers whose children are songs — Crescendum,
+Montreal Benefit, PNG Worship Collective (13 songs), Roger Garcia — and
+several more (Campus Jax Shows, The Bible Game Gospel, ONE805) hold
+sub-somethings whose status is a judgement call, so they start as one
+root each.
+
+**Decide nesting before a container's first checkpoint.** Carving a
+child root out later is *safe* — the album keeps its own files, the
+song root takes over, and everything already captured stays recoverable
+via `browse_at` on the pre-split commit (pinned by
+`carving_a_child_root_out_of_tracked_files_keeps_the_history`) — but the
+album records a deletion of those paths at the split, and `chain()`
+stops answering for them: it walks back from HEAD and halts where the
+path is absent (`chain.rs:112`), which is how *every* deleted file
+behaves, not a carving quirk. Registering the songs first avoids the
+whole question.
+
+Roots have a driver, unlike grants: `task files root create` with
+`--server` / `--org`, so this is a scripted pass, not new code.
+
 ## Sequencing
 
 1. ~~**Bind by id**~~ — done.
