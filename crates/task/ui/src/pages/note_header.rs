@@ -310,7 +310,10 @@ mod tests {
             rename_path("Untitled 1a2b.md", "a/b:c").as_deref(),
             Some("a b c.md")
         );
-        assert_eq!(rename_path("x.md", "My Note.md").as_deref(), Some("My Note.md"));
+        assert_eq!(
+            rename_path("x.md", "My Note.md").as_deref(),
+            Some("My Note.md")
+        );
         assert_eq!(rename_path("x.md", "   "), None);
     }
 }

@@ -65,6 +65,7 @@ pub fn MealplanView() -> Element {
                 }
             }
 
+            super::mealplan_week::MealWeek { slug }
             RecipesSection { slug }
             PantrySection { slug }
             MealPlanSection { slug }

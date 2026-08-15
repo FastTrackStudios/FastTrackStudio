@@ -131,7 +131,11 @@ pub fn ContactsView() -> Element {
         .filter(|(_, c)| !c.archived)
         .cloned()
         .collect();
-    active.sort_by(|a, b| display_name(&a.1).to_lowercase().cmp(&display_name(&b.1).to_lowercase()));
+    active.sort_by(|a, b| {
+        display_name(&a.1)
+            .to_lowercase()
+            .cmp(&display_name(&b.1).to_lowercase())
+    });
 
     // Group chips — every category across active contacts.
     let mut groups: Vec<String> = active

@@ -129,7 +129,11 @@ fn is_iso_date(s: &str) -> bool {
         && b[4] == b'-'
         && b[7] == b'-'
         && s.chars().enumerate().all(|(i, c)| {
-            if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() }
+            if i == 4 || i == 7 {
+                c == '-'
+            } else {
+                c.is_ascii_digit()
+            }
         })
 }
 

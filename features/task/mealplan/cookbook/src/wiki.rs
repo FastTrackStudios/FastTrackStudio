@@ -141,6 +141,86 @@ pub struct RecipeLink {
     pub servings: Option<f64>,
 }
 
+/// One wikilink as it appears in a string, with the byte span it
+/// occupies so a renderer can replace the markup with the display text
+/// instead of showing `[[Sauce]]{}` to someone who is cooking.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkSpan {
+    /// What the link points at, pipe-alias stripped.
+    pub target: String,
+    /// What to show: the alias if the link carried one, else the target.
+    pub display: String,
+    /// Servings, for the braced form. `None` means one whole batch.
+    pub servings: Option<f64>,
+    /// Whether the trailing `{…}` was present — see [`scan_recipe_links`]
+    /// for why that brace is the thing that makes it a recipe.
+    pub is_recipe: bool,
+    /// Byte offset of the opening `[`.
+    pub start: usize,
+    /// Byte length of the whole run, including `{…}` when braced.
+    pub len: usize,
+}
+
+/// Find every wikilink in `s`, braced or bare, with its span.
+///
+/// This is the one bracket walk; [`scan_recipe_links`] and
+/// [`scan_wikilinks`] are filters over it. Recording spans here rather
+/// than re-finding the markup downstream is what lets the reader render
+/// a link as its display text — the parser knows exactly which bytes
+/// were markup, and nothing else has to guess.
+#[must_use]
+pub fn scan_links(s: &str) -> Vec<LinkSpan> {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
+            let rest = &s[i + 2..];
+            if let Some(end) = rest.find("]]") {
+                let inner = rest[..end].trim();
+                let target = inner.split('|').next().unwrap_or(inner).trim();
+                let display = inner
+                    .split_once('|')
+                    .map_or(target, |(_, alias)| alias.trim());
+                // `[[…]]` is 4 bytes of delimiter around `end` of inner.
+                let mut len = 2 + end + 2;
+                let mut servings = None;
+                let mut is_recipe = false;
+                if let Some(brace) = rest[end + 2..].strip_prefix('{')
+                    && let Some(close) = brace.find('}')
+                {
+                    let qty = brace[..close].trim();
+                    servings = if qty.is_empty() {
+                        None
+                    } else {
+                        qty.parse::<f64>().ok()
+                    };
+                    is_recipe = true;
+                    len += 1 + close + 1;
+                }
+                if !target.is_empty() && !target.contains('\n') {
+                    out.push(LinkSpan {
+                        target: target.to_string(),
+                        display: if display.is_empty() {
+                            target.to_string()
+                        } else {
+                            display.to_string()
+                        },
+                        servings,
+                        is_recipe,
+                        start: i,
+                        len,
+                    });
+                }
+                i += 2 + end + 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 /// Find every `[[target]]{…}` in `s` — a recipe reference in vault
 /// link form.
 ///
@@ -153,64 +233,21 @@ pub struct RecipeLink {
 /// pulls a recipe in.
 #[must_use]
 pub fn scan_recipe_links(s: &str) -> Vec<RecipeLink> {
-    let mut out = Vec::new();
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
-            let rest = &s[i + 2..];
-            if let Some(end) = rest.find("]]") {
-                let target = rest[..end].trim();
-                let target = target.split('|').next().unwrap_or(target).trim();
-                let after = &rest[end + 2..];
-                if !target.is_empty()
-                    && !target.contains('\n')
-                    && let Some(brace) = after.strip_prefix('{')
-                    && let Some(close) = brace.find('}')
-                {
-                    let qty = brace[..close].trim();
-                    out.push(RecipeLink {
-                        target: target.to_string(),
-                        servings: if qty.is_empty() {
-                            None
-                        } else {
-                            qty.parse::<f64>().ok()
-                        },
-                    });
-                }
-                i += 2 + end + 2;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out
+    scan_links(s)
+        .into_iter()
+        .filter(|l| l.is_recipe)
+        .map(|l| RecipeLink {
+            target: l.target,
+            servings: l.servings,
+        })
+        .collect()
 }
 
 /// Find every `[[target]]` in `s`. Targets are returned
 /// trimmed; nested or escaped brackets are not supported
 /// (matches Obsidian-style wikilink semantics).
 fn scan_wikilinks(s: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
-            let rest = &s[i + 2..];
-            if let Some(end) = rest.find("]]") {
-                let target = rest[..end].trim();
-                // Strip pipe-display syntax: `[[target|alias]]`.
-                let target = target.split('|').next().unwrap_or(target).trim();
-                if !target.is_empty() && !target.contains('\n') {
-                    out.push(target.to_string());
-                }
-                i += 2 + end + 2;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out
+    scan_links(s).into_iter().map(|l| l.target).collect()
 }
 
 #[cfg(test)]
@@ -273,6 +310,55 @@ Reference [[render fat]] again to dedupe.
             WikiEdgeKind::RecipeRef,
             "and it should be the specific kind, not a generic concept"
         );
+    }
+
+    #[test]
+    fn link_spans_cover_the_whole_markup_run() {
+        // The reader draws `display` over `[start, start+len)`, so if the
+        // span is short by even the trailing `{}` the brackets survive
+        // on screen — which is the bug this exists to prevent.
+        let s = "Make a batch of [[Low-Cal Taco Sauce]]{} and chill it.";
+        let links = scan_links(s);
+        assert_eq!(links.len(), 1);
+        let l = &links[0];
+        assert_eq!(&s[l.start..l.start + l.len], "[[Low-Cal Taco Sauce]]{}");
+        assert_eq!(l.display, "Low-Cal Taco Sauce");
+        assert!(l.is_recipe);
+        assert_eq!(l.servings, None);
+    }
+
+    #[test]
+    fn bare_and_braced_links_are_told_apart() {
+        let s = "See [[mise en place]] then make [[Hot Honey]]{6}.";
+        let links = scan_links(s);
+        assert_eq!(links.len(), 2);
+        assert!(!links[0].is_recipe, "a bare link is not a recipe pull");
+        assert_eq!(
+            &s[links[0].start..links[0].start + links[0].len],
+            "[[mise en place]]"
+        );
+        assert!(links[1].is_recipe);
+        assert_eq!(links[1].servings, Some(6.0));
+        assert_eq!(
+            &s[links[1].start..links[1].start + links[1].len],
+            "[[Hot Honey]]{6}"
+        );
+    }
+
+    #[test]
+    fn alias_displays_the_alias_but_links_the_target() {
+        let l = &scan_links("Use [[saute|sautéing]] here.")[0];
+        assert_eq!(l.target, "saute");
+        assert_eq!(l.display, "sautéing");
+    }
+
+    #[test]
+    fn spans_survive_multibyte_text_before_them() {
+        // Byte offsets, not char offsets — an em-dash earlier in the
+        // step must not shift the span off the markup.
+        let s = "Brown the beef — then make [[Sauce]]{}.";
+        let l = &scan_links(s)[0];
+        assert_eq!(&s[l.start..l.start + l.len], "[[Sauce]]{}");
     }
 
     #[test]

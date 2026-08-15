@@ -17,7 +17,7 @@
 use chrono::Utc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use inbox_proto::{review, InboxItem, ReviewResponse};
+use inbox_proto::{InboxItem, ReviewResponse, review};
 
 use crate::orgs::{OrgMeta, OrgSelection};
 use crate::stores;

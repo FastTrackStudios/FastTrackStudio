@@ -81,17 +81,17 @@ use crate::pages::note_view::NoteView;
 use crate::shell::mobile::{BottomSheet, MobileActionBar};
 
 use graph::{build_local_graph, osis_to_ref};
-use tabs::{render_tab_bar, OpenTab, Pane, MAX_PANES};
+use tabs::{MAX_PANES, OpenTab, Pane, render_tab_bar};
 // `build_tree` / `basename_of` / `TreeNode` were free items on this
 // module before the split; other pages still import them by those paths.
-pub(crate) use tree::{basename_of, build_tree, TreeNode};
 use tree::render_node;
+pub(crate) use tree::{TreeNode, basename_of, build_tree};
 // Re-exported: these were free functions on this module before the
 // split, and other pages (search, note_view, the mobile shell) import
 // them by their old paths.
+use crate::vault_lookup;
 pub(crate) use rpc::{create_new_file, fetch_folder_index};
 use rpc::{fetch_backlinks, fetch_links, move_to_folder};
-use crate::vault_lookup;
 
 #[cfg(target_arch = "wasm32")]
 use crate::document_session::VAULT_ID;
@@ -103,9 +103,6 @@ pub(crate) struct FileMeta {
     pub(crate) sha256: String,
 }
 
-
-
-
 /// The right sidebar's active tab. Properties (the focused note's
 /// frontmatter, edited live) and Links (backlinks + outgoing links +
 /// local graph).
@@ -115,7 +112,6 @@ enum RightTab {
     Links,
     Share,
 }
-
 
 #[component]
 pub fn VaultView(
@@ -213,10 +209,9 @@ pub fn VaultView(
                 if slug.is_empty() {
                     return false;
                 }
-                let Ok(client) = crate::vox_clients::establish_for::<
-                    vault_proto::VaultSyncStreamClient,
-                >(&slug)
-                .await
+                let Ok(client) =
+                    crate::vox_clients::establish_for::<vault_proto::VaultSyncStreamClient>(&slug)
+                        .await
                 else {
                     return false;
                 };
@@ -406,7 +401,10 @@ pub fn VaultView(
             return;
         }
         last_link.set(sel.clone());
-        nav.push(crate::routes::Route::VaultRoute { path: sel, org: active() });
+        nav.push(crate::routes::Route::VaultRoute {
+            path: sel,
+            org: active(),
+        });
     });
 
     // Autocomplete tags — `#` completes vault tags pulled once per org
@@ -462,7 +460,9 @@ pub fn VaultView(
                     create_parent.set(None);
                     let mut open_sha = created_sha.clone();
                     if let Some(parent) = parent {
-                        match move_to_folder(active(), name.clone(), Some(parent), created_sha).await {
+                        match move_to_folder(active(), name.clone(), Some(parent), created_sha)
+                            .await
+                        {
                             Ok(new_sha) => open_sha = new_sha,
                             Err(e) => {
                                 if let Some(n) = notify {
@@ -1042,10 +1042,6 @@ pub fn VaultView(
     }
 }
 
-
-
-
-
 // ── shared frontmatter readers ───────────────────────────────
 
 // The frontmatter readers (`frontmatter_value`, `front_block_maps`,
@@ -1070,13 +1066,6 @@ pub(crate) fn seed_note_bytes() -> Vec<u8> {
     let today = chrono::Local::now().date_naive();
     format!("---\ncreated: {today}\ntags: []\naliases: []\n---\n\n").into_bytes()
 }
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod song_front_tests {
@@ -1133,7 +1122,10 @@ mod setlist_wikilink_tests {
             vec!["praise", "god-im-just-grateful", "holy-forever"]
         );
         // Body wikilinks WIN over the frontmatter list…
-        assert_eq!(setlist_songs_from(note).first().map(|s| s.as_str()), Some("praise"));
+        assert_eq!(
+            setlist_songs_from(note).first().map(|s| s.as_str()),
+            Some("praise")
+        );
     }
 
     #[test]

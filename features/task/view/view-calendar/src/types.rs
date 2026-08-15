@@ -16,6 +16,14 @@ pub enum ViewMode {
     #[default]
     Week,
     Day,
+    /// A week whose vertical axis is *categories* rather than hours —
+    /// breakfast/lunch/dinner, morning/afternoon/evening, shift names.
+    ///
+    /// The other modes place a block by when it happens; this one
+    /// places it by what kind of thing it is. Some plans genuinely
+    /// have no clock value — "Friday dinner" is not 18:30 — and
+    /// inventing one to satisfy a time axis makes the grid lie.
+    Blocks,
 }
 
 impl ViewMode {
@@ -25,6 +33,7 @@ impl ViewMode {
             Self::Month => "Month",
             Self::Week => "Week",
             Self::Day => "Day",
+            Self::Blocks => "Blocks",
         }
     }
 }

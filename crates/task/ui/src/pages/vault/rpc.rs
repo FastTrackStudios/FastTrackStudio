@@ -12,13 +12,13 @@ use vault_proto::PageMeta;
 // so everything they'd need is gated to match or the native build
 // warns on unused imports.
 #[cfg(target_arch = "wasm32")]
-use std::collections::HashMap;
-#[cfg(target_arch = "wasm32")]
-use vault_proto::IfMatch;
+use super::seed_note_bytes;
 #[cfg(target_arch = "wasm32")]
 use crate::document_session::VAULT_ID;
 #[cfg(target_arch = "wasm32")]
-use super::seed_note_bytes;
+use std::collections::HashMap;
+#[cfg(target_arch = "wasm32")]
+use vault_proto::IfMatch;
 
 /// Frontmatter-derived page index for the folder tree.
 pub(crate) async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, String> {
@@ -54,7 +54,10 @@ pub(crate) async fn fetch_folder_index(slug: String) -> Result<Vec<PageMeta>, St
 }
 
 /// Outgoing wikilinks of `path`, via the `VaultGraph` RPC.
-pub(super) async fn fetch_links(slug: String, path: String) -> Result<Vec<vault_proto::GraphLink>, String> {
+pub(super) async fn fetch_links(
+    slug: String,
+    path: String,
+) -> Result<Vec<vault_proto::GraphLink>, String> {
     let client = crate::vox_clients::vault_graph_client(&slug).await?;
     #[cfg(target_arch = "wasm32")]
     {
@@ -128,7 +131,12 @@ pub(crate) async fn create_new_file(slug: String, path: String) -> Result<String
     {
         use vault_proto::IfMatch;
         let ack = client
-            .put_file(VAULT_ID.to_owned(), path, seed_note_bytes(), IfMatch::CreateOnly)
+            .put_file(
+                VAULT_ID.to_owned(),
+                path,
+                seed_note_bytes(),
+                IfMatch::CreateOnly,
+            )
             .await
             .map_err(|e| format!("put_file: {e:?}"))?;
         Ok(ack.sha256)

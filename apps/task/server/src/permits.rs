@@ -585,7 +585,7 @@ table!(COOKBOOK, "cookbook", "mealplan/cookbook/**", [
 #[cfg(feature = "plugin-mealplan")]
 table!(MEALPLAN, "mealplan", "mealplan/plan/**", [
     rd "list", rd "get", wr "create", wr "update", wr "rename", wa "delete",
-    wr "cook", wr "skip", rd "can_cook", wr "cook_recipe",
+    wr "cook", wr "skip", wr "eat_out", rd "can_cook", wr "cook_recipe",
 ]);
 #[cfg(feature = "plugin-mealplan")]
 table!(PANTRY, "pantry", "mealplan/pantry/**", [
