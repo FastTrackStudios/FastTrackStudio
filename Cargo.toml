@@ -9,29 +9,14 @@
 [workspace]
 resolver = "3"
 
-# fts-launcher is a standalone app with no in-workspace consumers. Its
-# launcher-core/launcher-ui/providers deps come from the unvendored
-# dioxus-launcher.git, and launcher-ui depends on `fts-ui` — which used to
-# be redirected at the in-tree crate by a [patch] on the Codeberg URL.
-# After the split there is no in-tree fts-ui to redirect to (it is
-# architect-ui now, in another repo, and [patch] cannot rename a crate), so
-# launcher-ui resolves a STALE fts-ui straight from Codeberg. That copy
-# carries its own dioxus, which puts two dioxus versions in one graph and
-# fails with 17 `Component<_> is not implemented` errors.
-#
-# The fix is to vendor or fork dioxus-launcher and repoint its fts-ui dep
-# at architect-ui. Until then the crate is excluded rather than left
-# breaking `cargo check --workspace`. The source is untouched.
-exclude = ["features/launcher/fts-launcher"]
-
 members = [
     # ── libs/vendor — patched third-party kept in-tree ────────────────
     "libs/vendor/dioxus-test",
     "libs/vendor/world",
     # ── libs/ — UI + infrastructure libraries ─────────────────────────
     "libs/fts-chrome",
-    "libs/fts-ui/fts-ui-audio",
-    "libs/fts-ui/fts-plug-ui",
+    "libs/ui/fts-audio-ui",
+    "libs/ui/fts-plug-ui",
     "libs/dock/dock-dioxus",
     "libs/dock/dock-proto",
     "libs/utils",
@@ -112,9 +97,9 @@ members = [
     "features/reaper/fts-icons",
     "features/reaper/fts-themer",
     "features/reaper/fts-themer-ui",
-    # ── features/launcher — launcher search/workflow engine + panel ────
-    # EXCLUDED by the August 2026 split, see `exclude` below.
-    # "features/launcher/fts-launcher",
+    # ── features/launcher — the REAPER DawModule glue; the engine itself
+    #    is architect-launcher-* in the architect repo ─────────────────
+    "features/launcher/fts-launcher",
     # ── features/standalone / surfaces / daw-ui ───────────────────────
     "features/standalone/daw-standalone",
     "features/surfaces/daw-csi",
@@ -323,8 +308,8 @@ repository = "https://codeberg.org/FastTrackStudios/FastTrackStudio"
 [workspace.dependencies]
 # ── Internal — every moved crate, path declared ONCE here ─────────────
 fts-chrome = { path = "libs/fts-chrome" }
-fts-ui-audio = { path = "libs/fts-ui/fts-ui-audio" }
-fts-plug-ui = { path = "libs/fts-ui/fts-plug-ui" }
+fts-audio-ui = { path = "libs/ui/fts-audio-ui" }
+fts-plug-ui = { path = "libs/ui/fts-plug-ui" }
 dock-dioxus ={ path = "libs/dock/dock-dioxus", default-features = false }
 dock-proto = { path = "libs/dock/dock-proto" }
 # nice-plug lives in its own fork repo (upstream RustAudio/nice-plug's
@@ -423,10 +408,6 @@ reaper-dioxus = { path = "features/reaper/reaper-dioxus" }
 # eagerly, which OOMs when loaded at REAPER plugin_main time. The only
 # consumer (fts-extensions) wants it off; enable per-member if needed.
 reaper-input = { path = "features/reaper/reaper-input", default-features = false }
-# Excluded from [workspace].members (see the note at the top), but kept here:
-# reaper-fts-extensions declares it as an OPTIONAL dep behind `mod-launcher`,
-# so it only builds when that feature is on — which is where it will break
-# until dioxus-launcher is vendored.
 fts-launcher = { path = "features/launcher/fts-launcher" }
 fts-extensions-actions = { path = "apps/extensions/reaper-fts-extensions/actions" }
 daw-standalone = { path = "features/standalone/daw-standalone" }
@@ -655,33 +636,40 @@ inferno-net = { git = "https://codeberg.org/FastTrackStudios/inferno-control", r
 # (FastTrackStudios/architect: the entity/RPC framework, the auth/crdt/
 # permissions stack, architect-ui + architect-story, architect-telemetry).
 # One tag pin shared by every entry so the whole framework moves together.
-architect = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-rpc-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-action-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-atom = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-form = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-permissions = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-permissions-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-auth-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-auth-db = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-auth-client = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-crdt = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-crdt-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-crdt-seaorm = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-# The Dioxus primitive library (was libs/fts-ui/fts-ui, renamed on the split).
-architect-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
+architect = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-rpc-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-action-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-atom = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-form = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-permissions = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-permissions-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+auth = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+auth-proto = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+auth-db = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+auth-client = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+crdt = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+crdt-derive = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+crdt-seaorm = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+# The Dioxus primitive library (was libs/ui/fts-ui, renamed on the split).
+architect-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+# The launcher engine, vendored into architect in v0.2.0 (was
+# launcher-core / launcher-ui / providers on dioxus-launcher.git).
+architect-launcher-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+# default-features = false lives here, not on the consumer: cargo refuses
+# `default-features = false` on a workspace-inherited dep.
+architect-launcher-ui = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0", default-features = false }
+architect-launcher-providers = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
 # Wide-events telemetry (was crates/task/telemetry).
-architect-telemetry = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
+architect-telemetry = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
 # Story/snapshot tooling (was libs/fts-story/*).
-architect-story-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-story-macros = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-story-runtime = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-story-shell = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-story-snapshots = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
-architect-story-parity = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.1.1" }
+architect-story-core = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-story-macros = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-story-runtime = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-story-shell = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-story-snapshots = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
+architect-story-parity = { git = "https://github.com/FastTrackStudios/architect", tag = "v0.2.0" }
 
 # Architect's externals, merged from its dissolved workspace table
 # (root pins win — both were already on the rc.5 fleet).

@@ -42,7 +42,7 @@ consumed as `x.workspace = true`.
 | new | from |
 |---|---|
 | libs/architect/* | subtree import of FastTrackStudios/architect ({architect,macros/*,atom,form,auth/*,crdt/*}; examples/xtask dropped) |
-| libs/fts-ui/* | architect-ui/crates/{architect-ui,fts-ui-audio,showcase} |
+| libs/ui/* | architect-ui/crates/{architect-ui,fts-audio-ui,showcase} |
 | libs/fts-story/* | fts-story/crates/* |
 | libs/dock/* | dock-dioxus/crates/{dock-dioxus,dock-proto} |
 | libs/nice-plug/* | FTS-Plugins/forks/fts-plug/crates/* |

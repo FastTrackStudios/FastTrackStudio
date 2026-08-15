@@ -107,7 +107,7 @@ dependencies = [
 [[package]]
 name = "actions-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
  "convert_case 0.6.0",
  "facet",
@@ -880,12 +880,12 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
 dependencies = [
- "architect-action-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
- "architect-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
- "architect-permissions 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
- "architect-rpc-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
+ "architect-action-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-permissions 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-rpc-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
  "eyre",
  "facet",
  "thiserror 2.0.18",
@@ -897,13 +897,13 @@ dependencies = [
 [[package]]
 name = "architect"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
- "architect-action-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-action-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "architect-atom",
- "architect-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
- "architect-permissions 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
- "architect-rpc-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "architect-permissions 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "architect-rpc-derive 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "async-channel 2.5.0",
  "axum",
  "eyre",
@@ -926,33 +926,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
-dependencies = [
- "architect-action-derive 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "architect-derive 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "architect-permissions 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "architect-rpc-derive 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "eyre",
- "facet",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
- "vox",
-]
-
-[[package]]
-name = "architect-action-derive"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
 name = "architect-action-derive"
 version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
@@ -965,7 +938,7 @@ dependencies = [
 [[package]]
 name = "architect-action-derive"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -975,7 +948,7 @@ dependencies = [
 [[package]]
 name = "architect-atom"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
  "dioxus",
 ]
@@ -983,17 +956,6 @@ dependencies = [
 [[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
-name = "architect-derive"
-version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
 dependencies = [
  "heck 0.5.0",
@@ -1005,7 +967,7 @@ dependencies = [
 [[package]]
 name = "architect-derive"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -1014,12 +976,42 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect-permissions"
+name = "architect-launcher-core"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
+ "chrono",
+ "facet",
+ "facet-styx",
+ "nucleo-matcher",
  "serde",
  "serde_json",
+ "tokio",
+ "toml 0.8.2",
+ "tracing",
+]
+
+[[package]]
+name = "architect-launcher-providers"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
+dependencies = [
+ "architect-launcher-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "architect-launcher-ui"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
+dependencies = [
+ "architect-launcher-core",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "dioxus",
+ "lucide-dioxus",
  "tracing",
 ]
 
@@ -1036,21 +1028,11 @@ dependencies = [
 [[package]]
 name = "architect-permissions"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
  "serde",
  "serde_json",
  "tracing",
-]
-
-[[package]]
-name = "architect-rpc-derive"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -1066,7 +1048,7 @@ dependencies = [
 [[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1076,7 +1058,7 @@ dependencies = [
 [[package]]
 name = "architect-story-core"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
 dependencies = [
  "linkme",
 ]
@@ -1084,20 +1066,9 @@ dependencies = [
 [[package]]
 name = "architect-story-core"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
  "linkme",
-]
-
-[[package]]
-name = "architect-story-macros"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -1112,14 +1083,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect-story-runtime"
+name = "architect-story-macros"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
- "architect-story-core 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
- "architect-story-macros 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
- "dioxus",
- "linkme",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -1134,11 +1105,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-story-runtime"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
+dependencies = [
+ "architect-story-core 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "architect-story-macros 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "dioxus",
+ "linkme",
+]
+
+[[package]]
 name = "architect-ui"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.0#43e60ba5cda5155bf9faa25d09a1fe63f37e1343"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
 dependencies = [
- "architect-story-runtime 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
+ "architect-story-runtime 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
  "chrono",
  "clsx",
  "dioxus",
@@ -1155,9 +1137,9 @@ dependencies = [
 [[package]]
 name = "architect-ui"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/architect?tag=v0.1.1#5cde23a3d3e319deb790979b2f2edaded9ce39fa"
+source = "git+https://github.com/FastTrackStudios/architect?tag=v0.2.0#a3a10e94d53467caf704713571303d08d95e38a2"
 dependencies = [
- "architect-story-runtime 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-story-runtime 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "chrono",
  "clsx",
  "dioxus",
@@ -1512,6 +1494,7 @@ checksum = "21e4227379beff4205943696e6c3e0cd809bacdf3f0edd6e3dd153e2269571a4"
 [[package]]
 name = "attachments-proto"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "facet",
  "thiserror 2.0.18",
@@ -2863,7 +2846,7 @@ checksum = "0d1275808335c5583ea45a4141d631dafcb36b79fa8a5e10b00e356b6af3e08a"
 name = "chord-tool"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dioxus",
  "keyflow",
  "tracing",
@@ -3142,8 +3125,9 @@ checksum = "724d27a0ee38b700e5e164350e79aba601a0db673ac47fce1cb74c3e38864036"
 [[package]]
 name = "collection-proto"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
  "facet",
  "links-proto",
  "serde",
@@ -3199,7 +3183,7 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
  "facet",
  "thiserror 2.0.18",
@@ -3314,13 +3298,13 @@ dependencies = [
 name = "comp-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "atomic_float",
  "audiocore-core",
  "comp-profiles",
  "dioxus",
  "dioxus-test",
- "fts-ui-audio",
+ "fts-audio-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "parking_lot",
@@ -4334,7 +4318,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 2.0.118",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -4347,7 +4331,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "daw"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "clap",
  "daw-control",
  "daw-csi",
@@ -4380,7 +4364,7 @@ dependencies = [
 name = "daw-actions"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw",
  "daw-reaper",
  "eyre",
@@ -4427,7 +4411,7 @@ dependencies = [
 name = "daw-bridge"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "crossbeam-channel",
  "daw",
  "daw-allocator",
@@ -4459,7 +4443,7 @@ dependencies = [
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw-proto 0.1.0",
  "eyre",
  "facet",
@@ -4493,7 +4477,7 @@ dependencies = [
 name = "daw-extension-runtime"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "crossbeam-channel",
  "daw-control",
  "daw-module",
@@ -4562,7 +4546,7 @@ name = "daw-proto"
 version = "0.1.0"
 dependencies = [
  "actions-proto 0.1.0",
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "facet-json",
  "futures",
@@ -4575,13 +4559,13 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
- "actions-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "actions-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
  "facet",
  "futures",
- "midicore 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "midicore 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
  "vox",
  "vox-types",
 ]
@@ -4590,7 +4574,7 @@ dependencies = [
 name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "base64 0.22.1",
  "camino",
  "crossbeam-channel",
@@ -4626,7 +4610,7 @@ name = "daw-reaper-dioxus"
 version = "0.1.0"
 dependencies = [
  "anyrender_vello 0.12.0",
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
@@ -4713,7 +4697,7 @@ dependencies = [
 name = "daw-standalone"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "base64 0.22.1",
  "clack-extensions",
  "clack-host",
@@ -4794,8 +4778,8 @@ dependencies = [
 name = "daw-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw-control",
  "daw-module",
  "daw-proto 0.1.0",
@@ -5003,14 +4987,14 @@ dependencies = [
 name = "delay-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "atomic_float",
  "crossbeam-channel",
  "delay-dsp",
  "delay-profiles",
  "dioxus",
  "dioxus-test",
- "fts-ui-audio",
+ "fts-audio-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "parking_lot",
@@ -6282,7 +6266,7 @@ name = "dynamic-template"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "color-palette 0.1.0",
  "daw",
  "daw-proto 0.1.0",
@@ -6394,6 +6378,7 @@ dependencies = [
 [[package]]
 name = "editor"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "dioxus",
  "editor-state",
@@ -6404,9 +6389,10 @@ dependencies = [
 [[package]]
 name = "editor-keyflow"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
- "engraver 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "keyflow-text 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "engraver 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "keyflow-text 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -6414,14 +6400,16 @@ dependencies = [
 [[package]]
 name = "editor-keyflow-lang"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "editor-state",
- "keyflow-text 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "keyflow-text 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
 ]
 
 [[package]]
 name = "editor-mermaid"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "mermaid-rs-renderer",
  "thiserror 2.0.18",
@@ -6431,6 +6419,7 @@ dependencies = [
 [[package]]
 name = "editor-state"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "editor-keyflow",
  "editor-mermaid",
@@ -6446,6 +6435,7 @@ dependencies = [
 [[package]]
 name = "editor-syntax"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "arborium",
  "arborium-theme",
@@ -6455,6 +6445,7 @@ dependencies = [
 [[package]]
 name = "editor-typst"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "chrono",
  "comemo",
@@ -6472,6 +6463,7 @@ dependencies = [
 [[package]]
 name = "editor-view"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "dioxus",
  "editor-state",
@@ -6487,6 +6479,7 @@ dependencies = [
 [[package]]
 name = "editor-vim"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
  "editor-state",
  "tracing",
@@ -6545,9 +6538,9 @@ dependencies = [
 [[package]]
 name = "engraver"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
- "engraver-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "engraver-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
 ]
 
 [[package]]
@@ -6599,7 +6592,7 @@ dependencies = [
 [[package]]
 name = "engraver-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
  "bitflags 2.13.0",
  "color-eyre",
@@ -6608,9 +6601,9 @@ dependencies = [
  "facet",
  "getrandom 0.2.17",
  "helgoboss-midi",
- "keyflow-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "keyflow-syntax 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "keyflow-text 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "keyflow-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "keyflow-syntax 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "keyflow-text 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
  "kurbo 0.13.1",
  "macro_rules_attribute",
  "peniko 0.6.1",
@@ -6832,14 +6825,14 @@ dependencies = [
 name = "eq-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "atomic_float",
  "audiocore-core",
  "dioxus",
  "dioxus-ssr",
  "dioxus-test",
  "eq-profiles",
- "fts-ui-audio",
+ "fts-audio-ui",
  "futures-timer",
  "nice-plug",
  "nice-plug-dioxus",
@@ -7064,7 +7057,7 @@ dependencies = [
 name = "expression-editor-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw-theme",
  "dioxus",
  "dioxus-ssr",
@@ -7406,7 +7399,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 name = "fasttrackstudio"
 version = "0.0.2-alpha"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "axum",
  "base64 0.22.1",
  "collection-proto",
@@ -7881,6 +7874,17 @@ name = "fts-audio-proto"
 version = "0.1.0"
 
 [[package]]
+name = "fts-audio-ui"
+version = "0.1.0"
+dependencies = [
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "dioxus",
+ "dioxus-test",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "fts-chrome"
 version = "0.1.0"
 dependencies = [
@@ -7901,7 +7905,7 @@ dependencies = [
 name = "fts-cli"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "axum",
  "clap",
  "daw",
@@ -7928,8 +7932,8 @@ version = "0.1.0"
 name = "fts-extensions"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "crossbeam-channel",
  "daw",
  "daw-actions",
@@ -7944,6 +7948,7 @@ dependencies = [
  "eyre",
  "fragile",
  "fts-extensions-actions",
+ "fts-launcher",
  "keyflow-orchestra",
  "reaper-config",
  "reaper-high",
@@ -7962,7 +7967,7 @@ dependencies = [
 name = "fts-extensions-actions"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
 ]
 
 [[package]]
@@ -8006,6 +8011,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-launcher"
+version = "0.1.0"
+dependencies = [
+ "architect-launcher-core",
+ "architect-launcher-providers",
+ "architect-launcher-ui",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "daw",
+ "dioxus-native",
+ "facet",
+ "facet-styx",
+ "reaper-high",
+ "reaper-medium",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "winit 0.31.0-beta.2",
+]
+
+[[package]]
 name = "fts-modulation"
 version = "0.1.0"
 dependencies = [
@@ -8016,7 +8042,7 @@ dependencies = [
 name = "fts-patchbay"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "clap",
  "dioxus",
  "eyre",
@@ -8036,11 +8062,11 @@ dependencies = [
 name = "fts-plug-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "atomic_float",
  "audiocore-core",
  "dioxus",
- "fts-ui-audio",
+ "fts-audio-ui",
  "nice-plug",
  "nice-plug-dioxus",
 ]
@@ -8066,7 +8092,7 @@ name = "fts-site"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "collection-proto",
  "console_error_panic_hook",
  "daw-proto 0.1.0",
@@ -8133,17 +8159,6 @@ name = "fts-themes"
 version = "0.1.0"
 dependencies = [
  "audiocore-core",
-]
-
-[[package]]
-name = "fts-ui-audio"
-version = "0.1.0"
-dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
- "dioxus",
- "dioxus-test",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -10376,7 +10391,7 @@ dependencies = [
 name = "input-dioxus"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dioxus",
  "gloo-timers",
  "input",
@@ -11032,7 +11047,7 @@ dependencies = [
 [[package]]
 name = "keyflow-chordpro"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 
 [[package]]
 name = "keyflow-cli"
@@ -11056,7 +11071,7 @@ dependencies = [
 name = "keyflow-daw-analysis"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw",
  "eyre",
  "facet",
@@ -11141,7 +11156,7 @@ dependencies = [
 name = "keyflow-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "color-palette 0.1.0",
  "daw-proto 0.1.0",
  "facet",
@@ -11159,15 +11174,15 @@ dependencies = [
 [[package]]
 name = "keyflow-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
  "facet",
  "helgoboss-midi",
- "keyflow-syntax 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "keyflow-syntax 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
  "serde",
  "thiserror 2.0.18",
  "tracing",
@@ -11208,7 +11223,7 @@ dependencies = [
 [[package]]
 name = "keyflow-syntax"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
  "facet",
  "serde",
@@ -11228,11 +11243,11 @@ dependencies = [
 [[package]]
 name = "keyflow-text"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
- "keyflow-chordpro 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "keyflow-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
- "keyflow-syntax 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "keyflow-chordpro 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "keyflow-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
+ "keyflow-syntax 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
  "tracing",
 ]
 
@@ -11243,7 +11258,7 @@ dependencies = [
  "anyrender",
  "anyrender_vello 0.12.0",
  "anyrender_vello_hybrid",
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw-proto 0.1.0",
  "dioxus",
  "dioxus-native",
@@ -11692,8 +11707,9 @@ dependencies = [
 [[package]]
 name = "links-proto"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
  "facet",
  "serde",
  "serde_json",
@@ -12595,9 +12611,9 @@ dependencies = [
 [[package]]
 name = "midicore"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
- "midicore-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "midicore-proto 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
 ]
 
 [[package]]
@@ -12615,7 +12631,7 @@ dependencies = [
 name = "midicore-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "vox",
  "vox-types",
@@ -12624,9 +12640,9 @@ dependencies = [
 [[package]]
 name = "midicore-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
  "facet",
  "vox",
  "vox-types",
@@ -12768,11 +12784,11 @@ dependencies = [
 name = "modulation-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "atomic_float",
  "dioxus",
  "dioxus-test",
- "fts-ui-audio",
+ "fts-audio-ui",
  "modulation-profiles",
  "nice-plug",
  "nice-plug-dioxus",
@@ -12900,9 +12916,9 @@ dependencies = [
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main#75d685d3a9a496da012de20667e3d5844a7e87d5"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0#0d7e77114458b2a0dccbe90c6ec4499c4f396bd4"
 dependencies = [
- "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?branch=main)",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/FastTrackStudio?tag=v0.1.0)",
 ]
 
 [[package]]
@@ -14699,7 +14715,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 name = "patchbay"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dirs",
  "eyre",
  "facet",
@@ -14722,7 +14738,7 @@ dependencies = [
 name = "patchbay-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "serde",
  "thiserror 2.0.18",
@@ -16567,7 +16583,7 @@ dependencies = [
 name = "reaper-input"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "camino",
  "daw",
  "dioxus-native",
@@ -16961,12 +16977,12 @@ dependencies = [
 name = "reverb-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "atomic_float",
  "crossbeam-channel",
  "dioxus",
  "dioxus-test",
- "fts-ui-audio",
+ "fts-audio-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "parking_lot",
@@ -17475,12 +17491,12 @@ dependencies = [
 name = "saturate-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "atomic_float",
  "crossbeam-channel",
  "dioxus",
  "dioxus-test",
- "fts-ui-audio",
+ "fts-audio-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "parking_lot",
@@ -17988,7 +18004,7 @@ name = "session"
 version = "0.1.0"
 dependencies = [
  "actions-proto 0.1.0",
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "chrono",
  "color-palette 0.1.0",
  "daw",
@@ -18057,7 +18073,7 @@ name = "session-proto"
 version = "0.1.0"
 dependencies = [
  "actions-proto 0.1.0",
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw-proto 0.1.0",
  "eyre",
  "facet",
@@ -18076,7 +18092,7 @@ dependencies = [
 name = "session-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw-proto 0.1.0",
  "dioxus",
  "dock-dioxus",
@@ -18187,7 +18203,7 @@ dependencies = [
 name = "signal-bass"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "facet-styx",
  "midicore 0.1.0",
@@ -18204,7 +18220,7 @@ dependencies = [
 name = "signal-bass-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "midicore-proto 0.1.0",
  "signal-proto",
@@ -18215,7 +18231,7 @@ dependencies = [
 name = "signal-bass-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dioxus",
  "fts-chrome",
  "midicore-proto 0.1.0",
@@ -18263,7 +18279,7 @@ dependencies = [
 name = "signal-drums"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw",
  "kontrol",
  "midicore 0.1.0",
@@ -18282,7 +18298,7 @@ dependencies = [
 name = "signal-drums-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "midicore-proto 0.1.0",
  "vox",
@@ -18292,7 +18308,7 @@ dependencies = [
 name = "signal-drums-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dioxus",
  "midicore-proto 0.1.0",
  "midicore-ui",
@@ -18304,7 +18320,7 @@ dependencies = [
 name = "signal-ekit"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw",
  "midicore 0.1.0",
  "signal-ekit-proto",
@@ -18319,7 +18335,7 @@ dependencies = [
 name = "signal-ekit-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "vox",
 ]
@@ -18328,7 +18344,7 @@ dependencies = [
 name = "signal-ekit-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dioxus",
  "signal-ekit-proto",
 ]
@@ -18384,8 +18400,8 @@ dependencies = [
 name = "signal-grid-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "audio-controls",
  "dioxus",
  "lumen-blocks",
@@ -18399,7 +18415,7 @@ dependencies = [
 name = "signal-guitar"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "facet-styx",
  "midicore 0.1.0",
@@ -18419,7 +18435,7 @@ dependencies = [
 name = "signal-guitar-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "signal-proto",
  "vox",
@@ -18429,7 +18445,7 @@ dependencies = [
 name = "signal-guitar-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dioxus",
  "eq-ui",
  "lumen-blocks",
@@ -18490,7 +18506,7 @@ dependencies = [
 name = "signal-keys"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw",
  "daw-audio-io",
  "eyre",
@@ -18515,7 +18531,7 @@ dependencies = [
 name = "signal-keys-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "midicore-proto 0.1.0",
  "vox",
@@ -18525,7 +18541,7 @@ dependencies = [
 name = "signal-keys-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dioxus",
  "fts-chrome",
  "midicore-proto 0.1.0",
@@ -18598,7 +18614,7 @@ dependencies = [
 name = "signal-pack-library"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "sha2 0.10.9",
  "signal-packs-proto",
  "tokio",
@@ -18611,7 +18627,7 @@ dependencies = [
 name = "signal-packs-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "thiserror 2.0.18",
  "vox",
@@ -18690,7 +18706,7 @@ dependencies = [
 name = "signal-rigs-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "vox",
 ]
@@ -18765,7 +18781,7 @@ dependencies = [
 name = "signal-space"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "bhtsne",
  "hound",
  "rayon",
@@ -18781,7 +18797,7 @@ dependencies = [
 name = "signal-space-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "vox",
 ]
@@ -18821,7 +18837,7 @@ dependencies = [
 name = "signal-synth-proto"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "facet",
  "midicore-proto 0.1.0",
  "vox",
@@ -18831,7 +18847,7 @@ dependencies = [
 name = "signal-synth-rig"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw",
  "daw-audio-io",
  "midicore 0.1.0",
@@ -18849,7 +18865,7 @@ dependencies = [
 name = "signal-synth-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "dioxus",
  "fts-chrome",
  "midicore-proto 0.1.0",
@@ -18864,8 +18880,8 @@ dependencies = [
 name = "signal-ui"
 version = "0.1.0"
 dependencies = [
- "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "audio-controls",
  "audiocore-gui",
  "dioxus",
@@ -19280,10 +19296,10 @@ dependencies = [
 name = "spectrum-analyzer-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "audiocore-core",
  "dioxus",
- "fts-ui-audio",
+ "fts-audio-ui",
  "nice-plug-dioxus",
  "spectrum-analyzer-dsp",
 ]
@@ -21631,12 +21647,12 @@ dependencies = [
 name = "trigger-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "atomic_float",
  "audiocore-core",
  "dioxus",
  "dioxus-test",
- "fts-ui-audio",
+ "fts-audio-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "tokio",
@@ -22758,8 +22774,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "view-knowledge-graph"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/task?branch=main#e42cdb3f5ef6414e62e35827292196753a2961b3"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.0)",
+ "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.1.1)",
  "dioxus",
  "links-proto",
  "serde",
