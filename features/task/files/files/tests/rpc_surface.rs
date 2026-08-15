@@ -410,6 +410,114 @@ async fn nested_roots_are_submodules() {
     scope.close().await;
 }
 
+/// Carving a child root out of a parent that ALREADY tracks those
+/// files — the real migration case, not the greenfield one the test
+/// above covers. A 5 TB tree gets registered as whole-project roots
+/// first; deciding an album's songs deserve their own roots comes
+/// later, by which time the album has history.
+///
+/// What must hold: the files are not lost, the album keeps its own
+/// files, and everything captured before the split is still
+/// **recoverable** from the commit that captured it. The parent
+/// recording a deletion at the moment of the split is correct and
+/// expected — the paths genuinely left its tree, exactly as `git rm -r`
+/// precedes adding a submodule.
+///
+/// Note what is NOT asserted: that `chain(parent, "song one/mix.wav")`
+/// still answers. It does not, and that is not a carving bug — `chain`
+/// walks back from HEAD and stops the moment the path is absent
+/// (`chain.rs:112`), so the history of ANY deleted file is unreachable
+/// that way. Worth knowing before splitting a tree that already has
+/// history: reach it through `browse_at` on the pre-split commit, which
+/// is what this pins.
+#[tokio::test(flavor = "multi_thread")]
+async fn carving_a_child_root_out_of_tracked_files_keeps_the_history() {
+    let data_dir = tempfile::tempdir().expect("data tempdir");
+    let album = data_dir.path().join("album");
+    let song = album.join("song one");
+    std::fs::create_dir_all(&song).unwrap();
+    std::fs::write(album.join("album notes.txt"), b"the album's own file").unwrap();
+    std::fs::write(song.join("mix.wav"), b"v1 of the song").unwrap();
+
+    let backend =
+        FilesBackend::new(data_dir.path(), data_dir.path().join("vault")).expect("backend");
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(backend), scope.clone());
+    let client: FilesServiceClient = local.establish().await.expect("establish client");
+
+    let parent = client
+        .create_root(
+            album.to_str().unwrap().to_string(),
+            "Album".to_string(),
+            RootFlavor::Media,
+        )
+        .await
+        .expect("create album root");
+    let whole = client
+        .checkpoint_now(parent.id, Some("album captured whole".to_string()))
+        .await
+        .expect("first checkpoint");
+
+    // The song is in the album's history at this point.
+    let before = client
+        .chain(parent.id, "song one/mix.wav".to_string())
+        .await
+        .expect("chain rpc");
+    assert!(
+        !before.is_empty(),
+        "the song must be in the album's history before the split"
+    );
+
+    // Now carve it out.
+    let child = client
+        .create_root(
+            song.to_str().unwrap().to_string(),
+            "Song One".to_string(),
+            RootFlavor::Media,
+        )
+        .await
+        .expect("create song root");
+    client
+        .checkpoint_now(parent.id, Some("after the split".to_string()))
+        .await
+        .expect("second checkpoint");
+
+    // The album keeps its OWN files — the whole point of the submodule
+    // prune (a parent with subprojects still has files of its own).
+    let album_entries = client
+        .browse(parent.id, String::new())
+        .await
+        .expect("browse album");
+    assert!(
+        album_entries.iter().any(|e| e.name == "album notes.txt"),
+        "the album's own files must survive the split: {album_entries:?}"
+    );
+
+    // What was already captured is still THERE, reachable at the
+    // commit that captured it. This is the property that makes
+    // splitting a tree that already has history a safe operation.
+    let at_split = client
+        .browse_at(parent.id, whole.commit_id.clone(), "song one".to_string())
+        .await
+        .expect("browse_at the pre-split commit");
+    assert!(
+        at_split.iter().any(|e| e.name == "mix.wav"),
+        "the pre-split capture must still hold the song's file: {at_split:?}"
+    );
+
+    // And the child owns the file going forward.
+    let song_entries = client
+        .browse(child.id, String::new())
+        .await
+        .expect("browse song");
+    assert!(
+        song_entries.iter().any(|e| e.name == "mix.wav"),
+        "the song root must see its own file: {song_entries:?}"
+    );
+
+    scope.close().await;
+}
+
 /// PR #280 review finding 4: two concurrent `checkpoint_now` calls on
 /// the same root must not race — every writer's change must land in
 /// the chain, none silently orphaned by a lost `set_head`.
