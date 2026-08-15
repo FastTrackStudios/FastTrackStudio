@@ -105,7 +105,10 @@ async fn entity_streams_deliver_mutations_end_to_end() {
         date_created: None,
         date_modified: None,
     };
-    let created = projects.create(draft.clone()).await.expect("create project");
+    let created = projects
+        .create(draft.clone())
+        .await
+        .expect("create project");
     match next_event(&mut rx, 5).await {
         ProjectEvent::Upserted(p) => {
             assert_eq!(p.id, created.id);

@@ -70,7 +70,10 @@ async fn migration_persists_and_records_against_real_sqlite() -> eyre::Result<()
         .await
         .map_err(|e| eyre::eyre!("history: {e:?}"))?;
     assert_eq!(history.len(), 1, "expected one row, got {history:?}");
-    assert_eq!(history[0].previous_email.as_deref(), Some("old@example.test"));
+    assert_eq!(
+        history[0].previous_email.as_deref(),
+        Some("old@example.test")
+    );
     assert_eq!(history[0].new_email, "new@example.test");
     assert_eq!(
         history[0].changed_by, None,
@@ -99,7 +102,10 @@ async fn migration_persists_and_records_against_real_sqlite() -> eyre::Result<()
             user_agent: None,
         })
         .await;
-    assert!(old_login.is_err(), "the old address must stop authenticating");
+    assert!(
+        old_login.is_err(),
+        "the old address must stop authenticating"
+    );
 
     let who = auth
         .auth
@@ -128,7 +134,10 @@ async fn migration_is_idempotent_and_refuses_collisions_on_real_sqlite() -> eyre
             reason: None,
         })
         .await;
-    assert!(clash.is_err(), "must not merge two accounts onto one address");
+    assert!(
+        clash.is_err(),
+        "must not merge two accounts onto one address"
+    );
     assert!(
         auth.auth.list_email_history(id).await.unwrap().is_empty(),
         "a refused migration must leave no trace"

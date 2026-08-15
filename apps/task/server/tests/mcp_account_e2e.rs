@@ -36,12 +36,7 @@ async fn rpc(
 
 /// A tool call's decoded payload: the content text parsed as JSON,
 /// plus the isError flag.
-async fn call_tool(
-    client: &reqwest::Client,
-    url: &str,
-    name: &str,
-    args: Value,
-) -> (bool, Value) {
+async fn call_tool(client: &reqwest::Client, url: &str, name: &str, args: Value) -> (bool, Value) {
     let res = rpc(
         client,
         url,
@@ -107,7 +102,10 @@ async fn mcp_account_lane_spans_orgs() {
         .iter()
         .filter_map(|o| o["slug"].as_str())
         .collect();
-    assert!(slugs.contains(&"home") && slugs.contains(&"second"), "{orgs}");
+    assert!(
+        slugs.contains(&"home") && slugs.contains(&"second"),
+        "{orgs}"
+    );
     assert_eq!(orgs["default"], "home", "home org is the default: {orgs}");
 
     // ── every tool carries the `org` argument ────────────────────
@@ -137,8 +135,7 @@ async fn mcp_account_lane_spans_orgs() {
     assert!(!err, "create_task in `second` failed: {made}");
 
     // …and lands ONLY there: separate vaults, not one pooled list.
-    let (err, second) =
-        call_tool(&client, &url, "list_tasks", json!({ "org": "second" })).await;
+    let (err, second) = call_tool(&client, &url, "list_tasks", json!({ "org": "second" })).await;
     assert!(!err, "{second}");
     assert!(
         second["tasks"]

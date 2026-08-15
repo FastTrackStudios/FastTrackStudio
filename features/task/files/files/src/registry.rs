@@ -79,23 +79,34 @@ impl Registry {
         v
     }
 
-    /// A registered root that would conflict with a new root at
-    /// `path` — exact match, an existing root nested inside `path`, or
-    /// `path` nested inside an existing root, checked both directions
-    /// since containment is symmetric-in-effect for versioning:
-    /// "roots never overlap on disk" (glossary "File Root"). The
-    /// marker-file check on disk covers the exact-match case for a
-    /// root this registry hasn't seen yet; this covers the ancestor/
-    /// descendant cases, which no marker file can detect.
+    /// A registered root that would conflict with a new root at `path`
+    /// — an EXACT match, and only that.
+    ///
+    /// Nesting is allowed: a root inside another root is a **submodule**
+    /// (a song inside an album, a show inside a venue), which is the
+    /// shape this work is actually organised in. The parent keeps its
+    /// own files and its own history; the child keeps its own store,
+    /// and [`crate::scan::walk_live_tree`] prunes the child's directory
+    /// out of the parent's walk so the parent never ingests it as
+    /// content.
+    ///
+    /// This used to refuse both containment directions, on the sound
+    /// reasoning that an outer root would otherwise swallow the inner
+    /// root's version store as ordinary files. That is still true — the
+    /// prune is what makes relaxing this safe, so the two must stay
+    /// together. **Do not loosen this further without checking that the
+    /// walk still prunes**; the failure mode is silent and expensive
+    /// (the child's whole history duplicated into the parent's store,
+    /// again on every checkpoint).
+    ///
+    /// The marker file on disk still covers exact-match for a root this
+    /// registry has not seen.
     pub fn conflicting_root(&self, path: &Path) -> Option<FileRootInfo> {
         self.roots
             .lock()
             .expect("registry lock poisoned")
             .values()
-            .find(|r| {
-                let existing = Path::new(&r.path);
-                path == existing || path.starts_with(existing) || existing.starts_with(path)
-            })
+            .find(|r| path == Path::new(&r.path))
             .cloned()
     }
 }

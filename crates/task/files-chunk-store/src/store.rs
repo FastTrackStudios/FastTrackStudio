@@ -335,6 +335,124 @@ impl ChunkStore {
         Ok(file_id)
     }
 
+    /// Store the file at `path`, returning its content address — the
+    /// entry point for content that is already a file on disk, as opposed
+    /// to [`ChunkStore::write_stream`]'s arbitrary reader.
+    ///
+    /// Below `chunker_config.whole_file_threshold` this is exactly
+    /// `write_stream` on the opened file. At or above it the file is
+    /// stored **whole**, as a single blob imported by path, which lets
+    /// iroh-blobs bring the content in with a **reflink** (`FICLONE`)
+    /// where source and store share a reflink-capable filesystem — XFS
+    /// with `reflink=1`, btrfs. The bytes are then shared, not copied:
+    /// versioning a 250 GB camera original costs its hash and its
+    /// metadata, not 250 GB.
+    ///
+    /// This is what makes a media root's *first* checkpoint affordable.
+    /// Without it, capturing a root writes a second copy of every byte in
+    /// it — for the trees this is built for, terabytes that do not exist.
+    ///
+    /// The trade, taken deliberately: a whole-stored file shares no
+    /// chunks with its own later versions, so an edit re-stores it in
+    /// full. For files this size that is nearly free to give up — they
+    /// are media, and a re-encode or a re-bounce changes every byte, so
+    /// content-defined chunking finds almost nothing to share anyway —
+    /// while the case it buys, snapshotting an *unchanged* tree, is the
+    /// dominant one by orders of magnitude.
+    ///
+    /// Reflink is an optimization, never a requirement: on a filesystem
+    /// that cannot clone (ext4, or a store on a different filesystem than
+    /// the source) iroh-blobs falls back to a real copy and this still
+    /// produces the same, correct content address — slowly.
+    ///
+    /// Divergence is the filesystem's problem, and it solves it
+    /// correctly: a clone is copy-on-write, so a later edit to the live
+    /// file copies only the extents it touches and the stored version
+    /// keeps the originals. History stays real. This is why the import
+    /// uses `Copy` (clone-then-own) rather than `TryReference`, which
+    /// would point the store at the live file itself and let a later edit
+    /// or delete destroy the version that was supposed to survive it.
+    pub async fn write_path(&self, path: impl AsRef<Path>) -> Result<FileId> {
+        let path = path.as_ref();
+        let len = tokio::fs::metadata(path).await?.len();
+        if len < self.chunker_config.whole_file_threshold {
+            let file = tokio::fs::File::open(path).await?;
+            return self.write_stream(file).await;
+        }
+
+        // Same GC discipline as `write_stream` — see `write_lock`'s doc:
+        // the blob is unreferenced by any manifest until the write below
+        // lands, so a sweep must not be able to observe this call
+        // partway through.
+        let _write_guard = self.write_lock.read().await;
+        let batch = self
+            .blobs
+            .batch()
+            .await
+            .map_err(|e| Error::Store(format!("opening a gc-protection batch: {e}")))?;
+        let tag = batch
+            .add_path_with_opts(iroh_blobs::api::blobs::AddPathOptions {
+                path: path.to_path_buf(),
+                format: iroh_blobs::BlobFormat::Raw,
+                // `Copy` is the reflinking mode (iroh-blobs' import path
+                // tries `FICLONE` first and falls back to a copy). See
+                // this method's doc for why not `TryReference`.
+                mode: iroh_blobs::api::blobs::ImportMode::Copy,
+            })
+            .await
+            .map_err(|e| Error::Store(format!("importing {}: {e}", path.display())))?;
+
+        // A `Raw` blob's iroh hash IS the blake3 of its content, so the
+        // manifest stays exactly what it always was — a list of
+        // (hash, len) — with one entry covering the whole file. No format
+        // change, and nothing else in this crate (read, range read, GC
+        // liveness) needs to know which path stored it.
+        let hash = blake3::Hash::from_bytes(*tag.hash().as_bytes());
+        let manifest = Manifest::new(vec![ChunkRef { hash, len }]);
+        let file_id = manifest.file_id();
+        self.write_manifest(file_id, &manifest).await?;
+        drop(tag);
+        drop(batch);
+        Ok(file_id)
+    }
+
+    /// Derive the [`FileId`] the file at `path` *would* have in this
+    /// store, writing nothing — [`ChunkStore::write_path`]'s pure twin,
+    /// exactly as [`ChunkStore::probe_stream`] is `write_stream`'s.
+    ///
+    /// It must make the **same size decision** `write_path` would: a
+    /// whole-stored file and a chunked one have different ids for the
+    /// same bytes, so a probe that chunked what the write would clone
+    /// (or vice versa) would report "changed" on every capture of an
+    /// untouched file — turning the skip-what-is-unchanged fast path
+    /// into a guaranteed re-import of the whole tree, forever.
+    pub async fn probe_path(&self, path: impl AsRef<Path>) -> Result<FileId> {
+        let path = path.as_ref();
+        let len = tokio::fs::metadata(path).await?.len();
+        let file = tokio::fs::File::open(path).await?;
+        if len < self.chunker_config.whole_file_threshold {
+            return self.probe_stream(file).await;
+        }
+        // Whole-file: one entry, hashed in bounded memory rather than by
+        // reading the file in (blake3 of the content is the same hash
+        // iroh-blobs derives for a `Raw` blob).
+        let mut hasher = blake3::Hasher::new();
+        let mut reader = tokio::io::BufReader::new(file);
+        let mut buf = vec![0u8; 1024 * 1024];
+        loop {
+            let n = tokio::io::AsyncReadExt::read(&mut reader, &mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+        let manifest = Manifest::new(vec![ChunkRef {
+            hash: hasher.finalize(),
+            len,
+        }]);
+        Ok(manifest.file_id())
+    }
+
     /// Derive the [`FileId`] `source` *would* have in this store,
     /// writing nothing — no chunks, no manifest, no locks. The pure
     /// half of [`ChunkStore::write_stream`]: same chunker config, same
@@ -436,7 +554,7 @@ impl ChunkStore {
     where
         W: AsyncWrite + Unpin,
     {
-        use tokio::io::AsyncWriteExt;
+        use tokio::io::AsyncReadExt as _;
         let manifest = self.read_manifest(file_id).await?;
         let end = start.saturating_add(len); // exclusive
         let mut offset = 0u64; // start of the current chunk in the file
@@ -448,16 +566,29 @@ impl ChunkStore {
             if chunk_end <= start || chunk_start >= end {
                 continue;
             }
-            let bytes = self.read_chunk(chunk.hash).await?;
             // Overlap of [start,end) with this chunk, relative to it.
-            let from = start.saturating_sub(chunk_start) as usize;
-            let to = (end.min(chunk_end) - chunk_start) as usize;
-            // A blob shorter than the manifest claims must error like
-            // `read_to`'s length check, not panic on the slice.
-            if bytes.len() < to {
+            let from = start.saturating_sub(chunk_start);
+            let to = end.min(chunk_end) - chunk_start;
+
+            // Seek within the blob rather than reading it whole: with a
+            // whole-file blob (see `write_path`) one "chunk" can be the
+            // entire multi-hundred-GB file, and buffering it to serve a
+            // 1 MB video seek would take the server down. `BlobReader` is
+            // `AsyncSeek`, so only the window is ever read.
+            let mut reader = self.blobs.reader(*chunk.hash.as_bytes());
+            tokio::io::AsyncSeekExt::seek(&mut reader, std::io::SeekFrom::Start(from))
+                .await
+                .map_err(Error::Io)?;
+            let want = to - from;
+            let copied = tokio::io::copy(&mut reader.take(want), dest)
+                .await
+                .map_err(Error::Io)?;
+            // Short read where the manifest promised bytes: the same
+            // "absent chunk, not an I/O fault" distinction `read_to`
+            // draws, so a repairable store doesn't look like a broken one.
+            if copied != want {
                 return Err(Error::MissingChunk(chunk.hash.to_hex().to_string()));
             }
-            dest.write_all(&bytes[from..to]).await.map_err(Error::Io)?;
         }
         Ok(())
     }

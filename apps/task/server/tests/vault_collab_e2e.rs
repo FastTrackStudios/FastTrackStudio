@@ -207,7 +207,10 @@ async fn live_smoke_two_clients_plus_put_file() {
         .unwrap_or_else(|_| "ws://127.0.0.1:18081/org/fasttrackstudios/vox".to_string());
     let path = format!("collab-smoke/{}.md", uuid::Uuid::new_v4());
 
-    let writer: VaultSyncClient = vox::connect_lane(&url).establish().await.expect("ws connect");
+    let writer: VaultSyncClient = vox::connect_lane(&url)
+        .establish()
+        .await
+        .expect("ws connect");
     writer
         .put_file(
             "default".into(),

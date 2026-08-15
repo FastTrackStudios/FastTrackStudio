@@ -98,17 +98,14 @@ async fn read_window(
     let (tx, mut rx) = vox::channel::<MediaChunk>();
     let media = media.clone();
     let hash_owned = hash.to_string();
-    let reader =
-        tokio::spawn(async move { media.read(hash_owned, start, len, tx).await });
+    let reader = tokio::spawn(async move { media.read(hash_owned, start, len, tx).await });
     let mut got: Vec<u8> = Vec::new();
     while let Ok(Some(chunk)) = rx.recv().await {
         let c = chunk.get();
         assert_eq!(c.offset, start + got.len() as u64, "contiguous offsets");
         got.extend_from_slice(&c.bytes);
     }
-    reader
-        .await?
-        .map_err(|e| eyre::eyre!("read: {e:?}"))?;
+    reader.await?.map_err(|e| eyre::eyre!("read: {e:?}"))?;
     Ok(got)
 }
 

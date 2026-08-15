@@ -194,6 +194,22 @@ impl ActivitySink for Hints {
     }
 }
 
+/// Where, besides its own org directory, this org may hold live trees.
+///
+/// Implemented by the server over the deployment's Storage Location
+/// registry (`files_storage::StorageCore::live_tree_boundaries`). It is a
+/// trait rather than a direct dependency so this crate — which is about
+/// versioning file trees — stays independent of the placement layer, and
+/// so a test can grant a boundary without standing up a registry.
+///
+/// Called on every path resolution, so implementations must be cheap:
+/// a read-lock over an in-memory registry, not I/O.
+pub trait LocationBoundaries: Send + Sync {
+    /// Absolute directories that are permitted, in addition to the org
+    /// directory. Empty means "no locations" — the default everywhere.
+    fn permitted(&self) -> Vec<PathBuf>;
+}
+
 #[derive(Clone, architect::HasDispatcher)]
 pub struct FilesBackend {
     data_dir: PathBuf,
@@ -201,6 +217,17 @@ pub struct FilesBackend {
     /// / `drive_browse` path arguments must resolve inside (see the
     /// module doc's "Filesystem confinement" section).
     confine_root: PathBuf,
+    /// Extra directories this org may hold live trees in, beyond
+    /// `confine_root` — the deployment's Storage Locations, resolved per
+    /// grant. `None` on a backend built without a storage registry
+    /// (tests, and any single-machine deployment), where the org
+    /// directory is the only permitted boundary exactly as before.
+    ///
+    /// Holds the registry rather than a snapshot of paths, because a
+    /// grant issued after boot must take effect without restarting the
+    /// server — a boundary cached at construction would mean "your new
+    /// Storage Location works tomorrow".
+    boundaries: Option<Arc<dyn LocationBoundaries>>,
     registry: Arc<Registry>,
     /// The org vault holding the curated version entities (issue
     /// #261). Separate from `data_dir`: a File Root's *content* is
@@ -352,6 +379,7 @@ impl FilesBackend {
         Ok(Self {
             data_dir,
             confine_root,
+            boundaries: None,
             registry: Arc::new(registry),
             versions: VaultVersions::new(vault_root),
             repos: Arc::new(Mutex::new(HashMap::new())),
@@ -420,6 +448,16 @@ impl FilesBackend {
     /// into `PathError::Io` (a temporarily-unmounted volume, EIO), and
     /// reporting the second as the first is both a false alarm and the
     /// wrong status code (PR #287 review).
+    /// Permit live trees inside this org's Storage Locations, on top of
+    /// its own directory. Without this a backend confines to the org
+    /// directory alone — the pre-locations behaviour, and still the right
+    /// answer for a single-machine deployment.
+    #[must_use]
+    pub fn with_location_boundaries(mut self, boundaries: Arc<dyn LocationBoundaries>) -> Self {
+        self.boundaries = Some(boundaries);
+        self
+    }
+
     #[must_use]
     pub fn confine_root(&self) -> &Path {
         &self.confine_root
@@ -638,8 +676,34 @@ impl FilesBackend {
     /// `files-storage`'s grant-prefix enforcement: it was written three
     /// times across the platform, so a hardening fix to one copy left
     /// the others escapable (PR #284 review).
+    /// Resolve a caller-supplied path, refusing anything outside a
+    /// permitted boundary.
+    ///
+    /// The org's own directory is always permitted. Beyond it, a path is
+    /// permitted when it falls inside a Storage Location this org holds a
+    /// live-tree grant on (issue #262) — which is how a File Root can
+    /// point at media on a NAS that was never going to fit in the org
+    /// directory, without the boundary check degrading into "anywhere on
+    /// the filesystem".
+    ///
+    /// Order matters for the error message: the org directory is tried
+    /// first and its rejection is what the caller sees when NO boundary
+    /// matches, because "outside `<org>/files`" is the answer that makes
+    /// sense on the overwhelming majority of deployments, which have no
+    /// locations at all.
     fn confine(&self, requested: &Path) -> Result<PathBuf, Error> {
-        task_files_util::confine(requested, &self.confine_root).map_err(confinement)
+        let own = task_files_util::confine(requested, &self.confine_root);
+        if own.is_ok() {
+            return own.map_err(confinement);
+        }
+        if let Some(boundaries) = &self.boundaries {
+            for boundary in boundaries.permitted() {
+                if let Ok(path) = task_files_util::confine(requested, &boundary) {
+                    return Ok(path);
+                }
+            }
+        }
+        own.map_err(confinement)
     }
 
     /// The commit a checkpoint on this root builds on. Media roots read

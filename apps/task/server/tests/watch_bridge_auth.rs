@@ -76,11 +76,7 @@ async fn watch_bridge_accepts_session_and_device_tokens() -> eyre::Result<()> {
     let url = format!("{base}/org/{SLUG}/watch/v1/timer/active");
 
     // 1. The phone-inherited session token authenticates.
-    let res = http
-        .get(&url)
-        .bearer_auth(&session_token)
-        .send()
-        .await?;
+    let res = http.get(&url).bearer_auth(&session_token).send().await?;
     assert_eq!(
         res.status(),
         reqwest::StatusCode::OK,
@@ -89,7 +85,11 @@ async fn watch_bridge_accepts_session_and_device_tokens() -> eyre::Result<()> {
     );
 
     // 2. A bogus token is rejected.
-    let res = http.get(&url).bearer_auth("not-a-real-token").send().await?;
+    let res = http
+        .get(&url)
+        .bearer_auth("not-a-real-token")
+        .send()
+        .await?;
     assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
 
     // 3. No token at all is rejected.

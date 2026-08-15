@@ -884,7 +884,6 @@ async fn show_memberships(args: &[String]) -> eyre::Result<()> {
     Ok(())
 }
 
-
 /// `admin seed` — stand up (or top up) a LOCAL multi-org dev vault with
 /// demo data so a fresh `task-server` has something to sign into and
 /// exercise: an owner account with known credentials in every org, a

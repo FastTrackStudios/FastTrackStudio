@@ -22,6 +22,15 @@ pub struct ChunkerConfig {
     pub min_size: usize,
     pub avg_size: usize,
     pub max_size: usize,
+    /// Size at or above which a file imported *from a path*
+    /// ([`ChunkStore::write_path`]) is stored **whole** — one blob, copied
+    /// in with a reflink where the filesystem supports it — instead of
+    /// being split into content-defined chunks. See that method's doc for
+    /// the trade.
+    ///
+    /// Only consulted by the path-taking entry points; `write_stream` has
+    /// no file to clone and always chunks.
+    pub whole_file_threshold: u64,
 }
 
 impl ChunkerConfig {
@@ -30,12 +39,27 @@ impl ChunkerConfig {
     /// may want a smaller average.
     pub const DEFAULT_AVG_SIZE: usize = 1024 * 1024;
 
+    /// 64 MiB. Below this, chunking's cross-version dedup is worth its
+    /// copy; above it, the file is almost always media whose next version
+    /// shares no chunk boundaries anyway (a re-encode changes every byte),
+    /// so the reflink's near-zero cost dominates.
+    pub const DEFAULT_WHOLE_FILE_THRESHOLD: u64 = 64 * 1024 * 1024;
+
     pub fn with_avg_size(avg_size: usize) -> Self {
         Self {
             min_size: avg_size / 4,
             avg_size,
             max_size: avg_size * 4,
+            whole_file_threshold: Self::DEFAULT_WHOLE_FILE_THRESHOLD,
         }
+    }
+
+    /// Store files of `bytes` and up whole (see
+    /// [`ChunkerConfig::whole_file_threshold`]). `u64::MAX` disables the
+    /// whole-file path entirely — everything chunks, as before it existed.
+    pub fn with_whole_file_threshold(mut self, bytes: u64) -> Self {
+        self.whole_file_threshold = bytes;
+        self
     }
 
     /// Check `min_size`/`avg_size`/`max_size` against the bounds
@@ -155,6 +179,7 @@ mod tests {
             min_size: 0,
             avg_size: 0,
             max_size: 0,
+            whole_file_threshold: ChunkerConfig::DEFAULT_WHOLE_FILE_THRESHOLD,
         };
         assert!(config.validate().is_err());
     }
@@ -170,6 +195,7 @@ mod tests {
             min_size: 0,
             avg_size: 0,
             max_size: 0,
+            whole_file_threshold: ChunkerConfig::DEFAULT_WHOLE_FILE_THRESHOLD,
         };
         let err = chunk_to_vec(&b"some bytes"[..], config).await.unwrap_err();
         assert!(matches!(err, Error::InvalidConfig(_)));
