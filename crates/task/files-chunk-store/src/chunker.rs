@@ -23,13 +23,19 @@ pub struct ChunkerConfig {
     pub avg_size: usize,
     pub max_size: usize,
     /// Size at or above which a file imported *from a path*
-    /// ([`ChunkStore::write_path`]) is stored **whole** — one blob, copied
-    /// in with a reflink where the filesystem supports it — instead of
-    /// being split into content-defined chunks. See that method's doc for
-    /// the trade.
+    /// ([`ChunkStore::write_path`]) is stored **whole** — one blob,
+    /// *linked* into the store rather than copied — instead of being
+    /// split into content-defined chunks.
     ///
-    /// Only consulted by the path-taking entry points; `write_stream` has
-    /// no file to clone and always chunks.
+    /// **Zero by default: every file, whatever its size.** A link costs
+    /// nothing regardless of length, so there is no size at which
+    /// copying-and-chunking becomes the better trade. The knob remains
+    /// so a caller can force chunking (`u64::MAX`) — which is how the
+    /// tests measure what linking actually saves.
+    ///
+    /// Only consulted by the path-taking entry points, and only when the
+    /// source is on the same filesystem as the store; `write_stream` has
+    /// no file to link and always chunks.
     pub whole_file_threshold: u64,
 }
 
@@ -39,11 +45,16 @@ impl ChunkerConfig {
     /// may want a smaller average.
     pub const DEFAULT_AVG_SIZE: usize = 1024 * 1024;
 
-    /// 64 MiB. Below this, chunking's cross-version dedup is worth its
-    /// copy; above it, the file is almost always media whose next version
-    /// shares no chunk boundaries anyway (a re-encode changes every byte),
-    /// so the reflink's near-zero cost dominates.
-    pub const DEFAULT_WHOLE_FILE_THRESHOLD: u64 = 64 * 1024 * 1024;
+    /// Zero — link everything that can be linked.
+    ///
+    /// This was 64 MiB when whole-file placement meant a reflink, on the
+    /// theory that small files should keep chunk-level dedup. Measuring
+    /// a real import killed that theory: one 6.36 GiB song held only
+    /// 1.35 GiB in files above the threshold, so 72% of it was still
+    /// copied, and a 5 TB archive would still have needed terabytes it
+    /// did not have. Since a link costs nothing at any size, the
+    /// threshold had no work left to do.
+    pub const DEFAULT_WHOLE_FILE_THRESHOLD: u64 = 0;
 
     pub fn with_avg_size(avg_size: usize) -> Self {
         Self {

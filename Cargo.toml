@@ -690,6 +690,12 @@ iroh = { version = "1" }
 fastcdc = { version = "4", features = ["tokio"] }
 iroh-blobs = { version = "0.103", default-features = false, features = ["fs-store"] }
 blake3 = { version = "1.8" }
+# Whole-file placement: reflink where the filesystem clones extents,
+# hardlink otherwise (see ChunkStore::write_path). Already in the tree as
+# an iroh-blobs dependency; named here so the chunk store can use it
+# directly rather than only through iroh-blobs' import path, which offers
+# no hardlink fallback.
+reflink-copy = { version = "0.1" }
 # Files version-store engine (issue #257/ADR 0001): jj-lib's `Backend` trait,
 # implemented over the chunk store above. Pinned (jj-lib is pre-1.0 per the
 # ADR); vendor-patch here if/when we need to carry a local fix.

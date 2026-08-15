@@ -12,6 +12,7 @@ repository.workspace = true
 fastcdc.workspace = true
 iroh-blobs.workspace = true
 blake3.workspace = true
+reflink-copy.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
 futures.workspace = true
 thiserror.workspace = true
