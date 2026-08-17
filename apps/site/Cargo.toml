@@ -10,6 +10,7 @@ name = "fts-site"
 version = "0.1.0"
 authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2024"
+license.workspace = true
 description = "FastTrackStudio website — landing, live keyflow editor, chart browser"
 
 [dependencies]

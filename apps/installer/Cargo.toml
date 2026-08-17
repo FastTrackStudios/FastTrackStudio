@@ -3,6 +3,7 @@ name = "fts-installer"
 version = "0.1.0"
 authors = ["Cody Wright <acodywright@gmail.com>"]
 edition.workspace = true
+license.workspace = true
 
 # Thin downloader/installer for FastTrackStudio releases (codeberg).
 # Resolves a release via the Gitea API, downloads the platform tarball
