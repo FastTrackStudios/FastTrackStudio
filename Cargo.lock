@@ -6946,7 +6946,6 @@ dependencies = [
  "expression-editor-daw",
  "expression-editor-guitarpro",
  "expression-editor-ui",
- "nice-plug-dioxus",
  "tokio",
  "tracing",
 ]
@@ -6966,7 +6965,6 @@ dependencies = [
 name = "expression-editor-ui"
 version = "0.1.0"
 dependencies = [
- "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?tag=v0.2.0)",
  "daw-theme",
  "dioxus",
  "dioxus-ssr",
@@ -6976,7 +6974,6 @@ dependencies = [
  "expression-editor-tools",
  "input",
  "level-dsp",
- "nice-plug-dioxus",
  "tokio",
 ]
 
