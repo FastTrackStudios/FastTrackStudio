@@ -6965,15 +6965,21 @@ dependencies = [
 name = "expression-editor-ui"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
+ "blitz-dom",
  "daw-theme",
  "dioxus",
+ "dioxus-native-dom",
  "dioxus-ssr",
  "dioxus-test",
  "expression-editor-core",
  "expression-editor-guitarpro",
  "expression-editor-tools",
  "input",
+ "kurbo 0.13.1",
  "level-dsp",
+ "parley 0.10.0",
+ "peniko 0.6.1",
  "tokio",
 ]
 

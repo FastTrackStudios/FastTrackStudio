@@ -792,6 +792,10 @@ vello_hybrid = "0.0.9"
 vello_common = "0.0.9"
 peniko = "0.6"
 kurbo = "0.13"
+# Text shaping for the painted expression-editor roll. Same version blitz
+# shapes DOM text with, so a label drawn into a scene and a label drawn
+# by the DOM come out of the same shaper.
+parley = "0.10"
 # Deterministic CPU rendering for the ui-snapshot regression gate.
 anyrender_vello_cpu = "0.14"
 
