@@ -360,6 +360,20 @@ impl Store {
         Ok(())
     }
 
+    /// Drop every rendition row with `status`, putting those songs back
+    /// in the queue. Returns how many were cleared.
+    ///
+    /// Used for `blocked`, which records a refusal rather than a
+    /// verdict and so must never be allowed to become permanent.
+    pub async fn clear_status(&self, status: &str) -> Result<u64> {
+        Ok(sqlx::query("DELETE FROM rendition WHERE status = ?")
+            .bind(status)
+            .execute(&self.pool)
+            .await
+            .context("clearing rendition rows")?
+            .rows_affected())
+    }
+
     /// Counts by acquisition status.
     pub async fn acquisition_summary(&self) -> Result<Vec<(String, i64)>> {
         let rows = sqlx::query(

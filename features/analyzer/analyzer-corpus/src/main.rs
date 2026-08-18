@@ -113,6 +113,14 @@ enum Cmd {
         /// the resolver and hides how it does on the long tail.
         #[arg(long)]
         sample: bool,
+        /// Seconds to wait out a rate limit before resuming. 0 = stop.
+        ///
+        /// Measured, the block clears in about 2.2 hours, so the
+        /// default overshoots slightly — waiting too long costs some
+        /// throughput, waiting too little just trips again after 25
+        /// songs and sleeps once more, so erring long is cheaper.
+        #[arg(long, default_value_t = 8100)]
+        cooldown_secs: u64,
     },
 
     /// Clear recorded acquisition outcomes so they are attempted again.
@@ -171,7 +179,20 @@ async fn main() -> Result<()> {
             candidates,
             dry_run,
             sample,
-        } => acquire_cmd(db, audio_root, limit, concurrency, candidates, dry_run, sample).await,
+            cooldown_secs,
+        } => {
+            acquire_cmd(
+                db,
+                audio_root,
+                limit,
+                concurrency,
+                candidates,
+                dry_run,
+                sample,
+                cooldown_secs,
+            )
+            .await
+        }
         Cmd::Reset { db, status } => reset(db, status).await,
         Cmd::Status { db } => status(db).await,
         Cmd::Export { db, out } => export(db, out).await,
@@ -337,24 +358,98 @@ async fn acquire_cmd(
     candidates: usize,
     dry_run: bool,
     sample: bool,
+    cooldown_secs: u64,
 ) -> Result<()> {
     let store = Store::open(&db).await?;
     // Fail here rather than 4,000 songs into an overnight run.
     let tools = acquire::Tools::discover()?;
 
-    let pending = store.songs_needing_audio(limit, sample).await?;
-    if pending.is_empty() {
-        println!("nothing pending — every song already has a recorded outcome");
-        return Ok(());
+    // The rate limit is a per-IP request quota, not a concurrency cap:
+    // it trips after roughly 500-800 songs whether 8 or 16 run at once,
+    // and clears on its own after about 2.2 hours (measured from a
+    // 3,359-song refusal streak). So the useful shape is not "go slow
+    // enough to never trip" — it is to work until refused, wait it out,
+    // and resume. Each pass requeues the songs the last one was refused.
+    let mut pass = 0usize;
+    let mut tripped_once = false;
+
+    loop {
+        pass += 1;
+
+        if !dry_run {
+            let requeued = store.clear_status("blocked").await?;
+            if requeued > 0 {
+                tracing::info!(pass, requeued, "requeued songs the last pass was refused");
+            }
+        }
+
+        let pending = store.songs_needing_audio(limit, sample).await?;
+        if pending.is_empty() {
+            println!("nothing pending — every song has a recorded outcome");
+            break;
+        }
+
+        tracing::info!(
+            pass,
+            songs = pending.len(),
+            concurrency,
+            dry_run,
+            "starting acquisition pass"
+        );
+
+        let tripped = acquire_pass(
+            &store,
+            &tools,
+            pending,
+            &audio_root,
+            concurrency,
+            candidates,
+            dry_run,
+        )
+        .await?;
+
+        if !tripped {
+            break;
+        }
+        tripped_once = true;
+
+        if cooldown_secs == 0 {
+            tracing::warn!("rate limited and --cooldown-secs is 0, stopping");
+            break;
+        }
+
+        tracing::warn!(
+            pass,
+            cooldown_secs,
+            "rate limited — sleeping it out, then resuming automatically"
+        );
+        tokio::time::sleep(Duration::from_secs(cooldown_secs)).await;
     }
 
-    tracing::info!(
-        songs = pending.len(),
-        concurrency,
-        dry_run,
-        "starting acquisition"
-    );
+    if !dry_run {
+        println!();
+        for (status, n) in store.acquisition_summary().await? {
+            println!("  {status:<10} {n}");
+        }
+        if tripped_once {
+            println!("\n(hit the rate limit at least once; `blocked` rows are requeued each pass)");
+        }
+    }
+    Ok(())
+}
 
+/// One pass over the pending songs. Returns whether it stopped early
+/// because the search started refusing.
+#[allow(clippy::too_many_arguments)]
+async fn acquire_pass(
+    store: &Store,
+    tools: &acquire::Tools,
+    pending: Vec<analyzer_corpus::db::PendingSong>,
+    audio_root: &std::path::Path,
+    concurrency: usize,
+    candidates: usize,
+    dry_run: bool,
+) -> Result<bool> {
     // Streamed, not batched. Chunking with `join_all` made every batch
     // wait for its slowest song before the next could start, and
     // per-song time varies hugely — some resolve in seconds, some grind
@@ -389,15 +484,16 @@ async fn acquire_cmd(
         if rec.status == "blocked" {
             consecutive_blocked += 1;
             if consecutive_blocked >= BLOCKED_LIMIT {
-                store.record_rendition(&rec).await.ok();
-                tracing::error!(
+                if !dry_run {
+                    store.record_rendition(&rec).await.ok();
+                }
+                tracing::warn!(
                     consecutive_blocked,
                     done,
-                    "search refused {BLOCKED_LIMIT} times running — stopping rather than \
-                     marking the rest of the corpus blocked. Wait, then re-run with lower \
-                     --concurrency; `corpus reset --status blocked` clears these for retry."
+                    "search refused {BLOCKED_LIMIT} times running — ending this pass rather \
+                     than marking the rest of the corpus blocked"
                 );
-                break;
+                return Ok(true);
             }
         } else {
             consecutive_blocked = 0;
@@ -426,13 +522,7 @@ async fn acquire_cmd(
         }
     }
 
-    if !dry_run {
-        println!();
-        for (status, n) in store.acquisition_summary().await? {
-            println!("  {status:<10} {n}");
-        }
-    }
-    Ok(())
+    Ok(false)
 }
 
 /// One song's full resolve → download → probe attempt.
