@@ -23,6 +23,7 @@ use analyzer_corpus::db::Store;
 use analyzer_corpus::hot100;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use futures::StreamExt;
 use sqlx::Row;
 
 #[derive(Parser)]
@@ -333,34 +334,49 @@ async fn acquire_cmd(
         "starting acquisition"
     );
 
-    for chunk in pending.chunks(concurrency.max(1)) {
-        let results = futures::future::join_all(
-            chunk
-                .iter()
-                .map(|song| attempt(&tools, song, &audio_root, candidates, dry_run)),
-        )
-        .await;
+    // Streamed, not batched. Chunking with `join_all` made every batch
+    // wait for its slowest song before the next could start, and
+    // per-song time varies hugely — some resolve in seconds, some grind
+    // through a JS challenge. The observed cost was brutal: with
+    // --concurrency 6 only two yt-dlp processes were ever alive.
+    // `buffer_unordered` keeps `concurrency` songs in flight at all
+    // times, so a slow song no longer stalls five fast ones.
+    let total = pending.len();
+    let started = std::time::Instant::now();
+    let mut done = 0usize;
 
-        for (song, rec) in chunk.iter().zip(results) {
-            let mark = match rec.status.as_str() {
-                "ok" => "ok  ",
-                "no_match" => "MISS",
-                _ => "FAIL",
-            };
-            println!(
-                "{mark} [{:>5}] {} — {}{}",
-                song.song_id,
-                truncate(&song.title, 38),
-                truncate(&song.artist, 26),
-                match (&rec.match_score, &rec.error) {
-                    (Some(s), _) => format!("  score {s:.1} ({})", rec.match_reason.as_deref().unwrap_or("")),
-                    (None, Some(e)) => format!("  {e}"),
-                    _ => String::new(),
-                }
-            );
-            if !dry_run {
-                store.record_rendition(&rec).await?;
+    let mut in_flight = futures::stream::iter(pending)
+        .map(|song| {
+            let tools = &tools;
+            let audio_root = &audio_root;
+            async move {
+                let rec = attempt(tools, &song, audio_root, candidates, dry_run).await;
+                (song, rec)
             }
+        })
+        .buffer_unordered(concurrency.max(1));
+
+    while let Some((song, rec)) = in_flight.next().await {
+        done += 1;
+        let mark = match rec.status.as_str() {
+            "ok" => "ok  ",
+            "no_match" => "MISS",
+            _ => "FAIL",
+        };
+        let rate = done as f64 / started.elapsed().as_secs_f64().max(1.0) * 60.0;
+        println!(
+            "{mark} [{done:>5}/{total}] {:>5.1}/min  {} — {}{}",
+            rate,
+            truncate(&song.title, 34),
+            truncate(&song.artist, 24),
+            match (&rec.match_score, &rec.error) {
+                (Some(s), _) => format!("  score {s:.1}"),
+                (None, Some(e)) => format!("  {e}"),
+                _ => String::new(),
+            }
+        );
+        if !dry_run {
+            store.record_rendition(&rec).await?;
         }
     }
 
