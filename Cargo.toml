@@ -20,6 +20,7 @@ members = [
     "libs/dock/dock-dioxus",
     "libs/dock/dock-proto",
     "libs/utils",
+    "libs/adaptive-grid",
     "libs/monarchy/monarchy",
     "libs/monarchy/monarchy-derive",
     "libs/installer-core",
@@ -320,6 +321,10 @@ nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch 
 nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 nice-plug-xtask = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 utils = { path = "libs/utils" }
+# The grid that follows the zoom. Pure arithmetic and no dependencies, so
+# the arrange view and the expression editor can agree on it without
+# either depending on the other.
+adaptive-grid = { path = "libs/adaptive-grid" }
 installer-core = { path = "libs/installer-core" }
 engine-launcher = { path = "libs/engine-launcher" }
 neural-amp-modeler = { git = "https://github.com/FastTrackStudios/neural-amp-modeler-rs", tag = "v0.1.0" }
@@ -719,7 +724,17 @@ dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d0
 # dioxus git's own `=0.3.0-beta.1` pins. Feature union of the wave-1
 # UI libs (prelude, system-fonts) and daw-reaper-dioxus (svg, autofocus,
 # incremental, data-uri theme-skin PNGs).
-dioxus-native = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", features = ["prelude", "system-fonts", "svg", "autofocus", "incremental", "data-uri"] }
+# `vello` — the compute-shader renderer — because dioxus-native's own
+# default is `vello-hybrid`, which does much of its path work on the CPU.
+# Hybrid exists for WebGL-class targets; on a desktop GPU it is what
+# stands between the expression editor and its frame budget (35 fps at
+# 5120x1440 with five notes on screen, where the whole scene was 69 draw
+# commands and 0.04 ms to build — the cost was all in rasterising it).
+#
+# Both features can be on at once: the renderer is chosen by a `cfg_if`
+# chain that tests `vello` first, so this wins over the default without
+# having to turn defaults off and re-list them.
+dioxus-native = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", features = ["prelude", "system-fonts", "svg", "autofocus", "incremental", "data-uri", "vello"] }
 blitz-dom = "=0.3.0-beta.1"
 blitz-paint = "=0.3.0-beta.1"
 blitz-traits = "=0.3.0-beta.1"
