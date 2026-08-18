@@ -1,0 +1,20 @@
+[package]
+name = "fts-analyzer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Audio plugin analysis engine — load, measure, and compare CLAP plugins"
+
+[lints]
+workspace = true
+
+[dependencies]
+clack-host = { workspace = true }
+clack-extensions = { workspace = true }
+anyhow = { workspace = true }
+hound = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rustfft = { workspace = true }
+csv = { workspace = true }

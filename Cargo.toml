@@ -75,6 +75,9 @@ members = [
     "features/dawfile/dawfile-reaper",
     "features/dawfile/dawfile-standalone",
     "features/expression-editor/expression-editor-demo",
+    # ── features/analyzer — measurement rig (plugins + reference corpus) ──
+    "features/analyzer/fts-analyzer",
+    "features/analyzer/fts-analyzer-cli",
     # ── features/reaper ───────────────────────────────────────────────
     "features/reaper/daw-reaper",
     "features/reaper/daw-bridge",
@@ -551,6 +554,8 @@ expression-editor-core = { path = "features/expression-editor/expression-editor-
 expression-editor-corpus = { path = "features/expression-editor/expression-editor-corpus" }
 expression-editor-daw = { path = "features/expression-editor/expression-editor-daw" }
 expression-editor-demo = { path = "features/expression-editor/expression-editor-demo" }
+fts-analyzer = { path = "features/analyzer/fts-analyzer" }
+fts-analyzer-cli = { path = "features/analyzer/fts-analyzer-cli" }
 expression-editor-guitarpro = { path = "features/expression-editor/expression-editor-guitarpro" }
 expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
 expression-editor-standalone = { path = "features/expression-editor/expression-editor-standalone" }
@@ -869,6 +874,11 @@ atomic_refcell = "0.1"
 bitflags = "2.11"
 raw-window-handle = "0.5"
 realfft = "3.0"
+# ── Analyzer externals (features/analyzer) ────────────────────────────
+hound = "3"
+rustfft = "6"
+csv = "1"
+rayon = "1"
 # Pure-Rust ONNX inference (no C onnxruntime dep) — Basic Pitch polyphonic
 # note transcription in tune-dsp, behind the `basic-pitch` feature.
 tract-onnx = "0.21"

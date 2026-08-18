@@ -7783,6 +7783,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-analyzer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clack-extensions",
+ "clack-host",
+ "csv",
+ "hound",
+ "rustfft",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fts-analyzer-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "csv",
+ "fts-analyzer",
+ "hound",
+ "rayon",
+ "rustfft",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fts-audio-proto"
 version = "0.1.0"
 

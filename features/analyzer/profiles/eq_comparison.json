@@ -1,0 +1,48 @@
+{
+  "name": "EQ Comparison — FabFilter Pro-Q 4 vs FTS-EQ",
+  "measurement": {
+    "sampleRate": 48000,
+    "seconds": 2,
+    "blockSize": 256,
+    "signalType": "sweep",
+    "sweepStartHz": 20.0,
+    "sweepEndHz": 20000.0,
+    "inputGainBucketsDb": [-12.0, -6.0, 0.0],
+    "analyzers": ["LinearResponse", "RmsPeak", "Thd"],
+    "warmupSeconds": 0.1
+  },
+  "plugins": [
+    {
+      "name": "FabFilter Pro-Q 4",
+      "path": "/home/cody/.clap/yabridge/FabFilter Pro-Q 4.clap",
+      "parameterBuckets": [
+        {
+          "paramName": "Band 1 Gain",
+          "strategy": "DisplayText",
+          "textValues": ["-6.0 dB", "-3.0 dB", "0.0 dB", "3.0 dB", "6.0 dB", "12.0 dB"]
+        },
+        {
+          "paramName": "Band 1 Frequency",
+          "strategy": "DisplayText",
+          "textValues": ["100 Hz", "1000 Hz", "10000 Hz"]
+        }
+      ]
+    },
+    {
+      "name": "FTS-EQ",
+      "path": "/home/cody/Development/FastTrackStudio/FTS-Plugins/target/bundled/eq-plugin.clap",
+      "parameterBuckets": [
+        {
+          "paramName": "B1 Gain",
+          "strategy": "DisplayText",
+          "textValues": ["-6.0 dB", "-3.0 dB", "0.0 dB", "3.0 dB", "6.0 dB", "12.0 dB"]
+        },
+        {
+          "paramName": "B1 Freq",
+          "strategy": "DisplayText",
+          "textValues": ["100 Hz", "1000 Hz", "10000 Hz"]
+        }
+      ]
+    }
+  ]
+}

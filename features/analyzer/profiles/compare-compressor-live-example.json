@@ -1,0 +1,21 @@
+{
+  "comment": "Example profile for comparing Pro-C 3 against FTS-Comp",
+  "reference": "/path/to/Pro-C3.clap",
+  "plugin": "../FTS-Plugins/target/bundled/comp-plugin.clap",
+  "out": "./comparison-results",
+  "attack_ms": 10,
+  "release_ms": 50,
+  "threshold_db": -18,
+  "ratio": 4.0,
+  "knee_db": 2.0,
+  "tolerance_db": 1.0,
+  "sample_rate": 48000,
+  "block_size": 512,
+  "param_remaps": {
+    "7": "Attack",
+    "8": "Release",
+    "0": "Threshold",
+    "1": "Ratio",
+    "2": "Knee"
+  }
+}

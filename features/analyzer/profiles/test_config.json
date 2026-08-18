@@ -1,0 +1,22 @@
+{
+  "pluginPath": "/home/cody/Development/FastTrackStudio/FTS-Plugins/target/bundled/comp-plugin.clap",
+  "sampleRate": 48000,
+  "seconds": 2,
+  "blockSize": 256,
+  "signalType": "sine",
+  "sineFrequency": 1000.0,
+  "inputGainBucketsDb": [-12.0, -6.0, 0.0],
+  "parameterBuckets": [
+    {
+      "paramName": "Threshold",
+      "strategy": "ExplicitValues",
+      "values": [0.25, 0.5, 0.75]
+    }
+  ],
+  "analyzers": [
+    "RmsPeak",
+    "TransferCurve",
+    "Thd"
+  ],
+  "warmupSeconds": 0.1
+}

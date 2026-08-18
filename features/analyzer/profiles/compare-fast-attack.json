@@ -1,0 +1,19 @@
+{
+  "comment": "Fast attack scenario - for transient-heavy material",
+  "reference": "/path/to/Pro-C3.clap",
+  "plugin": "../FTS-Plugins/target/bundled/comp-plugin.clap",
+  "out": "./comparison-fast-attack",
+  "attack_ms": 1,
+  "release_ms": 100,
+  "threshold_db": -12,
+  "ratio": 4.0,
+  "knee_db": 3.0,
+  "tolerance_db": 1.0,
+  "param_remaps": {
+    "7": "Attack",
+    "8": "Release",
+    "0": "Threshold",
+    "1": "Ratio",
+    "2": "Knee"
+  }
+}
