@@ -175,11 +175,7 @@ pub fn uninstall(prefix: Option<PathBuf>) -> eyre::Result<()> {
             Some(("vst3", name)) => dirs.vst3.join(name),
             _ => continue,
         };
-        if path.is_dir() {
-            fs::remove_dir_all(&path).wrap_err_with(|| format!("removing {}", path.display()))?;
-            removed += 1;
-        } else if path.exists() {
-            fs::remove_file(&path).wrap_err_with(|| format!("removing {}", path.display()))?;
+        if remove_path(&path)? {
             removed += 1;
         }
     }
@@ -211,18 +207,41 @@ fn dirs_home() -> eyre::Result<PathBuf> {
 }
 
 /// Copy a file or directory tree, replacing any existing destination.
+///
+/// The destination is inspected with `symlink_metadata`, never `exists()`/
+/// `is_dir()`: those follow symlinks, so a bundle that is currently a symlink
+/// into a developer's worktree would otherwise have its *target* deleted, and
+/// a DANGLING symlink (that worktree since removed) would look absent
+/// entirely — leaving the link in place for `create_dir_all` to trip over
+/// with EEXIST. Both are the normal state of a dev machine that has had
+/// `just plugins-bundle` output symlinked in by hand.
 fn copy_any(src: &Path, dest: &Path) -> eyre::Result<()> {
-    if dest.is_dir() {
-        fs::remove_dir_all(dest)?;
-    } else if dest.exists() {
-        fs::remove_file(dest)?;
-    }
+    remove_path(dest)?;
     if src.is_dir() {
         copy_tree(src, dest)?;
     } else {
         fs::copy(src, dest).wrap_err_with(|| format!("copying {}", src.display()))?;
     }
     Ok(())
+}
+
+/// Delete `path` whatever it is — file, directory tree, or symlink — and
+/// succeed if it was already gone. Returns `Ok(true)` when something was
+/// actually removed.
+fn remove_path(path: &Path) -> eyre::Result<bool> {
+    match fs::symlink_metadata(path) {
+        // A symlink of any kind (live or dangling): remove the LINK, never
+        // follow it into whatever worktree it points at.
+        Ok(meta) if meta.file_type().is_symlink() => fs::remove_file(path)
+            .wrap_err_with(|| format!("removing symlink {}", path.display()))?,
+        Ok(meta) if meta.is_dir() => {
+            fs::remove_dir_all(path).wrap_err_with(|| format!("removing {}", path.display()))?
+        }
+        Ok(_) => fs::remove_file(path).wrap_err_with(|| format!("removing {}", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e).wrap_err_with(|| format!("stat {}", path.display())),
+    }
+    Ok(true)
 }
 
 fn copy_tree(src: &Path, dest: &Path) -> eyre::Result<()> {

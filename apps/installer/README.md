@@ -16,7 +16,30 @@ fts-installer update  [--prefix DIR]
 fts-installer uninstall [--prefix DIR]
 fts-installer reaper    [--prefix DIR]   # REAPER + SWS + ReaPack + the 3 rigs
 fts-installer bundle    [--prefix DIR] [--version vX.Y.Z]   # everything, one command
+fts-installer plugins install [--version vX.Y.Z] [--from PATH] [--prefix DIR]
+fts-installer plugins uninstall [--prefix DIR]
+fts-installer plugins list      [--prefix DIR]
 ```
+
+## Installing the plugins you just built
+
+`--from` takes a local tarball or an already-extracted directory instead of
+a release, which is how a developer installs the working tree's own plugins.
+The repo wraps it, so from a checkout the whole loop is:
+
+```bash
+just plugins-install          # bundle all 17, then install them
+just plugins-bundle eq && just plugins-install   # iterate on one
+just plugins-list             # what the manifest says is installed
+just plugins-uninstall        # remove exactly that set
+```
+
+This lands real files in `~/.clap` / `~/.vst3` (macOS:
+`~/Library/Audio/Plug-Ins/{CLAP,VST3}`), **replacing** whatever is there under
+the same name — including a symlink left pointing into a worktree, which the
+installer deletes as a link rather than following it. Hand-symlinking
+`target/bundled` entries also works and is fine for fast iteration, but those
+links break the moment the worktree moves; the manifest install does not.
 
 ## `fts-installer bundle` — the full installer package
 
