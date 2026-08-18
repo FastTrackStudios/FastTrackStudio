@@ -10,14 +10,30 @@
 //! can only be picked out positionally — so they are derived from our
 //! own weekly observations instead (see `db::SCHEMA`'s `song_stats`).
 //!
+//! ## Trusting the page, not the URL
+//!
+//! Asking for a chart *before that chart launched* does not 404. Billboard
+//! answers 200, with no redirect, and renders its earliest available
+//! chart instead. Requesting Dance/Electronic Songs — which launched in
+//! 2013 — for 1990, 1999 and 2009 returns the same January 2013 chart
+//! all three times.
+//!
+//! Taking the URL at its word would therefore file 2013 data under 1990
+//! and quietly corrupt every era comparison the corpus exists to make.
+//! So the page's own rendered date (`Week of June 10, 1995`) is parsed
+//! and treated as the truth:
+//!
+//! - it is what entries are filed under, not the requested date, and
+//! - if it is more than a week away from what was asked for, Billboard
+//!   has snapped to a different chart and the week is reported as
+//!   [`ScrapeError::NoSuchChart`].
+//!
 //! ## Failing loudly
 //!
-//! The one genuinely dangerous outcome for a scraper is silently
-//! parsing zero rows and recording that as "this chart was empty that
-//! week". [`parse`] therefore separates the two cases: a page with no
+//! The other dangerous outcome is silently parsing zero rows and
+//! recording that as "this chart was empty that week". A page with no
 //! row containers at all is a [`ScrapeError::NoRows`], which the caller
-//! must treat as a bug, while a chart that simply had not launched yet
-//! answers 404 and is recorded as a genuinely empty week.
+//! must treat as a bug rather than as data.
 
 use anyhow::{Context, Result};
 use scraper::{Html, Selector};
@@ -30,10 +46,23 @@ pub const USER_AGENT: &str =
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScrapeError {
-    /// The chart did not exist on that date. Expected for dates before
-    /// a genre chart launched.
-    #[error("chart {chart} has no edition for {date}")]
-    NoSuchChart { chart: Chart, date: String },
+    /// The chart had no edition for that date, so Billboard served a
+    /// different week. Expected for dates before a genre chart launched.
+    #[error("chart {chart} has no edition for {date} (it served {served} instead)")]
+    NoSuchChart {
+        chart: Chart,
+        date: String,
+        /// What Billboard rendered instead, or `"404"`.
+        served: String,
+    },
+
+    /// The page rendered rows but carried no `Week of ...` date, so
+    /// there is no way to tell which chart week it actually is.
+    #[error(
+        "chart {chart} for {date} has no rendered 'Week of' date — \
+         Billboard's markup has probably changed; check rendered_date() in billboard.rs"
+    )]
+    NoRenderedDate { chart: Chart, date: String },
 
     /// The page rendered but contained no chart rows — Billboard has
     /// changed its markup and the selectors below need revisiting.
@@ -66,6 +95,7 @@ pub async fn fetch(
         return Err(ScrapeError::NoSuchChart {
             chart,
             date: date.to_string(),
+            served: "404".to_string(),
         }
         .into());
     }
@@ -90,12 +120,37 @@ pub fn parse(html: &str, chart: Chart, date: &str) -> Result<Vec<ChartEntry>, Sc
     let label_sel = Selector::parse("span.c-label").unwrap();
 
     let doc = Html::parse_document(html);
+    let rows: Vec<_> = doc.select(&row_sel).collect();
+
+    if rows.is_empty() {
+        return Err(ScrapeError::NoRows {
+            chart,
+            date: date.to_string(),
+            bytes: html.len(),
+        });
+    }
+
+    // Billboard answers 200 for a chart that had not launched yet and
+    // renders its earliest available week instead, so the requested
+    // date cannot be trusted — only the date the page states.
+    let Some(rendered) = rendered_date(html) else {
+        return Err(ScrapeError::NoRenderedDate {
+            chart,
+            date: date.to_string(),
+        });
+    };
+
+    if !within_a_week(&rendered, date) {
+        return Err(ScrapeError::NoSuchChart {
+            chart,
+            date: date.to_string(),
+            served: rendered,
+        });
+    }
+
     let mut out = Vec::new();
-    let mut containers = 0usize;
 
-    for row in doc.select(&row_sel) {
-        containers += 1;
-
+    for row in rows {
         // The first c-label in the row is the rank. Later ones are the
         // stat columns, so stop at the first that parses.
         let Some(rank) = row
@@ -127,22 +182,70 @@ pub fn parse(html: &str, chart: Chart, date: &str) -> Result<Vec<ChartEntry>, Sc
 
         out.push(ChartEntry {
             chart,
-            date: date.to_string(),
+            // Filed under what the page says the week is, not what was
+            // asked for, so a snapped date corrects itself.
+            date: rendered.clone(),
             rank,
             title,
             artist,
         });
     }
 
-    if containers == 0 {
-        return Err(ScrapeError::NoRows {
-            chart,
-            date: date.to_string(),
-            bytes: html.len(),
-        });
-    }
-
     Ok(out)
+}
+
+/// The chart week the page actually rendered, as ISO `yyyy-mm-dd`.
+///
+/// Billboard states it in prose — `Week of June 10, 1995` — which is
+/// the only place on the page that distinguishes the week you asked for
+/// from the week you were given.
+pub fn rendered_date(html: &str) -> Option<String> {
+    let at = html.find("Week of ")? + "Week of ".len();
+    let rest = &html[at..];
+    let end = rest.find('<').unwrap_or(rest.len());
+    let text = rest[..end].trim();
+
+    // "June 10, 1995"
+    let (month_name, rest) = text.split_once(' ')?;
+    let (day, year) = rest.split_once(", ")?;
+
+    let month = MONTHS
+        .iter()
+        .position(|m| m.eq_ignore_ascii_case(month_name.trim()))? as u32
+        + 1;
+    let day: u32 = day.trim().parse().ok()?;
+    let year: i32 = year.trim().parse().ok()?;
+
+    chrono::NaiveDate::from_ymd_opt(year, month, day).map(|d| d.format("%Y-%m-%d").to_string())
+}
+
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// Are these two ISO dates within seven days of each other?
+///
+/// Charts share one Saturday grid, so a legitimate answer matches
+/// exactly; the tolerance only absorbs a chart whose week is dated a
+/// day or two differently in some era. Anything further away means
+/// Billboard served a different chart entirely.
+fn within_a_week(a: &str, b: &str) -> bool {
+    let parse = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok();
+    match (parse(a), parse(b)) {
+        (Some(a), Some(b)) => (a - b).num_days().abs() <= 7,
+        _ => false,
+    }
 }
 
 /// Collapse an element's descendant text into a single trimmed line.
@@ -181,9 +284,18 @@ mod tests {
         </ul>
       </div>"#;
 
+    /// A whole page: the `Week of ...` heading Billboard renders, plus
+    /// `n` chart rows.
+    fn page(week_of: &str, n: usize) -> String {
+        format!(
+            "<html><body><p class=\"c-tagline\">Week of {week_of}</p>{}</body></html>",
+            ROW.repeat(n)
+        )
+    }
+
     #[test]
     fn reads_rank_title_and_linked_artist() {
-        let got = parse(ROW, Chart::Country, "2020-01-04").unwrap();
+        let got = parse(&page("January 4, 2020", 1), Chart::Country, "2020-01-04").unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].rank, 1);
         assert_eq!(got[0].title, "Some Song Title");
@@ -194,7 +306,7 @@ mod tests {
 
     #[test]
     fn reads_an_unlinked_artist() {
-        let unlinked = ROW.replace(
+        let unlinked = page("January 4, 2020", 1).replace(
             r#"<a href="https://www.billboard.com/artist/someone/">An Artist</a>"#,
             "An Artist",
         );
@@ -206,20 +318,81 @@ mod tests {
     fn takes_the_rank_not_a_later_stat_column() {
         // The stat columns are also bare c-label integers; picking the
         // wrong one silently corrupts every rank in the corpus.
-        let got = parse(ROW, Chart::Rock, "2020-01-04").unwrap();
+        let got = parse(&page("January 4, 2020", 1), Chart::Rock, "2020-01-04").unwrap();
         assert_eq!(got[0].rank, 1);
     }
 
     #[test]
     fn many_rows_all_parse() {
-        let page = format!("<html><body>{}</body></html>", ROW.repeat(100));
-        assert_eq!(parse(&page, Chart::Latin, "2020-01-04").unwrap().len(), 100);
+        let got = parse(&page("January 4, 2020", 100), Chart::Latin, "2020-01-04").unwrap();
+        assert_eq!(got.len(), 100);
     }
 
     #[test]
     fn a_page_with_no_rows_is_an_error_not_an_empty_week() {
-        let err = parse("<html><body>nothing here</body></html>", Chart::Rock, "2020-01-04")
-            .unwrap_err();
+        let err = parse(
+            "<html><body>nothing here</body></html>",
+            Chart::Rock,
+            "2020-01-04",
+        )
+        .unwrap_err();
         assert!(matches!(err, ScrapeError::NoRows { .. }));
+    }
+
+    // ── the pre-launch snap ───────────────────────────────────────────
+    //
+    // Billboard answers 200 and renders its earliest available chart
+    // when asked for a date before that chart existed. Observed live:
+    // dance-electronic-songs (launched 2013) returned the same January
+    // 2013 chart for 1990, 1999 and 2009. Trusting the URL would file
+    // 2013 data under 1990.
+
+    #[test]
+    fn a_chart_served_for_the_wrong_week_is_rejected() {
+        let err = parse(&page("January 5, 2013", 50), Chart::DanceElectronic, "1990-01-06")
+            .unwrap_err();
+        match err {
+            ScrapeError::NoSuchChart { served, date, .. } => {
+                assert_eq!(date, "1990-01-06");
+                assert_eq!(served, "2013-01-05");
+            }
+            other => panic!("expected NoSuchChart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn entries_are_filed_under_the_rendered_week_not_the_requested_one() {
+        // Within tolerance, so it parses — but the page's own date wins.
+        let got = parse(&page("January 4, 2020", 1), Chart::Rock, "2020-01-03").unwrap();
+        assert_eq!(got[0].date, "2020-01-04");
+    }
+
+    #[test]
+    fn a_page_with_rows_but_no_rendered_date_is_an_error() {
+        let no_date = format!("<html><body>{}</body></html>", ROW);
+        let err = parse(&no_date, Chart::Rock, "2020-01-04").unwrap_err();
+        assert!(matches!(err, ScrapeError::NoRenderedDate { .. }));
+    }
+
+    #[test]
+    fn rendered_date_parses_billboards_prose() {
+        assert_eq!(
+            rendered_date("<p>Week of June 10, 1995 </p>").as_deref(),
+            Some("1995-06-10")
+        );
+        assert_eq!(
+            rendered_date("Week of December 31, 2022<").as_deref(),
+            Some("2022-12-31")
+        );
+        assert_eq!(rendered_date("no date here"), None);
+        assert_eq!(rendered_date("Week of Smarch 40, 1995<"), None);
+    }
+
+    #[test]
+    fn week_tolerance_accepts_neighbours_and_rejects_eras() {
+        assert!(within_a_week("2020-01-04", "2020-01-04"));
+        assert!(within_a_week("2020-01-04", "2020-01-11"));
+        assert!(!within_a_week("2020-01-04", "2020-01-12"));
+        assert!(!within_a_week("2013-01-05", "1990-01-06"));
     }
 }
