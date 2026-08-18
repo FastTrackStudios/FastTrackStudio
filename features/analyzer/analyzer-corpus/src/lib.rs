@@ -38,6 +38,7 @@
 //! deriving them keeps every chart reporting the same way, and keeps
 //! them correct when a partial ingest is later completed.
 
+pub mod acquire;
 pub mod billboard;
 pub mod chart;
 pub mod db;

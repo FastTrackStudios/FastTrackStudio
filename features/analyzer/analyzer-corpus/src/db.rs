@@ -64,6 +64,34 @@ CREATE TABLE IF NOT EXISTS chart_week (
     PRIMARY KEY (chart, chart_date)
 ) WITHOUT ROWID;
 
+-- One audio rendition per song. `status` distinguishes the three ways
+-- acquisition ends, so a re-run resumes rather than re-asking, and a
+-- rejected song stays visible as a gap rather than vanishing.
+--   ok        — downloaded and probed
+--   no_match  — searched, nothing scored high enough to trust
+--   failed    — resolve or download errored
+CREATE TABLE IF NOT EXISTS rendition (
+    song_id      INTEGER PRIMARY KEY REFERENCES song(id),
+    status       TEXT    NOT NULL,
+    source       TEXT,
+    video_id     TEXT,
+    path         TEXT,
+    codec        TEXT,
+    sample_rate  INTEGER,
+    channels     INTEGER,
+    duration_s   REAL,
+    bytes        INTEGER,
+    match_score  REAL,
+    match_reason TEXT,
+    cand_title   TEXT,
+    cand_artist  TEXT,
+    cand_year    INTEGER,
+    error        TEXT,
+    acquired_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rendition_status ON rendition (status);
+
 -- Everything derivable about a song's chart life, derived rather than
 -- stored so it cannot drift from the observations underneath it.
 CREATE VIEW IF NOT EXISTS song_stats AS
@@ -256,12 +284,133 @@ impl Store {
             .collect())
     }
 
+    /// Songs with no rendition attempt yet, best-charting first.
+    ///
+    /// Ordered so that a partial run covers the biggest hits — the ones
+    /// any finding most depends on — rather than an arbitrary slice.
+    /// With `sample`, order randomly instead — the honest way to
+    /// measure a match rate, since the best-charting songs are also the
+    /// best-catalogued and would flatter any resolver.
+    pub async fn songs_needing_audio(&self, limit: i64, sample: bool) -> Result<Vec<PendingSong>> {
+        let order = if sample {
+            "RANDOM()"
+        } else {
+            "s.best_rank, s.chart_weeks DESC"
+        };
+        let rows = sqlx::query(&format!(
+            "SELECT s.song_id, s.title, s.artist, s.first_year
+               FROM song_stats s
+               LEFT JOIN rendition r ON r.song_id = s.song_id
+              WHERE r.song_id IS NULL
+              ORDER BY {order}
+              LIMIT ?"
+        ))
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .context("selecting songs needing audio")?;
+
+        Ok(rows
+            .iter()
+            .map(|r| PendingSong {
+                song_id: r.get(0),
+                title: r.get(1),
+                artist: r.get(2),
+                first_year: r.get(3),
+            })
+            .collect())
+    }
+
+    /// Record the outcome of one acquisition attempt.
+    pub async fn record_rendition(&self, rec: &RenditionRecord) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO rendition (song_id, status, source, video_id, path, codec,
+                                    sample_rate, channels, duration_s, bytes,
+                                    match_score, match_reason, cand_title, cand_artist,
+                                    cand_year, error, acquired_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))
+             ON CONFLICT (song_id) DO UPDATE SET
+               status=excluded.status, source=excluded.source, video_id=excluded.video_id,
+               path=excluded.path, codec=excluded.codec, sample_rate=excluded.sample_rate,
+               channels=excluded.channels, duration_s=excluded.duration_s,
+               bytes=excluded.bytes, match_score=excluded.match_score,
+               match_reason=excluded.match_reason, cand_title=excluded.cand_title,
+               cand_artist=excluded.cand_artist, cand_year=excluded.cand_year,
+               error=excluded.error, acquired_at=excluded.acquired_at",
+        )
+        .bind(rec.song_id)
+        .bind(&rec.status)
+        .bind(&rec.source)
+        .bind(&rec.video_id)
+        .bind(&rec.path)
+        .bind(&rec.codec)
+        .bind(rec.sample_rate)
+        .bind(rec.channels)
+        .bind(rec.duration_s)
+        .bind(rec.bytes)
+        .bind(rec.match_score)
+        .bind(&rec.match_reason)
+        .bind(&rec.cand_title)
+        .bind(&rec.cand_artist)
+        .bind(rec.cand_year)
+        .bind(&rec.error)
+        .execute(&self.pool)
+        .await
+        .context("recording rendition")?;
+        Ok(())
+    }
+
+    /// Counts by acquisition status.
+    pub async fn acquisition_summary(&self) -> Result<Vec<(String, i64)>> {
+        let rows = sqlx::query(
+            "SELECT status, COUNT(*) FROM rendition GROUP BY status ORDER BY COUNT(*) DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("summarising acquisition")?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get::<String, _>(0), r.get::<i64, _>(1)))
+            .collect())
+    }
+
     pub async fn song_count(&self) -> Result<i64> {
         Ok(sqlx::query("SELECT COUNT(*) FROM song")
             .fetch_one(&self.pool)
             .await?
             .get::<i64, _>(0))
     }
+}
+
+/// A song still awaiting audio.
+#[derive(Debug, Clone)]
+pub struct PendingSong {
+    pub song_id: i64,
+    pub title: String,
+    pub artist: String,
+    pub first_year: i64,
+}
+
+/// One acquisition outcome, ready to store.
+#[derive(Debug, Clone, Default)]
+pub struct RenditionRecord {
+    pub song_id: i64,
+    /// `ok` | `no_match` | `failed`.
+    pub status: String,
+    pub source: Option<String>,
+    pub video_id: Option<String>,
+    pub path: Option<String>,
+    pub codec: Option<String>,
+    pub sample_rate: Option<i64>,
+    pub channels: Option<i64>,
+    pub duration_s: Option<f64>,
+    pub bytes: Option<i64>,
+    pub match_score: Option<f64>,
+    pub match_reason: Option<String>,
+    pub cand_title: Option<String>,
+    pub cand_artist: Option<String>,
+    pub cand_year: Option<i64>,
+    pub error: Option<String>,
 }
 
 /// What one [`Store::insert_entries`] batch actually changed.

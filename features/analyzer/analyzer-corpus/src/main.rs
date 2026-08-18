@@ -16,6 +16,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use analyzer_corpus::acquire;
 use analyzer_corpus::billboard::{self, ScrapeError};
 use analyzer_corpus::chart::Chart;
 use analyzer_corpus::db::Store;
@@ -74,6 +75,38 @@ enum Cmd {
         delay_ms: u64,
     },
 
+    /// Fetch one audio rendition per song.
+    ///
+    /// Resumable: a song with any recorded outcome is skipped, so an
+    /// interrupted run picks up where it stopped. Works best-charting
+    /// songs first, so a partial run still covers the biggest hits.
+    Acquire {
+        #[arg(long, default_value = "corpus.sqlite")]
+        db: PathBuf,
+        /// Where audio files are written.
+        #[arg(long, default_value = "/run/media/AudioHaven/fts-corpus/audio")]
+        audio_root: PathBuf,
+        /// How many songs to attempt this run.
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        /// Songs attempted concurrently.
+        #[arg(long, default_value_t = 4)]
+        concurrency: usize,
+        /// How many search candidates to score per song.
+        #[arg(long, default_value_t = 10)]
+        candidates: usize,
+        /// Score candidates and report, without downloading anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Pick songs at random rather than best-charting first.
+        ///
+        /// The honest way to measure a match rate: the biggest hits are
+        /// also the best-catalogued, so working down from #1 flatters
+        /// the resolver and hides how it does on the long tail.
+        #[arg(long)]
+        sample: bool,
+    },
+
     /// Show what the corpus currently holds.
     Status {
         #[arg(long, default_value = "corpus.sqlite")]
@@ -109,6 +142,15 @@ async fn main() -> Result<()> {
             concurrency,
             delay_ms,
         } => ingest_genre(db, charts, from, to, stride, concurrency, delay_ms).await,
+        Cmd::Acquire {
+            db,
+            audio_root,
+            limit,
+            concurrency,
+            candidates,
+            dry_run,
+            sample,
+        } => acquire_cmd(db, audio_root, limit, concurrency, candidates, dry_run, sample).await,
         Cmd::Status { db } => status(db).await,
         Cmd::Export { db, out } => export(db, out).await,
     }
@@ -262,6 +304,168 @@ fn is_absent(e: &anyhow::Error) -> bool {
         e.downcast_ref::<ScrapeError>(),
         Some(ScrapeError::NoSuchChart { .. })
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn acquire_cmd(
+    db: PathBuf,
+    audio_root: PathBuf,
+    limit: i64,
+    concurrency: usize,
+    candidates: usize,
+    dry_run: bool,
+    sample: bool,
+) -> Result<()> {
+    let store = Store::open(&db).await?;
+    // Fail here rather than 4,000 songs into an overnight run.
+    let tools = acquire::Tools::discover()?;
+
+    let pending = store.songs_needing_audio(limit, sample).await?;
+    if pending.is_empty() {
+        println!("nothing pending — every song already has a recorded outcome");
+        return Ok(());
+    }
+
+    tracing::info!(
+        songs = pending.len(),
+        concurrency,
+        dry_run,
+        "starting acquisition"
+    );
+
+    for chunk in pending.chunks(concurrency.max(1)) {
+        let results = futures::future::join_all(
+            chunk
+                .iter()
+                .map(|song| attempt(&tools, song, &audio_root, candidates, dry_run)),
+        )
+        .await;
+
+        for (song, rec) in chunk.iter().zip(results) {
+            let mark = match rec.status.as_str() {
+                "ok" => "ok  ",
+                "no_match" => "MISS",
+                _ => "FAIL",
+            };
+            println!(
+                "{mark} [{:>5}] {} — {}{}",
+                song.song_id,
+                truncate(&song.title, 38),
+                truncate(&song.artist, 26),
+                match (&rec.match_score, &rec.error) {
+                    (Some(s), _) => format!("  score {s:.1} ({})", rec.match_reason.as_deref().unwrap_or("")),
+                    (None, Some(e)) => format!("  {e}"),
+                    _ => String::new(),
+                }
+            );
+            if !dry_run {
+                store.record_rendition(&rec).await?;
+            }
+        }
+    }
+
+    if !dry_run {
+        println!();
+        for (status, n) in store.acquisition_summary().await? {
+            println!("  {status:<10} {n}");
+        }
+    }
+    Ok(())
+}
+
+/// One song's full resolve → download → probe attempt.
+///
+/// Never returns `Err`: every failure becomes a recorded outcome, so a
+/// long run is not derailed by one bad song and the failure stays
+/// visible in the corpus.
+async fn attempt(
+    tools: &acquire::Tools,
+    song: &analyzer_corpus::db::PendingSong,
+    audio_root: &std::path::Path,
+    candidates: usize,
+    dry_run: bool,
+) -> analyzer_corpus::db::RenditionRecord {
+    use analyzer_corpus::db::RenditionRecord;
+
+    let mut rec = RenditionRecord {
+        song_id: song.song_id,
+        status: "failed".into(),
+        source: Some("youtube-music".into()),
+        ..Default::default()
+    };
+
+    let target = acquire::Target {
+        title: song.title.clone(),
+        artist: song.artist.clone(),
+        chart_year: song.first_year as i32,
+    };
+
+    let cands = match acquire::resolve(tools, &target, candidates).await {
+        Ok(c) => c,
+        Err(e) => {
+            rec.error = Some(format!("resolve: {e}"));
+            return rec;
+        }
+    };
+
+    let Some((best, score)) = acquire::score::best(&target, &cands) else {
+        rec.status = "no_match".into();
+        rec.error = Some(format!("{} candidates, none scored >= {}", cands.len(), acquire::score::ACCEPT));
+        return rec;
+    };
+
+    rec.video_id = Some(best.id.clone());
+    rec.match_score = Some(score.value);
+    rec.match_reason = Some(score.reason.clone());
+    rec.cand_title = best.track.clone().or_else(|| Some(best.title.clone()));
+    rec.cand_artist = best.artist.clone().or_else(|| best.channel.clone());
+    rec.cand_year = best.release_year.map(|y| y as i64);
+
+    if dry_run {
+        rec.status = "ok".into();
+        return rec;
+    }
+
+    // One directory per song keeps a re-download from colliding with
+    // the file it is replacing.
+    let dir = audio_root.join(song.song_id.to_string());
+    let path = match acquire::download(tools, &best.id, &dir).await {
+        Ok(p) => p,
+        Err(e) => {
+            rec.error = Some(format!("download: {e}"));
+            return rec;
+        }
+    };
+
+    match acquire::probe(tools, &path).await {
+        Ok(p) => {
+            // A clip or a half-finished download must never be filed as
+            // the record — it would measure as ordinary data.
+            if let Err(e) = acquire::check_complete(&p, best.duration) {
+                rec.error = Some(format!("incomplete: {e}"));
+                let _ = tokio::fs::remove_file(&path).await;
+                return rec;
+            }
+            rec.status = "ok".into();
+            rec.path = Some(p.path.to_string_lossy().into_owned());
+            rec.bytes = Some(p.bytes as i64);
+            rec.duration_s = Some(p.duration_s);
+            rec.codec = Some(p.codec);
+            rec.sample_rate = Some(p.sample_rate as i64);
+            rec.channels = Some(p.channels as i64);
+        }
+        Err(e) => rec.error = Some(format!("probe: {e}")),
+    }
+    rec
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        format!("{s:<n$}")
+    } else {
+        let head: String = s.chars().take(n.saturating_sub(1)).collect();
+        format!("{head}…")
+    }
 }
 
 async fn status(db: PathBuf) -> Result<()> {

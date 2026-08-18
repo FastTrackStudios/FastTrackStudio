@@ -21,6 +21,15 @@
         cargo-nextest
         bacon
         flac
+        # yt-dlp + ffmpeg — the corpus acquisition stage
+        # (features/analyzer/analyzer-corpus). yt-dlp resolves and
+        # fetches a rendition per charting song; ffprobe (from ffmpeg)
+        # reads back the real duration and stream layout, which is how a
+        # download is checked against the chart metadata rather than
+        # trusted. ffmpeg is also what the later separation stage will
+        # decode through.
+        yt-dlp
+        ffmpeg
         # uv — vehicle for the graphify bootstrap below (graphify is a
         # PyPI tool, not in nixpkgs; python3 comes from buildInputs).
         uv
