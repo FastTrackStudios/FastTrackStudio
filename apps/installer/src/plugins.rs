@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 
 use eyre::{Context, eyre};
 
-use crate::{codeberg, fetch};
+use crate::{fetch, github};
 
 pub struct PluginDirs {
     pub clap: PathBuf,
@@ -94,9 +94,9 @@ pub async fn install(
         None => {
             let client = fetch::http_client()?;
             let release = if cfg!(target_os = "macos") {
-                codeberg::resolve_macos_plugins_zip(&client, version.as_deref()).await?
+                github::resolve_macos_plugins_zip(&client, version.as_deref()).await?
             } else {
-                codeberg::resolve_with_prefix(&client, version.as_deref(), "fts-plugins-").await?
+                github::resolve_with_prefix(&client, version.as_deref(), "fts-plugins-").await?
             };
             let tarball_path = stage.path().join(&release.tarball.name);
             fetch::download(&client, &release.tarball.url, &tarball_path, &release.tarball.name).await?;

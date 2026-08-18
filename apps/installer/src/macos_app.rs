@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use eyre::{Context, eyre};
 
-use crate::{codeberg, fetch};
+use crate::{fetch, github};
 
 pub struct MacApp {
     prefix: PathBuf,
@@ -164,7 +164,7 @@ pub async fn install(prefix: Option<PathBuf>, version: Option<String>, url: Opti
             (url, name, None)
         }
         None => {
-            let release = codeberg::resolve_macos_dmg(&client, version.as_deref()).await?;
+            let release = github::resolve_macos_dmg(&client, version.as_deref()).await?;
             println!("release: {} ({})", release.tag, release.tarball.name);
             (release.tarball.url, release.tarball.name, Some(release.tag))
         }
@@ -185,7 +185,7 @@ pub async fn install(prefix: Option<PathBuf>, version: Option<String>, url: Opti
 pub async fn update(prefix: Option<PathBuf>) -> eyre::Result<()> {
     let app = MacApp::new(prefix.clone())?;
     let client = fetch::http_client()?;
-    let release = codeberg::resolve_macos_dmg(&client, None).await?;
+    let release = github::resolve_macos_dmg(&client, None).await?;
     let latest = release.tag.trim_start_matches('v').to_string();
 
     match app.installed_version() {

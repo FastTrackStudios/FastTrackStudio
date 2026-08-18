@@ -1,21 +1,33 @@
-//! Release resolution against the codeberg (Gitea/Forgejo) API.
+//! Release resolution against the GitHub API.
 //!
-//! `GET /api/v1/repos/FastTrackStudios/FastTrackStudio/releases/latest`
-//! (or `/releases/tags/<tag>`), then pick a release asset by name and its
-//! `browser_download_url`. An optional `$CODEBERG_TOKEN` is sent as
-//! `Authorization: token <t>` (private repos / rate limits); public access
-//! works without it.
+//! `GET /repos/FastTrackStudios/FastTrackStudio/releases/tags/<tag>`, or —
+//! with no tag — a scan of `/releases`, then pick a release asset by name
+//! and its `browser_download_url`. An optional `$GITHUB_TOKEN` (or
+//! `$GH_TOKEN`, what the `gh` CLI exports) is sent as
+//! `Authorization: Bearer <t>` for private repos and the higher rate limit;
+//! public access works without it.
+//!
+//! **Releases are resolved by asset, not by recency.** One repo publishes
+//! two products — FastTrackStudio under `v*` and Task under `task-v*` — so
+//! `/releases/latest` regularly names a release with nothing in it for the
+//! caller (and, being GitHub, skips prereleases besides, which is all the
+//! FTS line has published so far). Resolution walks the release list newest
+//! first and takes the first release that actually carries a matching
+//! asset, which is correct regardless of how the tags are namespaced.
 //!
 //! Asset naming isn't uniform across platforms — Linux tarballs and the
 //! macOS plugin zip both follow `<prefix>-<platform_suffix>.<ext>`, but the
 //! macOS app `.dmg` (built by `deploy-macos.sh`) embeds a build-number
 //! infix and no arch token. `resolve_matching` is the shared fetch +
-//! fallback logic; each platform/asset-shape gets its own thin wrapper
+//! scan logic; each platform/asset-shape gets its own thin wrapper
 //! around it.
 
 use eyre::{Context, eyre};
 
-const API_BASE: &str = "https://codeberg.org/api/v1/repos/FastTrackStudios/FastTrackStudio";
+const API_BASE: &str = "https://api.github.com/repos/FastTrackStudios/FastTrackStudio";
+
+/// How many releases back to look for one carrying the wanted asset.
+const RELEASE_SCAN_LIMIT: usize = 30;
 
 pub struct Asset {
     pub name: String,
@@ -98,45 +110,63 @@ pub async fn resolve_macos_plugins_zip(client: &reqwest::Client, tag: Option<&st
     .await
 }
 
-/// Fetch a release (latest, or a specific tag) and pick the one asset
-/// satisfying `matches`; `asset_desc` is only used in the error message.
+/// Resolve a release carrying an asset satisfying `matches`: the one tagged
+/// `tag`, or — with no tag — the newest release that has such an asset.
+/// `asset_desc` is only used in the error message.
 async fn resolve_matching(
     client: &reqwest::Client,
     tag: Option<&str>,
     matches: impl Fn(&str) -> bool,
     asset_desc: &str,
 ) -> eyre::Result<Release> {
-    let url = match tag {
-        Some(tag) => format!("{API_BASE}/releases/tags/{tag}"),
-        None => format!("{API_BASE}/releases/latest"),
-    };
-
-    let mut req = client.get(&url).header("Accept", "application/json");
-    if let Ok(token) = std::env::var("CODEBERG_TOKEN")
-        && !token.is_empty() {
-            req = req.header("Authorization", format!("token {token}"));
+    match tag {
+        // An explicit tag is a demand for THAT release: if it doesn't carry
+        // the asset, say so rather than quietly installing a different
+        // version than the one asked for.
+        Some(tag) => {
+            let url = format!("{API_BASE}/releases/tags/{tag}");
+            let release = get_json(client, &url).await.map_err(|e| {
+                eyre!("{e}\n(no release tagged {tag}? `gh release list` shows what exists)")
+            })?;
+            pick_asset(&release, &matches, asset_desc)
         }
-
-    let resp = req.send().await.wrap_err_with(|| format!("requesting {url}"))?;
-    let status = resp.status();
-    let body = resp.bytes().await.wrap_err("reading release response")?;
-    if !status.is_success() {
-        // Gitea's /releases/latest EXCLUDES prereleases — when only
-        // alphas exist it 404s. Fall back to the newest release of any
-        // kind.
-        if status.as_u16() == 404 && tag.is_none() {
-            return Box::pin(resolve_newest_any(client, matches, asset_desc)).await;
+        None => {
+            let url = format!("{API_BASE}/releases?per_page={RELEASE_SCAN_LIMIT}");
+            let list = get_json(client, &url).await?;
+            let releases = list
+                .as_array()
+                .ok_or_else(|| eyre!("{url} did not return a release list"))?;
+            if releases.is_empty() {
+                return Err(eyre!("no releases published yet"));
+            }
+            // GitHub returns these newest-first, so the first match is the
+            // newest release carrying the asset.
+            for release in releases {
+                if let Ok(found) = pick_asset(release, &matches, asset_desc) {
+                    return Ok(found);
+                }
+            }
+            let tags: Vec<&str> = releases
+                .iter()
+                .filter_map(|r| r["tag_name"].as_str())
+                .collect();
+            Err(eyre!(
+                "none of the {} most recent releases carries a {asset_desc} asset \
+                 (looked at: {})",
+                releases.len(),
+                tags.join(", ")
+            ))
         }
-        let hint = match (status.as_u16(), tag) {
-            (404, Some(tag)) => format!(" (no release tagged {tag}?)"),
-            (404, None) => " (no releases published yet?)".to_string(),
-            _ => String::new(),
-        };
-        return Err(eyre!("{url} -> HTTP {status}{hint}"));
     }
+}
 
-    let release: serde_json::Value =
-        serde_json::from_slice(&body).wrap_err("parsing release JSON")?;
+/// Pull the wanted asset (and any SHA256SUMS beside it) out of one release's
+/// JSON.
+fn pick_asset(
+    release: &serde_json::Value,
+    matches: &impl Fn(&str) -> bool,
+    asset_desc: &str,
+) -> eyre::Result<Release> {
     let tag = release["tag_name"]
         .as_str()
         .ok_or_else(|| eyre!("release JSON has no tag_name"))?
@@ -172,33 +202,30 @@ async fn resolve_matching(
     Ok(Release { tag, tarball, sums })
 }
 
-/// Newest release of any kind (prereleases included): first entry of
-/// the paginated list.
-async fn resolve_newest_any(
-    client: &reqwest::Client,
-    matches: impl Fn(&str) -> bool,
-    asset_desc: &str,
-) -> eyre::Result<Release> {
-    let url = format!("{API_BASE}/releases?limit=1");
-    let mut req = client.get(&url).header("Accept", "application/json");
-    if let Ok(token) = std::env::var("CODEBERG_TOKEN")
-        && !token.is_empty() {
-            req = req.header("Authorization", format!("token {token}"));
-        }
+/// GET a GitHub API endpoint as JSON, with the token if we have one.
+async fn get_json(client: &reqwest::Client, url: &str) -> eyre::Result<serde_json::Value> {
+    let mut req = client.get(url).header("Accept", "application/vnd.github+json");
+    // GITHUB_TOKEN is the CI/API name; GH_TOKEN is what the `gh` CLI exports,
+    // so a developer with gh set up needs no extra configuration.
+    let token = std::env::var("GITHUB_TOKEN")
+        .or_else(|_| std::env::var("GH_TOKEN"))
+        .unwrap_or_default();
+    if !token.is_empty() {
+        req = req.header("Authorization", format!("Bearer {token}"));
+    }
+
     let resp = req.send().await.wrap_err_with(|| format!("requesting {url}"))?;
     let status = resp.status();
-    let body = resp.bytes().await.wrap_err("reading releases response")?;
+    let body = resp.bytes().await.wrap_err("reading release response")?;
     if !status.is_success() {
-        return Err(eyre!("{url} -> HTTP {status}"));
+        // 403 with no token is nearly always the 60-req/hour anonymous rate
+        // limit rather than a real permission problem; say which it is.
+        let hint = if status.as_u16() == 403 && std::env::var_os("GITHUB_TOKEN").is_none() {
+            " (GitHub rate limit? set $GITHUB_TOKEN)"
+        } else {
+            ""
+        };
+        return Err(eyre!("{url} -> HTTP {status}{hint}"));
     }
-    let list: serde_json::Value =
-        serde_json::from_slice(&body).wrap_err("parsing releases JSON")?;
-    let first = list
-        .as_array()
-        .and_then(|a| a.first())
-        .ok_or_else(|| eyre!("no releases published yet"))?;
-    let tag = first["tag_name"]
-        .as_str()
-        .ok_or_else(|| eyre!("release JSON has no tag_name"))?;
-    Box::pin(resolve_matching(client, Some(tag), matches, asset_desc)).await
+    serde_json::from_slice(&body).wrap_err("parsing release JSON")
 }

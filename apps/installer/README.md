@@ -58,17 +58,26 @@ there regardless of order — see [macOS specifics](#macos-specifics).)
 REAPER/SWS/ReaPack are always their pinned/latest official versions (see
 below), independent of the FTS release tag.
 
-- Releases are resolved via the codeberg (Gitea/Forgejo) API
-  (`/api/v1/repos/FastTrackStudios/FastTrackStudio/releases/latest` or
-  `/releases/tags/<tag>`); the platform tarball asset
-  (`fasttrackstudio-v<ver>-x86_64-linux.tar.gz`) is downloaded with
-  progress + retry (installer-core primitives), verified against the
-  release's `SHA256SUMS` asset when present, extracted, and the layout
-  applied in Rust.
+- Releases are resolved via the **GitHub** API
+  (`api.github.com/repos/FastTrackStudios/FastTrackStudio/releases`); the
+  platform tarball asset (`fasttrackstudio-v<ver>-x86_64-linux.tar.gz`) is
+  downloaded with progress + retry (installer-core primitives), verified
+  against the release's `SHA256SUMS` asset when present, extracted, and the
+  layout applied in Rust.
+- **Resolution is by asset, not by recency.** This repo publishes two
+  products — FastTrackStudio under `v*` and Task under `task-v*` — so
+  `/releases/latest` routinely names a release with nothing in it for the
+  caller, quite apart from GitHub skipping prereleases (all the FTS line
+  has published so far). With no `--version`, the resolver walks the 30
+  most recent releases newest-first and takes the first one that actually
+  carries the asset it wants. With `--version`, that exact tag must carry
+  it, or the command fails rather than silently installing something else.
 - `--url` skips the API entirely and installs from a direct tarball URL
   (SHA256SUMS is looked for next to it, best-effort).
-- `$CODEBERG_TOKEN`, if set, is sent as `Authorization: token <t>`
-  (private repo / rate-limit cases); public access needs no token.
+- `$GITHUB_TOKEN` — or `$GH_TOKEN`, what the `gh` CLI exports — is sent as
+  `Authorization: Bearer <t>` (private repo / rate-limit cases); public
+  access needs no token, subject to GitHub's 60-requests-per-hour
+  anonymous limit.
 - `--prefix` (default `$HOME`) relocates the whole layout; with a
   non-home prefix the systemd / desktop-database refreshes are skipped —
   that is the test path.
