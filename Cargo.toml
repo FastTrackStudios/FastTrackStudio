@@ -994,6 +994,22 @@ vox-codegen = "0.10.0-rc.5"
 # tabindex div unfocusable by mouse). dioxus git pins `=0.3.0-beta.1`
 # and the vendored dioxus-test needs post-beta.1 APIs
 # (Node::outer_html_pretty). One rev across all blitz crates.
+#
+# 02523b83 is the CEILING, and the blocker is dioxus, not us. Our four
+# patches rebase cleanly onto current upstream main — that part is
+# free — but blitz has since made `NodeId` a real type (5833d681, the
+# SlotMap-backed node tree) where it used to be a `usize`, and moved
+# `final_layout`/`scroll_offset` from fields to methods. dioxus's
+# `native-dom` is still written against the old shape, so any bump
+# lands ~47 type errors *inside the dioxus rev*, not in our tree.
+#
+# There is no dioxus rev that fixes it: main still pins blitz
+# `=0.3.0-beta.1`, and our pin (f717a8e1) IS its newest "Sync
+# Blitz/Native" commit. So the bump is gated on dioxus's next Blitz
+# sync, and it moves as one step — blitz and the dioxus rev together.
+# Rebased branches are parked on the fork at fts-focus-2026-08 (onto
+# main) and fts-focus-2026-08b (onto db12391a, the last commit with
+# the `incremental` feature) so the rebase does not have to be redone.
 blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
 blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
 blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
