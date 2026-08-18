@@ -229,13 +229,24 @@ on Linux.
   `fasttrackstudio` GUI/`--engine` binary — the app tarball's `fts`
   binary is Linux-only for now); no `reaper_fts_extensions.dylib` build
   exists yet, so unlike Linux the macOS app install never touches the
-  REAPER rig `UserPlugins/` dirs; the universal-binary build (both the
-  app and the plugin bundle) is new and unverified against this
-  codebase's vendored native deps (phon-jit, NAM's C++ bridge) —
-  specifically whether they cross-compile cleanly to
+  REAPER rig `UserPlugins/` dirs; the **app's** universal build remains
+  unverified against this codebase's vendored native deps (phon-jit,
+  NAM's C++ bridge) — specifically whether they cross-compile cleanly to
   `x86_64-apple-darwin` and whether every Mach-O in the app bundle
   actually has a same-path counterpart to `lipo` against — until it's
-  actually run on airlock. `apps/fasttrackstudio/ios/verify-macos-universal.sh`
+  actually run on airlock.
+
+  The **plugin** half of that gap is now closed (2026-08-18, on airlock):
+  all 17 plugins build via `bundle-universal`, every `.clap` and `.vst3`
+  reports `x86_64 arm64` under `lipo -archs`, and every one of the 34
+  bundles loads — `just plugins-verify` and `just plugins-verify x86_64`,
+  i.e. dlopen + entry point + factory walk, native and under Rosetta.
+  `plugins install --from` then lays them into
+  `~/Library/Audio/Plug-Ins/{CLAP,VST3}` and the installed copies still
+  load. So NAM's C++ bridge does cross-compile; nothing here says the app
+  bundle will.
+
+  `apps/fasttrackstudio/ios/verify-macos-universal.sh`
   (wired into the `macos-desktop`/`macos-plugins` CI jobs, right after
   build and before upload) is the automated check for this: codesign +
   Gatekeeper/notarization acceptance, `lipo -archs` on every Mach-O in
