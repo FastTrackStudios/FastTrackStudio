@@ -26,6 +26,13 @@ use clap::{Parser, Subcommand};
 use futures::StreamExt;
 use sqlx::Row;
 
+/// Consecutive refused searches before an acquisition run gives up.
+///
+/// Low on purpose. A rate-limited stretch produces refusals far faster
+/// than successes, so by the time you notice, thousands of songs are
+/// already recorded — and every one has to be redone.
+const BLOCKED_LIMIT: usize = 25;
+
 #[derive(Parser)]
 #[command(name = "corpus", about = "Build the Billboard chart corpus")]
 struct Cli {
@@ -108,6 +115,19 @@ enum Cmd {
         sample: bool,
     },
 
+    /// Clear recorded acquisition outcomes so they are attempted again.
+    ///
+    /// Mainly for `blocked` rows: those are songs the search refused to
+    /// answer for, not songs that are missing, so they must go back in
+    /// the queue once the rate limit has passed.
+    Reset {
+        #[arg(long, default_value = "corpus.sqlite")]
+        db: PathBuf,
+        /// Which status to clear.
+        #[arg(long, default_value = "blocked")]
+        status: String,
+    },
+
     /// Show what the corpus currently holds.
     Status {
         #[arg(long, default_value = "corpus.sqlite")]
@@ -152,6 +172,7 @@ async fn main() -> Result<()> {
             dry_run,
             sample,
         } => acquire_cmd(db, audio_root, limit, concurrency, candidates, dry_run, sample).await,
+        Cmd::Reset { db, status } => reset(db, status).await,
         Cmd::Status { db } => status(db).await,
         Cmd::Export { db, out } => export(db, out).await,
     }
@@ -356,11 +377,36 @@ async fn acquire_cmd(
         })
         .buffer_unordered(concurrency.max(1));
 
+    // Consecutive refusals mean the search is being rate limited, not
+    // that the songs are missing. Without this the run happily marched
+    // through ~2,800 songs recording "blocked" for every one, spending
+    // hours to produce nothing but rows that must be redone.
+    let mut consecutive_blocked = 0usize;
+
     while let Some((song, rec)) = in_flight.next().await {
         done += 1;
+
+        if rec.status == "blocked" {
+            consecutive_blocked += 1;
+            if consecutive_blocked >= BLOCKED_LIMIT {
+                store.record_rendition(&rec).await.ok();
+                tracing::error!(
+                    consecutive_blocked,
+                    done,
+                    "search refused {BLOCKED_LIMIT} times running — stopping rather than \
+                     marking the rest of the corpus blocked. Wait, then re-run with lower \
+                     --concurrency; `corpus reset --status blocked` clears these for retry."
+                );
+                break;
+            }
+        } else {
+            consecutive_blocked = 0;
+        }
+
         let mark = match rec.status.as_str() {
             "ok" => "ok  ",
             "no_match" => "MISS",
+            "blocked" => "BLOK",
             _ => "FAIL",
         };
         let rate = done as f64 / started.elapsed().as_secs_f64().max(1.0) * 60.0;
@@ -424,9 +470,24 @@ async fn attempt(
         }
     };
 
+    // Zero candidates is not "this song does not exist" — it is almost
+    // always the search being refused. Conflating the two silently
+    // poisoned ~2,800 songs as permanent gaps during a rate-limited
+    // stretch, which is unrecoverable damage once the run moves on.
+    // `blocked` is retryable; `no_match` is a real verdict.
+    if cands.is_empty() {
+        rec.status = "blocked".into();
+        rec.error = Some("search returned no candidates — refused or rate limited".into());
+        return rec;
+    }
+
     let Some((best, score)) = acquire::score::best(&target, &cands) else {
         rec.status = "no_match".into();
-        rec.error = Some(format!("{} candidates, none scored >= {}", cands.len(), acquire::score::ACCEPT));
+        rec.error = Some(format!(
+            "{} candidates, none scored >= {}",
+            cands.len(),
+            acquire::score::ACCEPT
+        ));
         return rec;
     };
 
@@ -482,6 +543,18 @@ fn truncate(s: &str, n: usize) -> String {
         let head: String = s.chars().take(n.saturating_sub(1)).collect();
         format!("{head}…")
     }
+}
+
+async fn reset(db: PathBuf, status: String) -> Result<()> {
+    let store = Store::open(&db).await?;
+    let n = sqlx::query("DELETE FROM rendition WHERE status = ?")
+        .bind(&status)
+        .execute(store.pool())
+        .await
+        .context("clearing rendition rows")?
+        .rows_affected();
+    println!("cleared {n} '{status}' rows — they will be attempted again");
+    Ok(())
 }
 
 async fn status(db: PathBuf) -> Result<()> {
