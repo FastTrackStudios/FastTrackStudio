@@ -373,6 +373,9 @@ async fn acquire_cmd(
     let store = Store::open(&db).await?;
     // Fail here rather than 4,000 songs into an overnight run.
     let tools = acquire::Tools::discover()?;
+    // One helper process for the whole run; it is what makes resolution
+    // cost a single request per song instead of about six.
+    let search = acquire::MusicSearch::spawn(candidates).await?;
 
     // The rate limit is a per-IP request quota, not a concurrency cap:
     // it trips after roughly 500-800 songs whether 8 or 16 run at once,
@@ -411,10 +414,10 @@ async fn acquire_cmd(
         let tripped = acquire_pass(
             &store,
             &tools,
+            &search,
             pending,
             &audio_root,
             concurrency,
-            candidates,
             dry_run,
         )
         .await?;
@@ -455,10 +458,10 @@ async fn acquire_cmd(
 async fn acquire_pass(
     store: &Store,
     tools: &acquire::Tools,
+    search: &acquire::MusicSearch,
     pending: Vec<analyzer_corpus::db::PendingSong>,
     audio_root: &std::path::Path,
     concurrency: usize,
-    candidates: usize,
     dry_run: bool,
 ) -> Result<bool> {
     // Streamed, not batched. Chunking with `join_all` made every batch
@@ -474,10 +477,8 @@ async fn acquire_pass(
 
     let mut in_flight = futures::stream::iter(pending)
         .map(|song| {
-            let tools = &tools;
-            let audio_root = &audio_root;
             async move {
-                let rec = attempt(tools, &song, audio_root, candidates, dry_run).await;
+                let rec = attempt(tools, search, &song, audio_root, dry_run).await;
                 (song, rec)
             }
         })
@@ -543,9 +544,9 @@ async fn acquire_pass(
 /// visible in the corpus.
 async fn attempt(
     tools: &acquire::Tools,
+    search: &acquire::MusicSearch,
     song: &analyzer_corpus::db::PendingSong,
     audio_root: &std::path::Path,
-    candidates: usize,
     dry_run: bool,
 ) -> analyzer_corpus::db::RenditionRecord {
     use analyzer_corpus::db::RenditionRecord;
@@ -563,7 +564,8 @@ async fn attempt(
         chart_year: song.first_year as i32,
     };
 
-    let cands = match acquire::resolve(tools, &target, candidates).await {
+    let query = format!("{} {}", target.artist, target.title);
+    let cands = match search.resolve(&query).await {
         Ok(c) => c,
         Err(e) => {
             rec.error = Some(format!("resolve: {e}"));

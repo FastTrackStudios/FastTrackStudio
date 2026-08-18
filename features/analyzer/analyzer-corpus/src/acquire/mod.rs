@@ -14,10 +14,14 @@
 //! Plain search ranks by engagement, so it surfaces reactions, karaoke,
 //! covers and lyric videos ahead of the record — measured on a real
 //! chart-topper, twelve plain results contained no original master at
-//! all. YouTube Music returns the label's own "art tracks", and yt-dlp
-//! reports their `artist` / `track` / `release_year` metadata, which is
-//! exactly what [`score`] needs to tell an original from a
-//! re-recording.
+//! all. YouTube Music returns the label's own "art tracks", described by
+//! structured `artist` / `track` / `album` metadata rather than an
+//! uploader's free-text title, which is what [`score`] needs to tell an
+//! original from a re-recording.
+//!
+//! Resolution goes through [`search`] rather than yt-dlp: one request
+//! per song instead of about six, which matters because the binding
+//! limit is a per-IP request quota.
 //!
 //! ## Why nothing is re-encoded
 //!
@@ -27,6 +31,7 @@
 //! decoded only at analysis time.
 
 pub mod score;
+pub mod search;
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -35,6 +40,7 @@ use anyhow::{Context, Result, bail};
 use tokio::process::Command;
 
 pub use score::{Candidate, Score, Target};
+pub use search::MusicSearch;
 
 /// External binaries this stage shells out to.
 ///
@@ -71,46 +77,6 @@ fn which(exe: &str) -> Result<PathBuf> {
         .map(|d| d.join(exe))
         .find(|p| p.is_file())
         .with_context(|| format!("{exe} not on PATH"))
-}
-
-/// Ask YouTube Music for candidate uploads of a song.
-pub async fn resolve(tools: &Tools, target: &Target, limit: usize) -> Result<Vec<Candidate>> {
-    let query = format!("{} {}", target.artist, target.title);
-    let url = format!(
-        "https://music.youtube.com/search?q={}",
-        urlencode(&query)
-    );
-
-    let out = Command::new(&tools.yt_dlp)
-        .args([
-            "--dump-json",
-            "--skip-download",
-            "--no-warnings",
-            "--ignore-errors",
-            "--playlist-end",
-            &limit.to_string(),
-        ])
-        .arg(&url)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .await
-        .context("running yt-dlp to resolve candidates")?;
-
-    // yt-dlp exits non-zero when *some* entries fail, which is normal
-    // here; the JSON lines it did produce are still good.
-    let mut cands = Vec::new();
-    for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let line = line.trim();
-        if !line.starts_with('{') {
-            continue;
-        }
-        match serde_json::from_str::<Candidate>(line) {
-            Ok(c) => cands.push(c),
-            Err(e) => tracing::debug!(error = %e, "skipping unparseable yt-dlp record"),
-        }
-    }
-    Ok(cands)
 }
 
 /// What landed on disk.
@@ -289,21 +255,6 @@ pub async fn probe(tools: &Tools, path: &Path) -> Result<Rendition> {
     })
 }
 
-/// Percent-encode a search query.
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,14 +296,4 @@ mod tests {
         assert!(check_complete(&rendition(30.0), None).is_err());
     }
 
-    #[test]
-    fn queries_are_encoded_safely() {
-        assert_eq!(urlencode("Bryan Adams"), "Bryan+Adams");
-        // The characters that actually appear in chart titles.
-        assert_eq!(urlencode("Woman?"), "Woman%3F");
-        assert_eq!(urlencode("A&B"), "A%26B");
-        assert_eq!(urlencode("Despacito"), "Despacito");
-        assert_eq!(urlencode("Décimas"), "D%C3%A9cimas");
-        assert_eq!(urlencode("hi #1"), "hi+%231");
-    }
 }
