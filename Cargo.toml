@@ -78,6 +78,7 @@ members = [
     # ── features/analyzer — measurement rig (plugins + reference corpus) ──
     "features/analyzer/fts-analyzer",
     "features/analyzer/fts-analyzer-cli",
+    "features/analyzer/analyzer-corpus",
     # ── features/reaper ───────────────────────────────────────────────
     "features/reaper/daw-reaper",
     "features/reaper/daw-bridge",
@@ -556,6 +557,7 @@ expression-editor-daw = { path = "features/expression-editor/expression-editor-d
 expression-editor-demo = { path = "features/expression-editor/expression-editor-demo" }
 fts-analyzer = { path = "features/analyzer/fts-analyzer" }
 fts-analyzer-cli = { path = "features/analyzer/fts-analyzer-cli" }
+analyzer-corpus = { path = "features/analyzer/analyzer-corpus" }
 expression-editor-guitarpro = { path = "features/expression-editor/expression-editor-guitarpro" }
 expression-editor-reaper = { path = "features/expression-editor/expression-editor-reaper" }
 expression-editor-standalone = { path = "features/expression-editor/expression-editor-standalone" }
@@ -879,6 +881,17 @@ hound = "3"
 rustfft = "6"
 csv = "1"
 rayon = "1"
+# Corpus store. Pinned to the sqlx already in the lock (sea-orm pulls
+# 0.8.6) so only ONE libsqlite3-sys ends up linked into the tree.
+sqlx = { version = "0.8", default-features = false, features = [
+    "sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+    "chrono",
+] }
+# Billboard genre charts have no public data dump, so they are parsed
+# out of the chart pages. Hot 100 comes from a JSON archive instead.
+scraper = "0.20"
 # Pure-Rust ONNX inference (no C onnxruntime dep) — Basic Pitch polyphonic
 # note transcription in tune-dsp, behind the `basic-pitch` feature.
 tract-onnx = "0.21"
