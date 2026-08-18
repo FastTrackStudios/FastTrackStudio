@@ -291,19 +291,27 @@ impl Store {
     /// With `sample`, order randomly instead — the honest way to
     /// measure a match rate, since the best-charting songs are also the
     /// best-catalogued and would flatter any resolver.
-    pub async fn songs_needing_audio(&self, limit: i64, sample: bool) -> Result<Vec<PendingSong>> {
+    pub async fn songs_needing_audio(
+        &self,
+        limit: i64,
+        sample: bool,
+        scope: Scope,
+    ) -> Result<Vec<PendingSong>> {
+        // Hot 100 peak first, so the biggest hits land earliest and the
+        // analysis can start long before the tail finishes.
         let order = if sample {
             "RANDOM()"
         } else {
-            "s.best_rank, s.chart_weeks DESC"
+            "COALESCE(s.hot100_peak, 9999), s.best_rank, s.chart_weeks DESC"
         };
         let rows = sqlx::query(&format!(
             "SELECT s.song_id, s.title, s.artist, s.first_year
                FROM song_stats s
                LEFT JOIN rendition r ON r.song_id = s.song_id
-              WHERE r.song_id IS NULL
+              WHERE r.song_id IS NULL AND {}
               ORDER BY {order}
-              LIMIT ?"
+              LIMIT ?",
+            scope.predicate()
         ))
         .bind(limit)
         .fetch_all(&self.pool)
@@ -393,6 +401,45 @@ impl Store {
             .fetch_one(&self.pool)
             .await?
             .get::<i64, _>(0))
+    }
+}
+
+/// Which slice of the corpus to acquire audio for.
+///
+/// The corpus is far larger than any single question needs — the genre
+/// charts alone nearly triple it — and acquisition is rate limited, so
+/// which songs go first is the main lever on when results arrive.
+/// `Hot100` is the Billboard spine and the closest match to how these
+/// vocal studies are usually framed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum Scope {
+    /// Everything that ever charted, genre charts included.
+    #[default]
+    All,
+    /// Songs that reached the Hot 100 at any position.
+    Hot100,
+    /// Hot 100 top 40.
+    Top40,
+    /// Hot 100 top 10.
+    Top10,
+    /// Hot 100 top 40, plus anything that topped a genre chart.
+    ///
+    /// Keeps strong coverage in every genre: country and Christian have
+    /// many songs that chart well in-genre without ever crossing over,
+    /// so a Hot 100 cut alone under-samples exactly those.
+    Top40PlusGenreLeaders,
+}
+
+impl Scope {
+    /// SQL predicate over `song_stats s`.
+    pub fn predicate(self) -> &'static str {
+        match self {
+            Scope::All => "1=1",
+            Scope::Hot100 => "s.hot100_peak IS NOT NULL",
+            Scope::Top40 => "s.hot100_peak <= 40",
+            Scope::Top10 => "s.hot100_peak <= 10",
+            Scope::Top40PlusGenreLeaders => "(s.hot100_peak <= 40 OR s.best_rank = 1)",
+        }
     }
 }
 

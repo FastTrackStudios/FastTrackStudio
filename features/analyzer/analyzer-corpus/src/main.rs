@@ -113,6 +113,13 @@ enum Cmd {
         /// the resolver and hides how it does on the long tail.
         #[arg(long)]
         sample: bool,
+        /// Which slice of the corpus to acquire.
+        ///
+        /// Acquisition is rate limited, so scope is the main lever on
+        /// when results arrive: the genre charts nearly triple the song
+        /// count. Work the Hot 100 first, then widen.
+        #[arg(long, value_enum, default_value_t = analyzer_corpus::db::Scope::All)]
+        scope: analyzer_corpus::db::Scope,
         /// Seconds to wait out a rate limit before resuming. 0 = stop.
         ///
         /// Measured, the block clears in about 2.2 hours, so the
@@ -179,6 +186,7 @@ async fn main() -> Result<()> {
             candidates,
             dry_run,
             sample,
+            scope,
             cooldown_secs,
         } => {
             acquire_cmd(
@@ -189,6 +197,7 @@ async fn main() -> Result<()> {
                 candidates,
                 dry_run,
                 sample,
+                scope,
                 cooldown_secs,
             )
             .await
@@ -358,6 +367,7 @@ async fn acquire_cmd(
     candidates: usize,
     dry_run: bool,
     sample: bool,
+    scope: analyzer_corpus::db::Scope,
     cooldown_secs: u64,
 ) -> Result<()> {
     let store = Store::open(&db).await?;
@@ -383,9 +393,9 @@ async fn acquire_cmd(
             }
         }
 
-        let pending = store.songs_needing_audio(limit, sample).await?;
+        let pending = store.songs_needing_audio(limit, sample, scope).await?;
         if pending.is_empty() {
-            println!("nothing pending — every song has a recorded outcome");
+            println!("nothing pending in scope {scope:?} — every song has a recorded outcome");
             break;
         }
 
@@ -393,6 +403,7 @@ async fn acquire_cmd(
             pass,
             songs = pending.len(),
             concurrency,
+            ?scope,
             dry_run,
             "starting acquisition pass"
         );
