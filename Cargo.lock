@@ -4483,6 +4483,7 @@ dependencies = [
  "daw-control",
  "daw-proto 0.1.0",
  "dawfile-reaper",
+ "dawfile-standalone",
  "eyre",
  "gloo-timers",
  "js-sys",
