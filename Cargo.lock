@@ -3229,6 +3229,7 @@ dependencies = [
  "audiocore-core",
  "comp",
  "comp-ui",
+ "fx-stack",
  "nice-plug",
 ]
 
