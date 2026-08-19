@@ -470,7 +470,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -481,7 +481,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1836,8 +1836,7 @@ dependencies = [
 [[package]]
 name = "baseview"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41e90905c0b6f990fc4e8aff1eea97c40dc3e77cbc337e2d6fee1581585ed7bb"
+source = "git+https://github.com/FastTrackStudios/baseview.git?rev=fa0c2c870927ec27138f914c0841f305e9b4972f#fa0c2c870927ec27138f914c0841f305e9b4972f"
 dependencies = [
  "block2 0.6.2",
  "bytemuck",
@@ -3166,7 +3165,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3710,8 +3709,8 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "windows 0.62.2",
- "windows-core 0.62.2",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -5943,7 +5942,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6013,7 +6012,7 @@ checksum = "ad5208a115eaba24916f7456929832e310a81518c641f93fee4f89aa93aa3675"
 dependencies = [
  "cfg-if",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6789,7 +6788,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7818,6 +7817,8 @@ dependencies = [
  "baseview 0.2.2",
  "daw-standalone",
  "eyre",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "raw-window-handle 0.6.2",
 ]
 
@@ -8598,8 +8599,8 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
- "windows-result 0.4.1",
+ "windows-link 0.1.3",
+ "windows-result 0.3.4",
 ]
 
 [[package]]
@@ -8955,7 +8956,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.62.2",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -9695,7 +9696,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -10589,7 +10590,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -12589,7 +12590,7 @@ dependencies = [
  "parking_lot",
  "wasm-bindgen",
  "web-sys",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -12789,7 +12790,7 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -13167,16 +13168,16 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nice-log"
 version = "0.3.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#155e28d3d1556e25ae516f602e9e9e34286f9647"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#b4cb3456901f92675f3215c2fe5808d0eb497d34"
 dependencies = [
  "tracing-appender",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
 name = "nice-plug"
 version = "0.2.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#155e28d3d1556e25ae516f602e9e9e34286f9647"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#b4cb3456901f92675f3215c2fe5808d0eb497d34"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -13200,13 +13201,13 @@ dependencies = [
  "tracing-subscriber",
  "vst3",
  "widestring",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
 name = "nice-plug-core"
 version = "0.2.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#155e28d3d1556e25ae516f602e9e9e34286f9647"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#b4cb3456901f92675f3215c2fe5808d0eb497d34"
 dependencies = [
  "atomic_float",
  "atomic_refcell",
@@ -13225,7 +13226,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-derive"
 version = "0.1.2"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#155e28d3d1556e25ae516f602e9e9e34286f9647"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#b4cb3456901f92675f3215c2fe5808d0eb497d34"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -13235,7 +13236,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-dioxus"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#155e28d3d1556e25ae516f602e9e9e34286f9647"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#b4cb3456901f92675f3215c2fe5808d0eb497d34"
 dependencies = [
  "anyrender",
  "anyrender_vello 0.11.0",
@@ -13251,6 +13252,8 @@ dependencies = [
  "keyboard-types 0.8.3",
  "libc",
  "nice-plug-core",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "parking_lot",
  "pollster",
  "raw-window-handle 0.6.2",
@@ -13265,7 +13268,7 @@ dependencies = [
 [[package]]
 name = "nice-plug-xtask"
 version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#155e28d3d1556e25ae516f602e9e9e34286f9647"
+source = "git+https://github.com/FastTrackStudios/nice-plug.git?branch=fts-baseview-03#b4cb3456901f92675f3215c2fe5808d0eb497d34"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -13427,7 +13430,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -15918,7 +15921,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.4",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -16659,7 +16662,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "rustix 1.1.4",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -17167,7 +17170,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -17225,7 +17228,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -17614,7 +17617,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -19120,7 +19123,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -19503,7 +19506,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -20511,7 +20514,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -21497,7 +21500,7 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -23778,7 +23781,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -24688,8 +24691,8 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.18",
- "windows 0.62.2",
- "windows-core 0.62.2",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
 ]
 
 [[package]]

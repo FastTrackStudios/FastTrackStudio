@@ -988,6 +988,16 @@ vox-codegen = "0.10.0-rc.5"
 # architect-ui. Nothing resolves a crate named `fts-ui` any more.
 
 [patch.crates-io]
+# baseview from the FTS fork (upstream v0.3 + one fix): the macOS frame timer
+# is registered in kCFRunLoopCommonModes rather than kCFRunLoopDefaultMode.
+# AppKit runs the run loop modally for the whole of a live window resize, so a
+# default-mode timer stops firing mid-drag — the editor's on_frame is frozen,
+# nothing relayouts, and AppKit stretches the stale surface until the mouse
+# comes up. Still present upstream at 0.3.1.
+#
+# Pinned by rev: this is a plugin-editor dependency, and a moving branch would
+# let a window-system change land in a released plugin without a bump.
+baseview = { git = "https://github.com/FastTrackStudios/baseview.git", rev = "fa0c2c870927ec27138f914c0841f305e9b4972f" }
 # pipewire-rs one commit past its v0.10.0 release. PipeWire 1.6 rewrote
 # constants like SPA_ID_INVALID from a bare `0xffffffff` into a cast form,
 # `((uint32_t)0xffffffff)`, which bindgen's own macro evaluator cannot fold —
