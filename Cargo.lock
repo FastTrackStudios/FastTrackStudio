@@ -17425,6 +17425,7 @@ dependencies = [
  "crossbeam-channel",
  "dioxus",
  "dioxus-test",
+ "eq-ui",
  "fts-audio-ui",
  "fts-plug-ui",
  "nice-plug",
