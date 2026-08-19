@@ -39,11 +39,7 @@ members = [
     "crates/midicore/midicore-midir",
     "crates/midicore/midicore-ui",
     "crates/kontrol/kontrol",
-    "crates/input/actions-proto",
     "crates/input/input-config-proto",
-    "crates/input/actions-registry",
-    "crates/input/actions-keybindings",
-    "crates/input/actions-standalone",
     "crates/input/input",
     "crates/input/input-dioxus",
     "crates/input/input-keybinds",
@@ -92,7 +88,6 @@ members = [
     "features/reaper/reaper-dioxus",
     "features/reaper/reaper-input",
     "features/reaper/daw-perf-test",
-    "features/reaper/actions-reaper",
     "features/reaper/fts-icons",
     "features/reaper/fts-themer",
     "features/reaper/fts-themer-ui",
@@ -347,16 +342,11 @@ midicore-midir = { path = "crates/midicore/midicore-midir" }
 midicore-ui = { path = "crates/midicore/midicore-ui" }
 # NI Komplete Kontrol keyboard driver (Light Guide / per-key RGB LEDs).
 kontrol = { path = "crates/kontrol/kontrol" }
-actions-proto = { path = "crates/input/actions-proto" }
 input-config-proto = { path = "crates/input/input-config-proto" }
 arborium ={ version = "2.16.0", default-features = false }
 arborium-theme = "2.16.0"
 arborium-tree-sitter = "2.16.0"
 ropey = "1.6"
-actions-registry = { path = "crates/input/actions-registry" }
-actions-keybindings = { path = "crates/input/actions-keybindings" }
-actions-standalone = { path = "crates/input/actions-standalone" }
-actions-reaper = { path = "features/reaper/actions-reaper" }
 input = { path = "crates/input/input" }
 input-dioxus = { path = "crates/input/input-dioxus" }
 input-keybinds = { path = "crates/input/input-keybinds" }
