@@ -7906,6 +7906,7 @@ dependencies = [
 name = "fts-themer-ui"
 version = "0.1.0"
 dependencies = [
+ "daw-proto 0.1.0",
  "daw-ui",
  "dioxus",
  "fts-themer",
