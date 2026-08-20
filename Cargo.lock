@@ -4603,6 +4603,7 @@ dependencies = [
  "daw-control",
  "daw-proto 0.1.0",
  "dawfile-reaper",
+ "dawfile-standalone",
  "eyre",
  "gloo-timers",
  "js-sys",
@@ -6894,6 +6895,10 @@ name = "expression-editor-standalone"
 version = "0.1.0"
 dependencies = [
  "daw",
+ "daw-control",
+ "daw-theme",
+ "daw-theme-art",
+ "daw-ui",
  "dawfile-reaper",
  "dioxus",
  "dioxus-native",
@@ -6903,6 +6908,8 @@ dependencies = [
  "expression-editor-daw",
  "expression-editor-guitarpro",
  "expression-editor-ui",
+ "eyre",
+ "futures-timer",
  "tokio",
  "tracing",
 ]
@@ -8019,6 +8026,7 @@ dependencies = [
 name = "fts-themer-ui"
 version = "0.1.0"
 dependencies = [
+ "daw-proto 0.1.0",
  "daw-ui",
  "dioxus",
  "fts-themer",
