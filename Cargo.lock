@@ -6775,6 +6775,8 @@ name = "expression-editor-standalone"
 version = "0.1.0"
 dependencies = [
  "daw",
+ "daw-control",
+ "daw-ui",
  "dawfile-reaper",
  "dioxus",
  "dioxus-native",
@@ -6784,6 +6786,8 @@ dependencies = [
  "expression-editor-daw",
  "expression-editor-guitarpro",
  "expression-editor-ui",
+ "eyre",
+ "futures-timer",
  "tokio",
  "tracing",
 ]
