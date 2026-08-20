@@ -6776,6 +6776,8 @@ version = "0.1.0"
 dependencies = [
  "daw",
  "daw-control",
+ "daw-theme",
+ "daw-theme-art",
  "daw-ui",
  "dawfile-reaper",
  "dioxus",
