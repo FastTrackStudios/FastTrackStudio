@@ -16,7 +16,30 @@ fts-installer update  [--prefix DIR]
 fts-installer uninstall [--prefix DIR]
 fts-installer reaper    [--prefix DIR]   # REAPER + SWS + ReaPack + the 3 rigs
 fts-installer bundle    [--prefix DIR] [--version vX.Y.Z]   # everything, one command
+fts-installer plugins install [--version vX.Y.Z] [--from PATH] [--prefix DIR]
+fts-installer plugins uninstall [--prefix DIR]
+fts-installer plugins list      [--prefix DIR]
 ```
+
+## Installing the plugins you just built
+
+`--from` takes a local tarball or an already-extracted directory instead of
+a release, which is how a developer installs the working tree's own plugins.
+The repo wraps it, so from a checkout the whole loop is:
+
+```bash
+just plugins-install          # bundle all 17, then install them
+just plugins-bundle eq && just plugins-install   # iterate on one
+just plugins-list             # what the manifest says is installed
+just plugins-uninstall        # remove exactly that set
+```
+
+This lands real files in `~/.clap` / `~/.vst3` (macOS:
+`~/Library/Audio/Plug-Ins/{CLAP,VST3}`), **replacing** whatever is there under
+the same name — including a symlink left pointing into a worktree, which the
+installer deletes as a link rather than following it. Hand-symlinking
+`target/bundled` entries also works and is fine for fast iteration, but those
+links break the moment the worktree moves; the manifest install does not.
 
 ## `fts-installer bundle` — the full installer package
 
@@ -35,17 +58,26 @@ there regardless of order — see [macOS specifics](#macos-specifics).)
 REAPER/SWS/ReaPack are always their pinned/latest official versions (see
 below), independent of the FTS release tag.
 
-- Releases are resolved via the codeberg (Gitea/Forgejo) API
-  (`/api/v1/repos/FastTrackStudios/FastTrackStudio/releases/latest` or
-  `/releases/tags/<tag>`); the platform tarball asset
-  (`fasttrackstudio-v<ver>-x86_64-linux.tar.gz`) is downloaded with
-  progress + retry (installer-core primitives), verified against the
-  release's `SHA256SUMS` asset when present, extracted, and the layout
-  applied in Rust.
+- Releases are resolved via the **GitHub** API
+  (`api.github.com/repos/FastTrackStudios/FastTrackStudio/releases`); the
+  platform tarball asset (`fasttrackstudio-v<ver>-x86_64-linux.tar.gz`) is
+  downloaded with progress + retry (installer-core primitives), verified
+  against the release's `SHA256SUMS` asset when present, extracted, and the
+  layout applied in Rust.
+- **Resolution is by asset, not by recency.** This repo publishes two
+  products — FastTrackStudio under `v*` and Task under `task-v*` — so
+  `/releases/latest` routinely names a release with nothing in it for the
+  caller, quite apart from GitHub skipping prereleases (all the FTS line
+  has published so far). With no `--version`, the resolver walks the 30
+  most recent releases newest-first and takes the first one that actually
+  carries the asset it wants. With `--version`, that exact tag must carry
+  it, or the command fails rather than silently installing something else.
 - `--url` skips the API entirely and installs from a direct tarball URL
   (SHA256SUMS is looked for next to it, best-effort).
-- `$CODEBERG_TOKEN`, if set, is sent as `Authorization: token <t>`
-  (private repo / rate-limit cases); public access needs no token.
+- `$GITHUB_TOKEN` — or `$GH_TOKEN`, what the `gh` CLI exports — is sent as
+  `Authorization: Bearer <t>` (private repo / rate-limit cases); public
+  access needs no token, subject to GitHub's 60-requests-per-hour
+  anonymous limit.
 - `--prefix` (default `$HOME`) relocates the whole layout; with a
   non-home prefix the systemd / desktop-database refreshes are skipped —
   that is the test path.
@@ -197,13 +229,24 @@ on Linux.
   `fasttrackstudio` GUI/`--engine` binary — the app tarball's `fts`
   binary is Linux-only for now); no `reaper_fts_extensions.dylib` build
   exists yet, so unlike Linux the macOS app install never touches the
-  REAPER rig `UserPlugins/` dirs; the universal-binary build (both the
-  app and the plugin bundle) is new and unverified against this
-  codebase's vendored native deps (phon-jit, NAM's C++ bridge) —
-  specifically whether they cross-compile cleanly to
+  REAPER rig `UserPlugins/` dirs; the **app's** universal build remains
+  unverified against this codebase's vendored native deps (phon-jit,
+  NAM's C++ bridge) — specifically whether they cross-compile cleanly to
   `x86_64-apple-darwin` and whether every Mach-O in the app bundle
   actually has a same-path counterpart to `lipo` against — until it's
-  actually run on airlock. `apps/fasttrackstudio/ios/verify-macos-universal.sh`
+  actually run on airlock.
+
+  The **plugin** half of that gap is now closed (2026-08-18, on airlock):
+  all 17 plugins build via `bundle-universal`, every `.clap` and `.vst3`
+  reports `x86_64 arm64` under `lipo -archs`, and every one of the 34
+  bundles loads — `just plugins-verify` and `just plugins-verify x86_64`,
+  i.e. dlopen + entry point + factory walk, native and under Rosetta.
+  `plugins install --from` then lays them into
+  `~/Library/Audio/Plug-Ins/{CLAP,VST3}` and the installed copies still
+  load. So NAM's C++ bridge does cross-compile; nothing here says the app
+  bundle will.
+
+  `apps/fasttrackstudio/ios/verify-macos-universal.sh`
   (wired into the `macos-desktop`/`macos-plugins` CI jobs, right after
   build and before upload) is the automated check for this: codesign +
   Gatekeeper/notarization acceptance, `lipo -archs` on every Mach-O in
