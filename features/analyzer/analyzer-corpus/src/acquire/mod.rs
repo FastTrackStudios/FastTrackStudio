@@ -174,6 +174,38 @@ pub async fn download(tools: &Tools, video_id: &str, dir: &Path) -> Result<PathB
     bail!("yt-dlp reported success but produced no file for {video_id}")
 }
 
+/// Does this download error mean "try again later" rather than "this
+/// song cannot be fetched"?
+///
+/// Making resolution six times cheaper moved the pressure onto the
+/// download step, which then tripped YouTube's bot check on ~6,900
+/// songs in a single run. Those were recorded as terminal failures —
+/// and since acquisition skips any song with a recorded outcome, they
+/// would never have been retried, quietly costing nearly half the Hot
+/// 100.
+///
+/// The check is transient: the same videos download normally once the
+/// pressure is off, verified against a video that had failed. So these
+/// must be recorded as retryable, exactly like a refused search.
+pub fn is_retryable_download_error(err: &str) -> bool {
+    const SIGNS: &[&str] = &[
+        // YouTube's bot interstitial.
+        "not a bot",
+        "Sign in to confirm",
+        // Signature/permission refusals that clear on their own.
+        "HTTP Error 403",
+        "HTTP Error 429",
+        "Too Many Requests",
+        "The page needs to be reloaded",
+        // Transport-level trouble, not a property of the song.
+        "Unable to download",
+        "Connection reset",
+        "timed out",
+        "Temporary failure",
+    ];
+    SIGNS.iter().any(|s| err.contains(s))
+}
+
 /// Shortest audio we will accept as a whole song.
 ///
 /// Guards against the failure that would be invisible in the numbers: a
@@ -267,6 +299,41 @@ mod tests {
             codec: "opus".into(),
             sample_rate: 48_000,
             channels: 2,
+        }
+    }
+
+    /// The exact message that cost ~6,900 songs by being filed as a
+    /// permanent failure.
+    #[test]
+    fn the_bot_check_is_retryable() {
+        let real = "every player client failed; last: ERROR: [youtube] w8NU40X15Vs: \
+                    Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies";
+        assert!(is_retryable_download_error(real));
+    }
+
+    #[test]
+    fn transient_transport_errors_are_retryable() {
+        for e in [
+            "HTTP Error 403: Forbidden",
+            "HTTP Error 429: Too Many Requests",
+            "The page needs to be reloaded",
+            "Connection reset by peer",
+            "Unable to download webpage",
+        ] {
+            assert!(is_retryable_download_error(e), "should retry: {e}");
+        }
+    }
+
+    #[test]
+    fn a_genuinely_unavailable_video_is_not_retryable() {
+        // Retrying these forever would spin the queue and never drain.
+        for e in [
+            "Video unavailable",
+            "This video is private",
+            "Requested format is not available",
+            "yt-dlp reported success but produced no file",
+        ] {
+            assert!(!is_retryable_download_error(e), "should NOT retry: {e}");
         }
     }
 

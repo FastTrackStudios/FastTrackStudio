@@ -612,7 +612,16 @@ async fn attempt(
     let path = match acquire::download(tools, &best.id, &dir).await {
         Ok(p) => p,
         Err(e) => {
-            rec.error = Some(format!("download: {e}"));
+            let msg = e.to_string();
+            // A bot check or a 403 is "come back later", not "this song
+            // cannot be fetched". Recording it as a terminal failure
+            // means never retrying, which once cost ~6,900 songs.
+            rec.status = if acquire::is_retryable_download_error(&msg) {
+                "blocked".into()
+            } else {
+                "failed".into()
+            };
+            rec.error = Some(format!("download: {msg}"));
             return rec;
         }
     };
