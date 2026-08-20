@@ -328,7 +328,10 @@ audiocore-core = { path = "crates/audiocore/audiocore-core" }
 audiocore-dsp = { path = "crates/audiocore/audiocore-dsp", default-features = false }
 audiocore-gui = { path = "crates/audiocore/audiocore-gui" }
 fts-modulation = { path = "crates/audiocore/fts-modulation" }
-fts-sample = { path = "crates/audiocore/fts-sample" }
+# Defaults OFF at the root so lean consumers (probe-only scanners, the
+# iOS-clean session-guide) don't drag the pack engine in; each consumer
+# names the features it needs ("load" / "write" / "engine").
+fts-sample = { path = "crates/audiocore/fts-sample", default-features = false }
 fts-themes = { path = "crates/audiocore/fts-themes" }
 meter-dsp = { path = "crates/audiocore/meter-dsp" }
 meter-ui = { path = "crates/audiocore/meter-ui" }

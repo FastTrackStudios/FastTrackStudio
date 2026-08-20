@@ -6695,6 +6695,7 @@ dependencies = [
  "expression-editor-audio",
  "expression-editor-core",
  "expression-editor-tools",
+ "fts-sample",
  "realfft",
  "tune-dsp",
 ]
@@ -6716,6 +6717,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "expression-editor-audio",
+ "fts-sample",
  "hound",
  "midly",
 ]
@@ -10986,6 +10988,7 @@ dependencies = [
  "facet",
  "facet-json",
  "flate2",
+ "fts-sample",
  "hound",
  "midly",
  "ndarray",
@@ -17839,6 +17842,7 @@ name = "session-guide"
 version = "0.1.0"
 dependencies = [
  "chatterbox-rs",
+ "fts-sample",
  "hound",
  "ort",
  "session-proto",
@@ -18155,7 +18159,7 @@ dependencies = [
  "daw-proto 0.1.0",
  "delay",
  "eq",
- "hound",
+ "fts-sample",
  "level-dsp",
  "midicore-proto 0.1.0",
  "modulation",
@@ -18364,6 +18368,7 @@ name = "signal-nam"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "fts-sample",
  "neural-amp-modeler",
  "regex",
  "serde",
@@ -18552,7 +18557,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "bhtsne",
- "hound",
+ "fts-sample",
  "rayon",
  "realfft",
  "serde",
