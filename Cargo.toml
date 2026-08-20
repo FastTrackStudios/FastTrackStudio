@@ -39,11 +39,7 @@ members = [
     "crates/midicore/midicore-midir",
     "crates/midicore/midicore-ui",
     "crates/kontrol/kontrol",
-    "crates/input/actions-proto",
     "crates/input/input-config-proto",
-    "crates/input/actions-registry",
-    "crates/input/actions-keybindings",
-    "crates/input/actions-standalone",
     "crates/input/input",
     "crates/input/input-dioxus",
     "crates/input/input-keybinds",
@@ -92,7 +88,6 @@ members = [
     "features/reaper/reaper-dioxus",
     "features/reaper/reaper-input",
     "features/reaper/daw-perf-test",
-    "features/reaper/actions-reaper",
     "features/reaper/fts-icons",
     "features/reaper/fts-themer",
     "features/reaper/fts-themer-ui",
@@ -348,16 +343,11 @@ midicore-midir = { path = "crates/midicore/midicore-midir" }
 midicore-ui = { path = "crates/midicore/midicore-ui" }
 # NI Komplete Kontrol keyboard driver (Light Guide / per-key RGB LEDs).
 kontrol = { path = "crates/kontrol/kontrol" }
-actions-proto = { path = "crates/input/actions-proto" }
 input-config-proto = { path = "crates/input/input-config-proto" }
 arborium ={ version = "2.16.0", default-features = false }
 arborium-theme = "2.16.0"
 arborium-tree-sitter = "2.16.0"
 ropey = "1.6"
-actions-registry = { path = "crates/input/actions-registry" }
-actions-keybindings = { path = "crates/input/actions-keybindings" }
-actions-standalone = { path = "crates/input/actions-standalone" }
-actions-reaper = { path = "features/reaper/actions-reaper" }
 input = { path = "crates/input/input" }
 input-dioxus = { path = "crates/input/input-dioxus" }
 input-keybinds = { path = "crates/input/input-keybinds" }
@@ -1019,6 +1009,22 @@ pipewire-sys = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git"
 # tabindex div unfocusable by mouse). dioxus git pins `=0.3.0-beta.1`
 # and the vendored dioxus-test needs post-beta.1 APIs
 # (Node::outer_html_pretty). One rev across all blitz crates.
+#
+# 02523b83 is the CEILING, and the blocker is dioxus, not us. Our four
+# patches rebase cleanly onto current upstream main — that part is
+# free — but blitz has since made `NodeId` a real type (5833d681, the
+# SlotMap-backed node tree) where it used to be a `usize`, and moved
+# `final_layout`/`scroll_offset` from fields to methods. dioxus's
+# `native-dom` is still written against the old shape, so any bump
+# lands ~47 type errors *inside the dioxus rev*, not in our tree.
+#
+# There is no dioxus rev that fixes it: main still pins blitz
+# `=0.3.0-beta.1`, and our pin (f717a8e1) IS its newest "Sync
+# Blitz/Native" commit. So the bump is gated on dioxus's next Blitz
+# sync, and it moves as one step — blitz and the dioxus rev together.
+# Rebased branches are parked on the fork at fts-focus-2026-08 (onto
+# main) and fts-focus-2026-08b (onto db12391a, the last commit with
+# the `incremental` feature) so the rebase does not have to be redone.
 blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
 blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
 blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
