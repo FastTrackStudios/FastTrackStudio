@@ -109,12 +109,22 @@ pub fn shortest_useful_hold(
         hold += STEP_MS;
     }
 
-    // Nothing loops at any hold. Fall back to the configured length, NOT the
-    // maximum: since the probe scores by the same bar as the search, "no hold
-    // works" means the extra recording time buys nothing — it would just make
-    // every note 4x longer to produce a patch that still cannot loop.
+    // Nothing loops at any hold. Fall back to the LONGEST hold tried.
+    //
+    // The earlier reasoning here was that extra recording time buys nothing
+    // once looping is off the table. That is true for looping and wrong for
+    // playback: an unlooped zone just plays its recording, so whatever sustain
+    // was captured is all the sustain the note has. Hold a key past that and
+    // the *recorded release* plays while the key is still down. A 3 s hold puts
+    // that seam 3 s in; a 12 s hold puts it 12 s in.
+    //
+    // And the extra time is close to free, because the hold is a limit rather
+    // than a fixed wait — `wait_for_silence` releases as soon as the note has
+    // decayed. A percussive patch that cannot loop still stops early; only a
+    // genuinely sustaining one spends the full budget, which is exactly the
+    // case that needs it.
     ProbeResult {
-        note_length_ms: min_ms,
+        note_length_ms: max_ms.max(min_ms),
         score: None,
         gave_up: true,
     }
@@ -263,12 +273,15 @@ mod tests {
             .collect();
         let r = shortest_useful_hold(&noise, SR, 1500, 6000, &policy(), &search());
         assert!(r.gave_up, "should not claim a loop it cannot make");
-        assert_eq!(
-            r.note_length_ms, 1500,
-            "gives up to the CONFIGURED length, not the maximum — recording 4x \
-             longer cannot rescue material that does not loop"
-        );
         assert!(r.score.is_none());
+        // Giving up means the zone will be UNLOOPED, and an unlooped zone plays
+        // only what was recorded — so capture the most sustain, not the least.
+        // Costs nothing on a patch that decays, because the hold is a limit and
+        // `wait_for_silence` releases early.
+        assert_eq!(
+            r.note_length_ms, 6000,
+            "give-up should fall back to the longest hold tried, not the shortest"
+        );
     }
 
     #[test]

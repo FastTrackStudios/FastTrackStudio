@@ -33,6 +33,7 @@ CLI rather than the generator/recorder plugin pair a plugin host would force.
 | `compare` | A/B a pack against the hardware it came from |
 | `reloop` | Recompute loop points on an already-sampled folder (seconds, not a re-run) |
 | `export-decent` | Write a DecentSampler `.dspreset` beside the samples |
+| `export-gig` | Build a Gig Performer `.gig`, one DecentSampler rackspace per pack |
 
 ## Why the pack is always zone-mode
 
@@ -144,6 +145,14 @@ the patch has settled into something that *repeats* — and a tremolo caught
 mid-cycle is exactly what it must not mistake for a steady tone. Cross-
 correlation alone is scale-invariant and cannot see that.
 
+When **no** hold produces an acceptable loop, the probe falls back to the
+*longest* hold it tried, not the shortest. Giving up means those zones will be
+unlooped, and an unlooped zone plays only what was recorded — hold a key past
+the recorded sustain and the *recorded release* plays while the key is still
+down. The extra time is close to free, because the hold is a limit rather than a
+fixed wait: a percussive patch that cannot loop still releases early, and only a
+genuinely sustaining one spends the full budget.
+
 The loop search keeps shape-only scoring. Adding the level term there rejected
 two thirds of loops that had been approved by ear (188 → 65 on a piano), because
 a sustained note always decays a little across a loop. Two questions, two
@@ -226,3 +235,49 @@ correctly, because the resume key is the pack, not the samples.
   WAVs, same loop points, same velocity mapping. Confirmed by ear, unresolved.
   Given the crossfade finding above, the engine's crossfade handling is the
   first place to look. `compare` exists to isolate this kind of question.
+
+## Gig Performer export
+
+`export-gig` writes a `.gig` with one rackspace per pack, named
+`Kronos - <patch>` and ordered by set-list slot.
+
+A `.gig` is XML, not the binary chunk format the extension suggests. What is
+opaque is the plugin state, nested four layers deep:
+
+```text
+PROCESSORSTATEZ = juce_b64( zlib( outer ) )
+outer           = "VC2!" u32(len) <VST3PluginState>…</VST3PluginState> NUL
+IComponent body = juce_b64( inner )
+inner           = "VC2!" u32(len) <DecentSampler …/> NUL JUCEPrivateData
+```
+
+Both `u32` lengths count the XML **without** its trailing NUL, and DecentSampler
+embeds the entire `.dspreset` inline — so a rackspace is self-contained apart
+from the audio.
+
+`juce_b64` is JUCE's `MemoryBlock::toBase64Encoding`: a `<byte-count>.` prefix,
+a 64-character alphabet beginning with `.` and ending with `+` (no `/`), and
+**LSB-first** bit packing. Standard base64 is MSB-first and produces a file Gig
+Performer silently refuses. The alphabet was derived from a real file — 64
+distinct characters at a 1.333 ratio — rather than from memory.
+
+An existing `.gig` supplies the template. Its one rackspace is cloned per patch;
+everything outside the preset (busses, connections, the MIDI-in processor, the
+global rackspace) is copied verbatim, because reproducing those by hand is exactly
+where a generated file would go subtly wrong.
+
+Two details that matter:
+
+- **`_samplePath` resolves the audio.** It is `{instrumentLibraryRoot}/<folder>`
+  — DecentSampler's own variable for its Sample Libraries folder — which each
+  `<sample path="…wav">` is relative to. The patch folders must be visible there
+  (a symlink is enough), and the gig stays portable across machines.
+- **`_libraryBookmark` is deliberately dropped.** It is a macOS security-scoped
+  bookmark naming one specific file, so carrying the template's over would aim
+  every rackspace at whichever patch the template held.
+
+The export re-reads what it wrote and checks each rackspace decodes to the
+preset it should, comparing zone counts against the source `.dspreset`. That is
+not ceremony: a state can decode cleanly and still carry the wrong preset, and
+only comparing against the source catches it. It caught an XML-unescaping bug on
+the three patches whose names contain `&`.

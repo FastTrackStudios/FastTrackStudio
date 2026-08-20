@@ -47,6 +47,37 @@ enum Cmd {
     /// Recompute loop points on an already-sampled folder. Loop points are
     /// metadata, so this is seconds, not another sampling run.
     Reloop(ReloopArgs),
+    /// Build a Gig Performer .gig with one DecentSampler rackspace per pack.
+    ExportGig(ExportGigArgs),
+}
+
+#[derive(clap::Args)]
+struct ExportGigArgs {
+    /// An existing .gig holding ONE DecentSampler rackspace, used as the
+    /// template. Everything outside the preset — busses, connections, the
+    /// global rackspace — is copied from it verbatim, which is the only
+    /// reliable way to get those right.
+    #[arg(long)]
+    example: PathBuf,
+    /// Root holding `<folder>/` per patch (the batch's --out-root).
+    #[arg(long)]
+    packs: PathBuf,
+    /// Patch list: one `<slot> <name>` per line, same file the batch uses.
+    #[arg(long)]
+    list: PathBuf,
+    /// Where to write the .gig.
+    #[arg(long)]
+    out: PathBuf,
+    /// Prefix for each rackspace name.
+    #[arg(long, default_value = "Kronos - ")]
+    prefix: String,
+    /// Only these slots (comma separated).
+    #[arg(long)]
+    only: Option<String>,
+    /// Skip re-reading the written file to confirm every rackspace decodes to
+    /// the preset it should.
+    #[arg(long)]
+    no_verify: bool,
 }
 
 #[derive(clap::Args)]
@@ -149,6 +180,11 @@ struct BatchArgs {
     /// a pack already built are skipped.
     #[arg(long)]
     limit: Option<usize>,
+    /// Re-record every cell, ignoring samples an interrupted run already
+    /// captured. Use when the instrument's sound has changed; otherwise
+    /// resuming reuses them, which is what makes a stopped run cheap.
+    #[arg(long)]
+    fresh: bool,
     /// Re-sample patches that already have a pack, instead of skipping them.
     /// The old pack survives until the new one is built, so you never have to
     /// delete a good recording to try different settings.
@@ -418,6 +454,10 @@ struct RunArgs {
     /// runs out, which is usually only what you want for percussive patches.
     #[arg(long)]
     no_loop: bool,
+    /// Re-record every cell, ignoring samples an interrupted run already
+    /// captured.
+    #[arg(long)]
+    fresh: bool,
     /// Preferred loop length, in milliseconds.
     #[arg(long, default_value_t = 1000)]
     loop_len: u32,
@@ -442,7 +482,86 @@ pub fn cli_main(argv: impl IntoIterator<Item = OsString>) -> Result<()> {
         Cmd::Batch(args) => batch(args),
         Cmd::ExportDecent(args) => export_decent(args),
         Cmd::Reloop(args) => reloop(args),
+        Cmd::ExportGig(args) => export_gig(args),
     }
+}
+
+/// `fts signal sample export-gig` — one rackspace per pack.
+fn export_gig(args: ExportGigArgs) -> Result<()> {
+    let text = std::fs::read_to_string(&args.list)
+        .wrap_err_with(|| format!("read {}", args.list.display()))?;
+    let mut entries = parse_list(&text)?;
+
+    if let Some(only) = &args.only {
+        let wanted: Vec<u8> = only
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.parse::<u8>())
+            .collect::<Result<_, _>>()
+            .wrap_err("--only expects comma-separated slot numbers")?;
+        entries.retain(|e| wanted.contains(&e.slot));
+    }
+
+    let mut patches = Vec::new();
+    let mut missing = Vec::new();
+    for e in &entries {
+        let (dir, _) = crate::batch::paths_for(&args.packs, &e.name);
+        let folder = dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        // The folder name is sanitised but the preset keeps the patch's real
+        // name, so find it rather than construct it.
+        let preset = std::fs::read_dir(&dir)
+            .ok()
+            .and_then(|rd| {
+                rd.filter_map(|x| x.ok())
+                    .map(|x| x.path())
+                    .find(|p| p.extension().is_some_and(|x| x == "dspreset"))
+            });
+        match preset {
+            Some(preset) => patches.push(crate::gig::GigPatch {
+                slot: e.slot,
+                name: e.name.clone(),
+                folder,
+                preset,
+            }),
+            None => missing.push(e.name.clone()),
+        }
+    }
+
+    let report = crate::gig::export(&args.example, &patches, &args.prefix, &args.out)?;
+    for name in &report.rackspaces {
+        println!("  {name}");
+    }
+    println!(
+        "\nwrote {} — {} rackspace(s)",
+        report.written.display(),
+        report.rackspaces.len()
+    );
+    for name in &missing {
+        println!("  skipped {name}: no .dspreset yet");
+    }
+
+    if !args.no_verify {
+        let checked = crate::gig::verify(&args.out, &args.packs)?;
+        let good = checked.iter().filter(|(_, _, ok)| *ok).count();
+        println!(
+            "verified {good}/{} rackspace(s): state decodes and zone count matches the source preset",
+            checked.len()
+        );
+        for (name, zones, ok) in &checked {
+            if !ok {
+                println!("  MISMATCH {name}: {zones} zones in the gig");
+            }
+        }
+        if good != checked.len() {
+            bail!("verification failed — do not load this file");
+        }
+    }
+    Ok(())
 }
 
 /// `fts signal sample reloop` — new loop points, no re-recording.
@@ -578,6 +697,7 @@ fn batch(args: BatchArgs) -> Result<()> {
             right_input: args.right_input,
         },
         loops: !args.no_loop,
+        resume_samples: !args.fresh,
         loop_policy: LoopPolicy {
             target_len_ms: args.loop_len,
             xfade_ms: args.loop_xfade,
@@ -919,6 +1039,7 @@ fn run(args: RunArgs) -> Result<()> {
             right_input: args.right_input,
         },
         loops: !args.no_loop,
+        resume_samples: !args.fresh,
         loop_policy: LoopPolicy {
             target_len_ms: args.loop_len,
             xfade_ms: args.loop_xfade,

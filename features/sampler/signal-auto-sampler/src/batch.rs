@@ -342,6 +342,7 @@ fn clone_template(t: &AutoSampleConfig) -> AutoSampleConfig {
         midi: t.midi.clone(),
         audio: t.audio.clone(),
         loops: t.loops,
+        resume_samples: t.resume_samples,
         loop_policy: t.loop_policy,
         probe_search: t.probe_search,
         out_dir: t.out_dir.clone(),

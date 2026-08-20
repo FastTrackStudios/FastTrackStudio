@@ -18,6 +18,8 @@ cpal = { workspace = true }
 eyre = { workspace = true }
 tracing = { workspace = true }
 hound = "3.5"
+flate2 = "1"
+uuid = { workspace = true }
 
 # MIDI out to the instrument under test.
 midicore-proto = { workspace = true }

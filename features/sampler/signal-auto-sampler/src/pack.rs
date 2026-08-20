@@ -219,6 +219,7 @@ mod tests {
             midi: MidiRoute::default(),
             audio: AudioRoute::default(),
             loops: true,
+            resume_samples: true,
             loop_policy: crate::loops::LoopPolicy::default(),
             probe_search: None,
             out_dir: PathBuf::from("/tmp/x"),

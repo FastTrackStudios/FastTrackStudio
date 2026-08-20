@@ -28,6 +28,13 @@ pub struct AutoSampleConfig {
     /// it picks is one the later loop search will actually accept.
     pub probe_search: Option<crate::reloop::SearchRange>,
 
+    /// Reuse cells already recorded in `out_dir` instead of re-playing them.
+    ///
+    /// On by default: a patch takes hours, interruptions are ordinary, and the
+    /// WAVs on disk are already final. Set false to re-record from scratch —
+    /// which is what you want if the instrument's sound has changed since.
+    pub resume_samples: bool,
+
     /// Directory that receives the WAVs and `library.styx`.
     pub out_dir: PathBuf,
     /// Pack path to build. `None` leaves the folder unpacked.

@@ -37,8 +37,31 @@ const FADE_OUT_MS: u32 = 10;
 /// frequencies that are not in the patch.
 const QUIET_THRESHOLD: f32 = 0.0005;
 
-/// Longest to wait for the instrument to go quiet between notes.
-const QUIET_TIMEOUT_MS: u32 = 6000;
+/// Floor for how long to wait for the instrument to go quiet between notes.
+///
+/// The real limit is derived from `max_tail_ms` — see [`quiet_timeout`].
+const QUIET_TIMEOUT_FLOOR_MS: u32 = 6000;
+
+/// Longest to wait for the instrument to go quiet before striking the next
+/// note.
+///
+/// Derived from the tail budget rather than fixed. If we are willing to *record*
+/// a tail for `max_tail_ms`, we must be willing to *wait* at least that long for
+/// it to decay — a shorter limit guarantees the wait times out on exactly the
+/// patches with the longest tails, and their bleed lands in the head of the next
+/// sample as a foreign pitch.
+///
+/// A fixed 6 s was doing this on slow pads whose tails run 12 s+: every note
+/// logged "instrument never went fully quiet" and every sample was
+/// contaminated.
+fn quiet_timeout(timing: &Timing) -> u32 {
+    // Decay to the quiet threshold takes longer than decay to the point where
+    // the tail stopped being worth recording, so allow headroom beyond the tail.
+    timing
+        .max_tail_ms
+        .saturating_add(4000)
+        .max(QUIET_TIMEOUT_FLOOR_MS)
+}
 
 /// What a completed run produced.
 #[derive(Debug)]
@@ -108,7 +131,7 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
     // The calibration strike is loud and has the same long tail as everything
     // else. Without this wait its reverb lands in the head of the FIRST sample,
     // at a pitch unrelated to that sample's note.
-    wait_until_quiet(&capture, config.timing.settle_ms, QUIET_TIMEOUT_MS);
+    wait_until_quiet(&capture, config.timing.settle_ms, quiet_timeout(&config.timing));
 
     // 2b. Ask the instrument how long it needs to be held to be loopable.
     //     Done here, after calibration, because the probe needs the latency
@@ -138,10 +161,29 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
     }
 
     // 3. Walk the grid.
+    //
+    // Cells already recorded by an earlier, interrupted run are reused rather
+    // than re-played: the WAVs on disk are final (each was latency-trimmed when
+    // written), and the sidecar supplies the one fact the audio does not carry,
+    // the hold. See `progress`.
+    let already = if config.resume_samples {
+        crate::progress::load(&config.out_dir)
+    } else {
+        crate::progress::clear(&config.out_dir)?;
+        Default::default()
+    };
+    if !already.is_empty() {
+        tracing::info!(
+            recorded = already.len(),
+            "resuming — cells already on disk will not be re-recorded"
+        );
+    }
+
     let cells = cells(&config.grid);
     let mut recorded = Vec::with_capacity(cells.len());
     let mut skipped = Vec::new();
     let mut peak = 0.0f32;
+    let mut reused = 0usize;
 
     let guard_frames = ms_to_frames(TAIL_GUARD_MS, capture.sample_rate);
     let fade_frames = ms_to_frames(FADE_OUT_MS, capture.sample_rate);
@@ -154,6 +196,31 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
             cell.note,
             cell.velocity
         );
+        // Already recorded by an earlier run? Rebuild its entry from the file
+        // and the remembered hold, and move on without striking the note.
+        if let Some(held_ms) = crate::progress::is_recorded(&config.out_dir, &already, &file) {
+            let sustain_end = ms_to_frames(held_ms, capture.sample_rate);
+            let loop_points = config.loops.then(|| {
+                crate::loops::choose_for_note(
+                    sustain_end,
+                    // The recording is at least as long as its hold; the loop
+                    // search re-reads the audio and refines this anyway.
+                    sustain_end,
+                    capture.sample_rate,
+                    &config.loop_policy,
+                    Some(cell.note),
+                )
+            });
+            recorded.push(Recorded {
+                cell: *cell,
+                file,
+                loop_points: loop_points.flatten(),
+                sustain_end: Some(sustain_end as u32),
+            });
+            reused += 1;
+            continue;
+        }
+
         tracing::info!(
             "[{}/{}] {} vel {} → {file}",
             i + 1,
@@ -190,7 +257,7 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
             Ok(t) => t,
             Err(e) => {
                 skipped.push((*cell, e.to_string()));
-                wait_until_quiet(&capture, config.timing.settle_ms, QUIET_TIMEOUT_MS);
+                wait_until_quiet(&capture, config.timing.settle_ms, quiet_timeout(&config.timing));
                 continue;
             }
         };
@@ -211,7 +278,7 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
                     latency.threshold
                 ),
             ));
-            wait_until_quiet(&capture, config.timing.settle_ms, QUIET_TIMEOUT_MS);
+            wait_until_quiet(&capture, config.timing.settle_ms, quiet_timeout(&config.timing));
             continue;
         }
         peak = peak.max(take_peak);
@@ -239,6 +306,9 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
         );
 
         wav::write(&config.out_dir.join(&file), &take, capture.sample_rate)?;
+        // After the audio is on disk, never before: a run killed mid-write must
+        // leave a truncated WAV with no entry, so it is re-recorded.
+        crate::progress::append(&config.out_dir, &file, held_ms)?;
         recorded.push(Recorded {
             cell: *cell,
             file,
@@ -249,10 +319,18 @@ pub fn run(config: &AutoSampleConfig) -> Result<RunReport> {
         // Wait for the instrument to actually go quiet before the next strike.
         // A fixed sleep is a guess: any effect tail outlasting it is recorded
         // into the head of the next sample as a foreign pitch.
-        wait_until_quiet(&capture, config.timing.settle_ms, QUIET_TIMEOUT_MS);
+        wait_until_quiet(&capture, config.timing.settle_ms, quiet_timeout(&config.timing));
     }
 
     instrument.silence()?;
+
+    if reused > 0 {
+        tracing::info!(
+            reused,
+            recorded = recorded.len() - reused,
+            "reused cells from an earlier run"
+        );
+    }
 
     if recorded.is_empty() {
         eyre::bail!(
@@ -393,6 +471,33 @@ mod tests {
         assert_eq!(sanitize("Mart's Awesome Synth"), "Mart_s_Awesome_Synth");
         assert_eq!(sanitize("Kronos/Strings"), "Kronos_Strings");
         assert_eq!(sanitize("well-behaved"), "well-behaved");
+    }
+
+    #[test]
+    fn quiet_timeout_always_outlasts_the_tail_it_must_wait_out() {
+        // The bug this guards: a fixed 6 s limit while recording tails up to
+        // 15 s meant the wait timed out on every note of a slow pad, and the
+        // undecayed tail landed in the head of the next sample.
+        for max_tail in [1000u32, 8000, 15000, 30000] {
+            let t = Timing {
+                max_tail_ms: max_tail,
+                ..Default::default()
+            };
+            assert!(
+                quiet_timeout(&t) > max_tail,
+                "max_tail {max_tail} would time out at {}",
+                quiet_timeout(&t)
+            );
+        }
+    }
+
+    #[test]
+    fn quiet_timeout_keeps_a_floor_for_short_tails() {
+        let t = Timing {
+            max_tail_ms: 0,
+            ..Default::default()
+        };
+        assert_eq!(quiet_timeout(&t), QUIET_TIMEOUT_FLOOR_MS);
     }
 
     #[test]

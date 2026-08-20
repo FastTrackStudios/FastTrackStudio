@@ -25477,11 +25477,13 @@ dependencies = [
  "cpal",
  "daw-audio-io",
  "eyre",
+ "flate2",
  "hound",
  "midicore-midir",
  "midicore-proto",
  "signal-sampler",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
