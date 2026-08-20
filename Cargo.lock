@@ -1787,8 +1787,7 @@ dependencies = [
 [[package]]
 name = "baseview"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41e90905c0b6f990fc4e8aff1eea97c40dc3e77cbc337e2d6fee1581585ed7bb"
+source = "git+https://github.com/FastTrackStudios/baseview.git?rev=fa0c2c870927ec27138f914c0841f305e9b4972f#fa0c2c870927ec27138f914c0841f305e9b4972f"
 dependencies = [
  "block2 0.6.2",
  "bytemuck",
@@ -3181,6 +3180,7 @@ dependencies = [
  "audiocore-core",
  "comp",
  "comp-ui",
+ "fx-stack",
  "nice-plug",
 ]
 
@@ -3202,7 +3202,9 @@ dependencies = [
  "comp-profiles",
  "dioxus",
  "dioxus-test",
+ "eq-ui",
  "fts-audio-ui",
+ "fts-plug-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "parking_lot",
@@ -4893,6 +4895,7 @@ dependencies = [
  "dioxus",
  "dioxus-test",
  "fts-audio-ui",
+ "fts-plug-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "parking_lot",
@@ -6695,6 +6698,7 @@ dependencies = [
  "dioxus-test",
  "eq-profiles",
  "fts-audio-ui",
+ "fts-plug-ui",
  "futures-timer",
  "nice-plug",
  "nice-plug-dioxus",
@@ -7755,9 +7759,14 @@ version = "0.1.0"
 name = "fts-audio-ui"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
  "architect-ui 0.1.0 (git+https://github.com/FastTrackStudios/architect?rev=5e4bb829674fe8b2d3527c3b65b9ab3a2b6baa86)",
+ "blitz-dom",
  "dioxus",
+ "dioxus-native-dom",
  "dioxus-test",
+ "kurbo 0.13.1",
+ "peniko 0.6.1",
  "tokio",
  "tracing",
 ]
@@ -7776,6 +7785,8 @@ dependencies = [
  "baseview 0.2.2",
  "daw-standalone",
  "eyre",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "raw-window-handle 0.6.2",
 ]
 
@@ -8185,6 +8196,13 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "fx-stack"
+version = "0.1.0"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
@@ -11459,8 +11477,7 @@ dependencies = [
 [[package]]
 name = "libspa-sys"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69ad52764fca54818486f3cf75afec844d1f1a1568c24dcee25d41b1ab007dda"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=9b54509e848e53ffa971ace15d7adf4908c09358#9b54509e848e53ffa971ace15d7adf4908c09358"
 dependencies = [
  "bindgen",
  "cc",
@@ -12659,6 +12676,7 @@ dependencies = [
  "dioxus",
  "dioxus-test",
  "fts-audio-ui",
+ "fts-plug-ui",
  "modulation-profiles",
  "nice-plug",
  "nice-plug-dioxus",
@@ -15100,8 +15118,7 @@ dependencies = [
 [[package]]
 name = "pipewire-sys"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2089f245b548723e60325773c27f586b7a2372c79ea941b246cd0d654706adc"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=9b54509e848e53ffa971ace15d7adf4908c09358#9b54509e848e53ffa971ace15d7adf4908c09358"
 dependencies = [
  "bindgen",
  "libspa-sys",
@@ -16847,7 +16864,9 @@ dependencies = [
  "crossbeam-channel",
  "dioxus",
  "dioxus-test",
+ "eq-ui",
  "fts-audio-ui",
+ "fts-plug-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "parking_lot",
@@ -17349,6 +17368,7 @@ dependencies = [
 name = "saturate-profiles"
 version = "0.1.0"
 dependencies = [
+ "fx-stack",
  "saturate-dsp",
 ]
 
@@ -17361,7 +17381,9 @@ dependencies = [
  "crossbeam-channel",
  "dioxus",
  "dioxus-test",
+ "eq-ui",
  "fts-audio-ui",
+ "fts-plug-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "parking_lot",
@@ -21519,6 +21541,7 @@ dependencies = [
  "dioxus",
  "dioxus-test",
  "fts-audio-ui",
+ "fts-plug-ui",
  "nice-plug",
  "nice-plug-dioxus",
  "tokio",
