@@ -2324,8 +2324,10 @@ fn encode_flac_via_cli(samples_i16: &[i16], channels: u16, sample_rate: u32) -> 
     Some(out)
 }
 
-#[cfg(test)]
-pub(crate) fn encode_flac_i24_for_test(
+// Test-only in spirit, but `pub` so signal-sampler's relocated voice test
+// (a held looping voice over a streamed sample) can still encode a fixture.
+#[doc(hidden)]
+pub fn encode_flac_i24_for_test(
     samples: &[i32],
     channels: u16,
     sample_rate: u32,

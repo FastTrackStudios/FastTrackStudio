@@ -21,7 +21,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 use arc_swap::ArcSwap;
 
-use super::flac_index::FlacIndex;
+use crate::flac_index::FlacIndex;
 
 /// Sample frames per chunk — a quarter second at 48 kHz, 48 KB of stereo
 /// i16. Small enough that a *playing* voice's working set is a couple of
@@ -581,7 +581,7 @@ mod tests {
             .iter()
             .map(|s| (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32)
             .collect();
-        let Ok(flac) = super::super::cache::encode_flac_i24_for_test(&ints, ch, sr) else {
+        let Ok(flac) = crate::cache::encode_flac_i24_for_test(&ints, ch, sr) else {
             return;
         };
         let tmp = std::env::temp_dir().join(format!("fts-decode-all-{}.flac", std::process::id()));
@@ -638,7 +638,7 @@ mod tests {
             .collect();
         let ints: Vec<i32> =
             pcm.iter().map(|s| (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32).collect();
-        let Ok(flac) = super::super::cache::encode_flac_i24_for_test(&ints, ch, sr) else {
+        let Ok(flac) = crate::cache::encode_flac_i24_for_test(&ints, ch, sr) else {
             return;
         };
 
@@ -714,70 +714,7 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
     }
 
-    /// A held, looping note over a STREAMED sample must keep sounding. The
-    /// loop wraps backwards, which linear prefetch never sees coming, and the
-    /// loop region has to stay resident for as long as the voice holds it —
-    /// this is the case that goes silent if chunks are evicted underneath a
-    /// sustaining voice.
-    #[test]
-    fn a_looping_voice_keeps_sounding_over_a_streamed_sample() {
-        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        use crate::engine::voice::{Voice, VoiceKind};
-        use crate::engine::cache::SampleData;
-
-        let (sr, ch) = (48_000u32, 2u16);
-        let n = (sr as f64 * 6.0) as usize; // 6 s, well past head + chunks
-        let pcm: Vec<f32> = (0..n)
-            .flat_map(|i| {
-                let t = i as f64 / sr as f64;
-                let v = (t * 220.0 * std::f64::consts::TAU).sin() as f32 * 0.8;
-                [v, -v]
-            })
-            .collect();
-        let ints: Vec<i32> =
-            pcm.iter().map(|s| (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32).collect();
-        let Ok(flac) = crate::engine::cache::encode_flac_i24_for_test(&ints, ch, sr) else {
-            return;
-        };
-        let tmp = std::env::temp_dir().join(format!("fts-loop-{}.flac", std::process::id()));
-        std::fs::write(&tmp, &flac).expect("write");
-        let file = std::fs::File::open(&tmp).expect("open");
-        let map = Arc::new(unsafe { memmap2::Mmap::map(&file) }.expect("map"));
-        let streamed =
-            StreamedSample::open(map, 0, flac.len(), ch, sr, n).expect("stream");
-        let data = Arc::new(SampleData::streamed(streamed));
-
-        // Loop the 3rd..5th second — entirely past the head, and longer than
-        // one chunk, so it spans several.
-        let (loop_start, loop_end) = (sr as usize * 3, sr as usize * 5);
-        let mut voice = Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8)
-            .with_forward_loop(loop_start, loop_end);
-
-        // Play 30 seconds — many loop passes, and long enough that the idle
-        // sweep runs several times underneath.
-        let mut block = vec![0.0f32; 512 * 2];
-        let blocks = (sr as usize * 30) / 512;
-        let mut silent_runs = 0usize;
-        let mut worst_run = 0usize;
-        for _ in 0..blocks {
-            block.fill(0.0);
-            voice.render_block(&mut block);
-            let peak = block.iter().fold(0.0f32, |a, b| a.max(b.abs()));
-            if peak < 1e-4 {
-                silent_runs += 1;
-                worst_run = worst_run.max(silent_runs);
-            } else {
-                silent_runs = 0;
-            }
-            // Real time: the streamer gets the same wall clock a live rig
-            // would give it (512 frames ≈ 10.7 ms).
-            std::thread::sleep(std::time::Duration::from_micros(10_667));
-        }
-        let _ = std::fs::remove_file(&tmp);
-        assert!(
-            worst_run <= 2,
-            "held loop went silent for {worst_run} blocks in a row ({} ms)",
-            worst_run * 512 * 1000 / sr as usize,
-        );
-    }
+    // NOTE: the "held looping voice over a streamed sample" test lives in
+    // signal-sampler's `engine::voice` tests — it needs the `Voice` types,
+    // which stayed behind when this module moved into fts-sample.
 }

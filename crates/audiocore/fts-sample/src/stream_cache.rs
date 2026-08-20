@@ -22,7 +22,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use super::cache::{PcmFmt, SampleData};
+use crate::cache::{PcmFmt, SampleData};
 
 /// Where materialised PCM lives, or `None` when the cache is off.
 pub fn dir() -> Option<&'static Path> {
