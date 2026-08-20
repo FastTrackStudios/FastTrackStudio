@@ -216,6 +216,7 @@ members = [
     "features/fx/modulation/modulation-profiles",
     "features/fx/modulation/modulation-ui",
     "features/fx/multiband",
+    "features/fx/stack",
     "features/fx/modulation/pattern-ui",
     "features/fx/modulation/trem-dsp",
     "features/fx/modulation/wah-dsp",
@@ -567,6 +568,7 @@ chorus-dsp = { path = "features/fx/modulation/chorus-dsp" }
 modulation-profiles = { path = "features/fx/modulation/modulation-profiles" }
 modulation-ui = { path = "features/fx/modulation/modulation-ui" }
 multiband-dsp = { path = "features/fx/multiband" }
+fx-stack = { path = "features/fx/stack" }
 pattern-ui = { path = "features/fx/modulation/pattern-ui" }
 trem-dsp = { path = "features/fx/modulation/trem-dsp" }
 wah-dsp = { path = "features/fx/modulation/wah-dsp" }
@@ -978,6 +980,29 @@ vox-codegen = "0.10.0-rc.5"
 # architect-ui. Nothing resolves a crate named `fts-ui` any more.
 
 [patch.crates-io]
+# baseview from the FTS fork (upstream v0.3 + one fix): the macOS frame timer
+# is registered in kCFRunLoopCommonModes rather than kCFRunLoopDefaultMode.
+# AppKit runs the run loop modally for the whole of a live window resize, so a
+# default-mode timer stops firing mid-drag — the editor's on_frame is frozen,
+# nothing relayouts, and AppKit stretches the stale surface until the mouse
+# comes up. Still present upstream at 0.3.1.
+#
+# Pinned by rev: this is a plugin-editor dependency, and a moving branch would
+# let a window-system change land in a released plugin without a bump.
+baseview = { git = "https://github.com/FastTrackStudios/baseview.git", rev = "fa0c2c870927ec27138f914c0841f305e9b4972f" }
+# pipewire-rs one commit past its v0.10.0 release. PipeWire 1.6 rewrote
+# constants like SPA_ID_INVALID from a bare `0xffffffff` into a cast form,
+# `((uint32_t)0xffffffff)`, which bindgen's own macro evaluator cannot fold —
+# it needs the clang fallback, which 0.10.0 asks for but never gives a
+# writable build dir, so the fallback silently produces nothing and the
+# constants vanish from the generated bindings. The result is
+# `error[E0425]: cannot find value SPA_ID_INVALID in crate spa_sys` in
+# libspa, which takes out everything downstream of daw-audio-io (patchbay,
+# signal-sampler, and with it the FTS Signal plugin). Upstream commit
+# 9b54509 "sys: Set clang macro fallback build dir to OUT_DIR" is the fix;
+# drop this patch when a release carrying it lands on crates.io.
+libspa-sys = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "9b54509e848e53ffa971ace15d7adf4908c09358" }
+pipewire-sys = { git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "9b54509e848e53ffa971ace15d7adf4908c09358" }
 # Blitz from the FTS fork (0.3.0-beta.1 line, upstream 02523b83 +
 # fts-focus: focus-follows-pointerdown for all focusable content —
 # upstream only click-focuses text inputs, leaving the editor's

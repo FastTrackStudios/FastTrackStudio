@@ -1,6 +1,6 @@
 //! fts-installer — thin downloader/installer for FastTrackStudio releases.
 //!
-//! Resolves a release on codeberg (Gitea API), downloads the platform
+//! Resolves a release on GitHub, downloads the platform
 //! tarball with progress + retry, verifies it against the release's
 //! SHA256SUMS when present, extracts it, and applies the installed layout
 //! (the same one `just install` and the tarball's `install.sh` produce):
@@ -16,7 +16,7 @@
 //! `--prefix` defaults to `$HOME`; with a non-home prefix the systemd /
 //! desktop-database refreshes are skipped (test installs).
 
-mod codeberg;
+mod github;
 mod fetch;
 mod layout;
 mod macos_app;
@@ -33,7 +33,7 @@ use crate::layout::Layout;
 /// Platform suffix used in Linux release asset names, e.g.
 /// `fasttrackstudio-v0.1.0-x86_64-linux.tar.gz`. The macOS app/plugin
 /// assets are universal (both arches, `lipo`'d together) so they don't
-/// need one — see `codeberg::resolve_macos_dmg` /
+/// need one — see `github::resolve_macos_dmg` /
 /// `resolve_macos_plugins_zip`.
 pub fn platform_suffix() -> eyre::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
@@ -145,7 +145,7 @@ struct InstallArgs {
     #[arg(long, value_name = "DIR")]
     prefix: Option<PathBuf>,
 
-    /// Install from a direct tarball URL, skipping the codeberg API.
+    /// Install from a direct tarball URL, skipping the GitHub API.
     #[arg(long, value_name = "URL")]
     url: Option<String>,
 }
@@ -196,7 +196,7 @@ async fn install(args: InstallArgs) -> eyre::Result<()> {
             (url.clone(), name, sums, None)
         }
         None => {
-            let release = codeberg::resolve(&client, args.version.as_deref()).await?;
+            let release = github::resolve(&client, args.version.as_deref()).await?;
             println!("release: {} ({})", release.tag, release.tarball.name);
             (
                 release.tarball.url,
@@ -248,7 +248,7 @@ async fn update(prefix: Option<PathBuf>) -> eyre::Result<()> {
 
     let layout = Layout::new(prefix)?;
     let client = fetch::http_client()?;
-    let release = codeberg::resolve(&client, None).await?;
+    let release = github::resolve(&client, None).await?;
     let latest = release.tag.trim_start_matches('v').to_string();
 
     match layout.installed_version() {
