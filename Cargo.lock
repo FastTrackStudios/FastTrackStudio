@@ -7169,6 +7169,7 @@ dependencies = [
  "cpal",
  "daw",
  "daw-audio-io",
+ "daw-proto 0.1.0",
  "daw-standalone",
  "daw-ui",
  "dawfile-reaper",
@@ -7182,6 +7183,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "include_dir",
+ "js-sys",
  "keyflow",
  "keyflow-sync",
  "libc",
@@ -7224,6 +7226,8 @@ dependencies = [
  "vox",
  "vox-core",
  "vox-websocket",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -18292,6 +18296,7 @@ dependencies = [
  "daw-audio-io",
  "eyre",
  "facet",
+ "facet-json",
  "facet-styx",
  "libc",
  "midicore 0.1.0",
