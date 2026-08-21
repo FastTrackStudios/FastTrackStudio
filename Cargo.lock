@@ -18418,8 +18418,13 @@ name = "signal-pack-library"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "facet-json",
+ "futures-util",
+ "hound",
  "sha2 0.10.9",
  "signal-packs-proto",
+ "signal-sampler",
+ "tempfile",
  "tokio",
  "tracing",
  "vox",
@@ -18546,6 +18551,7 @@ dependencies = [
  "signal-plugin-host",
  "signal-proto",
  "signal-rig-host",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
  "walkdir",
