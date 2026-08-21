@@ -1277,3 +1277,31 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.trigger-dsp]
 opt-level = 3
+
+# ── LOCAL ARCHITECT OVERRIDE — DO NOT COMMIT ──────────────────────────
+#
+# W13 (browser keys rig) needs `EngineHost::cross_origin_isolated` for the
+# COOP/COEP headers that unlock SharedArrayBuffer. Developing against the
+# local checkout per CLAUDE.md; the release path is: land in architect,
+# tag, bump the rev here, delete this block.
+[patch."https://github.com/FastTrackStudios/architect"]
+architect = { path = "../architect/crates/architect" }
+architect-action-derive = { path = "../architect/crates/architect-action-derive" }
+architect-atom = { path = "../architect/features/atom" }
+architect-auth = { path = "../architect/features/auth/architect-auth" }
+architect-derive = { path = "../architect/crates/architect-derive" }
+architect-form = { path = "../architect/features/form" }
+architect-launcher-core = { path = "../architect/features/launcher/architect-launcher-core" }
+architect-launcher-providers = { path = "../architect/features/launcher/architect-launcher-providers" }
+architect-launcher-ui = { path = "../architect/features/launcher/architect-launcher-ui" }
+architect-permissions = { path = "../architect/features/permissions" }
+architect-permissions-proto = { path = "../architect/features/permissions/proto" }
+architect-rpc-derive = { path = "../architect/crates/architect-rpc-derive" }
+architect-story-core = { path = "../architect/features/story/architect-story-core" }
+architect-story-macros = { path = "../architect/features/story/architect-story-macros" }
+architect-story-parity = { path = "../architect/features/story/architect-story-parity" }
+architect-story-runtime = { path = "../architect/features/story/architect-story-runtime" }
+architect-story-shell = { path = "../architect/features/story/architect-story-shell" }
+architect-story-snapshots = { path = "../architect/features/story/architect-story-snapshots" }
+architect-telemetry = { path = "../architect/features/telemetry" }
+architect-ui = { path = "../architect/features/ui/architect-ui" }
