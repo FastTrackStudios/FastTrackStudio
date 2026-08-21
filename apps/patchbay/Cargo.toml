@@ -18,6 +18,9 @@ patchbay.workspace = true
 patchbay-proto.workspace = true
 patchbay-ui.workspace = true
 architect = { workspace = true, features = ["vox", "local", "host", "server-axum"] }
+# Telemetry: fmt console logs + optional Sentry + OTLP export, engaged
+# only when OTEL_EXPORTER_OTLP_ENDPOINT is set (http/protobuf, :4318).
+architect-telemetry = { workspace = true, features = ["otel"] }
 vox.workspace = true
 clap = { workspace = true, features = ["env"] }
 dioxus = { workspace = true, default-features = true, features = ["desktop", "launch"] }
