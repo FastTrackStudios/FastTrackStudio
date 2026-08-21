@@ -18334,6 +18334,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-keys-worklet"
+version = "0.1.0"
+dependencies = [
+ "daw-standalone",
+ "eyre",
+ "facet",
+ "facet-json",
+ "fts-sample",
+ "hound",
+ "js-sys",
+ "signal-sampler",
+ "tracing",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "signal-live"
 version = "0.1.0"
 dependencies = [
@@ -18500,7 +18516,6 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "cpal",
- "crossbeam-channel",
  "daw",
  "daw-audio-io",
  "eyre",
@@ -18529,7 +18544,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
- "zstd",
 ]
 
 [[package]]
