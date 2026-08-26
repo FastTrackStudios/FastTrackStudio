@@ -56,9 +56,8 @@ fn main() {
             .map(|e| e.path())
             .filter(|p| {
                 p.extension().is_some_and(|x| x == "styx")
-                    && p.file_stem().is_some_and(|s| {
-                        s != "profile" && s != "mouse-profile"
-                    })
+                    && p.file_stem()
+                        .is_some_and(|s| s != "profile" && s != "mouse-profile")
             })
             .collect();
         sections.sort();
@@ -197,7 +196,12 @@ fn main() {
         .expect("assets/guides-media dir")
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_file() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
+        .filter(|p| {
+            p.is_file()
+                && !p
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        })
         .collect();
     media.sort();
     out.push_str(

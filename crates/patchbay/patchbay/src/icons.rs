@@ -87,7 +87,9 @@ fn build_desktop_index() -> HashMap<String, String> {
             }
             let Some(icon) = icon else { continue };
             if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                index.entry(stem.to_lowercase()).or_insert_with(|| icon.clone());
+                index
+                    .entry(stem.to_lowercase())
+                    .or_insert_with(|| icon.clone());
             }
             if let Some(name) = name {
                 index.entry(name).or_insert(icon);
@@ -114,7 +116,9 @@ fn data_dirs() -> Vec<PathBuf> {
         dirs.push(home.join(".nix-profile/share"));
     }
     if let Ok(user) = std::env::var("USER") {
-        dirs.push(PathBuf::from(format!("/etc/profiles/per-user/{user}/share")));
+        dirs.push(PathBuf::from(format!(
+            "/etc/profiles/per-user/{user}/share"
+        )));
     }
     dirs
 }
@@ -150,7 +154,11 @@ fn base64(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
         for i in 0..4 {
             if i <= chunk.len() {

@@ -54,10 +54,7 @@ pub fn load_modes() -> Vec<Mode> {
         .filter_map(|w| {
             let config: WorkflowConfig = facet_styx::from_str(w.styx).ok()?;
 
-            let name = config
-                .name
-                .clone()
-                .unwrap_or_else(|| kebab_to_title(w.id));
+            let name = config.name.clone().unwrap_or_else(|| kebab_to_title(w.id));
             let description = config.description.clone().unwrap_or_default();
 
             // Inline bindings are an implicit overlay; explicit overlays
@@ -117,7 +114,10 @@ mod tests {
                 "modal states must sort before plain workflows"
             );
         }
-        let record = modes.iter().find(|m| m.id == "mode-record").expect("mode-record");
+        let record = modes
+            .iter()
+            .find(|m| m.id == "mode-record")
+            .expect("mode-record");
         assert_eq!(record.name, "Record");
         assert!(!record.bindings.is_empty());
     }

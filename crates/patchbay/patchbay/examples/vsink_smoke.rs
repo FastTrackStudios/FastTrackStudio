@@ -18,7 +18,10 @@ async fn main() {
 
     let name = "Vsink Smoke Test";
     backend
-        .add_virtual_sink(VirtualSink { name: name.into(), channels: 2 })
+        .add_virtual_sink(VirtualSink {
+            name: name.into(),
+            channels: 2,
+        })
         .await
         .expect("add_virtual_sink");
 

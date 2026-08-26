@@ -66,7 +66,11 @@ pub async fn download(
 
 /// Fetch a small text resource (e.g. SHA256SUMS).
 pub async fn fetch_text(client: &reqwest::Client, url: &str) -> eyre::Result<String> {
-    let resp = client.get(url).send().await.wrap_err_with(|| format!("requesting {url}"))?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .wrap_err_with(|| format!("requesting {url}"))?;
     if !resp.status().is_success() {
         eyre::bail!("{url} -> HTTP {}", resp.status());
     }
@@ -89,14 +93,13 @@ pub fn verify_sha256(path: &Path, filename: &str, sums: &str) -> eyre::Result<()
         .ok_or_else(|| eyre!("SHA256SUMS has no entry for {filename}"))?;
 
     let mut hasher = Sha256::new();
-    let mut file = std::fs::File::open(path).wrap_err_with(|| format!("opening {}", path.display()))?;
+    let mut file =
+        std::fs::File::open(path).wrap_err_with(|| format!("opening {}", path.display()))?;
     std::io::copy(&mut file, &mut hasher)?;
     let actual = format!("{:x}", hasher.finalize());
 
     if actual != expected {
-        eyre::bail!(
-            "sha256 mismatch for {filename}:\n  expected {expected}\n  actual   {actual}"
-        );
+        eyre::bail!("sha256 mismatch for {filename}:\n  expected {expected}\n  actual   {actual}");
     }
     Ok(())
 }
@@ -107,7 +110,8 @@ pub fn extract_tarball(tarball: &Path, dest: &Path) -> eyre::Result<()> {
         std::fs::remove_dir_all(dest)?;
     }
     std::fs::create_dir_all(dest)?;
-    let file = std::fs::File::open(tarball).wrap_err_with(|| format!("opening {}", tarball.display()))?;
+    let file =
+        std::fs::File::open(tarball).wrap_err_with(|| format!("opening {}", tarball.display()))?;
     let gz = flate2::read::GzDecoder::new(std::io::BufReader::new(file));
     tar::Archive::new(gz)
         .unpack(dest)
@@ -123,10 +127,13 @@ pub fn extract_zip(zip_path: &Path, dest: &Path) -> eyre::Result<()> {
         std::fs::remove_dir_all(dest)?;
     }
     std::fs::create_dir_all(dest)?;
-    let file = std::fs::File::open(zip_path).wrap_err_with(|| format!("opening {}", zip_path.display()))?;
+    let file = std::fs::File::open(zip_path)
+        .wrap_err_with(|| format!("opening {}", zip_path.display()))?;
     let mut archive = zip::ZipArchive::new(std::io::BufReader::new(file))
         .wrap_err_with(|| format!("reading zip {}", zip_path.display()))?;
-    archive.extract(dest).wrap_err_with(|| format!("unpacking into {}", dest.display()))?;
+    archive
+        .extract(dest)
+        .wrap_err_with(|| format!("unpacking into {}", dest.display()))?;
     Ok(())
 }
 

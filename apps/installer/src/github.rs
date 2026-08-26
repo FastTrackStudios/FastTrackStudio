@@ -86,7 +86,10 @@ pub async fn resolve_with_prefix_ext(
 /// predict, so this matches on prefix/suffix only. No `SHA256SUMS` covers
 /// it; the notarization signature is the integrity/authenticity check
 /// instead.
-pub async fn resolve_macos_dmg(client: &reqwest::Client, tag: Option<&str>) -> eyre::Result<Release> {
+pub async fn resolve_macos_dmg(
+    client: &reqwest::Client,
+    tag: Option<&str>,
+) -> eyre::Result<Release> {
     resolve_matching(
         client,
         tag,
@@ -100,7 +103,10 @@ pub async fn resolve_macos_dmg(client: &reqwest::Client, tag: Option<&str>) -> e
 /// (`fts-plugins-v<ver>-macos.zip`) — a single universal (lipo'd) build
 /// covering both Mac architectures (nice-plug-xtask's `bundle-universal`),
 /// unlike the app dmg. No arch token, so no `platform_suffix()` involved.
-pub async fn resolve_macos_plugins_zip(client: &reqwest::Client, tag: Option<&str>) -> eyre::Result<Release> {
+pub async fn resolve_macos_plugins_zip(
+    client: &reqwest::Client,
+    tag: Option<&str>,
+) -> eyre::Result<Release> {
     resolve_matching(
         client,
         tag,
@@ -188,12 +194,19 @@ fn pick_asset(
     let tarball = assets
         .iter()
         .find(|a| matches(&a.name))
-        .map(|a| Asset { name: a.name.clone(), url: a.url.clone() })
+        .map(|a| Asset {
+            name: a.name.clone(),
+            url: a.url.clone(),
+        })
         .ok_or_else(|| {
             let names: Vec<&str> = assets.iter().map(|a| a.name.as_str()).collect();
             eyre!(
                 "release {tag} has no {asset_desc} asset (assets: {})",
-                if names.is_empty() { "none".to_string() } else { names.join(", ") }
+                if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names.join(", ")
+                }
             )
         })?;
 
@@ -204,7 +217,9 @@ fn pick_asset(
 
 /// GET a GitHub API endpoint as JSON, with the token if we have one.
 async fn get_json(client: &reqwest::Client, url: &str) -> eyre::Result<serde_json::Value> {
-    let mut req = client.get(url).header("Accept", "application/vnd.github+json");
+    let mut req = client
+        .get(url)
+        .header("Accept", "application/vnd.github+json");
     // GITHUB_TOKEN is the CI/API name; GH_TOKEN is what the `gh` CLI exports,
     // so a developer with gh set up needs no extra configuration.
     let token = std::env::var("GITHUB_TOKEN")
@@ -214,7 +229,10 @@ async fn get_json(client: &reqwest::Client, url: &str) -> eyre::Result<serde_jso
         req = req.header("Authorization", format!("Bearer {token}"));
     }
 
-    let resp = req.send().await.wrap_err_with(|| format!("requesting {url}"))?;
+    let resp = req
+        .send()
+        .await
+        .wrap_err_with(|| format!("requesting {url}"))?;
     let status = resp.status();
     let body = resp.bytes().await.wrap_err("reading release response")?;
     if !status.is_success() {

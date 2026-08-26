@@ -9360,6 +9360,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1489f81ead4b71a09ddeab6850c0356c0932587637d753f21ee1010ab875b013"
 
 [[package]]
+name = "hit-detect-dsp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "approx",
+ "eq-dsp",
+ "fts-sample",
+ "trigger-dsp",
+]
+
+[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

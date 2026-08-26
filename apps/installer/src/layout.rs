@@ -27,7 +27,10 @@ impl Layout {
             }
             None => (home, true),
         };
-        Ok(Self { prefix, system_integration })
+        Ok(Self {
+            prefix,
+            system_integration,
+        })
     }
 
     fn lib_dir(&self) -> PathBuf {
@@ -37,10 +40,12 @@ impl Layout {
         self.prefix.join(".local/bin")
     }
     fn unit_path(&self) -> PathBuf {
-        self.prefix.join(".config/systemd/user/signal-engine.service")
+        self.prefix
+            .join(".config/systemd/user/signal-engine.service")
     }
     fn desktop_path(&self) -> PathBuf {
-        self.prefix.join(".local/share/applications/fasttrackstudio.desktop")
+        self.prefix
+            .join(".local/share/applications/fasttrackstudio.desktop")
     }
     fn icon_path(&self) -> PathBuf {
         self.prefix
@@ -76,7 +81,10 @@ impl Layout {
         for name in ["fasttrackstudio", "fts"] {
             let src = stage.join(name);
             if !src.exists() {
-                eyre::bail!("tarball is missing the {name} binary (looked at {})", src.display());
+                eyre::bail!(
+                    "tarball is missing the {name} binary (looked at {})",
+                    src.display()
+                );
             }
             let tmp = lib.join(format!("{name}.new"));
             std::fs::copy(&src, &tmp).wrap_err_with(|| format!("copying {name}"))?;
@@ -144,7 +152,10 @@ impl Layout {
             );
             best_effort(
                 "gtk-update-icon-cache",
-                &[&self.prefix.join(".local/share/icons/hicolor").to_string_lossy()],
+                &[&self
+                    .prefix
+                    .join(".local/share/icons/hicolor")
+                    .to_string_lossy()],
             );
         } else {
             println!(
@@ -177,7 +188,8 @@ impl Layout {
         }
         let lib = self.lib_dir();
         if lib.exists() {
-            std::fs::remove_dir_all(&lib).wrap_err_with(|| format!("removing {}", lib.display()))?;
+            std::fs::remove_dir_all(&lib)
+                .wrap_err_with(|| format!("removing {}", lib.display()))?;
         }
         remove_file_if_exists(&self.desktop_path())?;
         remove_file_if_exists(&self.icon_path())?;
@@ -189,7 +201,10 @@ impl Layout {
             );
             best_effort(
                 "gtk-update-icon-cache",
-                &[&self.prefix.join(".local/share/icons/hicolor").to_string_lossy()],
+                &[&self
+                    .prefix
+                    .join(".local/share/icons/hicolor")
+                    .to_string_lossy()],
             );
         }
 

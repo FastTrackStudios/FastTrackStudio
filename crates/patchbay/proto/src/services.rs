@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use vox::Tx;
 
 use crate::types::{
-    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteDeviceConfig,
-    DanteStatus, CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute,
+    AliasEntry, ApplyReport, CanvasView, ClockDefaults, ClockInfo, ColorEntry, DanteDevice,
+    DanteDeviceConfig, DanteStatus, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute,
     RoutingPreset, ServiceAction, ServiceStatus, VirtualSink,
 };
 
@@ -226,8 +226,7 @@ pub mod patchbay_service {
         /// Write (all-zero = delete) the clock-defaults drop-in. Wins
         /// over the flake's 50-quantum.conf by filename ordering;
         /// applied on PipeWire restart (services panel).
-        async fn set_clock_defaults(&self, defaults: ClockDefaults)
-        -> Result<(), PatchbayError>;
+        async fn set_clock_defaults(&self, defaults: ClockDefaults) -> Result<(), PatchbayError>;
 
         // ── Per-app latency rules ────────────────────────────────────
 

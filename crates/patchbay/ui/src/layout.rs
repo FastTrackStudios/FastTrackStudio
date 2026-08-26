@@ -97,7 +97,9 @@ pub fn strip_channel_prefix(label: &str, chan: Option<u64>) -> String {
     if num.parse::<u64>() != Ok(chan) {
         return label.to_string();
     }
-    let stripped = rest.trim_start_matches([' ', '-', '–', '.', ':', '·']).trim_start();
+    let stripped = rest
+        .trim_start_matches([' ', '-', '–', '.', ':', '·'])
+        .trim_start();
     if stripped.is_empty() {
         label.to_string()
     } else {
@@ -151,7 +153,11 @@ pub struct GraphLayout {
 /// Split `playback_97` → (`playback_`, 97). Ports without a numeric
 /// suffix never group.
 fn split_numeric(name: &str) -> Option<(&str, u64)> {
-    let digits = name.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+    let digits = name
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .count();
     if digits == 0 || digits == name.len() {
         return None;
     }
@@ -441,7 +447,11 @@ pub fn compute_layout(
             continue;
         }
         if !search.is_empty() {
-            let alias = filters.aliases.get(&node.name).map(String::as_str).unwrap_or("");
+            let alias = filters
+                .aliases
+                .get(&node.name)
+                .map(String::as_str)
+                .unwrap_or("");
             let hay = format!("{} {} {}", node.name, node.label, alias).to_lowercase();
             if !hay.contains(&search) {
                 continue;
@@ -512,18 +522,21 @@ pub fn compute_layout(
             || node.media_class.starts_with("Stream");
         if filters.tab == MediaKind::Midi && !is_app {
             if !outs.is_empty() {
-                let rows =
-                    build_rows(node, &outs, PortDirection::Output, expanded, filters.aliases);
+                let rows = build_rows(
+                    node,
+                    &outs,
+                    PortDirection::Output,
+                    expanded,
+                    filters.aliases,
+                );
                 columns[0].push(make_card(rows, 0, format!("{}-out", node.id)));
             }
             if !ins.is_empty() {
-                let rows =
-                    build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
+                let rows = build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
                 columns[3].push(make_card(rows, 3, format!("{}-in", node.id)));
             }
         } else {
-            let mut rows =
-                build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
+            let mut rows = build_rows(node, &ins, PortDirection::Input, expanded, filters.aliases);
             rows.extend(build_rows(
                 node,
                 &outs,
@@ -552,12 +565,9 @@ pub fn compute_layout(
                 .iter()
                 .enumerate()
                 .filter(|(_, c)| {
-                    c.node.media_class.starts_with("Stream/Output")
-                        && !c.node.group.is_empty()
+                    c.node.media_class.starts_with("Stream/Output") && !c.node.group.is_empty()
                 })
-                .filter_map(|(i, c)| {
-                    sink_groups.get(c.node.group.as_str()).map(|&s| (i, s))
-                })
+                .filter_map(|(i, c)| sink_groups.get(c.node.group.as_str()).map(|&s| (i, s)))
                 .collect()
         };
         for (stream_idx, sink_idx) in moved.into_iter().rev() {
@@ -576,7 +586,12 @@ pub fn compute_layout(
     let mut cards = Vec::new();
     let mut height: f64 = 0.0;
     for col in &mut columns {
-        col.sort_by(|a, b| a.node.label.to_lowercase().cmp(&b.node.label.to_lowercase()));
+        col.sort_by(|a, b| {
+            a.node
+                .label
+                .to_lowercase()
+                .cmp(&b.node.label.to_lowercase())
+        });
         let mut y = MARGIN + COL_HEADER_H;
         for mut card in col.drain(..) {
             card.y = y;
@@ -651,10 +666,7 @@ mod reaper_layout {
         };
         let mut ports = Vec::new();
         let mut pid = 100;
-        for (dir, prefix) in [
-            (PortDirection::Input, "in"),
-            (PortDirection::Output, "out"),
-        ] {
+        for (dir, prefix) in [(PortDirection::Input, "in"), (PortDirection::Output, "out")] {
             for ch in 1..=128 {
                 ports.push(PwPort {
                     id: pid,
@@ -666,7 +678,11 @@ mod reaper_layout {
                 pid += 1;
             }
         }
-        GraphSnapshot { nodes: vec![node], ports, links: Vec::new() }
+        GraphSnapshot {
+            nodes: vec![node],
+            ports,
+            links: Vec::new(),
+        }
     }
 
     #[test]
@@ -699,17 +715,25 @@ mod reaper_layout {
 
         // Both directions are present, so it's routable to AND from.
         assert!(
-            card.rows.iter().any(|r| r.direction == PortDirection::Input),
+            card.rows
+                .iter()
+                .any(|r| r.direction == PortDirection::Input),
             "REAPER must expose input rows (route audio INTO it)"
         );
         assert!(
-            card.rows.iter().any(|r| r.direction == PortDirection::Output),
+            card.rows
+                .iter()
+                .any(|r| r.direction == PortDirection::Output),
             "REAPER must expose output rows (route audio OUT of it)"
         );
 
         // Every one of the 256 audio ports is anchored (reachable by a cable).
         assert_eq!(
-            graph.ports.iter().filter(|p| lay.anchors.contains_key(&p.id)).count(),
+            graph
+                .ports
+                .iter()
+                .filter(|p| lay.anchors.contains_key(&p.id))
+                .count(),
             256,
             "all REAPER audio ports must be cable-anchored"
         );
@@ -778,8 +802,7 @@ mod stereo_pairs {
     fn aliased_lr_channels_pair_up_inside_a_numbered_bank() {
         // Channels 5+6 of a big bank aliased "Room Far L"/"Room Far R":
         // they split out of the group AND condense into a stereo row.
-        let ports: Vec<PwPort> =
-            (1..=12).map(|n| port(n, &format!("capture_{n}"))).collect();
+        let ports: Vec<PwPort> = (1..=12).map(|n| port(n, &format!("capture_{n}"))).collect();
         let graph = GraphSnapshot {
             nodes: vec![node()],
             ports,
@@ -838,7 +861,11 @@ mod stereo_pairs {
         // REAPER-style: in28/in29 aliased "28 - Guitar 1 L"/"29 - Guitar 1 R"
         // must condense to "Guitar 1 L/R" with chans (28, 29).
         let ports = vec![port(28, "in28"), port(29, "in29")];
-        let graph = GraphSnapshot { nodes: vec![node()], ports, links: Vec::new() };
+        let graph = GraphSnapshot {
+            nodes: vec![node()],
+            ports,
+            links: Vec::new(),
+        };
         let aliases: HashMap<String, String> = [
             ("dev:in28".to_string(), "28 - Guitar 1 L".to_string()),
             ("dev:in29".to_string(), "29 - Guitar 1 R".to_string()),
@@ -859,8 +886,7 @@ mod stereo_pairs {
         assert_eq!(rows[0].chan, (Some(28), Some(29)));
 
         // Expanding the pair splits it back into the two channels.
-        let expanded: HashMap<String, bool> =
-            [(rows[0].pair_key.clone().unwrap(), true)].into();
+        let expanded: HashMap<String, bool> = [(rows[0].pair_key.clone().unwrap(), true)].into();
         let lay = compute_layout(&graph, &filters, &expanded);
         let rows = &lay.cards[0].rows;
         assert_eq!(rows.len(), 2, "expanded pair = two channel rows");
@@ -906,7 +932,11 @@ mod stereo_pairs {
                 media_kind: MediaKind::Audio,
             });
         }
-        let graph = GraphSnapshot { nodes: vec![sink, stream], ports, links: Vec::new() };
+        let graph = GraphSnapshot {
+            nodes: vec![sink, stream],
+            ports,
+            links: Vec::new(),
+        };
         let aliases = HashMap::new();
         let filters = Filters {
             search: "",
@@ -921,8 +951,16 @@ mod stereo_pairs {
         let card = &lay.cards[0];
         assert_eq!(card.node.name, "system_audio");
         // Sink inputs AND the forwarder's outputs live on one card.
-        assert!(card.rows.iter().any(|r| r.direction == PortDirection::Input));
-        assert!(card.rows.iter().any(|r| r.direction == PortDirection::Output));
+        assert!(
+            card.rows
+                .iter()
+                .any(|r| r.direction == PortDirection::Input)
+        );
+        assert!(
+            card.rows
+                .iter()
+                .any(|r| r.direction == PortDirection::Output)
+        );
         // Forwarder output ports anchor on the sink card's right edge.
         assert_eq!(lay.anchors[&20].0, card.x + CARD_W);
     }
@@ -931,11 +969,7 @@ mod stereo_pairs {
     fn duplex_cards_stack_sides_independently() {
         // 3 inputs + 1 output: height follows the LONGER side (3 rows),
         // and each side's rows start at the top of the card.
-        let mut ports = vec![
-            port(1, "in_a"),
-            port(2, "in_b"),
-            port(3, "in_c"),
-        ];
+        let mut ports = vec![port(1, "in_a"), port(2, "in_b"), port(3, "in_c")];
         ports.push(PwPort {
             id: 4,
             node_id: 1,
@@ -943,7 +977,11 @@ mod stereo_pairs {
             direction: PortDirection::Output,
             media_kind: MediaKind::Audio,
         });
-        let graph = GraphSnapshot { nodes: vec![node()], ports, links: Vec::new() };
+        let graph = GraphSnapshot {
+            nodes: vec![node()],
+            ports,
+            links: Vec::new(),
+        };
         let aliases = HashMap::new();
         let filters = Filters {
             search: "",
@@ -956,8 +994,16 @@ mod stereo_pairs {
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         let card = &lay.cards[0];
         assert_eq!(card.h, HEADER_H + 3.0 * ROW_H + 8.0, "height = longer side");
-        let first_in = card.rows.iter().find(|r| r.direction == PortDirection::Input).unwrap();
-        let first_out = card.rows.iter().find(|r| r.direction == PortDirection::Output).unwrap();
+        let first_in = card
+            .rows
+            .iter()
+            .find(|r| r.direction == PortDirection::Input)
+            .unwrap();
+        let first_out = card
+            .rows
+            .iter()
+            .find(|r| r.direction == PortDirection::Output)
+            .unwrap();
         assert_eq!(first_in.y, first_out.y, "both sides start at the card top");
     }
 
@@ -996,8 +1042,10 @@ mod live_probe {
         let link = vox_websocket::WsLink::connect("ws://127.0.0.1:4046/vox")
             .await
             .expect("ws connect (is patchbay running?)");
-        let client: PatchbayServiceClient =
-            vox_core::initiator_on(link).establish().await.expect("establish");
+        let client: PatchbayServiceClient = vox_core::initiator_on(link)
+            .establish()
+            .await
+            .expect("establish");
         let graph = client.graph().await.expect("graph");
         println!(
             "graph: {} nodes / {} ports / {} links",
@@ -1019,7 +1067,10 @@ mod live_probe {
             let x = MARGIN + col as f64 * (CARD_W + COL_GAP);
             println!("── column {col} ({})", COLUMN_TITLES_DBG[col]);
             for c in lay.cards.iter().filter(|c| (c.x - x).abs() < 1.0) {
-                println!("   y={:>6.0} h={:>5.0} {} [{}]", c.y, c.h, c.node.label, c.node.name);
+                println!(
+                    "   y={:>6.0} h={:>5.0} {} [{}]",
+                    c.y, c.h, c.node.label, c.node.name
+                );
             }
         }
         assert!(
@@ -1038,8 +1089,10 @@ mod live_probe {
         let link = vox_websocket::WsLink::connect("ws://127.0.0.1:4046/vox")
             .await
             .expect("ws connect (is patchbay running?)");
-        let client: PatchbayServiceClient =
-            vox_core::initiator_on(link).establish().await.expect("establish");
+        let client: PatchbayServiceClient = vox_core::initiator_on(link)
+            .establish()
+            .await
+            .expect("establish");
         let graph = client.graph().await.expect("graph");
         for n in &graph.nodes {
             let ports = graph.ports.iter().filter(|p| p.node_id == n.id).count();
@@ -1067,8 +1120,10 @@ mod live_probe {
         let link = vox_websocket::WsLink::connect("ws://127.0.0.1:4046/vox")
             .await
             .expect("ws connect (is patchbay running?)");
-        let client: PatchbayServiceClient =
-            vox_core::initiator_on(link).establish().await.expect("establish");
+        let client: PatchbayServiceClient = vox_core::initiator_on(link)
+            .establish()
+            .await
+            .expect("establish");
         let graph = client.graph().await.expect("graph");
         let aliases: HashMap<String, String> = client
             .aliases()
@@ -1088,12 +1143,25 @@ mod live_probe {
         };
         let lay = compute_layout(&graph, &filters, &HashMap::new());
         for c in &lay.cards {
-            let pairs: Vec<&str> =
-                c.rows.iter().filter(|r| r.pair).map(|r| r.label.as_str()).collect();
-            let ports = graph.ports.iter().filter(|p| p.node_id == c.node.id).count();
+            let pairs: Vec<&str> = c
+                .rows
+                .iter()
+                .filter(|r| r.pair)
+                .map(|r| r.label.as_str())
+                .collect();
+            let ports = graph
+                .ports
+                .iter()
+                .filter(|p| p.node_id == c.node.id)
+                .count();
             println!(
                 "card {:30} rows={:3} ports={:3} pairs={:?} icon_name={:?} app={:?}",
-                c.node.label, c.rows.len(), ports, pairs, c.node.icon_name, c.node.app_name
+                c.node.label,
+                c.rows.len(),
+                ports,
+                pairs,
+                c.node.icon_name,
+                c.node.app_name
             );
         }
         // What would the icon lookups be, and do they resolve host-side?
@@ -1107,7 +1175,10 @@ mod live_probe {
         let icons = client.icons(candidates).await.expect("icons");
         println!(
             "resolved icons: {:?}",
-            icons.iter().map(|i| i.icon_name.as_str()).collect::<Vec<_>>()
+            icons
+                .iter()
+                .map(|i| i.icon_name.as_str())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1128,12 +1199,20 @@ mod live_probe {
             graph.links.len()
         );
         if let Some(r) = graph.nodes.iter().find(|n| n.name == "REAPER") {
-            let ins = graph.ports.iter().filter(|p| p.node_id == r.id
-                && p.direction == PortDirection::Input).count();
-            let outs = graph.ports.iter().filter(|p| p.node_id == r.id
-                && p.direction == PortDirection::Output).count();
-            println!("mirror REAPER: id={} class={:?} kind={:?} ins={ins} outs={outs}",
-                r.id, r.media_class, r.media_kind);
+            let ins = graph
+                .ports
+                .iter()
+                .filter(|p| p.node_id == r.id && p.direction == PortDirection::Input)
+                .count();
+            let outs = graph
+                .ports
+                .iter()
+                .filter(|p| p.node_id == r.id && p.direction == PortDirection::Output)
+                .count();
+            println!(
+                "mirror REAPER: id={} class={:?} kind={:?} ins={ins} outs={outs}",
+                r.id, r.media_class, r.media_kind
+            );
         } else {
             println!("mirror REAPER: ABSENT");
         }
@@ -1150,8 +1229,12 @@ mod live_probe {
         match lay.cards.iter().find(|c| c.node.name == "REAPER") {
             Some(c) => {
                 let col = ((c.x - MARGIN) / (CARD_W + COL_GAP)).round() as usize;
-                println!("layout REAPER: column {col} ({}), {} rows, x={}",
-                    COLUMN_TITLES_DBG.get(col).unwrap_or(&"?"), c.rows.len(), c.x);
+                println!(
+                    "layout REAPER: column {col} ({}), {} rows, x={}",
+                    COLUMN_TITLES_DBG.get(col).unwrap_or(&"?"),
+                    c.rows.len(),
+                    c.x
+                );
             }
             None => println!("layout REAPER: NOT IN LAYOUT (nodes present but filtered out)"),
         }
@@ -1165,14 +1248,45 @@ mod category_colors {
     #[test]
     fn category_coverage() {
         let names = [
-            "Kick In", "Kick Out", "Snare Top", "Snare Bottom", "Tom 1", "Hi Hat",
-            "Ride", "OH L", "Room L", "Room Far L", "Electronic Kit L", "Drum Pad L",
-            "Bass DI", "Bass Amp", "Bass Synth L", "Guitar 1 L", "Guitar 1 DI",
-            "Keys 1 L", "Lead Mic L", "Engineer Vocal", "Drummer Mic", "Wireless Mic 1",
-            "Click", "Guide", "Talkback L", "Speakers L", "Engineer Mix L",
-            "Drums Mix L", "Bass Mix L", "Guitar 1 Mix L", "Keys 1 Mix L",
-            "Broadcast Mix L", "Voice Chat L", "DAW L", "Spare 1", "Acoustic 1",
-            "Synth Lead", "Pad", "Vocal 1 Mix L",
+            "Kick In",
+            "Kick Out",
+            "Snare Top",
+            "Snare Bottom",
+            "Tom 1",
+            "Hi Hat",
+            "Ride",
+            "OH L",
+            "Room L",
+            "Room Far L",
+            "Electronic Kit L",
+            "Drum Pad L",
+            "Bass DI",
+            "Bass Amp",
+            "Bass Synth L",
+            "Guitar 1 L",
+            "Guitar 1 DI",
+            "Keys 1 L",
+            "Lead Mic L",
+            "Engineer Vocal",
+            "Drummer Mic",
+            "Wireless Mic 1",
+            "Click",
+            "Guide",
+            "Talkback L",
+            "Speakers L",
+            "Engineer Mix L",
+            "Drums Mix L",
+            "Bass Mix L",
+            "Guitar 1 Mix L",
+            "Keys 1 Mix L",
+            "Broadcast Mix L",
+            "Voice Chat L",
+            "DAW L",
+            "Spare 1",
+            "Acoustic 1",
+            "Synth Lead",
+            "Pad",
+            "Vocal 1 Mix L",
         ];
         let mut misses = Vec::new();
         for n in names {

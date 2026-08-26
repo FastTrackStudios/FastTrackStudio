@@ -35,15 +35,21 @@ async fn main() {
         .expect("set rule 2");
 
     println!("--- {}:", dropin.display());
-    print!("{}", std::fs::read_to_string(&dropin).expect("dropin written"));
+    print!(
+        "{}",
+        std::fs::read_to_string(&dropin).expect("dropin written")
+    );
 
     let rules = backend.latency_rules().await.expect("rules");
     println!("--- {} rule(s) stored", rules.len());
 
-    backend.remove_latency_rule("REAPER".into()).await.expect("rm");
-    backend.remove_latency_rule("~Firefox.*".into()).await.expect("rm2");
-    println!(
-        "--- after removal, dropin exists: {}",
-        dropin.exists()
-    );
+    backend
+        .remove_latency_rule("REAPER".into())
+        .await
+        .expect("rm");
+    backend
+        .remove_latency_rule("~Firefox.*".into())
+        .await
+        .expect("rm2");
+    println!("--- after removal, dropin exists: {}", dropin.exists());
 }

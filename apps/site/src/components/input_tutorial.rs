@@ -12,8 +12,8 @@
 //! `InputConfigService` (your live rig / hub profiles) instead of the
 //! embedded snapshot — the rendering stays identical.
 
-use dioxus::prelude::*;
 use architect_ui::prelude::*;
+use dioxus::prelude::*;
 use input_config_proto::{
     KeybindContext, KeybindDef, ProfileConfig, SectionConfig, WheelBindDef, kebab_to_title,
 };
@@ -430,7 +430,11 @@ fn ModeChip(
 /// profile (tagged "overrides" where they shadow a base key) and the
 /// REAPER settings it flips while active.
 #[component]
-fn ModeSection(mode: Mode, #[props(default)] filter: Option<KeyFilter>, base_chords: Vec<(Mods, String)>) -> Element {
+fn ModeSection(
+    mode: Mode,
+    #[props(default)] filter: Option<KeyFilter>,
+    base_chords: Vec<(Mods, String)>,
+) -> Element {
     let color = mode.color();
 
     let rows: Vec<(KeybindDef, bool)> = mode
@@ -438,8 +442,7 @@ fn ModeSection(mode: Mode, #[props(default)] filter: Option<KeyFilter>, base_cho
         .iter()
         .filter(|b| filter.as_ref().is_none_or(|f| binding_matches(&b.keys, f)))
         .map(|b| {
-            let overrides = first_chord(&b.keys)
-                .is_some_and(|c| base_chords.contains(&c));
+            let overrides = first_chord(&b.keys).is_some_and(|c| base_chords.contains(&c));
             (b.clone(), overrides)
         })
         .collect();
@@ -528,11 +531,7 @@ fn CategorySection(
     let bindings: Vec<KeybindDef> = config
         .bindings()
         .iter()
-        .filter(|b| {
-            filter
-                .as_ref()
-                .is_none_or(|f| binding_matches(&b.keys, f))
-        })
+        .filter(|b| filter.as_ref().is_none_or(|f| binding_matches(&b.keys, f)))
         .cloned()
         .collect();
     let show_wheel = filter.is_none();
@@ -701,12 +700,18 @@ mod tests {
 
     #[test]
     fn chord_pretty_printing() {
-        assert_eq!(pretty_keys("<C-s>"), vec![vec!["Ctrl".to_string(), "S".into()]]);
+        assert_eq!(
+            pretty_keys("<C-s>"),
+            vec![vec!["Ctrl".to_string(), "S".into()]]
+        );
         assert_eq!(
             pretty_keys("<C-S-space>"),
             vec![vec!["Ctrl".to_string(), "Shift".into(), "Space".into()]]
         );
-        assert_eq!(pretty_keys("g g"), vec![vec!["G".to_string()], vec!["G".to_string()]]);
+        assert_eq!(
+            pretty_keys("g g"),
+            vec![vec!["G".to_string()], vec!["G".to_string()]]
+        );
         assert_eq!(pretty_chord("<C->"), vec!["Ctrl".to_string()]);
     }
 }

@@ -24,7 +24,9 @@ pub fn default_path() -> PathBuf {
         .unwrap_or_else(|_| "default".to_string());
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(format!(".fasttrackstudio/Reaper/ChanMaps/{host}.ReaperChanMap"))
+        .join(format!(
+            ".fasttrackstudio/Reaper/ChanMaps/{host}.ReaperChanMap"
+        ))
 }
 
 pub fn resolve_path(path: &str) -> PathBuf {
@@ -51,7 +53,9 @@ pub fn read_names(path: &str) -> Result<BTreeMap<u32, String>, String> {
         let Some((idx, name)) = rest.split_once('=') else {
             continue;
         };
-        let Ok(idx) = idx.parse::<u32>() else { continue };
+        let Ok(idx) = idx.parse::<u32>() else {
+            continue;
+        };
         let name = name.trim();
         if !name.is_empty() {
             names.insert(idx + 1, name.to_string());

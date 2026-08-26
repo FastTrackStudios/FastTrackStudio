@@ -14,8 +14,8 @@
 
 use std::collections::HashMap;
 
-use dioxus::prelude::*;
 use architect_ui::prelude::*;
+use dioxus::prelude::*;
 use input_config_proto::{KeybindDef, kebab_to_title};
 
 use super::colors::category_color;
@@ -69,7 +69,11 @@ impl KeyFilter {
     pub fn label(&self) -> String {
         let mods = self.mods.label();
         let key = display_key_name(&self.key);
-        if mods.is_empty() { key } else { format!("{mods} + {key}") }
+        if mods.is_empty() {
+            key
+        } else {
+            format!("{mods} + {key}")
+        }
     }
 }
 
@@ -206,8 +210,18 @@ struct KeySpec {
     units: f32,
 }
 
-const fn key(id: &'static str, label: &'static str, shifted: Option<&'static str>, units: f32) -> KeySpec {
-    KeySpec { id, label, shifted, units }
+const fn key(
+    id: &'static str,
+    label: &'static str,
+    shifted: Option<&'static str>,
+    units: f32,
+) -> KeySpec {
+    KeySpec {
+        id,
+        label,
+        shifted,
+        units,
+    }
 }
 
 /// Modifier key ids — rendered as toggles, not binding targets.
@@ -345,7 +359,10 @@ pub fn KeyboardMap(
                       label: &'static str,
                       shifted: Option<&'static str>,
                       grow: Option<f32>| {
-        let binds = lookup.get(&(m, id.to_string())).cloned().unwrap_or_default();
+        let binds = lookup
+            .get(&(m, id.to_string()))
+            .cloned()
+            .unwrap_or_default();
         let count = binds.len();
         let is_hovered = hov == Some(id);
         let is_filtered = active_filter
@@ -396,12 +413,13 @@ pub fn KeyboardMap(
                 "text-foreground cursor-pointer hover:brightness-125",
                 format!("background-color: {c}26; border-color: {c}59;"),
             ),
-            _ => ("bg-muted/20 border-border/40 text-muted-foreground/40", String::new()),
+            _ => (
+                "bg-muted/20 border-border/40 text-muted-foreground/40",
+                String::new(),
+            ),
         };
         if let (Some(mc), false) = (mode_hit, is_filtered) {
-            color_style.push_str(&format!(
-                " box-shadow: 0 0 0 1.5px {mc}, 0 0 10px {mc}66;"
-            ));
+            color_style.push_str(&format!(" box-shadow: 0 0 0 1.5px {mc}, 0 0 10px {mc}66;"));
         }
 
         // With Shift toggled, show the shifted legend as the primary one.
@@ -665,22 +683,47 @@ mod tests {
         assert_eq!(chord("r"), (Mods::default(), "r".to_string()));
         assert_eq!(
             chord("<C-s>"),
-            (Mods { ctrl: true, ..Default::default() }, "s".to_string())
+            (
+                Mods {
+                    ctrl: true,
+                    ..Default::default()
+                },
+                "s".to_string()
+            )
         );
         assert_eq!(
             chord("<C-S-space>"),
-            (Mods { ctrl: true, shift: true, ..Default::default() }, "space".to_string())
+            (
+                Mods {
+                    ctrl: true,
+                    shift: true,
+                    ..Default::default()
+                },
+                "space".to_string()
+            )
         );
         // Only the FIRST chord of a sequence counts.
         assert_eq!(chord("g g"), (Mods::default(), "g".to_string()));
         // `D` is the platform/command modifier alias.
         assert_eq!(
             chord("<D-1>"),
-            (Mods { meta: true, ..Default::default() }, "1".to_string())
+            (
+                Mods {
+                    meta: true,
+                    ..Default::default()
+                },
+                "1".to_string()
+            )
         );
         assert_eq!(
             chord("<M-z>"),
-            (Mods { meta: true, ..Default::default() }, "z".to_string())
+            (
+                Mods {
+                    meta: true,
+                    ..Default::default()
+                },
+                "z".to_string()
+            )
         );
     }
 
@@ -689,15 +732,33 @@ mod tests {
         // `?` is Shift + `/` on the physical board.
         assert_eq!(
             chord("?"),
-            (Mods { shift: true, ..Default::default() }, "/".to_string())
+            (
+                Mods {
+                    shift: true,
+                    ..Default::default()
+                },
+                "/".to_string()
+            )
         );
         assert_eq!(
             chord(":"),
-            (Mods { shift: true, ..Default::default() }, ";".to_string())
+            (
+                Mods {
+                    shift: true,
+                    ..Default::default()
+                },
+                ";".to_string()
+            )
         );
         assert_eq!(
             chord("<plus>"),
-            (Mods { shift: true, ..Default::default() }, "=".to_string())
+            (
+                Mods {
+                    shift: true,
+                    ..Default::default()
+                },
+                "=".to_string()
+            )
         );
         assert_eq!(chord("<minus>"), (Mods::default(), "-".to_string()));
         assert_eq!(chord(","), (Mods::default(), ",".to_string()));
@@ -713,7 +774,10 @@ mod tests {
     #[test]
     fn filter_matching() {
         let f = KeyFilter {
-            mods: Mods { ctrl: true, ..Default::default() },
+            mods: Mods {
+                ctrl: true,
+                ..Default::default()
+            },
             key: "s".to_string(),
         };
         assert!(binding_matches("<C-s>", &f));

@@ -136,14 +136,27 @@ pub enum GraphEvent {
     /// everything with fresh ids.
     Reset,
     NodeAdded(PwNode),
-    NodeRemoved { id: u32 },
+    NodeRemoved {
+        id: u32,
+    },
     /// A node's live processing state changed (`running`/`idle`/…).
-    NodeStateChanged { id: u32, state: NodeState },
+    NodeStateChanged {
+        id: u32,
+        state: NodeState,
+    },
     PortAdded(PwPort),
-    PortRemoved { id: u32, node_id: u32 },
+    PortRemoved {
+        id: u32,
+        node_id: u32,
+    },
     LinkAdded(PwLink),
-    LinkStateChanged { id: u32, active: bool },
-    LinkRemoved { id: u32 },
+    LinkStateChanged {
+        id: u32,
+        active: bool,
+    },
+    LinkRemoved {
+        id: u32,
+    },
 }
 
 // SelfRef compatibility: GraphEvent has no lifetime parameters, so Ref<'a> = Self.

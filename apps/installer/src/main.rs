@@ -16,8 +16,8 @@
 //! `--prefix` defaults to `$HOME`; with a non-home prefix the systemd /
 //! desktop-database refreshes are skipped (test installs).
 
-mod github;
 mod fetch;
+mod github;
 mod layout;
 mod macos_app;
 mod plugins;
@@ -161,9 +161,11 @@ async fn main() {
         Some(Cmd::Reaper { prefix }) => reaper_env::setup(prefix).await,
         Some(Cmd::Bundle { prefix, version }) => bundle(prefix, version).await,
         Some(Cmd::Plugins { cmd }) => match cmd {
-            PluginsCmd::Install { version, from, prefix } => {
-                plugins::install(version, from, prefix).await
-            }
+            PluginsCmd::Install {
+                version,
+                from,
+                prefix,
+            } => plugins::install(version, from, prefix).await,
             PluginsCmd::Uninstall { prefix } => plugins::uninstall(prefix),
             PluginsCmd::List { prefix } => plugins::list(prefix),
         },
@@ -192,7 +194,9 @@ async fn install(args: InstallArgs) -> eyre::Result<()> {
                 .ok_or_else(|| eyre!("--url has no filename component: {url}"))?
                 .to_string();
             // Best-effort: look for SHA256SUMS next to the tarball.
-            let sums = url.rsplit_once('/').map(|(dir, _)| format!("{dir}/SHA256SUMS"));
+            let sums = url
+                .rsplit_once('/')
+                .map(|(dir, _)| format!("{dir}/SHA256SUMS"));
             (url.clone(), name, sums, None)
         }
         None => {
@@ -207,7 +211,14 @@ async fn install(args: InstallArgs) -> eyre::Result<()> {
         }
     };
 
-    install_tarball(&client, &layout, &tarball_url, &tarball_name, sums_url.as_deref()).await?;
+    install_tarball(
+        &client,
+        &layout,
+        &tarball_url,
+        &tarball_name,
+        sums_url.as_deref(),
+    )
+    .await?;
 
     if let Some(tag) = tag {
         println!("installed FastTrackStudio {tag}");
@@ -225,7 +236,12 @@ async fn bundle(prefix: Option<PathBuf>, version: Option<String>) -> eyre::Resul
     reaper_env::setup(prefix.clone()).await?;
 
     println!("\n== 2/3: FastTrackStudio app ==");
-    install(InstallArgs { version: version.clone(), prefix: prefix.clone(), url: None }).await?;
+    install(InstallArgs {
+        version: version.clone(),
+        prefix: prefix.clone(),
+        url: None,
+    })
+    .await?;
 
     println!("\n== 3/3: FTS plugins ==");
     plugins::install(version, None, prefix).await?;
@@ -257,7 +273,10 @@ async fn update(prefix: Option<PathBuf>) -> eyre::Result<()> {
             return Ok(());
         }
         Some(installed) => println!("updating {installed} -> {} ...", release.tag),
-        None => println!("no installed version found — installing {} ...", release.tag),
+        None => println!(
+            "no installed version found — installing {} ...",
+            release.tag
+        ),
     }
 
     install_tarball(

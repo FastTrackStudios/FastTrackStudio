@@ -40,37 +40,36 @@ pub fn GraphCanvas() -> Element {
     // sources + downstream destinations, transitively). Cables off the
     // path dim.
     let hovered_node = *state::HOVERED_NODE.read();
-    let path_nodes: Option<std::collections::HashSet<u32>> =
-        hovered_node.map(|h| {
-            // Two directed closures (not one undirected sweep — that
-            // would flood into siblings sharing a sink).
-            let mut down = std::collections::HashSet::from([h]);
-            loop {
-                let before = down.len();
-                for l in &graph.links {
-                    if down.contains(&l.output_node) {
-                        down.insert(l.input_node);
-                    }
-                }
-                if down.len() == before {
-                    break;
+    let path_nodes: Option<std::collections::HashSet<u32>> = hovered_node.map(|h| {
+        // Two directed closures (not one undirected sweep — that
+        // would flood into siblings sharing a sink).
+        let mut down = std::collections::HashSet::from([h]);
+        loop {
+            let before = down.len();
+            for l in &graph.links {
+                if down.contains(&l.output_node) {
+                    down.insert(l.input_node);
                 }
             }
-            let mut up = std::collections::HashSet::from([h]);
-            loop {
-                let before = up.len();
-                for l in &graph.links {
-                    if up.contains(&l.input_node) {
-                        up.insert(l.output_node);
-                    }
-                }
-                if up.len() == before {
-                    break;
+            if down.len() == before {
+                break;
+            }
+        }
+        let mut up = std::collections::HashSet::from([h]);
+        loop {
+            let before = up.len();
+            for l in &graph.links {
+                if up.contains(&l.input_node) {
+                    up.insert(l.output_node);
                 }
             }
-            down.extend(up);
-            down
-        });
+            if up.len() == before {
+                break;
+            }
+        }
+        down.extend(up);
+        down
+    });
 
     // Ports rendered as condensed stereo pairs draw thin cables.
     let pair_ports: std::collections::HashSet<u32> = lay
@@ -98,9 +97,10 @@ pub fn GraphCanvas() -> Element {
         std::collections::HashMap::new();
     let mut cables: Vec<Cable> = Vec::new();
     for l in &graph.links {
-        let (Some(&(x1, y1)), Some(&(x2, y2))) =
-            (lay.anchors.get(&l.output_port), lay.anchors.get(&l.input_port))
-        else {
+        let (Some(&(x1, y1)), Some(&(x2, y2))) = (
+            lay.anchors.get(&l.output_port),
+            lay.anchors.get(&l.input_port),
+        ) else {
             continue;
         };
         let key = (
@@ -130,7 +130,11 @@ pub fn GraphCanvas() -> Element {
         by_path.insert(key, cables.len());
         cables.push(Cable {
             ids: vec![l.id],
-            d: format!("M {x1} {y1} C {} {y1}, {} {y2}, {x2} {y2}", x1 + dx, x2 - dx),
+            d: format!(
+                "M {x1} {y1} C {} {y1}, {} {y2}, {x2} {y2}",
+                x1 + dx,
+                x2 - dx
+            ),
             color,
             active: l.active,
             thin: pair_ports.contains(&l.output_port) || pair_ports.contains(&l.input_port),
@@ -147,7 +151,11 @@ pub fn GraphCanvas() -> Element {
             return None;
         }
         let dx = ((cx - sx) * 0.5).max(40.0);
-        Some(format!("M {sx} {sy} C {} {sy}, {} {cy}, {cx} {cy}", sx + dx, cx - dx))
+        Some(format!(
+            "M {sx} {sy} C {} {sy}, {} {cy}, {cx} {cy}",
+            sx + dx,
+            cx - dx
+        ))
     });
 
     let world_w = lay.width;

@@ -19,11 +19,11 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use architect_ui::lucide_dioxus::{FileText, Folder, Keyboard, Lightbulb, Wrench};
+use architect_ui::prelude::*;
 use dioxus::prelude::*;
 use editor::editor_view::DecorationSource;
 use editor::{Editor, EditorState, markdown};
-use architect_ui::lucide_dioxus::{FileText, Folder, Keyboard, Lightbulb, Wrench};
-use architect_ui::prelude::*;
 use view_knowledge_graph::{KnowledgeGraphView, WikiFile, build_wiki_graph};
 
 use crate::Route;
@@ -51,8 +51,7 @@ impl VaultNote {
 
     /// Display title: frontmatter `title:`, else de-dashed stem.
     pub fn title(&self) -> String {
-        fm_field(&self.content, "title")
-            .unwrap_or_else(|| self.stem().replace('-', " "))
+        fm_field(&self.content, "title").unwrap_or_else(|| self.stem().replace('-', " "))
     }
 }
 
@@ -167,7 +166,10 @@ pub fn resolve_route<'a>(notes: &'a [VaultNote], segs: &[String]) -> Option<&'a 
         return notes.iter().find(|n| n.path == "guides.md");
     }
     let flat = format!("{joined}.md");
-    let folder = format!("{joined}/{}.md", segs.last().map(String::as_str).unwrap_or(""));
+    let folder = format!(
+        "{joined}/{}.md",
+        segs.last().map(String::as_str).unwrap_or("")
+    );
     notes
         .iter()
         .find(|n| n.path.eq_ignore_ascii_case(&flat))
@@ -361,13 +363,13 @@ impl SiteKbdIndex {
         let mut map = std::collections::HashMap::new();
         if let Some(profile) = PROFILES.iter().find(|p| p.id == "fasttrackstudio") {
             for s in profile.sections {
-                let config: input_config_proto::SectionConfig = match facet_styx::from_str(s.styx)
-                {
+                let config: input_config_proto::SectionConfig = match facet_styx::from_str(s.styx) {
                     Ok(c) => c,
                     Err(_) => continue,
                 };
                 for b in config.bindings() {
-                    map.entry(b.action.clone()).or_insert_with(|| b.keys.clone());
+                    map.entry(b.action.clone())
+                        .or_insert_with(|| b.keys.clone());
                 }
                 for tree in config.which_key() {
                     walk_leaves(&tree.prefix, &tree.entries, &mut map);
@@ -378,7 +380,8 @@ impl SiteKbdIndex {
         // (take-ranking etc.) resolve too.
         for m in crate::components::modes::load_modes() {
             for b in &m.bindings {
-                map.entry(b.action.clone()).or_insert_with(|| b.keys.clone());
+                map.entry(b.action.clone())
+                    .or_insert_with(|| b.keys.clone());
             }
         }
         Self(map)
@@ -567,7 +570,9 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
     let decorations = use_hook(move || {
         DecorationSource::new(move |s: &EditorState| {
             let l = lookup.read();
-            let vault_ref = l.as_ref().map(|rc| rc.as_ref() as &dyn markdown::VaultLookup);
+            let vault_ref = l
+                .as_ref()
+                .map(|rc| rc.as_ref() as &dyn markdown::VaultLookup);
             markdown::live_preview_with_lookups(
                 s,
                 vault_ref,
@@ -592,12 +597,7 @@ pub fn GuidesVault(#[props(default)] path: Vec<String>) -> Element {
     let graph_files: Vec<WikiFile> = notes
         .iter()
         .map(|n| WikiFile {
-            name: n
-                .path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&n.path)
-                .to_string(),
+            name: n.path.rsplit('/').next().unwrap_or(&n.path).to_string(),
             path: n.path.clone(),
             content: n.content.clone(),
         })
@@ -731,7 +731,11 @@ fn ScreencastBlock(
     let media = media_render(&name);
     // Media and notes are always in the same DOM order; on desktop we
     // reverse the row to put the media on the right when asked.
-    let row = if media_right { "lg:flex-row-reverse" } else { "lg:flex-row" };
+    let row = if media_right {
+        "lg:flex-row-reverse"
+    } else {
+        "lg:flex-row"
+    };
     rsx! {
         div { class: "cast-block flex flex-col {row} gap-6 items-start my-7",
             // ── 16:9 media (left) ─────────────────────────
@@ -778,10 +782,15 @@ fn VaultExplorer(notes: Vec<VaultNote>, current: String) -> Element {
     for children in dirs.values_mut() {
         // Folder note first, then by title.
         children.sort_by_key(|n| {
-            let is_folder_note = n
-                .path
-                .strip_suffix(".md")
-                .is_some_and(|p| p.split('/').rev().take(2).collect::<Vec<_>>().windows(2).all(|w| w[0] == w[1]) && p.contains('/'));
+            let is_folder_note = n.path.strip_suffix(".md").is_some_and(|p| {
+                p.split('/')
+                    .rev()
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .windows(2)
+                    .all(|w| w[0] == w[1])
+                    && p.contains('/')
+            });
             (!is_folder_note, n.title().to_lowercase())
         });
     }
@@ -807,7 +816,13 @@ fn VaultExplorer(notes: Vec<VaultNote>, current: String) -> Element {
 }
 
 #[component]
-fn ExplorerRow(path: String, title: String, depth: usize, current: String, folder: bool) -> Element {
+fn ExplorerRow(
+    path: String,
+    title: String,
+    depth: usize,
+    current: String,
+    folder: bool,
+) -> Element {
     let active = path == current;
     let indent = depth * 12 + 8;
     rsx! {
@@ -846,7 +861,10 @@ mod tests {
             assert!(!n.title().is_empty(), "{} has no title", n.path);
         }
         // The landing + reaper folder notes exist for the routes.
-        assert!(resolve_route(&notes, &[]).is_some(), "vault index note missing");
+        assert!(
+            resolve_route(&notes, &[]).is_some(),
+            "vault index note missing"
+        );
         assert!(
             resolve_route(&notes, &["reaper".into()]).is_some(),
             "reaper folder note missing"
@@ -905,7 +923,9 @@ mod tests {
             .find(|n| n.path == "keyflow/chords.md")
             .expect("chords chapter");
         assert!(
-            chords.content.contains("```kf+\nCmaj7 | F#m7b5 | Bbmaj9 | G7b9\n```"),
+            chords
+                .content
+                .contains("```kf+\nCmaj7 | F#m7b5 | Bbmaj9 | G7b9\n```"),
             "chords chapter lost its kf+ fence (source + chart together)"
         );
     }
@@ -1053,7 +1073,11 @@ mod tests {
                 if !is_input {
                     continue;
                 }
-                let literal = span.strip_prefix("kbd:").unwrap_or(&span).trim().to_string();
+                let literal = span
+                    .strip_prefix("kbd:")
+                    .unwrap_or(&span)
+                    .trim()
+                    .to_string();
                 if !looks_like_keys(&literal) {
                     continue;
                 }
@@ -1067,11 +1091,18 @@ mod tests {
                     "{}: shortcut `{literal}` does not exist in the fasttrackstudio \
                      profile{} — update the note or the config",
                     note.path,
-                    if mode_keys.is_empty() { "" } else { " or its mode's overlays" },
+                    if mode_keys.is_empty() {
+                        ""
+                    } else {
+                        " or its mode's overlays"
+                    },
                 );
             }
         }
-        assert!(refs_checked > 15, "suspiciously few @refs checked ({refs_checked})");
+        assert!(
+            refs_checked > 15,
+            "suspiciously few @refs checked ({refs_checked})"
+        );
         assert!(
             literals_checked > 3,
             "suspiciously few literals checked ({literals_checked})"

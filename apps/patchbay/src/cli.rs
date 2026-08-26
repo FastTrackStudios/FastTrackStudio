@@ -21,7 +21,10 @@ use patchbay_proto::{
 };
 
 #[derive(Parser)]
-#[command(name = "patchbay-cli", about = "PipeWire studio-routing control (FTS Patchbay)")]
+#[command(
+    name = "patchbay-cli",
+    about = "PipeWire studio-routing control (FTS Patchbay)"
+)]
 struct Cli {
     /// ws endpoint of a running Patchbay app; falls back to an
     /// in-process engine when unreachable.
@@ -52,9 +55,15 @@ enum Cmd {
     /// Remove one link (same addressing as `connect`).
     Disconnect { output: String, input: String },
     /// Link every numeric-suffix channel of one node into another 1:1.
-    Connect1to1 { output_node: String, input_node: String },
+    Connect1to1 {
+        output_node: String,
+        input_node: String,
+    },
     /// Remove every link from one node into another.
-    DisconnectNodes { output_node: String, input_node: String },
+    DisconnectNodes {
+        output_node: String,
+        input_node: String,
+    },
     /// Routing presets.
     Preset {
         #[command(subcommand)]
@@ -119,21 +128,28 @@ enum Cmd {
 enum PresetCmd {
     List,
     /// Snapshot current connections under a name.
-    Save { name: String },
+    Save {
+        name: String,
+    },
     /// Re-create a preset's links; `--exclusive` also removes others.
     Apply {
         name: String,
         #[arg(long)]
         exclusive: bool,
     },
-    Delete { name: String },
+    Delete {
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
 enum AliasCmd {
     List,
     /// Empty alias clears.
-    Set { target: String, alias: String },
+    Set {
+        target: String,
+        alias: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -161,7 +177,9 @@ enum RouteCmd {
         output_node: String,
         input_node: String,
     },
-    Remove { name: String },
+    Remove {
+        name: String,
+    },
     /// Apply all enabled routes now; prints links created.
     Apply,
 }
@@ -192,7 +210,10 @@ enum DanteCmd {
         tx_device: String,
         tx_channel: String,
     },
-    Unsubscribe { rx_device: String, rx_channel: u32 },
+    Unsubscribe {
+        rx_device: String,
+        rx_channel: u32,
+    },
     /// Scan + persist the Dante routing snapshot (device channel names +
     /// subscriptions) to config.
     Save,
@@ -213,7 +234,9 @@ enum LatencyCmd {
         #[arg(long)]
         request: bool,
     },
-    Remove { pattern: String },
+    Remove {
+        pattern: String,
+    },
 }
 
 // ─── Client plumbing ────────────────────────────────────────────────────
@@ -336,9 +359,16 @@ async fn main() -> eyre::Result<()> {
                 );
                 println!(
                     "clock: {} Hz, quantum {} (force {}), range {}–{}",
-                    clock.rate, clock.quantum, clock.force_quantum, clock.min_quantum, clock.max_quantum
+                    clock.rate,
+                    clock.quantum,
+                    clock.force_quantum,
+                    clock.min_quantum,
+                    clock.max_quantum
                 );
-                println!("dante stack: {}", if dante.active { "active" } else { "inactive" });
+                println!(
+                    "dante stack: {}",
+                    if dante.active { "active" } else { "inactive" }
+                );
             }
         }
         Cmd::Nodes => {
@@ -393,7 +423,11 @@ async fn main() -> eyre::Result<()> {
                 println!(
                     "  [{:>4}] {:<4} {:<28}{}",
                     p.id,
-                    if p.direction == PortDirection::Input { "in" } else { "out" },
+                    if p.direction == PortDirection::Input {
+                        "in"
+                    } else {
+                        "out"
+                    },
                     p.name,
                     alias
                 );
@@ -452,7 +486,10 @@ async fn main() -> eyre::Result<()> {
             ok_or_msg(c.destroy_link(link.id).await)?;
             println!("unlinked {output} -> {input}");
         }
-        Cmd::Connect1to1 { output_node, input_node } => {
+        Cmd::Connect1to1 {
+            output_node,
+            input_node,
+        } => {
             let g = ok_or_msg(c.graph().await)?;
             let aliases = alias_map(ok_or_msg(c.aliases().await)?);
             let on = find_node(&g, &aliases, &output_node)?.name.clone();
@@ -460,7 +497,10 @@ async fn main() -> eyre::Result<()> {
             let n = ok_or_msg(c.connect_one_to_one(on, inn).await)?;
             println!("created {n} link(s)");
         }
-        Cmd::DisconnectNodes { output_node, input_node } => {
+        Cmd::DisconnectNodes {
+            output_node,
+            input_node,
+        } => {
             let g = ok_or_msg(c.graph().await)?;
             let aliases = alias_map(ok_or_msg(c.aliases().await)?);
             let on = find_node(&g, &aliases, &output_node)?.name.clone();
@@ -493,7 +533,10 @@ async fn main() -> eyre::Result<()> {
                     r.missing.len()
                 );
                 for m in r.missing.iter().take(10) {
-                    println!("  missing: {}:{} -> {}:{}", m.output_node, m.output_port, m.input_node, m.input_port);
+                    println!(
+                        "  missing: {}:{} -> {}:{}",
+                        m.output_node, m.output_port, m.input_node, m.input_port
+                    );
                 }
             }
             PresetCmd::Delete { name } => {
@@ -538,7 +581,12 @@ async fn main() -> eyre::Result<()> {
                     }
                 }
             }
-            RouteCmd::Set { name, from, to, disabled } => {
+            RouteCmd::Set {
+                name,
+                from,
+                to,
+                disabled,
+            } => {
                 let route = NamedRoute {
                     name: name.clone(),
                     from: parse_endpoint(&from),
@@ -548,11 +596,21 @@ async fn main() -> eyre::Result<()> {
                 ok_or_msg(c.set_route(route).await)?;
                 println!("route '{name}' set");
             }
-            RouteCmd::Bank { name, output_node, input_node } => {
+            RouteCmd::Bank {
+                name,
+                output_node,
+                input_node,
+            } => {
                 let route = NamedRoute {
                     name: name.clone(),
-                    from: RouteEndpoint { node: output_node, port: "*".into() },
-                    to: RouteEndpoint { node: input_node, port: "*".into() },
+                    from: RouteEndpoint {
+                        node: output_node,
+                        port: "*".into(),
+                    },
+                    to: RouteEndpoint {
+                        node: input_node,
+                        port: "*".into(),
+                    },
                     enabled: true,
                 };
                 ok_or_msg(c.set_route(route).await)?;
@@ -574,12 +632,15 @@ async fn main() -> eyre::Result<()> {
             let written = ok_or_msg(c.import_chanmap(n.clone(), path).await)?;
             println!("aliased {written} port(s) on {n} from the ChanMap");
         }
-        Cmd::InfernoNames { node, direction, device } => {
+        Cmd::InfernoNames {
+            node,
+            direction,
+            device,
+        } => {
             let g = ok_or_msg(c.graph().await)?;
             let aliases = alias_map(ok_or_msg(c.aliases().await)?);
             let n = find_node(&g, &aliases, &node)?.name.clone();
-            let written =
-                ok_or_msg(c.import_inferno_names(n.clone(), device, direction).await)?;
+            let written = ok_or_msg(c.import_inferno_names(n.clone(), device, direction).await)?;
             println!("aliased {written} port(s) on {n} from Inferno ARC names");
         }
         Cmd::Quantum { frames } => match frames {
@@ -590,14 +651,25 @@ async fn main() -> eyre::Result<()> {
                 } else {
                     println!(
                         "{} Hz, quantum {} (force {}), range {}–{}",
-                        clock.rate, clock.quantum, clock.force_quantum, clock.min_quantum, clock.max_quantum
+                        clock.rate,
+                        clock.quantum,
+                        clock.force_quantum,
+                        clock.min_quantum,
+                        clock.max_quantum
                     );
                 }
             }
             Some(f) => {
                 let frames = if f == "auto" { 0 } else { f.parse()? };
                 ok_or_msg(c.force_quantum(frames).await)?;
-                println!("force-quantum = {}", if frames == 0 { "auto".into() } else { frames.to_string() });
+                println!(
+                    "force-quantum = {}",
+                    if frames == 0 {
+                        "auto".into()
+                    } else {
+                        frames.to_string()
+                    }
+                );
             }
         },
         Cmd::Services { action, unit } => match (action.as_deref(), unit) {
@@ -609,7 +681,13 @@ async fn main() -> eyre::Result<()> {
                     for s in services {
                         println!(
                             "[{}] {:<28} {}/{}",
-                            if !s.present { "?" } else if s.state == "active" { "+" } else { "-" },
+                            if !s.present {
+                                "?"
+                            } else if s.state == "active" {
+                                "+"
+                            } else {
+                                "-"
+                            },
                             s.label,
                             s.state,
                             s.sub_state
@@ -639,16 +717,24 @@ async fn main() -> eyre::Result<()> {
                 for d in &devices {
                     println!(
                         "{} @ {}:{} — {} tx / {} rx / {} sub(s){}",
-                        d.name, d.ip, d.arc_port, d.tx.len(), d.rx.len(), d.subscriptions.len(),
-                        if d.unreachable { "  [ARC unreachable]" } else { "" }
+                        d.name,
+                        d.ip,
+                        d.arc_port,
+                        d.tx.len(),
+                        d.rx.len(),
+                        d.subscriptions.len(),
+                        if d.unreachable {
+                            "  [ARC unreachable]"
+                        } else {
+                            ""
+                        }
                     );
                     for s in &d.subscriptions {
-                        let rx_name = d
-                            .rx
-                            .iter()
-                            .find(|ch| ch.number == s.rx_channel)
-                            .map(|ch| ch.name.as_str())
-                            .unwrap_or("?");
+                        let rx_name =
+                            d.rx.iter()
+                                .find(|ch| ch.number == s.rx_channel)
+                                .map(|ch| ch.name.as_str())
+                                .unwrap_or("?");
                         println!(
                             "   rx {:>3} {:<26} <- {}@{}  status={}",
                             s.rx_channel, rx_name, s.tx_channel, s.tx_device, s.status
@@ -656,11 +742,22 @@ async fn main() -> eyre::Result<()> {
                     }
                 }
             }
-            DanteCmd::Subscribe { rx_device, rx_channel, tx_device, tx_channel } => {
-                ok_or_msg(c.dante_subscribe(rx_device, rx_channel, tx_device, tx_channel).await)?;
+            DanteCmd::Subscribe {
+                rx_device,
+                rx_channel,
+                tx_device,
+                tx_channel,
+            } => {
+                ok_or_msg(
+                    c.dante_subscribe(rx_device, rx_channel, tx_device, tx_channel)
+                        .await,
+                )?;
                 println!("subscribed");
             }
-            DanteCmd::Unsubscribe { rx_device, rx_channel } => {
+            DanteCmd::Unsubscribe {
+                rx_device,
+                rx_channel,
+            } => {
                 ok_or_msg(c.dante_unsubscribe(rx_device, rx_channel).await)?;
                 println!("unsubscribed");
             }
@@ -678,18 +775,24 @@ async fn main() -> eyre::Result<()> {
                     println!("(no saved Dante config — run `dante save`)");
                 }
                 for d in &devices {
-                    let subs = d.subscriptions.iter().filter(|s| !s.tx_channel.is_empty()).count();
+                    let subs = d
+                        .subscriptions
+                        .iter()
+                        .filter(|s| !s.tx_channel.is_empty())
+                        .count();
                     println!(
                         "{} — {} tx / {} rx / {} sub(s)",
-                        d.name, d.tx.len(), d.rx.len(), subs
+                        d.name,
+                        d.tx.len(),
+                        d.rx.len(),
+                        subs
                     );
                     for s in d.subscriptions.iter().filter(|s| !s.tx_channel.is_empty()) {
-                        let rx_name = d
-                            .rx
-                            .iter()
-                            .find(|ch| ch.number == s.rx_channel)
-                            .map(|ch| ch.name.as_str())
-                            .unwrap_or("?");
+                        let rx_name =
+                            d.rx.iter()
+                                .find(|ch| ch.number == s.rx_channel)
+                                .map(|ch| ch.name.as_str())
+                                .unwrap_or("?");
                         println!(
                             "   rx {:>3} {:<26} <- {}@{}",
                             s.rx_channel, rx_name, s.tx_channel, s.tx_device
@@ -718,10 +821,18 @@ async fn main() -> eyre::Result<()> {
                     }
                 }
             }
-            LatencyCmd::Set { pattern, quantum, request } => {
+            LatencyCmd::Set {
+                pattern,
+                quantum,
+                request,
+            } => {
                 ok_or_msg(
-                    c.set_latency_rule(LatencyRule { pattern: pattern.clone(), quantum, force: !request })
-                        .await,
+                    c.set_latency_rule(LatencyRule {
+                        pattern: pattern.clone(),
+                        quantum,
+                        force: !request,
+                    })
+                    .await,
                 )?;
                 println!("{pattern} → {quantum} frames (restart the app or WirePlumber to apply)");
             }

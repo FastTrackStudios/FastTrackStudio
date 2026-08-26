@@ -104,10 +104,7 @@ fn load(styx_path: &std::path::Path) -> Option<FileFormat> {
     let s = fs::read_to_string(&json_path).ok()?;
     match serde_json::from_str::<FileFormat>(&s) {
         Ok(data) => {
-            tracing::info!(
-                "migrating patchbay config {} → styx",
-                json_path.display()
-            );
+            tracing::info!("migrating patchbay config {} → styx", json_path.display());
             // Keep the old file as a backup rather than deleting it.
             let _ = fs::rename(&json_path, json_path.with_extension("json.bak"));
             Some(data)
@@ -161,10 +158,20 @@ impl PresetStore {
     }
 
     pub fn preset(&self, name: &str) -> Option<RoutingPreset> {
-        self.data.lock().presets.iter().find(|p| p.name == name).cloned()
+        self.data
+            .lock()
+            .presets
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
     }
 
-    pub fn upsert_preset(&self, name: String, description: String, links: Vec<PresetLink>) -> RoutingPreset {
+    pub fn upsert_preset(
+        &self,
+        name: String,
+        description: String,
+        links: Vec<PresetLink>,
+    ) -> RoutingPreset {
         let preset = RoutingPreset {
             name,
             description,
@@ -197,7 +204,10 @@ impl PresetStore {
         self.data.lock().latency_rules.clone()
     }
 
-    pub fn set_latency_rule(&self, rule: patchbay_proto::LatencyRule) -> Vec<patchbay_proto::LatencyRule> {
+    pub fn set_latency_rule(
+        &self,
+        rule: patchbay_proto::LatencyRule,
+    ) -> Vec<patchbay_proto::LatencyRule> {
         let mut data = self.data.lock();
         data.latency_rules.retain(|r| r.pattern != rule.pattern);
         data.latency_rules.push(rule);

@@ -106,7 +106,10 @@ fn bootstrap_blocking() -> eyre::Result<()> {
         // not awaited — serve() never returns.
         let router = backend.router();
         tokio::spawn(async move {
-            EngineHost::new(router, bind_addr()).web(web_bundle()).serve().await;
+            EngineHost::new(router, bind_addr())
+                .web(web_bundle())
+                .serve()
+                .await;
         });
 
         ENGINE

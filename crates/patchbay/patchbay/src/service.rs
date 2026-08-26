@@ -9,8 +9,8 @@ use patchbay_proto::services::patchbay_service::{
     PatchbayServiceStreamSource, patchbay_service_stream_service_descriptor, stream_serve,
 };
 use patchbay_proto::{
-    AliasEntry, ApplyReport, ClockDefaults, ClockInfo, ColorEntry, DanteDevice, DanteDeviceConfig,
-    DanteStatus, CanvasView, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute,
+    AliasEntry, ApplyReport, CanvasView, ClockDefaults, ClockInfo, ColorEntry, DanteDevice,
+    DanteDeviceConfig, DanteStatus, GraphEvent, GraphSnapshot, IconEntry, LatencyRule, NamedRoute,
     PatchbayError, PatchbayService, PortDirection, PresetLink, RouteEndpoint, RoutingPreset,
     ServiceAction, ServiceStatus, VirtualSink, patchbay_service_service_descriptor,
     serve_patchbay_service,
@@ -317,7 +317,10 @@ fn norm_route_name(s: &str) -> String {
     if lower.ends_with("[dsp]") {
         s.truncate(s.len() - "[dsp]".len());
     }
-    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Resolve one route endpoint to a live port id of the given direction,
@@ -342,7 +345,10 @@ fn resolve_route_endpoint(
             continue;
         };
         if !want_node.is_empty() {
-            let node_alias = aliases.get(&node.name).map(|s| s.to_lowercase()).unwrap_or_default();
+            let node_alias = aliases
+                .get(&node.name)
+                .map(|s| s.to_lowercase())
+                .unwrap_or_default();
             if node.name.to_lowercase() != want_node
                 && node.label.to_lowercase() != want_node
                 && node_alias != want_node
@@ -411,8 +417,11 @@ fn apply_named_routes(
     if routes.is_empty() {
         return 0;
     }
-    let aliases: HashMap<String, String> =
-        presets.aliases().into_iter().map(|a| (a.target, a.alias)).collect();
+    let aliases: HashMap<String, String> = presets
+        .aliases()
+        .into_iter()
+        .map(|a| (a.target, a.alias))
+        .collect();
     let store_r = store.read();
     let mut created = 0;
     for route in routes.iter().filter(|r| r.enabled) {
@@ -470,11 +479,7 @@ fn apply_named_routes(
 /// Non-destructive chanmap import: name `node`'s channels from the
 /// host's default ReaperChanMap, skipping channels the user already
 /// aliased in the patchbay. Missing chanmap file = silently nothing.
-fn auto_import_chanmap(
-    store: &Arc<RwLock<GraphStore>>,
-    presets: &Arc<PresetStore>,
-    node: &str,
-) {
+fn auto_import_chanmap(store: &Arc<RwLock<GraphStore>>, presets: &Arc<PresetStore>, node: &str) {
     let Ok(names) = crate::chanmap::read_names("") else {
         return;
     };
@@ -596,8 +601,7 @@ impl PatchbayService for PatchbayBackend {
         let link_ids: Vec<u32> = {
             let store = self.inner.store.read();
             let node_id = |name: &str| store.nodes.values().find(|n| n.name == name).map(|n| n.id);
-            let (Some(out_id), Some(in_id)) = (node_id(&output_node), node_id(&input_node))
-            else {
+            let (Some(out_id), Some(in_id)) = (node_id(&output_node), node_id(&input_node)) else {
                 return Err(PatchbayError::not_found(
                     "node",
                     format!("{output_node} or {input_node}"),
@@ -821,7 +825,11 @@ impl PatchbayService for PatchbayBackend {
         .ok_or_else(|| {
             PatchbayError::not_found(
                 "dante device",
-                if device.trim().is_empty() { "<any>" } else { &device },
+                if device.trim().is_empty() {
+                    "<any>"
+                } else {
+                    &device
+                },
             )
         })?;
         // channel number → name, from the chosen direction's channel list.
@@ -1143,11 +1151,17 @@ mod route_tests {
 
     #[test]
     fn normalization_strips_prefix_and_dsp_but_keeps_lr() {
-        assert_eq!(norm_route_name("81 - Engineer Vocal [DSP]"), "engineer vocal");
+        assert_eq!(
+            norm_route_name("81 - Engineer Vocal [DSP]"),
+            "engineer vocal"
+        );
         assert_eq!(norm_route_name("42 - Engineer Vocal"), "engineer vocal");
         assert_eq!(norm_route_name("Engineer Vocal"), "engineer vocal");
         // L/R must stay distinct — stereo halves are different channels.
-        assert_ne!(norm_route_name("Vocal 1 Mix L"), norm_route_name("Vocal 1 Mix R"));
+        assert_ne!(
+            norm_route_name("Vocal 1 Mix L"),
+            norm_route_name("Vocal 1 Mix R")
+        );
     }
 
     #[test]
@@ -1157,15 +1171,28 @@ mod route_tests {
         let mut store = GraphStore::default();
         store.nodes.insert(1, node(1, "Inferno source"));
         store.nodes.insert(2, node(2, "REAPER"));
-        store.ports.insert(100, port(100, 1, "capture_96", PortDirection::Output));
-        store.ports.insert(200, port(200, 2, "in5", PortDirection::Input));
+        store
+            .ports
+            .insert(100, port(100, 1, "capture_96", PortDirection::Output));
+        store
+            .ports
+            .insert(200, port(200, 2, "in5", PortDirection::Input));
 
         let mut aliases = HashMap::new();
-        aliases.insert("Inferno source:capture_96".into(), "96 - Engineer Vocal [DSP]".into());
+        aliases.insert(
+            "Inferno source:capture_96".into(),
+            "96 - Engineer Vocal [DSP]".into(),
+        );
         aliases.insert("REAPER:in5".into(), "5 - Engineer Vocal".into());
 
-        let from = RouteEndpoint { node: "Inferno source".into(), port: "Engineer Vocal".into() };
-        let to = RouteEndpoint { node: "REAPER".into(), port: "Engineer Vocal".into() };
+        let from = RouteEndpoint {
+            node: "Inferno source".into(),
+            port: "Engineer Vocal".into(),
+        };
+        let to = RouteEndpoint {
+            node: "REAPER".into(),
+            port: "Engineer Vocal".into(),
+        };
 
         assert_eq!(
             resolve_route_endpoint(&store, &aliases, &from, PortDirection::Output),
@@ -1188,13 +1215,20 @@ mod route_tests {
         let mut store = GraphStore::default();
         store.nodes.insert(1, node(1, "Inferno source"));
         store.nodes.insert(2, node(2, "Other Card"));
-        store.ports.insert(100, port(100, 1, "capture_1", PortDirection::Output));
-        store.ports.insert(101, port(101, 2, "out_1", PortDirection::Output));
+        store
+            .ports
+            .insert(100, port(100, 1, "capture_1", PortDirection::Output));
+        store
+            .ports
+            .insert(101, port(101, 2, "out_1", PortDirection::Output));
         let mut aliases = HashMap::new();
         aliases.insert("Inferno source:capture_1".into(), "Talkback".into());
         aliases.insert("Other Card:out_1".into(), "Talkback".into());
 
-        let ep = RouteEndpoint { node: "Other Card".into(), port: "Talkback".into() };
+        let ep = RouteEndpoint {
+            node: "Other Card".into(),
+            port: "Talkback".into(),
+        };
         assert_eq!(
             resolve_route_endpoint(&store, &aliases, &ep, PortDirection::Output),
             Some(101)

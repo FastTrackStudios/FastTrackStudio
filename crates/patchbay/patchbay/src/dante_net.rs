@@ -26,12 +26,10 @@ pub(crate) struct DanteEndpoints {
 
 impl DanteEndpoints {
     fn client(&self, device: &str) -> Result<DanteClient, PatchbayError> {
-        let addr = self
-            .map
-            .lock()
-            .get(device)
-            .copied()
-            .ok_or_else(|| PatchbayError::not_found("dante device (refresh the grid)", device))?;
+        let addr =
+            self.map.lock().get(device).copied().ok_or_else(|| {
+                PatchbayError::not_found("dante device (refresh the grid)", device)
+            })?;
         Ok(DanteClient::new(addr, ARC_TIMEOUT))
     }
 

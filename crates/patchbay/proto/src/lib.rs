@@ -17,7 +17,8 @@ mod types;
 pub mod services;
 
 pub use services::{
-    PatchbayError, PatchbayService, PatchbayServiceClient, PatchbayServiceDispatcher, PatchbayServiceLayer,
-    patchbay_service_layer, patchbay_service_service_descriptor, serve_patchbay_service,
+    PatchbayError, PatchbayService, PatchbayServiceClient, PatchbayServiceDispatcher,
+    PatchbayServiceLayer, patchbay_service_layer, patchbay_service_service_descriptor,
+    serve_patchbay_service,
 };
 pub use types::*;
