@@ -10955,7 +10955,6 @@ dependencies = [
  "facet",
  "helgoboss-midi",
  "keyflow-syntax 0.1.0",
- "keyflow-text 0.1.0",
  "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/music-convention?tag=v0.1.0)",
  "serde",
  "thiserror 2.0.18",
