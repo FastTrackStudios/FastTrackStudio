@@ -21,8 +21,6 @@ members = [
     "libs/dock/dock-proto",
     "libs/utils",
     "libs/adaptive-grid",
-    "libs/monarchy/monarchy",
-    "libs/monarchy/monarchy-derive",
     "libs/installer-core",
     "libs/engine-launcher",
     # ── crates/ — domain cores ────────────────────────────────────────
@@ -134,10 +132,8 @@ members = [
     "features/dynamic-template/dynamic-template",
     "features/dynamic-template/dynamic-template-proto",
     "features/dynamic-template/dynamic-template-extension",
-    "features/dynamic-template/music-catalog",
     "features/chord-tool/chord-tool",
     "features/chord-tool/chord-tool-daw",
-    "features/dynamic-template/color-palette",
     "features/dynamic-template/tests",
     # ── crates/signal — signal domain core (wave 4) ───────────────────
     # `signal` is the facade — the only public API surface for the signal
@@ -254,16 +250,8 @@ members = [
     "features/plugin-host",
     "features/reaper/signal-extension",
     "features/reaper/signal-reaper-controller",
-    # ── crates/patchbay — PipeWire studio-routing domain ──────────────
-    # `patchbay` is the facade (engine + services); `patchbay-proto` is
-    # the wire contract; `patchbay-ui` the Dioxus surface.
-    "crates/patchbay/patchbay",
-    "crates/patchbay/proto",
-    "crates/patchbay/ui",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/fasttrackstudio",
-    "apps/patchbay",
-    "apps/patchbay/web",
     "apps/installer",
     "apps/fasttrackstudio/cli",
     "apps/site",
@@ -421,9 +409,6 @@ daw-theme-reaper = { path = "features/daw-ui/daw-theme-reaper" }
 # `session` is the facade — the only public API surface for the session
 # domain. session-proto is INTERNAL (session-ui and session-guide are the
 # documented exceptions: Dioxus components / the guide engine).
-patchbay = { path = "crates/patchbay/patchbay" }
-patchbay-proto = { path = "crates/patchbay/proto" }
-patchbay-ui = { path = "crates/patchbay/ui" }
 session = { path = "crates/session/session" }
 session-proto = { path = "crates/session/proto" }
 session-ui = { path = "crates/session/ui", default-features = false }
@@ -697,17 +682,19 @@ totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 # ── Dynamic session templates (subtree-imported into the tree) ────────
 dynamic-template = { path = "features/dynamic-template/dynamic-template" }
 dynamic-template-proto = { path = "features/dynamic-template/dynamic-template-proto" }
-# Canonical music-production taxonomy (instrument groups + the REAPER
-# 128-slot group partition). Single source of truth shared with
-# dynamic-template.
-music-catalog = { path = "features/dynamic-template/music-catalog" }
 chord-tool = { path = "features/chord-tool/chord-tool" }
 chord-tool-daw = { path = "features/chord-tool/chord-tool-daw" }
-color-palette = { path = "features/dynamic-template/color-palette" }
-# Monarchy hierarchy framework (dynamic-template's engine) — subtree-
-# imported at libs/monarchy so the whole graph shares one facet line.
-monarchy = { path = "libs/monarchy/monarchy" }
-monarchy_derive = { path = "libs/monarchy/monarchy-derive" }
+
+# ── music-convention (its own repo since 2026-08-15) ──────────────────
+# The canonical music-production taxonomy (instrument groups + the REAPER
+# 128-slot group partition) and the monarchy hierarchy framework that
+# dynamic-template runs on. These lived here as subtree copies until the
+# repo split; the in-tree copies were byte-identical to the extracted
+# repo and have been deleted in favour of the tag.
+music-catalog = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+color-palette = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+monarchy = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
+monarchy_derive = { git = "https://github.com/FastTrackStudios/music-convention", tag = "v0.1.0" }
 
 # ── MusicXML parsing (keyflow) ─────────────────────────────────────────
 musicxml = "1.1"
