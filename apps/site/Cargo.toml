@@ -27,6 +27,9 @@ keyflow = { workspace = true, features = ["engraver", "pdf", "text", "highlighti
 # /input tutorial — the keybind config data model + styx parsing (the
 # canonical profiles are embedded by build.rs).
 input-config-proto = { workspace = true }
+# The shipped keybind profiles, embedded as bytes by the crate that owns
+# them (daw's reaper-input-config). Wasm-safe: no FFI, no std.
+reaper-input-config.workspace = true
 facet-styx = { workspace = true }
 
 # Live contenteditable editor + keyflow language bindings (homepage demo).
