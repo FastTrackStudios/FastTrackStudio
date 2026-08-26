@@ -1,5 +1,9 @@
 # Repo split — migration plan
 
+> **Status: DONE.** All four repos are live, green, and pinned to each
+> other's tags. See "Outcome" at the end for what shipped and what is
+> still open.
+
 Splitting the FastTrackStudio monorepo (247 workspace members, 8590
 commits, 4.85 GiB packed) into product repos. Successor to the August
 2026 four-repo split that produced `architect`, `task` and `vendor`.
@@ -297,3 +301,63 @@ the setlist round-trip.
   stays intact and buildable until the new repos are green.
 - The monorepo is not deleted. It becomes the shell repo, so its history
   and issue tracker survive in place.
+
+
+## Outcome
+
+Executed 2026-08-25. Every repo builds `cargo check --workspace` green,
+and daw / session / signal each resolve `--locked` from a clean clone.
+
+| repo | crates | tag | history |
+|---|---|---|---|
+| [daw](https://github.com/FastTrackStudios/daw) | 93 | v0.0.2 | 2074 commits, preserved |
+| [session](https://github.com/FastTrackStudios/session) | 30 | v0.0.2 | 1502 commits, preserved |
+| [signal](https://github.com/FastTrackStudios/signal) | 108 | v0.0.2 | 1908 commits, preserved |
+| FastTrackStudio (shell) | 6 | — | full monorepo history, reduced in place |
+
+architect was pushed to `main` and tagged **v0.0.2**, re-baselining a tag
+series that had run v0.1.0 → v0.5.0 in three days while the crate version
+never left 0.1.0. Two commits that existed only on a feature branch — one
+of them only on one laptop — were rescued in the process.
+
+### Five failure modes the split exposed
+
+Each of these built fine in the monorepo and broke the moment the graph
+narrowed. They are written up in the shell's CLAUDE.md as rules.
+
+1. **A cross-repo diamond with mismatched tags.** The shell depends on
+   both daw and session; with session one daw tag behind, the build got
+   two copies of `daw-proto` whose traits refused to unify. Bumping daw
+   now means cascading daw → session → signal → shell.
+2. **An unpinned git dep floating a major version.** `clack` has no rev
+   pin, so a fresh resolve took clack-host 0.1.0 → 0.2.0, whose
+   host-extension traits changed `&mut self` to `&self`, breaking
+   `daw-standalone`. Fixed by carrying the monorepo lockfile; the git dep
+   should still be pinned properly.
+3. **A build script reaching across a repo boundary.** `apps/site`
+   embedded the keybind profiles from `features/reaper/reaper-input` by
+   relative path. Fixed the documented way — `reaper-input-config` now
+   exports the bytes.
+4. **A committed local `[patch]`.** The monorepo shipped
+   `[patch."…/architect"] path = "../architect"` against its own rule,
+   silently redirecting every architect dep to one laptop's checkout.
+5. **A hard dependency used only under a `cfg`.** `signal-rigs-proto`
+   was non-optional but referenced only under `feature = "signal"`;
+   likewise architect's `chrono` lacked `serde` yet was derived on.
+
+### Still open
+
+- **`task` still pins architect v0.5.0** and has ~87 files of uncommitted
+  work, so it was left alone. **v0.3.0 / v0.4.0 / v0.5.0 were NOT
+  deleted** — removing a tag a repo actively pins, mid-WIP, would break
+  it. Migrate task to v0.0.2 first, then retire them.
+- **`patchbay` still pins architect v0.2.0.** Valid, but worth moving to
+  v0.0.2 for consistency.
+- **Ignition** was repointed from `../FastTrackStudio/...` to `../daw`
+  and `../signal` (it depends on `hit-detect-dsp`, so Ignition → signal
+  is a real edge). It resolves; the build was not run because a
+  `dx serve` was live in that worktree. Left uncommitted alongside
+  existing WIP.
+- **The Justfile and per-repo CLAUDE.md files** still carry monorepo
+  recipes and layout; each repo needs its own pass.
+- **`clack` should get a rev pin** rather than relying on the lockfile.
