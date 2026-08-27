@@ -1,6 +1,0 @@
-apiVersion: v2
-name: fts-site
-description: fasttrackstudio.app — the static FastTrackStudio website (wasm bundle behind static-web-server)
-type: application
-version: 0.1.0
-appVersion: "latest"

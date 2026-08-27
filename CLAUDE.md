@@ -1,13 +1,16 @@
 # FastTrackStudio — Repo Instructions
 
-**This repo is the shell.** The code moved out in August 2026. What used
-to be one 238-crate monorepo is now a set of product repos, and this one
-keeps the website, the docs site, the installer, the unified `fts` CLI,
-the aggregate REAPER extension, and the release machinery.
+**This repo is the aggregate.** The code moved out in August 2026. What
+used to be one 238-crate monorepo is now a set of product repos, and
+what is left here is packaging: the installer, the `fts` CLI, the docs
+site, and the release machinery that turns the parts into one shipped
+product. It holds no domain logic of its own.
 
 | repo | holds | consumed as |
 |---|---|---|
-| **FastTrackStudio** (here) | site, docs-site, installer, the `fts` CLI, apps/extensions | — |
+| **FastTrackStudio** (here) | the installer, the docs site, release machinery | — |
+| [fts-extensions](https://github.com/FastTrackStudios/fts-extensions) | DAW-host extensions — tempo tools, volume balancer, mirroring (REAPER is the first host) | separate product |
+| [fasttrackstudio.app](https://github.com/FastTrackStudios/fasttrackstudio.app) | the marketing site (TanStack Start / React) | separate |
 | [daw](https://github.com/FastTrackStudios/daw) | the DAW platform + all shared audio/MIDI/input substrate | git dep, tag |
 | [session](https://github.com/FastTrackStudios/session) | setlists, songs, keyflow, notation, the guide, the Session app | git dep, tag |
 | [signal](https://github.com/FastTrackStudios/signal) | the engine, the rigs, the sampler, the plugins, the Signal app | git dep, tag |
@@ -21,8 +24,12 @@ the aggregate REAPER extension, and the release machinery.
 ## The layering, and why it looks backwards
 
 ```
-daw  ->  session  ->  signal  ->  FastTrackStudio (here)
+daw  ->  session  ->  signal  ->  { FastTrackStudio (here),
+                                    fts-extensions,
+                                    fasttrackstudio.app }
 ```
+
+The three at the top are peers — none depends on another.
 
 At **runtime** Session is the coordinator: the Session app opens and
 syncs Signal and Ignition over WebSocket and depends on neither.
@@ -35,8 +42,14 @@ publishes the vocabulary AND ships the Session app, and Signal depends
 only on the former. The graph stays acyclic because the coordination is
 over the wire, not over cargo.
 
-This repo is the only one allowed to depend on daw, session and signal at
-once — that is what the `fts` CLI needs, and why it lives here.
+Nothing here depends on daw, session or signal at all any more. The
+installer fetches *released artifacts*, it does not compile the products
+— which is what makes this repo cheap to build and immune to the tag
+cascade below it.
+
+The apps are NOT here: Session, Signal and Ignition each ship their own.
+The `fts` CLI is being decomposed the same way — `daw`, `kf`, `session`
+and `dynamic-template` binaries already exist in their own repos.
 
 ## Rules learned the hard way in the split
 
@@ -70,11 +83,8 @@ once — that is what the `fts` CLI needs, and why it lives here.
 ## Layout
 
 ```
-apps/site/                fasttrackstudio.app (dioxus web)
+apps/installer/           fts-installer — the one crate here
 apps/docs-site/           docs.fasttrackstudio.app (NOT a cargo member)
-apps/installer/           fts-installer
-apps/fasttrackstudio/cli/ the unified `fts` CLI
-apps/extensions/          the aggregate REAPER extension cdylib
 docs/                     cross-domain guides + docs/split/PLAN.md
 nix/                      the dendritic flake modules
 ```

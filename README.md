@@ -1,7 +1,9 @@
 # FastTrackStudio
 
-The shell repo: the website, the docs site, the installer, the unified
-`fts` CLI, and the release machinery that ships the products.
+The aggregate repo: the installer, the docs site, and the release
+machinery that packages the products into one thing you can install.
+No domain logic and no product code lives here — each product has its
+own repo, and the installer consumes their released artifacts.
 
 The code moved out in August 2026. What used to be one 238-crate
 monorepo is now:
@@ -9,6 +11,7 @@ monorepo is now:
 | repo | holds |
 |---|---|
 | [daw](https://github.com/FastTrackStudios/daw) | the DAW platform + shared audio/MIDI/input substrate |
+| [fts-extensions](https://github.com/FastTrackStudios/fts-extensions) | DAW-host extensions (REAPER first) |
 | [session](https://github.com/FastTrackStudios/session) | setlists, songs, keyflow, notation, the guide, the Session app |
 | [signal](https://github.com/FastTrackStudios/signal) | the audio engine, the rigs, the sampler, the plugins, the Signal app |
 | [Ignition](https://github.com/FastTrackStudios/Ignition) | the Bevy visuals engine |
@@ -26,12 +29,8 @@ below Signal in the dependency graph. See `docs/split/PLAN.md`.
 ## Layout
 
 ```
-apps/site/       fasttrackstudio.app (dioxus web)
+apps/installer/  fts-installer — the one crate here
 apps/docs-site/  docs.fasttrackstudio.app
-apps/installer/  the installer
-apps/fasttrackstudio/cli/   the unified `fts` CLI — the one place
-                 allowed to depend on daw, session and signal at once
-apps/extensions/ the aggregate REAPER extension cdylib
 ```
 
 ## Licence

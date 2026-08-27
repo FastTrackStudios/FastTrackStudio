@@ -1,8 +1,0 @@
-# Local REAPER/dev output
-/.fts-dev/
-
-# Logs and runtime databases
-*.log
-*.db
-*.db-shm
-*.db-wal
