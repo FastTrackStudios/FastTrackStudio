@@ -73,6 +73,14 @@ ssh rat@airlock.local 'export PATH="/nix/var/nix/profiles/default/bin:$PATH"; \
 
 ## Disk (chronically ~full, 228 GB)
 
+The durable fix is to put build scratch on an external volume:
+`bash apps/fasttrackstudio/ios/airlock-build-storage.sh /Volumes/<drive>`
+points `CARGO_TARGET_DIR`, `TMPDIR`, and Xcode's DerivedData there for
+both build roots (the runner reads `~/actions-runner/.env`, SSH shells
+read `~/.zprofile`); `--status` / `--revert` to inspect or undo. Run
+`--revert` before building if the drive is unplugged.
+
+
 Safe reclaims, in order: `~/Library/Caches` (a few GB), the CI runner's
 `target/` (~20 GB, cold-rebuilds itself), `~/fts/target/debug` +
 `~/fts/target/aarch64-apple-ios/debug` (keep `release` for incremental
