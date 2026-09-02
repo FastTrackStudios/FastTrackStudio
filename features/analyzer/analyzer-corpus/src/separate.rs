@@ -116,6 +116,42 @@ fn which(exe: &str) -> Result<PathBuf> {
         .with_context(|| format!("{exe} not on PATH"))
 }
 
+/// What a stem file should say about itself.
+///
+/// Written into the Opus files as tags so they are self-describing. A
+/// directory of `12108/vocals.opus` is otherwise anonymous: correct only
+/// as long as the database that explains it survives alongside it, and
+/// useless to anyone handed the audio on its own. Since every later
+/// stage matches stems back to chart metadata, and since retagging means
+/// re-encoding the whole corpus, the tags go on at encode time.
+#[derive(Debug, Clone)]
+pub struct StemMeta {
+    pub song_id: i64,
+    pub title: String,
+    pub artist: String,
+}
+
+impl StemMeta {
+    /// `-metadata` arguments for one stem.
+    ///
+    /// `title`/`artist` are the standard tags any player shows. `STEM`
+    /// and `SONG_ID` are custom Vorbis comments so the file can be
+    /// matched back to the corpus by machine without guessing from its
+    /// path.
+    fn ffmpeg_args(&self, stem: &str) -> Vec<String> {
+        [
+            format!("title={} ({stem})", self.title),
+            format!("artist={}", self.artist),
+            "album=FastTrackStudio vocal corpus".to_string(),
+            format!("STEM={stem}"),
+            format!("SONG_ID={}", self.song_id),
+        ]
+        .into_iter()
+        .flat_map(|kv| ["-metadata".to_string(), kv])
+        .collect()
+    }
+}
+
 /// One song's separated stems, on disk.
 #[derive(Debug, Clone)]
 pub struct Stems {
@@ -193,6 +229,7 @@ pub async fn encode_stems(
     stem_name: &str,
     dest: &Path,
     bitrate_k: u32,
+    meta: &StemMeta,
 ) -> Result<Stems> {
     let src_dir = separated.join(stem_name);
     let vocal_src = src_dir.join("vocals.flac");
@@ -211,11 +248,15 @@ pub async fn encode_stems(
     let vocal_out = dest.join("vocals.opus");
     let instr_out = dest.join("instrumental.opus");
 
-    for (src, out) in [(&vocal_src, &vocal_out), (&instr_src, &instr_out)] {
+    for (src, out, label) in [
+        (&vocal_src, &vocal_out, "vocals"),
+        (&instr_src, &instr_out, "instrumental"),
+    ] {
         let status = Command::new(&tools.ffmpeg)
             .args(["-v", "error", "-y", "-i"])
             .arg(src)
             .args(["-c:a", "libopus", "-b:a", &format!("{bitrate_k}k")])
+            .args(meta.ffmpeg_args(label))
             .arg(out)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -254,6 +295,38 @@ mod tests {
             stem_name(Path::new("/x/audio/4/GIBk1JRhbJs.webm")).as_deref(),
             Some("GIBk1JRhbJs")
         );
+    }
+
+    #[test]
+    fn stems_are_tagged_so_the_files_describe_themselves() {
+        let m = StemMeta {
+            song_id: 12108,
+            title: "Wasted On You".into(),
+            artist: "Morgan Wallen".into(),
+        };
+        let args = m.ffmpeg_args("vocals");
+        // Every value must be preceded by its own -metadata flag.
+        assert_eq!(args.iter().filter(|a| *a == "-metadata").count(), 5);
+        let joined = args.join(" ");
+        assert!(joined.contains("title=Wasted On You (vocals)"), "{joined}");
+        assert!(joined.contains("artist=Morgan Wallen"), "{joined}");
+        // Machine-readable link back to the corpus, so a stem can be
+        // matched without parsing its path.
+        assert!(joined.contains("SONG_ID=12108"), "{joined}");
+        assert!(joined.contains("STEM=vocals"), "{joined}");
+    }
+
+    #[test]
+    fn a_title_with_punctuation_survives_tagging() {
+        // Chart titles are full of commas, quotes and parentheses; they
+        // must reach ffmpeg as single argv entries, not be re-split.
+        let m = StemMeta {
+            song_id: 1,
+            title: "Get Your Groove On (From \"Baps\")".into(),
+            artist: "Gyrl".into(),
+        };
+        let args = m.ffmpeg_args("instrumental");
+        assert!(args.iter().any(|a| a.starts_with("title=Get Your Groove On (From")));
     }
 
     #[test]

@@ -781,6 +781,13 @@ async fn separate_cmd(
                         &name,
                         &stems_root.join(song.song_id.to_string()),
                         bitrate_k,
+                        // Tagged at encode time so the audio is
+                        // self-describing without the database.
+                        &separate::StemMeta {
+                            song_id: song.song_id,
+                            title: song.title.clone(),
+                            artist: song.artist.clone(),
+                        },
                     )
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}")),
@@ -851,12 +858,17 @@ async fn status(db: PathBuf) -> Result<()> {
 async fn export(db: PathBuf, out: PathBuf) -> Result<()> {
     let store = Store::open(&db).await?;
 
+    // Joined to the files so the CSV is a usable manifest on its own —
+    // the point of an export is to be readable without the database.
     let rows = sqlx::query(
-        "SELECT song_id, title, artist, primary_artist, first_year, first_charted,
-                last_charted, best_rank, hot100_peak, hot100_weeks, chart_weeks,
-                chart_count, genre_charts
-           FROM song_stats
-          ORDER BY first_charted, best_rank",
+        "SELECT s.song_id, s.title, s.artist, s.primary_artist, s.first_year,
+                s.first_charted, s.last_charted, s.best_rank, s.hot100_peak,
+                s.hot100_weeks, s.chart_weeks, s.chart_count, s.genre_charts,
+                r.path AS audio_path, st.vocal_path, st.instr_path
+           FROM song_stats s
+           LEFT JOIN rendition r ON r.song_id = s.song_id AND r.status = 'ok'
+           LEFT JOIN stem st     ON st.song_id = s.song_id AND st.status = 'ok'
+          ORDER BY s.first_charted, s.best_rank",
     )
     .fetch_all(store.pool())
     .await
@@ -878,6 +890,9 @@ async fn export(db: PathBuf, out: PathBuf) -> Result<()> {
         "chart_weeks",
         "chart_count",
         "genre_charts",
+        "audio_path",
+        "vocal_path",
+        "instr_path",
     ])?;
 
     for r in &rows {
@@ -895,6 +910,9 @@ async fn export(db: PathBuf, out: PathBuf) -> Result<()> {
             r.get::<i64, _>("chart_weeks").to_string(),
             r.get::<i64, _>("chart_count").to_string(),
             r.get::<Option<String>, _>("genre_charts").unwrap_or_default(),
+            r.get::<Option<String>, _>("audio_path").unwrap_or_default(),
+            r.get::<Option<String>, _>("vocal_path").unwrap_or_default(),
+            r.get::<Option<String>, _>("instr_path").unwrap_or_default(),
         ])?;
     }
     w.flush()?;
