@@ -19,7 +19,34 @@ binary (`corpus`). Data is on AudioHaven, never in the repo:
   audio/<song_id>/     downloaded source (Opus in WebM)
   stems/<song_id>/     vocals.opus + instrumental.opus
   tmp-stems/           demucs scratch, deleted per batch
+  by-name/             symlinks, one directory per song — see below
 ```
+
+**Storage is keyed by id; browsing and analysis go through `by-name/`.**
+An id is stable under retitling, contains nothing a filesystem objects
+to, and cannot collide. `corpus link` builds a symlink view over it:
+
+```
+by-name/Glass Animals - Heat Waves [12108]/
+    source.webm          -> ../../audio/12108/W31x_BenZcY.webm
+    vocals.opus          -> ../../stems/12108/vocals.opus
+    instrumental.opus    -> ../../stems/12108/instrumental.opus
+```
+
+One directory per song, so an analysis pass walks the tree and finds
+everything for a track in one place. The stem filenames are **fixed** —
+open `vocals.opus` without consulting the database; a song whose stems
+are missing is simply a directory without them. Links are relative, so
+the corpus can be moved or mounted elsewhere. The whole tree costs 58 MB
+and rebuilds in under a second, so regenerate it freely.
+
+Do **not** rename the real files. 2.6% of chart titles contain characters
+a filesystem forbids (`?`, `"`, `:`), so those names would be
+permanently mangled, and every `path` recorded in the database would have
+to be rewritten in the same breath or the corpus loses track of its own
+audio. Stems also carry `title` / `artist` / `STEM` / `SONG_ID` tags in
+their OpusTags header, so the audio is self-describing even copied out of
+the tree.
 
 ## The stages
 
@@ -41,7 +68,8 @@ UV=$(command -v uv) FFMPEG=$(nix develop --command command -v ffmpeg) \
 corpus separate --db $DB --scope hot100 --batch 8 --bitrate-k 128 --device cuda
 
 corpus status --db $DB
-corpus export --db $DB --out songs.csv
+corpus export --db $DB --out songs.csv   # manifest incl. file paths
+corpus link   --db $DB                   # browsable by-name/ symlink tree
 ```
 
 Every stage is resumable: a song with a recorded outcome is skipped. All

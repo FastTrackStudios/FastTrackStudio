@@ -164,6 +164,20 @@ enum Cmd {
         device: String,
     },
 
+    /// Build a browsable, human-readable view of the corpus.
+    ///
+    /// Symlinks, not renames: the real files stay under their numeric
+    /// ids, so every path already in the database keeps working and the
+    /// 2.6% of titles containing characters a filesystem forbids are not
+    /// permanently mangled. Regenerate freely — nothing here is load
+    /// bearing.
+    Link {
+        #[arg(long, default_value = "corpus.sqlite")]
+        db: PathBuf,
+        #[arg(long, default_value = "/run/media/AudioHaven/fts-corpus/by-name")]
+        out: PathBuf,
+    },
+
     /// Clear recorded acquisition outcomes so they are attempted again.
     ///
     /// Mainly for `blocked` rows: those are songs the search refused to
@@ -252,6 +266,7 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Cmd::Link { db, out } => link_cmd(db, out).await,
         Cmd::Reset { db, status } => reset(db, status).await,
         Cmd::Status { db } => status(db).await,
         Cmd::Export { db, out } => export(db, out).await,
@@ -827,6 +842,61 @@ async fn separate_cmd(
     for (status, n, bytes) in store.stem_summary().await? {
         println!("  {status:<8} {n:>6}  {:.1} GB", bytes as f64 / 1e9);
     }
+    Ok(())
+}
+
+async fn link_cmd(db: PathBuf, out: PathBuf) -> Result<()> {
+    use analyzer_corpus::manifest;
+
+    let store = Store::open(&db).await?;
+    let rows = sqlx::query(
+        "SELECT s.song_id, s.title, s.artist, r.path, st.vocal_path, st.instr_path
+           FROM song_stats s
+           LEFT JOIN rendition r ON r.song_id = s.song_id AND r.status = 'ok'
+           LEFT JOIN stem st     ON st.song_id = s.song_id AND st.status = 'ok'
+          WHERE r.path IS NOT NULL OR st.vocal_path IS NOT NULL",
+    )
+    .fetch_all(store.pool())
+    .await
+    .context("reading the corpus for linking")?;
+
+    // One directory per song, holding the source and both stems, so an
+    // analysis pass walks the tree song by song and finds everything for
+    // a track together instead of joining three parallel trees by name.
+    let mut songs = 0usize;
+    let mut made = [0usize; 3];
+    for r in &rows {
+        let song_id: i64 = r.get("song_id");
+        let title: String = r.get("title");
+        let artist: String = r.get("artist");
+        let dir = out.join(manifest::song_dir(song_id, &title, &artist));
+
+        for (idx, col, name) in [
+            (0usize, "path", None),
+            (1, "vocal_path", Some(manifest::VOCALS_FILE)),
+            (2, "instr_path", Some(manifest::INSTRUMENTAL_FILE)),
+        ] {
+            let Some(target) = r.get::<Option<String>, _>(col) else {
+                continue;
+            };
+            let target = PathBuf::from(target);
+            // Fixed names inside, so a script opens `vocals.opus`
+            // without consulting the database. The source keeps its own
+            // extension because it varies with what was served.
+            let file = match name {
+                Some(n) => n.to_string(),
+                None => format!("source.{}", manifest::extension_of(&target)),
+            };
+            manifest::relink(&target, &dir.join(file))?;
+            made[idx] += 1;
+        }
+        songs += 1;
+    }
+
+    println!("linked {songs} songs under {}", out.display());
+    println!("  source       {}", made[0]);
+    println!("  vocals       {}", made[1]);
+    println!("  instrumental {}", made[2]);
     Ok(())
 }
 

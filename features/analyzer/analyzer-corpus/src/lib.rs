@@ -43,6 +43,7 @@ pub mod billboard;
 pub mod chart;
 pub mod db;
 pub mod hot100;
+pub mod manifest;
 pub mod metrics;
 pub mod norm;
 pub mod separate;
