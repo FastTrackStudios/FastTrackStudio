@@ -27,11 +27,20 @@ An id is stable under retitling, contains nothing a filesystem objects
 to, and cannot collide. `corpus link` builds a symlink view over it:
 
 ```
-by-name/2020/Glass Animals - Heat Waves [12108]/
+by-name/2020/#001 91wk Glass Animals - Heat Waves [12108]/
     source.webm          -> ../../../audio/12108/W31x_BenZcY.webm
     vocals.opus          -> ../../../stems/12108/vocals.opus
     instrumental.opus    -> ../../../stems/12108/instrumental.opus
 ```
+
+The name leads with **Hot 100 peak and weeks on chart**, so listing a
+year shows its biggest records first. The peak is zero-padded because
+otherwise `#1, #10, #100` sort before `#2`. Peak and weeks are both
+there because they answer different questions — one week at #1 and half
+a year at #4 are different kinds of hit, and only the pair separates
+them. Songs that never reached the Hot 100 (present when the corpus is
+widened to genre charts) render `#xxx`, which sorts after every real
+position.
 
 Grouped by the year the song **first charted** (`--group-by year`,
 `decade`, or `flat`). The corpus spans 35 years and the interesting
@@ -245,11 +254,24 @@ bitrate, including one that was audibly transparent — purely because Opus
 resamples to 48 kHz while demucs writes 44.1 kHz, so the bins were
 different frequencies.
 
-Resample to a common rate before comparing spectra, or work in
-logarithmic **hertz** bands. `metrics::band_spectrum` does the latter and
-is still not fully rate-invariant for tonal signals — its test is
-`#[ignore]`d with the details. **Resolve that before publishing any
-spectral aggregate.**
+The corpus mixes rates by construction: sources are 48 kHz Opus, stems
+come out of demucs at 44.1 kHz. **Decode to
+`metrics::ANALYSIS_SAMPLE_RATE` (48 kHz) before measuring anything
+spectral** — `ffmpeg -ar 48000`. That is the guarantee.
+
+`metrics::band_spectrum` integrates power spectral density over
+logarithmic hertz bands, weighting each FFT bin by how much of it falls
+inside the band, which is as rate-insensitive as a fixed transform size
+allows (measured: 0.34 → 0.19 dB mean error on resampled material).
+A worst-band residual of 1-2 dB survives regardless — the size of the
+genre differences being studied — so the fixed decode rate is not
+optional. `cross_rate_residual_stays_bounded` pins that number down so a
+regression is visible.
+
+Do not test this with a pure sinusoid. Nearly every band is then empty,
+the normalisation is taken over 60 near-zero values, and trivial
+numerical differences become tens of dB — it measures the degeneracy of
+the test signal rather than the estimator.
 
 ## Measurement notes
 

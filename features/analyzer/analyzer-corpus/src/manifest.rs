@@ -75,13 +75,48 @@ impl GroupBy {
 pub const VOCALS_FILE: &str = "vocals.opus";
 pub const INSTRUMENTAL_FILE: &str = "instrumental.opus";
 
-/// A filesystem-safe `Artist - Title [id]` directory for one song.
+/// How a song did on the chart, as it appears in its directory name.
+#[derive(Debug, Clone, Copy)]
+pub struct ChartRank {
+    /// Best Hot 100 position, if it reached the Hot 100 at all.
+    pub peak: Option<i64>,
+    /// Weeks on the Hot 100 — how long it lasted, not just how high it got.
+    pub weeks: i64,
+}
+
+impl ChartRank {
+    /// `#001 20wk` — peak zero-padded so a plain directory listing sorts
+    /// by chart position rather than lexicographically (`#1, #10, #100`
+    /// would otherwise come before `#2`).
+    ///
+    /// Peak and weeks together, because they answer different questions:
+    /// peak is how big it got, weeks is how long it stayed. A song that
+    /// reached #1 for one week and one that sat at #4 for half a year
+    /// are different kinds of hit, and only the pair distinguishes them.
+    ///
+    /// Songs that never reached the Hot 100 — present only when the
+    /// corpus is widened to the genre charts — render as `#xxx`, which
+    /// sorts after every real position rather than before it.
+    fn prefix(&self) -> String {
+        match self.peak {
+            Some(p) => format!("#{p:03} {}wk", self.weeks),
+            None => format!("#xxx {}wk", self.weeks),
+        }
+    }
+}
+
+/// A filesystem-safe `#001 20wk Artist - Title [id]` directory.
 ///
 /// One directory per song, holding the source and both stems together,
 /// so analysis walks the tree song by song and finds everything for a
-/// track in one place.
-pub fn song_dir(song_id: i64, title: &str, artist: &str) -> String {
-    format!("{} [{song_id}]", sanitize(&format!("{artist} - {title}")))
+/// track in one place. The chart position leads so that listing a year
+/// shows its biggest records first.
+pub fn song_dir(song_id: i64, title: &str, artist: &str, rank: ChartRank) -> String {
+    format!(
+        "{} {} [{song_id}]",
+        rank.prefix(),
+        sanitize(&format!("{artist} - {title}"))
+    )
 }
 
 /// A filesystem-safe `Artist - Title [id].ext` for one file.
@@ -219,19 +254,55 @@ mod tests {
         assert_eq!(rel, PathBuf::from("../../stems/12108/vocals.opus"));
     }
 
+    fn rank(peak: Option<i64>, weeks: i64) -> ChartRank {
+        ChartRank { peak, weeks }
+    }
+
     #[test]
     fn a_song_directory_has_no_extension() {
-        let d = song_dir(12108, "Heat Waves", "Glass Animals");
-        assert_eq!(d, "Glass Animals - Heat Waves [12108]");
+        let d = song_dir(12108, "Heat Waves", "Glass Animals", rank(Some(1), 91));
+        assert_eq!(d, "#001 91wk Glass Animals - Heat Waves [12108]");
         assert!(!d.contains('.'), "{d}");
     }
 
     #[test]
     fn song_directories_are_sanitized_like_filenames() {
-        let d = song_dir(1, "Hot R&B/Hip-Hop?", "Someone");
+        let d = song_dir(1, "Hot R&B/Hip-Hop?", "Someone", rank(Some(5), 10));
         assert!(!d.contains('/'), "{d}");
         assert!(!d.contains('?'), "{d}");
         assert!(d.ends_with("[1]"), "{d}");
+    }
+
+    /// A listing must come out in chart order, which plain lexicographic
+    /// sorting only gives if the position is zero-padded.
+    #[test]
+    fn zero_padding_makes_a_listing_sort_by_chart_position() {
+        let mut names = vec![
+            song_dir(1, "A", "X", rank(Some(100), 5)),
+            song_dir(2, "B", "X", rank(Some(2), 5)),
+            song_dir(3, "C", "X", rank(Some(10), 5)),
+            song_dir(4, "D", "X", rank(Some(1), 5)),
+        ];
+        names.sort();
+        let peaks: Vec<&str> = names.iter().map(|n| &n[..4]).collect();
+        assert_eq!(peaks, vec!["#001", "#002", "#010", "#100"]);
+    }
+
+    #[test]
+    fn peak_and_weeks_distinguish_kinds_of_hit() {
+        // One week at the top is not the same record as half a year at #4.
+        let brief = song_dir(1, "A", "X", rank(Some(1), 1));
+        let enduring = song_dir(2, "B", "X", rank(Some(4), 26));
+        assert!(brief.starts_with("#001 1wk"), "{brief}");
+        assert!(enduring.starts_with("#004 26wk"), "{enduring}");
+    }
+
+    #[test]
+    fn songs_that_never_made_the_hot_100_sort_last() {
+        let charted = song_dir(1, "A", "X", rank(Some(100), 5));
+        let not = song_dir(2, "B", "X", rank(None, 5));
+        assert!(not.starts_with("#xxx"), "{not}");
+        assert!(charted < not, "unranked songs must sort after ranked ones");
     }
 
     #[test]

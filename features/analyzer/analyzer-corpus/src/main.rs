@@ -862,7 +862,8 @@ async fn link_cmd(
 
     let store = Store::open(&db).await?;
     let rows = sqlx::query(
-        "SELECT s.song_id, s.title, s.artist, s.first_year, r.path, st.vocal_path, st.instr_path
+        "SELECT s.song_id, s.title, s.artist, s.first_year, s.hot100_peak, s.hot100_weeks,
+                r.path, st.vocal_path, st.instr_path
            FROM song_stats s
            LEFT JOIN rendition r ON r.song_id = s.song_id AND r.status = 'ok'
            LEFT JOIN stem st     ON st.song_id = s.song_id AND st.status = 'ok'
@@ -882,11 +883,15 @@ async fn link_cmd(
         let title: String = r.get("title");
         let artist: String = r.get("artist");
         let first_year: i64 = r.get("first_year");
+        let rank = manifest::ChartRank {
+            peak: r.get("hot100_peak"),
+            weeks: r.get("hot100_weeks"),
+        };
         let dir = match group_by.dir_for(first_year) {
             Some(era) => out.join(era),
             None => out.clone(),
         }
-        .join(manifest::song_dir(song_id, &title, &artist));
+        .join(manifest::song_dir(song_id, &title, &artist, rank));
 
         for (idx, col, name) in [
             (0usize, "path", None),
