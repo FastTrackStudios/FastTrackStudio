@@ -273,6 +273,24 @@ the normalisation is taken over 60 near-zero values, and trivial
 numerical differences become tens of dB — it measures the degeneracy of
 the test signal rather than the estimator.
 
+## Deeper separation, for reference mixes
+
+The corpus gets two stems. A separate on-demand path takes a handful of
+named reference tracks down to kick / snare / toms / hihat / ride /
+crash, lead / backing vocals, and guitar — for mixing against a
+reference rather than for corpus statistics.
+
+Design, model registry and the validation plan:
+`features/analyzer/docs/deep-separation.md`. Two things from it that are
+easy to get wrong:
+
+- `audio-separator`'s `separate()` returns only a primary/secondary
+  pair. A six-output drum model needs `MDXCSeparator.demix()` called
+  directly, or it silently yields two stems where six were expected.
+- Use the aufr33/jarredou DrumSep MDX23C model, **not** LarsNet.
+  LarsNet is trained on MIDI rendered through sampled kits — no bleed,
+  no bus compression — and real records are nothing like that.
+
 ## Measurement notes
 
 Crest factor is peak minus RMS **over voiced material only**. Including
