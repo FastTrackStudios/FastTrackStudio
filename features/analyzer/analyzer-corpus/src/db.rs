@@ -92,6 +92,24 @@ CREATE TABLE IF NOT EXISTS rendition (
 
 CREATE INDEX IF NOT EXISTS idx_rendition_status ON rendition (status);
 
+-- Separated stems, one row per song. Both stems are kept as audio:
+-- "where does the vocal sit against the track" needs the instrumental
+-- itself, not a summary of it.
+CREATE TABLE IF NOT EXISTS stem (
+    song_id      INTEGER PRIMARY KEY REFERENCES song(id),
+    status       TEXT    NOT NULL,   -- ok | failed
+    model        TEXT,
+    bitrate_k    INTEGER,
+    vocal_path   TEXT,
+    instr_path   TEXT,
+    vocal_bytes  INTEGER,
+    instr_bytes  INTEGER,
+    error        TEXT,
+    created_at   TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stem_status ON stem (status);
+
 -- Everything derivable about a song's chart life, derived rather than
 -- stored so it cannot drift from the observations underneath it.
 CREATE VIEW IF NOT EXISTS song_stats AS
@@ -368,6 +386,79 @@ impl Store {
         Ok(())
     }
 
+    /// Songs with downloaded audio but no separation attempt yet.
+    ///
+    /// Best-charting first, so a partial run still covers the songs any
+    /// finding leans on most.
+    pub async fn songs_needing_stems(&self, limit: i64, scope: Scope) -> Result<Vec<PendingStem>> {
+        let rows = sqlx::query(&format!(
+            "SELECT s.song_id, s.title, s.artist, r.path
+               FROM song_stats s
+               JOIN rendition r ON r.song_id = s.song_id AND r.status = 'ok'
+               LEFT JOIN stem st ON st.song_id = s.song_id
+              WHERE st.song_id IS NULL AND r.path IS NOT NULL AND {}
+              ORDER BY COALESCE(s.hot100_peak, 9999), s.best_rank, s.chart_weeks DESC
+              LIMIT ?",
+            scope.predicate()
+        ))
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .context("selecting songs needing stems")?;
+
+        Ok(rows
+            .iter()
+            .map(|r| PendingStem {
+                song_id: r.get(0),
+                title: r.get(1),
+                artist: r.get(2),
+                source: r.get(3),
+            })
+            .collect())
+    }
+
+    /// Record the outcome of one separation.
+    pub async fn record_stem(&self, rec: &StemRecord) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO stem (song_id, status, model, bitrate_k, vocal_path, instr_path,
+                               vocal_bytes, instr_bytes, error, created_at)
+             VALUES (?,?,?,?,?,?,?,?,?, datetime('now'))
+             ON CONFLICT (song_id) DO UPDATE SET
+               status=excluded.status, model=excluded.model, bitrate_k=excluded.bitrate_k,
+               vocal_path=excluded.vocal_path, instr_path=excluded.instr_path,
+               vocal_bytes=excluded.vocal_bytes, instr_bytes=excluded.instr_bytes,
+               error=excluded.error, created_at=excluded.created_at",
+        )
+        .bind(rec.song_id)
+        .bind(&rec.status)
+        .bind(&rec.model)
+        .bind(rec.bitrate_k)
+        .bind(&rec.vocal_path)
+        .bind(&rec.instr_path)
+        .bind(rec.vocal_bytes)
+        .bind(rec.instr_bytes)
+        .bind(&rec.error)
+        .execute(&self.pool)
+        .await
+        .context("recording stem")?;
+        Ok(())
+    }
+
+    /// Counts by separation status.
+    pub async fn stem_summary(&self) -> Result<Vec<(String, i64, i64)>> {
+        let rows = sqlx::query(
+            "SELECT status, COUNT(*), COALESCE(SUM(vocal_bytes + instr_bytes), 0)
+               FROM stem GROUP BY status ORDER BY 2 DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("summarising stems")?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get::<String, _>(0), r.get::<i64, _>(1), r.get::<i64, _>(2)))
+            .collect())
+    }
+
     /// Drop every rendition row with `status`, putting those songs back
     /// in the queue. Returns how many were cleared.
     ///
@@ -450,6 +541,31 @@ pub struct PendingSong {
     pub title: String,
     pub artist: String,
     pub first_year: i64,
+}
+
+/// A song with audio, awaiting separation.
+#[derive(Debug, Clone)]
+pub struct PendingStem {
+    pub song_id: i64,
+    pub title: String,
+    pub artist: String,
+    /// Path to the downloaded source audio.
+    pub source: String,
+}
+
+/// One separation outcome, ready to store.
+#[derive(Debug, Clone, Default)]
+pub struct StemRecord {
+    pub song_id: i64,
+    /// `ok` | `failed`.
+    pub status: String,
+    pub model: Option<String>,
+    pub bitrate_k: Option<i64>,
+    pub vocal_path: Option<String>,
+    pub instr_path: Option<String>,
+    pub vocal_bytes: Option<i64>,
+    pub instr_bytes: Option<i64>,
+    pub error: Option<String>,
 }
 
 /// One acquisition outcome, ready to store.

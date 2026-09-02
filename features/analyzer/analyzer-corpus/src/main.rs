@@ -130,6 +130,40 @@ enum Cmd {
         cooldown_secs: u64,
     },
 
+    /// Split downloaded songs into vocal and instrumental stems.
+    ///
+    /// Resumable: a song with a recorded outcome is skipped. Both stems
+    /// are kept as Opus — the instrumental is needed as audio, not just
+    /// as numbers, to answer where the vocal sits against the track.
+    Separate {
+        #[arg(long, default_value = "corpus.sqlite")]
+        db: PathBuf,
+        /// Where separated stems are written.
+        #[arg(long, default_value = "/run/media/AudioHaven/fts-corpus/stems")]
+        stems_root: PathBuf,
+        /// Scratch space for demucs' lossless output, deleted per batch.
+        #[arg(long, default_value = "/run/media/AudioHaven/fts-corpus/tmp-stems")]
+        work_dir: PathBuf,
+        #[arg(long, value_enum, default_value_t = analyzer_corpus::db::Scope::All)]
+        scope: analyzer_corpus::db::Scope,
+        /// How many songs to separate this run.
+        #[arg(long, default_value_t = 100000)]
+        limit: i64,
+        /// Songs per demucs invocation.
+        ///
+        /// Loading the model costs a couple of seconds, so one song per
+        /// invocation would spend more time on weights than on audio.
+        #[arg(long, default_value_t = 8)]
+        batch: usize,
+        #[arg(long, default_value = analyzer_corpus::separate::DEFAULT_MODEL)]
+        model: String,
+        #[arg(long, default_value_t = analyzer_corpus::separate::DEFAULT_BITRATE_K)]
+        bitrate_k: u32,
+        /// torch device — `cuda` or `cpu`.
+        #[arg(long, default_value = "cuda")]
+        device: String,
+    },
+
     /// Clear recorded acquisition outcomes so they are attempted again.
     ///
     /// Mainly for `blocked` rows: those are songs the search refused to
@@ -199,6 +233,22 @@ async fn main() -> Result<()> {
                 sample,
                 scope,
                 cooldown_secs,
+            )
+            .await
+        }
+        Cmd::Separate {
+            db,
+            stems_root,
+            work_dir,
+            scope,
+            limit,
+            batch,
+            model,
+            bitrate_k,
+            device,
+        } => {
+            separate_cmd(
+                db, stems_root, work_dir, scope, limit, batch, model, bitrate_k, device,
             )
             .await
         }
@@ -655,6 +705,122 @@ fn truncate(s: &str, n: usize) -> String {
         let head: String = s.chars().take(n.saturating_sub(1)).collect();
         format!("{head}…")
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn separate_cmd(
+    db: PathBuf,
+    stems_root: PathBuf,
+    work_dir: PathBuf,
+    scope: analyzer_corpus::db::Scope,
+    limit: i64,
+    batch: usize,
+    model: String,
+    bitrate_k: u32,
+    device: String,
+) -> Result<()> {
+    use analyzer_corpus::db::StemRecord;
+    use analyzer_corpus::separate;
+
+    let store = Store::open(&db).await?;
+    // Fail now rather than eight hours into an overnight run.
+    let tools = separate::Tools::discover()?;
+    if tools.driver_lib.is_none() && device == "cuda" {
+        tracing::warn!(
+            "no /run/opengl-driver/lib — torch may not see the GPU and will fall back to CPU \
+             silently, which is roughly 100x slower"
+        );
+    }
+
+    let pending = store.songs_needing_stems(limit, scope).await?;
+    if pending.is_empty() {
+        println!("nothing to separate — every song with audio already has stems");
+        return Ok(());
+    }
+
+    tracing::info!(
+        songs = pending.len(),
+        batch,
+        %model,
+        %device,
+        bitrate_k,
+        "starting separation"
+    );
+
+    let total = pending.len();
+    let started = std::time::Instant::now();
+    let mut done = 0usize;
+    let mut ok = 0usize;
+
+    for chunk in pending.chunks(batch.max(1)) {
+        // Fresh scratch per batch: demucs writes lossless FLAC, which is
+        // ~5x the size of what we keep, so it must not accumulate.
+        let work = work_dir.join(format!("b{}", chunk[0].song_id));
+        let _ = tokio::fs::remove_dir_all(&work).await;
+
+        let sources: Vec<PathBuf> = chunk.iter().map(|s| PathBuf::from(&s.source)).collect();
+        let separated = separate::separate_batch(&tools, &model, &sources, &work, &device).await;
+
+        for (song, source) in chunk.iter().zip(&sources) {
+            done += 1;
+            let mut rec = StemRecord {
+                song_id: song.song_id,
+                status: "failed".into(),
+                model: Some(model.clone()),
+                bitrate_k: Some(bitrate_k as i64),
+                ..Default::default()
+            };
+
+            let result = match &separated {
+                Err(e) => Err(anyhow::anyhow!("demucs: {e}")),
+                Ok(dir) => match separate::stem_name(source) {
+                    None => Err(anyhow::anyhow!("unusable source path {}", source.display())),
+                    Some(name) => separate::encode_stems(
+                        &tools,
+                        dir,
+                        &name,
+                        &stems_root.join(song.song_id.to_string()),
+                        bitrate_k,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}")),
+                },
+            };
+
+            match result {
+                Ok(st) => {
+                    rec.status = "ok".into();
+                    rec.vocal_path = Some(st.vocal.to_string_lossy().into_owned());
+                    rec.instr_path = Some(st.instrumental.to_string_lossy().into_owned());
+                    rec.vocal_bytes = Some(st.vocal_bytes as i64);
+                    rec.instr_bytes = Some(st.instrumental_bytes as i64);
+                    ok += 1;
+                }
+                Err(e) => rec.error = Some(e.to_string()),
+            }
+
+            let rate = done as f64 / started.elapsed().as_secs_f64().max(1.0) * 60.0;
+            println!(
+                "{} [{done:>6}/{total}] {rate:>5.1}/min  {} — {}{}",
+                if rec.status == "ok" { "ok  " } else { "FAIL" },
+                truncate(&song.title, 32),
+                truncate(&song.artist, 22),
+                rec.error
+                    .as_deref()
+                    .map(|e| format!("  {}", &e[..e.len().min(70)]))
+                    .unwrap_or_default()
+            );
+            store.record_stem(&rec).await?;
+        }
+
+        let _ = tokio::fs::remove_dir_all(&work).await;
+    }
+
+    println!("\nseparated {ok}/{total}");
+    for (status, n, bytes) in store.stem_summary().await? {
+        println!("  {status:<8} {n:>6}  {:.1} GB", bytes as f64 / 1e9);
+    }
+    Ok(())
 }
 
 async fn reset(db: PathBuf, status: String) -> Result<()> {
