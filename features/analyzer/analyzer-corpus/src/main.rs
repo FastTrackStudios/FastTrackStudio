@@ -176,6 +176,14 @@ enum Cmd {
         db: PathBuf,
         #[arg(long, default_value = "/run/media/AudioHaven/fts-corpus/by-name")]
         out: PathBuf,
+        /// Group song directories by chart era.
+        ///
+        /// The corpus spans 35 years and the interesting questions are
+        /// about change across it, so the era goes in the path by
+        /// default — "every 1994 vocal" becomes a glob rather than a
+        /// query.
+        #[arg(long, value_enum, default_value_t = analyzer_corpus::manifest::GroupBy::Year)]
+        group_by: analyzer_corpus::manifest::GroupBy,
     },
 
     /// Clear recorded acquisition outcomes so they are attempted again.
@@ -266,7 +274,7 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Cmd::Link { db, out } => link_cmd(db, out).await,
+        Cmd::Link { db, out, group_by } => link_cmd(db, out, group_by).await,
         Cmd::Reset { db, status } => reset(db, status).await,
         Cmd::Status { db } => status(db).await,
         Cmd::Export { db, out } => export(db, out).await,
@@ -845,12 +853,16 @@ async fn separate_cmd(
     Ok(())
 }
 
-async fn link_cmd(db: PathBuf, out: PathBuf) -> Result<()> {
+async fn link_cmd(
+    db: PathBuf,
+    out: PathBuf,
+    group_by: analyzer_corpus::manifest::GroupBy,
+) -> Result<()> {
     use analyzer_corpus::manifest;
 
     let store = Store::open(&db).await?;
     let rows = sqlx::query(
-        "SELECT s.song_id, s.title, s.artist, r.path, st.vocal_path, st.instr_path
+        "SELECT s.song_id, s.title, s.artist, s.first_year, r.path, st.vocal_path, st.instr_path
            FROM song_stats s
            LEFT JOIN rendition r ON r.song_id = s.song_id AND r.status = 'ok'
            LEFT JOIN stem st     ON st.song_id = s.song_id AND st.status = 'ok'
@@ -869,7 +881,12 @@ async fn link_cmd(db: PathBuf, out: PathBuf) -> Result<()> {
         let song_id: i64 = r.get("song_id");
         let title: String = r.get("title");
         let artist: String = r.get("artist");
-        let dir = out.join(manifest::song_dir(song_id, &title, &artist));
+        let first_year: i64 = r.get("first_year");
+        let dir = match group_by.dir_for(first_year) {
+            Some(era) => out.join(era),
+            None => out.clone(),
+        }
+        .join(manifest::song_dir(song_id, &title, &artist));
 
         for (idx, col, name) in [
             (0usize, "path", None),

@@ -27,11 +27,19 @@ An id is stable under retitling, contains nothing a filesystem objects
 to, and cannot collide. `corpus link` builds a symlink view over it:
 
 ```
-by-name/Glass Animals - Heat Waves [12108]/
-    source.webm          -> ../../audio/12108/W31x_BenZcY.webm
-    vocals.opus          -> ../../stems/12108/vocals.opus
-    instrumental.opus    -> ../../stems/12108/instrumental.opus
+by-name/2020/Glass Animals - Heat Waves [12108]/
+    source.webm          -> ../../../audio/12108/W31x_BenZcY.webm
+    vocals.opus          -> ../../../stems/12108/vocals.opus
+    instrumental.opus    -> ../../../stems/12108/instrumental.opus
 ```
+
+Grouped by the year the song **first charted** (`--group-by year`,
+`decade`, or `flat`). The corpus spans 35 years and the interesting
+questions are about change across it — vocals measurably compress harder
+now than in 1990 — so the era is in the path, and "every 1994 vocal" is a
+glob rather than a query. First-charted rather than release year: this is
+about what was popular when, and a record that re-charts later (as
+Christmas songs do every December) still belongs to the moment it broke.
 
 One directory per song, so an analysis pass walks the tree and finds
 everything for a track in one place. The stem filenames are **fixed** —

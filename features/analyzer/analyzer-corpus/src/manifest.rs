@@ -32,6 +32,40 @@ use anyhow::{Context, Result};
 /// Characters a filesystem will not take, plus control codes.
 const FORBIDDEN: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
+/// How the browsable tree is grouped above the song directories.
+///
+/// The corpus spans 35 years and the interesting questions are about
+/// change over that span — vocals measurably compress harder now than
+/// they did in 1990 — so the default puts the era in the path. A pass
+/// that wants "every 1994 vocal" then globs a directory instead of
+/// querying, and a listing is already sorted chronologically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum GroupBy {
+    /// `1994/Artist - Title [id]/`
+    #[default]
+    Year,
+    /// `1990s/Artist - Title [id]/`
+    Decade,
+    /// No grouping — every song directory at the top level.
+    Flat,
+}
+
+impl GroupBy {
+    /// The directory a song of this year belongs under, if any.
+    ///
+    /// Grouped by the year it FIRST charted, not by release year: this
+    /// corpus is about what was popular when, and a song that re-charts
+    /// years later (as Christmas records do every December) still
+    /// belongs to the moment it broke.
+    pub fn dir_for(self, first_year: i64) -> Option<String> {
+        match self {
+            GroupBy::Year => Some(first_year.to_string()),
+            GroupBy::Decade => Some(format!("{}s", first_year - first_year.rem_euclid(10))),
+            GroupBy::Flat => None,
+        }
+    }
+}
+
 /// Fixed filenames inside a song's directory.
 ///
 /// Constant across every song on purpose: a script walking the tree
@@ -198,6 +232,18 @@ mod tests {
         assert!(!d.contains('/'), "{d}");
         assert!(!d.contains('?'), "{d}");
         assert!(d.ends_with("[1]"), "{d}");
+    }
+
+    #[test]
+    fn years_group_verbatim_and_decades_round_down() {
+        assert_eq!(GroupBy::Year.dir_for(1994).as_deref(), Some("1994"));
+        assert_eq!(GroupBy::Decade.dir_for(1994).as_deref(), Some("1990s"));
+        assert_eq!(GroupBy::Decade.dir_for(1990).as_deref(), Some("1990s"));
+        // A decade boundary must not fall into the previous one.
+        assert_eq!(GroupBy::Decade.dir_for(1999).as_deref(), Some("1990s"));
+        assert_eq!(GroupBy::Decade.dir_for(2000).as_deref(), Some("2000s"));
+        assert_eq!(GroupBy::Decade.dir_for(2025).as_deref(), Some("2020s"));
+        assert_eq!(GroupBy::Flat.dir_for(1994), None);
     }
 
     /// The inner names are a contract with anything walking the tree.
